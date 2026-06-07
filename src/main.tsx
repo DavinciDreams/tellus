@@ -136,6 +136,8 @@ interface AssetLibraryModel {
   file_format?: string;
   file_size?: number;
   download_count?: number;
+  modelUrl?: string;
+  source?: "asset-library" | "generated";
 }
 
 interface AssetLibraryResponse {
@@ -1326,18 +1328,52 @@ function tellusAssetLibraryUrl(path: string): string {
 }
 
 async function loadAssetLibraryModels(): Promise<AssetLibraryModel[]> {
-  if (!runtimeConfig.worldApiBase) return [];
-  const response = await fetch(tellusAssetLibraryUrl("/api/assets/models?per_page=24"), {
-    cache: "no-store",
+  const [libraryModels, generatedEntries] = await Promise.all([
+    (async () => {
+      if (!runtimeConfig.worldApiBase) return [];
+      const response = await fetch(tellusAssetLibraryUrl("/api/assets/models?per_page=24"), {
+        cache: "no-store",
+      });
+      if (!response.ok) return [];
+      const parsed = await readJsonResponse<AssetLibraryResponse>(response);
+      return Array.isArray(parsed.models)
+        ? parsed.models
+            .filter(
+              (model): model is AssetLibraryModel =>
+                typeof model.id === "string" && typeof model.name === "string",
+            )
+            .map((model) => ({ ...model, source: "asset-library" as const }))
+        : [];
+    })(),
+    generatedAssetManifestEntries().catch(() => []),
+  ]);
+  const generatedModels = generatedEntries
+    .map((entry): AssetLibraryModel | null => {
+      if (typeof entry.id !== "string" || typeof entry.modelUrl !== "string") {
+        return null;
+      }
+      const modelUrl = entry.modelUrl;
+      const prompt =
+        typeof entry.prompt === "string" && entry.prompt.trim()
+          ? entry.prompt.trim()
+          : "generated asset";
+      return {
+        id: `generated:${entry.id}`,
+        name: prompt,
+        description: prompt,
+        file_format: "glb",
+        modelUrl: absoluteTellusApiUrl(modelUrl),
+        source: "generated",
+      };
+    })
+    .filter((model): model is AssetLibraryModel => model !== null);
+  const seen = new Set<string>();
+  return [...generatedModels, ...libraryModels].filter((model) => {
+    const key = model.modelUrl ?? model.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
-  if (!response.ok) return [];
-  const parsed = await readJsonResponse<AssetLibraryResponse>(response);
-  return Array.isArray(parsed.models)
-    ? parsed.models.filter(
-        (model): model is AssetLibraryModel =>
-          typeof model.id === "string" && typeof model.name === "string",
-      )
-    : [];
 }
 
 function tellusWorldWebSocketUrl(visitorId: string): string {
@@ -4854,7 +4890,9 @@ function createTellusWorld(
   const addLibraryAsset = (model: AssetLibraryModel): GeneratedThing => {
     const prompt = model.description?.trim() || model.name;
     const kind = inferGeneratedKind(prompt, "visitor");
-    const modelUrl = tellusAssetLibraryUrl(`/api/assets/download/${encodeURIComponent(model.id)}`);
+    const modelUrl =
+      model.modelUrl ??
+      tellusAssetLibraryUrl(`/api/assets/download/${encodeURIComponent(model.id)}`);
     const position = chooseLocation({
       prompt,
       creatorId: "visitor",
@@ -4887,7 +4925,7 @@ function createTellusWorld(
       agentId: "visitor",
       agentName: "Visitor",
       tool: "generate",
-      text: `added library asset: ${model.name}`,
+      text: `added ${model.source === "generated" ? "generated" : "library"} asset: ${model.name}`,
     });
     publishGeneratedThing(thing);
     publish();
@@ -7597,8 +7635,10 @@ function App(): React.ReactElement {
                   <span>
                     <strong>{model.name.slice(0, 30)}</strong>
                     <small>
-                      {(model.file_format ?? "model").toUpperCase()}
-                      {typeof model.download_count === "number"
+                      {model.source === "generated"
+                        ? "Generated"
+                        : (model.file_format ?? "model").toUpperCase()}
+                      {model.source !== "generated" && typeof model.download_count === "number"
                         ? ` · ${model.download_count} downloads`
                         : ""}
                     </small>
