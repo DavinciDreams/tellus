@@ -148,6 +148,9 @@ interface ComfyHistoryResponse {
 const generationJobs = new Map<string, GenerationJob>();
 let generationQueueTail: Promise<void> = Promise.resolve();
 const queuedJobTtlMs = Number(process.env.TELLUS_GENERATION_QUEUED_TTL_MS ?? 8 * 60 * 1000);
+const jobExecutionTimeoutMs = Number(
+  process.env.TELLUS_GENERATION_JOB_TIMEOUT_MS ?? 4 * 60 * 1000,
+);
 const runningJobTtlMs = Number(process.env.TELLUS_GENERATION_RUNNING_TTL_MS ?? 28 * 60 * 1000);
 
 function generationJobExpired(job: GenerationJob, now = Date.now()): boolean {
@@ -171,6 +174,26 @@ function pruneGenerationJobs(): void {
     ) {
       generationJobs.delete(jobId);
     }
+  }
+}
+
+async function withGenerationTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs = jobExecutionTimeoutMs,
+): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`Generation job timed out after ${Math.round(timeoutMs / 1000)}s`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -1425,10 +1448,12 @@ function startGenerationJob(params: {
     job.status = "generating";
     job.startedAt = Date.now();
     try {
-      const result = await executeGeneration(params);
+      const result = await withGenerationTimeout(executeGeneration(params));
+      if (!generationJobs.has(job.id)) return;
       job.status = "completed";
       job.result = result;
     } catch (error) {
+      if (!generationJobs.has(job.id)) return;
       job.status = "failed";
       job.error =
         error instanceof Error ? error.message : `${params.provider} generation failed`;

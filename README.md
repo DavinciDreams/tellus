@@ -113,6 +113,7 @@ TELLUS_GENERATED_ASSET_DIR=Z:\3d\assets\tellus
 TELLUS_TEXT_TO_IMAGE_PROVIDER=gradio
 TELLUS_TEXT_TO_IMAGE_BASE_URL=http://192.168.1.173:7862
 TELLUS_GRADIO_IMAGE_API_NAME=generate
+TELLUS_GENERATION_JOB_TIMEOUT_MS=240000
 ```
 
 For deployed builds, `INSTANTMESH_GRADIO_BASE_URL` must be a URL that the
@@ -132,6 +133,10 @@ Set `TELLUS_TEXT_TO_IMAGE_PROVIDER=gradio` with
 Z-Image-Turbo MLX Gradio service. Tellus calls the named Gradio API
 `/gradio_api/api/generate` with prompt, seed, steps, width, height, guidance,
 and negative-prompt inputs.
+
+`TELLUS_GENERATION_JOB_TIMEOUT_MS` caps each queued 3D generation lane. Keep it
+long enough for Z-Image plus the 3D model step to finish, but short enough that
+a wedged upstream Gradio request cannot block later visitors indefinitely.
 
 Tellus can also use `TELLUS_TEXT_TO_IMAGE_PROVIDER=comfyui` with a ComfyUI
 workflow, `TELLUS_TEXT_TO_IMAGE_PROVIDER=automatic1111`, or
