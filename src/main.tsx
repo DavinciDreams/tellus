@@ -3941,6 +3941,7 @@ function createTellusWorld(
     generated.map((thing) => worldGeneratedThing(thing));
 
   const saveGeneratedPlacementSnapshot = () => {
+    if (tellusWorldBackendAvailable) return;
     try {
       window.localStorage.setItem(
         generatedPlacementStorageKey(),
@@ -3956,6 +3957,7 @@ function createTellusWorld(
   };
 
   const loadGeneratedPlacementSnapshot = (): WorldGeneratedThing[] => {
+    if (tellusWorldBackendAvailable) return [];
     try {
       const raw = window.localStorage.getItem(generatedPlacementStorageKey());
       if (!raw) return [];
@@ -4140,6 +4142,7 @@ function createTellusWorld(
   };
 
   const recoverGeneratedFromManifest = () => {
+    if (tellusWorldBackendAvailable) return;
     if (generated.length > 0) return;
     void generatedAssetManifestEntries()
       .then((entries) => {
@@ -4211,7 +4214,7 @@ function createTellusWorld(
   };
 
   connectTellusWorldRealtime();
-  if (!recoverGeneratedFromPlacementSnapshot()) {
+  if (!tellusWorldBackendAvailable && !recoverGeneratedFromPlacementSnapshot()) {
     recoverGeneratedFromManifest();
   }
 
@@ -6324,6 +6327,7 @@ function App(): React.ReactElement {
   }, [snapshot]);
 
   useEffect(() => {
+    if (runtimeConfig.worldApiBase) return;
     const things = importedGeneratedThings(snapshot);
     if (things.length === 0) return;
     try {
