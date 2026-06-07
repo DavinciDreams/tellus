@@ -2,7 +2,18 @@ import { Buffer } from "node:buffer";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { NodeIO } from "@gltf-transform/core";
-import { dedup, prune, resample, weld } from "@gltf-transform/functions";
+import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
+import {
+  dedup,
+  prune,
+  quantize,
+  resample,
+  simplify,
+  textureCompress,
+  weld,
+} from "@gltf-transform/functions";
+import { MeshoptSimplifier } from "meshoptimizer";
+import sharp from "sharp";
 import { generatedAssetRoot } from "./generated-assets";
 
 interface Generate3DRequest {
@@ -30,6 +41,9 @@ interface Generate3DResponse {
   rawModelUrl?: string;
   storedModelUrl?: string;
   storedModelPath?: string;
+  assetStoreModelId?: string;
+  assetStoreModelUrl?: string;
+  assetStoreDownloadUrl?: string;
   sourceImageUrl?: string;
   sourceImagePath?: string;
   textImageProvider: string;
@@ -92,6 +106,29 @@ interface GeneratedAssetManifestEntry {
   storedModelSizeBytes?: number;
   optimized?: boolean;
   optimization?: string;
+  assetStoreModelId?: string;
+  assetStoreModelUrl?: string;
+  assetStoreDownloadUrl?: string;
+}
+
+interface AssetStoreUploadResult {
+  modelId: string;
+  modelUrl: string;
+  downloadUrl: string;
+}
+
+interface AssetStoreUploadResponse {
+  success?: boolean;
+  model?: {
+    id?: string;
+    name?: string;
+  };
+  uploaded?: Array<{
+    id?: string;
+    name?: string;
+  }>;
+  error?: string;
+  message?: string;
 }
 
 interface TextImageResult {
@@ -982,8 +1019,85 @@ async function persistGeneratedModel(params: {
     optimized: optimized.optimized,
     optimization: optimized.message,
   };
+  const assetStore = await uploadGeneratedModelToAssetStore({
+    id: params.id,
+    prompt: params.prompt,
+    kind: params.kind,
+    filename,
+    bytes: optimized.bytes,
+  });
+  if (assetStore) {
+    entry.assetStoreModelId = assetStore.modelId;
+    entry.assetStoreModelUrl = assetStore.modelUrl;
+    entry.assetStoreDownloadUrl = assetStore.downloadUrl;
+  }
   await appendManifest(entry);
   return entry;
+}
+
+async function uploadGeneratedModelToAssetStore(params: {
+  id: string;
+  prompt: string;
+  kind: string;
+  filename: string;
+  bytes: Buffer;
+}): Promise<AssetStoreUploadResult | null> {
+  const baseUrl = (
+    process.env.TELLUS_ASSET_STORE_API_BASE?.trim() || "https://3d.flobots.xyz"
+  ).replace(/\/+$/, "");
+  const sessionCookie = process.env.TELLUS_ASSET_STORE_SESSION_COOKIE?.trim();
+  const uploadToken = process.env.TELLUS_ASSET_STORE_UPLOAD_TOKEN?.trim();
+  const required = boolEnv("TELLUS_REQUIRE_ASSET_STORE_UPLOAD", true);
+  if (!sessionCookie && !uploadToken) {
+    if (required) {
+      throw new Error(
+        "Asset-store upload is required but TELLUS_ASSET_STORE_SESSION_COOKIE or TELLUS_ASSET_STORE_UPLOAD_TOKEN is not configured",
+      );
+    }
+    return null;
+  }
+
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([new Uint8Array(params.bytes)], { type: "model/gltf-binary" }),
+    params.filename,
+  );
+  form.append("name", params.prompt.slice(0, 96));
+  form.append("description", `Tellus generated ${params.kind}: ${params.prompt}`);
+  form.append("is_public", process.env.TELLUS_ASSET_STORE_PUBLIC ?? "true");
+  form.append("tags", `tellus,generated,${params.kind},${params.id}`);
+
+  const headers: HeadersInit = {};
+  if (sessionCookie) headers.Cookie = sessionCookie;
+  if (uploadToken) headers.Authorization = `Bearer ${uploadToken}`;
+
+  const response = await fetch(`${baseUrl}/api/upload`, {
+    method: "POST",
+    headers,
+    body: form,
+    redirect: "manual",
+  });
+  const contentType = response.headers.get("Content-Type") ?? "";
+  const body = contentType.includes("application/json")
+    ? ((await response.json()) as AssetStoreUploadResponse)
+    : ({ message: await response.text() } satisfies AssetStoreUploadResponse);
+  if (!response.ok) {
+    const message =
+      body.error ||
+      body.message ||
+      `asset-store upload failed with HTTP ${response.status}`;
+    throw new Error(message.slice(0, 240));
+  }
+  const model = body.model ?? body.uploaded?.[0];
+  if (!model?.id) {
+    throw new Error("asset-store upload completed without a model id");
+  }
+  return {
+    modelId: model.id,
+    modelUrl: `${baseUrl}/view/${encodeURIComponent(model.id)}`,
+    downloadUrl: `${baseUrl}/download/${encodeURIComponent(model.id)}`,
+  };
 }
 
 async function optimizeGeneratedGlb(
@@ -993,9 +1107,34 @@ async function optimizeGeneratedGlb(
     return { bytes: input, optimized: false, message: "disabled" };
   }
   try {
-    const io = new NodeIO();
+    const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
     const document = await io.readBinary(new Uint8Array(input));
-    await document.transform(resample(), prune(), dedup(), weld());
+    const transforms = [resample(), prune(), dedup(), weld()];
+    if (boolEnv("TELLUS_OPTIMIZE_QUANTIZE", true)) {
+      transforms.push(quantize());
+    }
+    const simplifyRatio = Number(process.env.TELLUS_OPTIMIZE_SIMPLIFY_RATIO || 0);
+    if (Number.isFinite(simplifyRatio) && simplifyRatio > 0 && simplifyRatio < 1) {
+      transforms.push(
+        simplify({
+          simplifier: MeshoptSimplifier,
+          ratio: simplifyRatio,
+          error: Number(process.env.TELLUS_OPTIMIZE_SIMPLIFY_ERROR || 0.0001),
+        }),
+      );
+    }
+    const textureMaxSize = Number(process.env.TELLUS_OPTIMIZE_TEXTURE_MAX_SIZE || 1024);
+    if (boolEnv("TELLUS_OPTIMIZE_TEXTURES", true) && textureMaxSize > 0) {
+      transforms.push(
+        textureCompress({
+          encoder: sharp,
+          targetFormat: "webp",
+          resize: [textureMaxSize, textureMaxSize],
+          quality: Number(process.env.TELLUS_OPTIMIZE_TEXTURE_QUALITY || 82),
+        }),
+      );
+    }
+    await document.transform(...transforms);
     const output = Buffer.from(await io.writeBinary(document));
     if (output.byteLength >= input.byteLength) {
       return {
@@ -1389,11 +1528,14 @@ async function executeGeneration(params: {
     return {
       jobId: stored.id,
       status: "completed",
-      modelUrl: stored.modelUrl,
+      modelUrl: stored.assetStoreModelUrl ?? stored.modelUrl,
       provider,
       rawModelUrl,
       storedModelUrl: stored.modelUrl,
       storedModelPath: stored.storedModelPath,
+      assetStoreModelId: stored.assetStoreModelId,
+      assetStoreModelUrl: stored.assetStoreModelUrl,
+      assetStoreDownloadUrl: stored.assetStoreDownloadUrl,
       sourceImageUrl: stored.sourceImageUrl,
       sourceImagePath: stored.sourceImagePath,
       textImageProvider: stored.textImageProvider,
@@ -1417,11 +1559,14 @@ async function executeGeneration(params: {
     return {
       jobId: stored.id,
       status: "completed",
-      modelUrl: stored.modelUrl,
+      modelUrl: stored.assetStoreModelUrl ?? stored.modelUrl,
       provider,
       rawModelUrl,
       storedModelUrl: stored.modelUrl,
       storedModelPath: stored.storedModelPath,
+      assetStoreModelId: stored.assetStoreModelId,
+      assetStoreModelUrl: stored.assetStoreModelUrl,
+      assetStoreDownloadUrl: stored.assetStoreDownloadUrl,
       sourceImageUrl: stored.sourceImageUrl,
       sourceImagePath: stored.sourceImagePath,
       textImageProvider: stored.textImageProvider,
@@ -1474,11 +1619,14 @@ async function executeGeneration(params: {
   return {
     jobId: stored.id,
     status: "completed",
-    modelUrl: stored.modelUrl,
+    modelUrl: stored.assetStoreModelUrl ?? stored.modelUrl,
     provider,
     rawModelUrl,
     storedModelUrl: stored.modelUrl,
     storedModelPath: stored.storedModelPath,
+    assetStoreModelId: stored.assetStoreModelId,
+    assetStoreModelUrl: stored.assetStoreModelUrl,
+    assetStoreDownloadUrl: stored.assetStoreDownloadUrl,
     sourceImageUrl: stored.sourceImageUrl,
     sourceImagePath: stored.sourceImagePath,
     textImageProvider: stored.textImageProvider,

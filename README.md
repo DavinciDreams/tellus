@@ -187,6 +187,16 @@ PIXAL3D_TIMEOUT_MS=1200000
 TELLUS_GENERATION_JOB_TIMEOUT_MS=2700000
 TELLUS_GENERATION_QUEUED_TTL_MS=5400000
 TELLUS_GENERATION_RUNNING_TTL_MS=5400000
+TELLUS_ASSET_STORE_API_BASE=https://3d.flobots.xyz
+TELLUS_ASSET_STORE_SESSION_COOKIE=session=...
+TELLUS_REQUIRE_ASSET_STORE_UPLOAD=true
+TELLUS_ASSET_STORE_PUBLIC=true
+TELLUS_OPTIMIZE_GLB=true
+TELLUS_OPTIMIZE_QUANTIZE=true
+TELLUS_OPTIMIZE_TEXTURES=true
+TELLUS_OPTIMIZE_TEXTURE_MAX_SIZE=1024
+TELLUS_OPTIMIZE_TEXTURE_QUALITY=82
+TELLUS_OPTIMIZE_SIMPLIFY_ERROR=0.0001
 ```
 
 For deployed builds, `INSTANTMESH_GRADIO_BASE_URL` must be a URL that the
@@ -212,6 +222,20 @@ and Anigen can run much longer than InstantMesh, so keep this well above the
 upstream Gradio timeout. `TELLUS_GENERATION_QUEUED_TTL_MS` should also be long
 enough for jobs waiting behind the currently loaded model, otherwise queued
 visitor requests can expire before they ever start.
+
+Generated GLBs are uploaded into the 3D asset store after the staging copy is
+written to `TELLUS_GENERATED_ASSET_DIR`. Set `TELLUS_ASSET_STORE_SESSION_COOKIE`
+to a valid server-side asset-store session cookie, or use
+`TELLUS_ASSET_STORE_UPLOAD_TOKEN` when the asset store supports bearer-token
+uploads. `TELLUS_REQUIRE_ASSET_STORE_UPLOAD=true` makes generation fail loudly
+if the object cannot be persisted into the asset store.
+
+The GLB optimizer registers glTF extensions, removes duplicate/unused data,
+welds geometry, quantizes attributes, and can resize/recompress textures.
+Optional simplification is controlled with `TELLUS_OPTIMIZE_SIMPLIFY_RATIO`
+between 0 and 1; leave it unset for conservative geometry preservation. When
+simplification is enabled, `TELLUS_OPTIMIZE_SIMPLIFY_ERROR` controls the error
+tolerance.
 
 Tellus can also use `TELLUS_TEXT_TO_IMAGE_PROVIDER=comfyui` with a ComfyUI
 workflow, `TELLUS_TEXT_TO_IMAGE_PROVIDER=automatic1111`, or
