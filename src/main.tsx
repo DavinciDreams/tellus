@@ -248,6 +248,11 @@ interface DirectGenerationResponse {
   error?: string;
 }
 
+interface GeneratedAssetManifestEntry {
+  id?: string;
+  modelUrl?: string;
+}
+
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
 interface SpeechRecognitionLike extends EventTarget {
@@ -1354,6 +1359,31 @@ function tellusApiUrl(path: string): string {
 function absoluteTellusApiUrl(path: string): string {
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
   return tellusApiUrl(path);
+}
+
+let generatedAssetManifestCache:
+  | { loadedAt: number; byId: Map<string, string> }
+  | undefined;
+
+async function generatedAssetManifestModelUrls(): Promise<Map<string, string>> {
+  const now = Date.now();
+  if (generatedAssetManifestCache && now - generatedAssetManifestCache.loadedAt < 5000) {
+    return generatedAssetManifestCache.byId;
+  }
+  const response = await fetch(tellusApiUrl("/generated-assets/manifest.json"), {
+    cache: "no-store",
+  });
+  if (!response.ok) return new Map();
+  const parsed = (await response.json()) as unknown;
+  const byId = new Map<string, string>();
+  if (Array.isArray(parsed)) {
+    for (const entry of parsed as GeneratedAssetManifestEntry[]) {
+      if (typeof entry.id !== "string" || typeof entry.modelUrl !== "string") continue;
+      byId.set(entry.id, absoluteTellusApiUrl(entry.modelUrl));
+    }
+  }
+  generatedAssetManifestCache = { loadedAt: now, byId };
+  return byId;
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
@@ -2956,6 +2986,7 @@ function createTellusWorld(
   const agentMeshes = new Map<AgentId, THREE.Group>();
   const pendingAgentDecisions = new Set<AgentId>();
   const pendingGenerationControllers = new Map<string, AbortController>();
+  const pendingManifestReconciliations = new Set<string>();
   const keys = new Set<string>();
   let selectedThingId: string | undefined;
   let sailingThingId: string | undefined;
@@ -3448,6 +3479,40 @@ function createTellusWorld(
       });
   };
 
+  const reconcileRemoteGeneratedManifest = (thing: GeneratedThing) => {
+    if (thing.modelUrl || !thing.pipelineId || pendingManifestReconciliations.has(thing.id)) {
+      return;
+    }
+    if (
+      thing.generationStatus !== "queued" &&
+      thing.generationStatus !== "generating" &&
+      thing.generationStatus !== "failed"
+    ) {
+      return;
+    }
+    pendingManifestReconciliations.add(thing.id);
+    void generatedAssetManifestModelUrls()
+      .then((modelUrls) => {
+        if (destroyed) return;
+        const modelUrl = modelUrls.get(thing.id);
+        if (!modelUrl) return;
+        const current = thingById(thing.id);
+        if (!current || current.modelUrl) return;
+        current.modelUrl = modelUrl;
+        current.generationStatus = "ready";
+        current.pipelineId = undefined;
+        publishGeneratedThing(current);
+        loadRemoteGeneratedModel(current);
+        publish();
+      })
+      .catch((error) => {
+        console.warn("Generated asset manifest reconciliation failed", error);
+      })
+      .finally(() => {
+        pendingManifestReconciliations.delete(thing.id);
+      });
+  };
+
   const applyRemoteGeneratedThing = (remote: WorldGeneratedThing) => {
     const existing = thingById(remote.id);
     if (existing) {
@@ -3463,6 +3528,7 @@ function createTellusWorld(
       existing.generationStatus = remote.generationStatus;
       updateThingMeshPosition(existing);
       loadRemoteGeneratedModel(existing);
+      reconcileRemoteGeneratedManifest(existing);
       return;
     }
     const thing: GeneratedThing = {
@@ -3487,6 +3553,7 @@ function createTellusWorld(
     scene.add(mesh);
     updateThingMeshPosition(thing);
     loadRemoteGeneratedModel(thing);
+    reconcileRemoteGeneratedManifest(thing);
   };
 
   const applyRemoteGeneratedThings = (remoteThings: WorldGeneratedThing[]) => {
