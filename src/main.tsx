@@ -1462,12 +1462,16 @@ function generatedFromWorldPatch(parsed: unknown): WorldGeneratedThing[] | null 
   return null;
 }
 
+let initialWorldGeneratedThings: WorldGeneratedThing[] = [];
+
 async function loadTellusWorldState(): Promise<boolean> {
   if (!runtimeConfig.worldApiBase) return false;
   const response = await fetch(tellusWorldHttpUrl("state"), { cache: "no-store" });
   if (!response.ok) return false;
-  const terrain = terrainFromWorldPatch(await response.json());
+  const parsed = await response.json();
+  const terrain = terrainFromWorldPatch(parsed);
   if (!terrain) return false;
+  initialWorldGeneratedThings = generatedFromWorldPatch(parsed) ?? [];
   applyTellusTerrainState(terrain);
   return true;
 }
@@ -4212,6 +4216,11 @@ function createTellusWorld(
     saveGeneratedPlacementSnapshot();
     publish();
   };
+
+  if (tellusWorldBackendAvailable && initialWorldGeneratedThings.length > 0) {
+    applyRemoteGeneratedThings(initialWorldGeneratedThings);
+    initialWorldGeneratedThings = [];
+  }
 
   connectTellusWorldRealtime();
   if (!tellusWorldBackendAvailable && !recoverGeneratedFromPlacementSnapshot()) {
