@@ -4060,11 +4060,19 @@ function createTellusWorld(
     sculptTerrainAt(mode, visitorPosition, "visitor", "Visitor");
   };
 
-  const abortPendingGeneration = () => {
-    for (const controller of pendingGenerationControllers.values()) {
-      controller.abort();
+  const generationPausedForThing = (thing: GeneratedThing) =>
+    paused && thing.creatorId !== "visitor";
+
+  const abortPendingGeneration = (
+    shouldAbort: (thing: GeneratedThing) => boolean = () => true,
+  ) => {
+    for (const [id, controller] of pendingGenerationControllers) {
+      const thing = thingById(id);
+      if (!thing || shouldAbort(thing)) {
+        controller.abort();
+        pendingGenerationControllers.delete(id);
+      }
     }
-    pendingGenerationControllers.clear();
   };
 
   const thingById = (id: string): GeneratedThing | undefined =>
@@ -4882,7 +4890,7 @@ function createTellusWorld(
       });
       void startPixel3DGeneration(thing, generationController.signal)
         .then(async (pipeline) => {
-          if (destroyed || paused || !thingById(thing.id)) return;
+          if (destroyed || generationPausedForThing(thing) || !thingById(thing.id)) return;
           thing.pipelineId = pipeline.pipelineId;
           thing.generationStatus = "generating";
           publishGeneratedThing(thing);
@@ -4896,7 +4904,7 @@ function createTellusWorld(
             pipeline.pipelineId,
             generationController.signal,
           );
-          if (destroyed || paused || !thingById(thing.id)) return;
+          if (destroyed || generationPausedForThing(thing) || !thingById(thing.id)) return;
           thing.modelUrl = modelUrl;
           addLog({
             agentId: "world",
@@ -4905,7 +4913,7 @@ function createTellusWorld(
             text: `Pixel3D returned a model URL for ${thing.kind}; loading it into Tellus.`,
           });
           const model = await loadGeneratedModel(modelUrl, thing);
-          if (destroyed || paused || !thingById(thing.id)) {
+          if (destroyed || generationPausedForThing(thing) || !thingById(thing.id)) {
             disposeObject(model);
             return;
           }
@@ -4932,7 +4940,7 @@ function createTellusWorld(
         })
         .catch((error) => {
           if (!thingById(thing.id)) return;
-          if (paused || generationController.signal.aborted) {
+          if (generationPausedForThing(thing) || generationController.signal.aborted) {
             thing.generationStatus = "local";
             showLocalFallbackMesh();
             publishGeneratedThing(thing);
@@ -4975,7 +4983,7 @@ function createTellusWorld(
         generationController.signal,
       )
         .then(async (initialResult) => {
-          if (destroyed || paused || !thingById(thing.id)) return;
+          if (destroyed || generationPausedForThing(thing) || !thingById(thing.id)) return;
           thing.pipelineId = initialResult.jobId;
           thing.generationStatus =
             initialResult.status === "queued" ? "queued" : "generating";
@@ -4993,7 +5001,7 @@ function createTellusWorld(
             initialResult,
             generationController.signal,
             (status) => {
-              if (destroyed || paused || !thingById(thing.id)) return;
+              if (destroyed || generationPausedForThing(thing) || !thingById(thing.id)) return;
               if (status === "queued" || status === "generating") {
                 thing.generationStatus = status;
                 addLog({
@@ -5005,7 +5013,7 @@ function createTellusWorld(
               }
             },
           );
-          if (destroyed || paused || !thingById(thing.id)) return;
+          if (destroyed || generationPausedForThing(thing) || !thingById(thing.id)) return;
           if (!result.modelUrl) {
             throw new Error(`${providerName} completed without a model URL`);
           }
@@ -5018,7 +5026,7 @@ function createTellusWorld(
             text: `${providerName} used ${result.textImageProvider ?? "image"} source ${result.sourceImageUrl ? absoluteTellusApiUrl(result.sourceImageUrl) : "image"} and saved ${thing.kind} GLB to ${result.storedModelUrl ? absoluteTellusApiUrl(result.storedModelUrl) : thing.modelUrl}; loading it into Tellus.`,
           });
           const model = await loadGeneratedModel(thing.modelUrl, thing);
-          if (destroyed || paused || !thingById(thing.id)) {
+          if (destroyed || generationPausedForThing(thing) || !thingById(thing.id)) {
             disposeObject(model);
             return;
           }
@@ -5044,7 +5052,7 @@ function createTellusWorld(
         })
         .catch((error) => {
           if (!thingById(thing.id)) return;
-          if (paused || generationController.signal.aborted) {
+          if (generationPausedForThing(thing) || generationController.signal.aborted) {
             thing.generationStatus = "local";
             showLocalFallbackMesh();
             publishGeneratedThing(thing);
@@ -5213,15 +5221,6 @@ function createTellusWorld(
   const submitVisitorPrompt = (prompt: string) => {
     const trimmed = prompt.trim();
     if (!trimmed) return;
-    if (paused) {
-      addLog({
-        agentId: "world",
-        agentName: "Tellus",
-        tool: "generate",
-        text: "Paused: generation is stopped.",
-      });
-      return;
-    }
     if (trimmed.toLowerCase().startsWith("ask ") && generated.length > 0) {
       interact({
         targetId: generated[generated.length - 1].id,
@@ -5313,11 +5312,12 @@ function createTellusWorld(
     if (paused === nextPaused) return;
     paused = nextPaused;
     if (paused) {
-      abortPendingGeneration();
+      abortPendingGeneration((thing) => thing.creatorId !== "visitor");
       for (const thing of generated) {
         if (
-          thing.generationStatus === "queued" ||
-          thing.generationStatus === "generating"
+          thing.creatorId !== "visitor" &&
+          (thing.generationStatus === "queued" ||
+            thing.generationStatus === "generating")
         ) {
           cancelDirectGeneration(thing.pipelineId);
           thing.generationStatus = "local";
