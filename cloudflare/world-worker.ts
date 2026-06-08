@@ -222,7 +222,7 @@ async function assetLibraryResponse(request: Request, pathname: string): Promise
 
   const downloadMatch = /^\/api\/assets\/download\/([^/]+)$/.exec(pathname);
   if (downloadMatch) {
-    const response = await fetch(`${assetLibraryBaseUrl}/download/${encodeURIComponent(downloadMatch[1])}`);
+    const response = await fetch(`${assetLibraryBaseUrl}/api/download/${encodeURIComponent(downloadMatch[1])}`);
     return new Response(response.body, {
       status: response.status,
       headers: {
