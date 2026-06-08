@@ -636,24 +636,32 @@ async function generateGradioConceptImage(
   const negativePrompt =
     process.env.TELLUS_TEXT_TO_IMAGE_NEGATIVE_PROMPT?.trim() ||
     "text, watermark, logo, cropped, blurry, background clutter, multiple objects";
+  const apiName = process.env.TELLUS_GRADIO_IMAGE_API_NAME?.trim() || "generate_image";
+  const seed = Number(process.env.TELLUS_TEXT_TO_IMAGE_SEED || 42);
+  const steps = Number(process.env.TELLUS_TEXT_TO_IMAGE_STEPS || 9);
+  const width = Number(process.env.TELLUS_TEXT_TO_IMAGE_WIDTH || 1024);
+  const height = Number(process.env.TELLUS_TEXT_TO_IMAGE_HEIGHT || 1024);
+  const guidance = Number(process.env.TELLUS_TEXT_TO_IMAGE_GUIDANCE || 0);
+  const preset = process.env.TELLUS_GRADIO_IMAGE_PRESET?.trim();
+  const data =
+    preset || apiName === "generate"
+      ? [
+          imagePrompt,
+          preset || "Square asset",
+          seed,
+          steps,
+          width,
+          height,
+          guidance,
+          negativePrompt,
+        ]
+      : [imagePrompt, seed, steps, width, height, guidance, negativePrompt];
   const response = await fetch(
-    `${baseUrl}/gradio_api/api/${
-      process.env.TELLUS_GRADIO_IMAGE_API_NAME?.trim() || "generate_image"
-    }`,
+    `${baseUrl}/gradio_api/api/${apiName}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        data: [
-          imagePrompt,
-          Number(process.env.TELLUS_TEXT_TO_IMAGE_SEED || 42),
-          Number(process.env.TELLUS_TEXT_TO_IMAGE_STEPS || 9),
-          Number(process.env.TELLUS_TEXT_TO_IMAGE_WIDTH || 1024),
-          Number(process.env.TELLUS_TEXT_TO_IMAGE_HEIGHT || 1024),
-          Number(process.env.TELLUS_TEXT_TO_IMAGE_GUIDANCE || 0),
-          negativePrompt,
-        ],
-      }),
+      body: JSON.stringify({ data }),
     },
   );
   const body = (await response.json()) as GradioImageResponse;
