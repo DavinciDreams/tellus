@@ -1103,8 +1103,8 @@ async function uploadGeneratedModelToAssetStore(params: {
   }
   return {
     modelId: model.id,
-    modelUrl: `${baseUrl}/view/${encodeURIComponent(model.id)}`,
-    downloadUrl: `${baseUrl}/download/${encodeURIComponent(model.id)}`,
+    modelUrl: `${baseUrl}/api/view/${encodeURIComponent(model.id)}`,
+    downloadUrl: `${baseUrl}/api/download/${encodeURIComponent(model.id)}`,
   };
 }
 
