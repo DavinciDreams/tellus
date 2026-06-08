@@ -28,6 +28,36 @@ const corsHeaders = {
 const assetLibraryBaseUrl = "https://3d.flobots.xyz";
 const presenceTtlMs = 90_000;
 
+function isPendingGeneratedThing(thing: WorldGeneratedThing): boolean {
+  return thing.generationStatus === "queued" || thing.generationStatus === "generating";
+}
+
+function isResolvedGeneratedThing(thing: WorldGeneratedThing): boolean {
+  return Boolean(thing.modelUrl) || thing.generationStatus === "ready" || thing.generationStatus === "local";
+}
+
+function mergeGeneratedThing(
+  existing: WorldGeneratedThing | undefined,
+  incoming: WorldGeneratedThing,
+  updatedAt: string,
+): WorldGeneratedThing {
+  const next = {
+    ...incoming,
+    updatedAt,
+  };
+  if (
+    existing &&
+    isResolvedGeneratedThing(existing) &&
+    isPendingGeneratedThing(incoming) &&
+    !incoming.modelUrl
+  ) {
+    next.modelUrl = existing.modelUrl;
+    next.pipelineId = existing.modelUrl ? undefined : existing.pipelineId;
+    next.generationStatus = existing.modelUrl ? "ready" : existing.generationStatus;
+  }
+  return next;
+}
+
 interface PersistedWorldState {
   version: number;
   worldId: string;
@@ -368,10 +398,7 @@ export class TellusWorld extends DurableObject<Env> {
     }
 
     if (action.type === "generated.upsert") {
-      const thing = {
-        ...action.thing,
-        updatedAt: now,
-      };
+      const thing = mergeGeneratedThing(this.generated.get(action.thing.id), action.thing, now);
       this.generated.set(thing.id, thing);
       await this.persistWorldState();
       return { type: "generated.updated", thing, actorId: action.visitorId };
