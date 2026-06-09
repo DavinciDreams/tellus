@@ -4,8 +4,16 @@
   "generationProvider": "instantmesh-gradio",
   "agentModel": "GLM-5.1",
   "worldApiBase": "https://tellus-world.agentstarter.workers.dev",
-  "worldId": "main",
+  "worldId": "new-world",
   "skyboxUrl": "https://cdn.example.com/tellus/sky.glb",
+  "worldTemplate": "wide-island",
+  "landShape": {
+    "pond": {
+      "x": 24,
+      "z": -8,
+      "radius": 9.6
+    }
+  },
   "dayNightCycleMs": 600000,
   "dayNightStart": 0.18,
   "enabledAgents": ["johnny"],

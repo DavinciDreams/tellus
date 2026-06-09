@@ -8,6 +8,7 @@
   "worldApiBase": "https://tellus-world.agentstarter.workers.dev",
   "worldId": "main",
   "skyboxUrl": "/skybox/free_-_skybox_in_the_cloud/scene.gltf",
+  "worldTemplate": "tellus",
   "dayNightCycleMs": 600000,
   "dayNightStart": 0.18,
   "enabledAgents": ["johnny"],

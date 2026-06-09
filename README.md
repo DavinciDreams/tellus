@@ -345,6 +345,7 @@ committed config:
   "worldApiBase": "https://tellus-world.agentstarter.workers.dev",
   "worldId": "main",
   "skyboxUrl": "https://cdn.example.com/tellus/sky.glb",
+  "worldTemplate": "tellus",
   "enabledAgents": ["johnny"],
   "avatars": {
     "johnny": "https://cdn.example.com/tellus/johnny.glb",
@@ -361,6 +362,55 @@ On Vercel, set `VITE_ASSET_FORGE_API_BASE` and the `VITE_TELLUS_*_AVATAR_URL`
 variables when you want the URLs baked into a build, or replace
 `public/tellus-config.json` during deployment if your hosting setup supports
 runtime config injection.
+
+## World Templates
+
+Tellus is designed to be copied as a world template. For each deployed copy,
+change at least:
+
+```json
+{
+  "worldId": "garden-moon",
+  "skyboxUrl": "https://cdn.example.com/tellus/garden-moon-sky.glb",
+  "worldTemplate": "lowlands"
+}
+```
+
+`worldId` is the identity for shared terrain, generated objects, presence, and
+local browser saves. Use a new `worldId` for each new world so it starts clean.
+`skyboxUrl` changes the enclosing world art. `worldTemplate` changes the
+starting land shape before any player or agent sculpts it.
+
+Built-in land presets:
+
+```text
+tellus
+wide-island
+lowlands
+ridge
+```
+
+You can also override individual shape knobs with `landShape`:
+
+```json
+{
+  "worldId": "red-ridge",
+  "skyboxUrl": "/skybox/red-ridge.glb",
+  "worldTemplate": "ridge",
+  "landShape": {
+    "mountain": { "height": 16, "radius": 24, "exponent": 2.6 },
+    "ridge": { "sinScale": 1.4, "cosScale": 0.8, "diagonalScale": 0.7 },
+    "pond": { "x": -18, "z": -16, "radius": 8, "depth": 2.2 },
+    "shore": { "startRatio": 0.74, "drop": 6.2 },
+    "baseOffset": -0.7
+  }
+}
+```
+
+Supported `landShape` groups are `mountain`, `shoulder`, `southernRise`,
+`ridge`, `shore`, `pond`, and `baseOffset`. Runtime JSON is loaded before the
+3D scene is created, so deploying a copy can be as simple as replacing
+`public/tellus-config.json` with a new `worldId`, `skyboxUrl`, and template.
 
 ## Agent Avatars
 
