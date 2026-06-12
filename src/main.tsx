@@ -102,6 +102,7 @@ import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tel
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyElevated, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createMoonHorizonOccluderTexture, createMoonCloudVeil, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
+import { createTerrainMaterial } from "./tellus-terrain-material";
 import { installSessionFetch } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
@@ -489,7 +490,7 @@ function createTellusWorld(
   // it (operator: range over thickness; worlds get larger for less).
   const terrainRenderSegments = useWebGPU ? 224 : 144;
   const ocean = createOceanSurface(useWebGPU);
-  const archipelago = createDistantArchipelago();
+  const archipelago = createDistantArchipelago(useWebGPU);
   // Ambient procedural vegetation (wind-swayed grass/flowers streamed around the player + island-wide
   // trees/rocks) and the lightweight physics world (thrown things, player jump/obstacles). Both are
   // deterministic from the synced terrain state — no protocol changes.
@@ -547,11 +548,7 @@ function createTellusWorld(
   });
   const terrain = new THREE.Mesh(
     createTerrainGeometry(terrainRenderSegments),
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.88,
-      metalness: 0,
-    }),
+    createTerrainMaterial(useWebGPU, { roughness: 0.88 }),
   );
   terrain.receiveShadow = true;
   const pondWater = createPondWater();
@@ -909,17 +906,91 @@ function createTellusWorld(
     terrain.geometry.computeVertexNormals();
     refreshFlowerPatches();
   };
+  // Localized color-only repaint: paint strokes change ONLY the vertex color inside the brush — height
+  // and normals are untouched — so there's no reason to walk all ~50K vertices or recompute normals.
+  // We rebuild colors for just the render-grid rows/cols that overlap the brush AABB. A single full
+  // rebuild costs ~50K vertex writes + a full computeVertexNormals(); a brush touches a few hundred.
+  const repaintCentralTerrainRegion = (
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+  ) => {
+    const colors = terrain.geometry.getAttribute("color") as THREE.BufferAttribute;
+    const renderRow = terrainRenderSegments + 1;
+    const span = WORLD_RADIUS * 2;
+    // Map the world-space brush AABB to render-grid index ranges (one cell of padding for falloff seams).
+    const toIndex = (w: number) =>
+      clamp(Math.floor(((w / span) + 0.5) * terrainRenderSegments), 0, terrainRenderSegments);
+    const x0 = Math.max(0, toIndex(minX) - 1);
+    const x1 = Math.min(terrainRenderSegments, toIndex(maxX) + 1);
+    const z0 = Math.max(0, toIndex(minZ) - 1);
+    const z1 = Math.min(terrainRenderSegments, toIndex(maxZ) + 1);
+    for (let zIndex = z0; zIndex <= z1; zIndex++) {
+      const vz = (zIndex / terrainRenderSegments - 0.5) * span;
+      for (let xIndex = x0; xIndex <= x1; xIndex++) {
+        const vx = (xIndex / terrainRenderSegments - 0.5) * span;
+        const radius = Math.hypot(vx, vz);
+        const inside = radius <= WORLD_RADIUS;
+        const edgeScale = inside ? 1 : WORLD_RADIUS / radius;
+        const px = vx * edgeScale;
+        const pz = vz * edgeScale;
+        const py = inside ? terrainHeight(px, pz) : -4.5;
+        const color = terrainVertexColor(
+          inside ? terrainKind(px, pz, py) : "rock",
+          px,
+          pz,
+          xIndex * 1009 + zIndex * 9176,
+        );
+        colors.setXYZ(zIndex * renderRow + xIndex, color.r, color.g, color.b);
+      }
+    }
+    colors.needsUpdate = true;
+  };
+
   // Coalesce the full 9409-vertex rebuild (positions + colors + computeVertexNormals + flower patches) to one
   // flush per frame — rapid sculpt steps and remote terrain patches no longer recompute the whole grid N
   // times per frame. Terrain height queries use the math (terrainHeight), not the mesh, so a 1-frame defer is
   // invisible.
   let centralTerrainDirty = false;
+  // Accumulated world-space AABB for paint-only (color) strokes that don't need a full rebuild. Stays
+  // null whenever a height-changing op (sculpt) or a remote patch forces the full path.
+  let paintDirtyBounds: { minX: number; minZ: number; maxX: number; maxZ: number } | null = null;
   const refreshTerrainGeometry = () => {
+    centralTerrainDirty = true;
+    paintDirtyBounds = null; // full rebuild requested — discard any pending localized region
+  };
+  // Request a cheap color-only refresh over a brush AABB. Falls back to a full rebuild automatically if
+  // a full rebuild is already pending this frame.
+  const refreshTerrainPaintRegion = (
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+  ) => {
+    if (centralTerrainDirty && !paintDirtyBounds) return; // full rebuild already covers it
+    paintDirtyBounds = paintDirtyBounds
+      ? {
+          minX: Math.min(paintDirtyBounds.minX, minX),
+          minZ: Math.min(paintDirtyBounds.minZ, minZ),
+          maxX: Math.max(paintDirtyBounds.maxX, maxX),
+          maxZ: Math.max(paintDirtyBounds.maxZ, maxZ),
+        }
+      : { minX, minZ, maxX, maxZ };
     centralTerrainDirty = true;
   };
   const flushTerrain = () => {
     if (!centralTerrainDirty) return;
     centralTerrainDirty = false;
+    if (paintDirtyBounds) {
+      // Paint-only frame: recolor just the brushed region, skip positions + computeVertexNormals.
+      const b = paintDirtyBounds;
+      paintDirtyBounds = null;
+      repaintCentralTerrainRegion(b.minX, b.minZ, b.maxX, b.maxZ);
+      refreshFlowerPatches();
+      vegetation.notifyTerrainChanged();
+      return;
+    }
     rebuildCentralTerrain();
     // Re-grow the procedural vegetation lazily wherever the terrain changed (local sculpt or remote
     // patch both funnel through here).
@@ -1238,7 +1309,18 @@ function createTellusWorld(
           terrainSculptOffsets[index] = clamp(terrainSculptOffsets[index], -9, 9);
         }
       }
-      refreshTerrainGeometry();
+      if (paintCode) {
+        // Paint only recolors vertices — height/normals are unchanged, so do the cheap localized
+        // recolor over the brush AABB instead of a full-mesh rebuild + computeVertexNormals.
+        refreshTerrainPaintRegion(
+          center.x - brushRadius,
+          center.z - brushRadius,
+          center.x + brushRadius,
+          center.z + brushRadius,
+        );
+      } else {
+        refreshTerrainGeometry();
+      }
       updatePondSurfacePosition();
     }
 

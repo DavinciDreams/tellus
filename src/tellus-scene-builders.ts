@@ -53,6 +53,7 @@ import {
 } from "./tellus-terrain";
 import { createGltfLoader, gltfObjectCache } from "./tellus-generation-client";
 import { tryLoadVrmObject, VrmObjectRig } from "./tellus-vrm-avatar";
+import { createTerrainMaterial } from "./tellus-terrain-material";
 
 export function createFlowerSpriteTexture(petalColor: string): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
@@ -254,7 +255,10 @@ export function createDistantIslandTerrainGeometry(
   return geometry;
 }
 
-export function createDistantIsland(spec: DistantIslandSpec): THREE.Group {
+export function createDistantIsland(
+  spec: DistantIslandSpec,
+  useWebGPU = false,
+): THREE.Group {
   const group = new THREE.Group();
   group.name = `tellus-distant-island-${spec.seed}`;
   group.position.set(spec.x, SEA_LEVEL - 0.02, spec.z);
@@ -284,11 +288,7 @@ export function createDistantIsland(spec: DistantIslandSpec): THREE.Group {
 
   const topTerrain = new THREE.Mesh(
     createDistantIslandTerrainGeometry(spec),
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.9,
-      metalness: 0,
-    }),
+    createTerrainMaterial(useWebGPU, { roughness: 0.9 }),
   );
   topTerrain.name = `tellus-distant-terrain-${spec.seed}`;
   topTerrain.rotation.y = spec.rotationY;
@@ -327,11 +327,11 @@ export function createDistantIsland(spec: DistantIslandSpec): THREE.Group {
   return group;
 }
 
-export function createDistantArchipelago(): THREE.Group {
+export function createDistantArchipelago(useWebGPU = false): THREE.Group {
   const group = new THREE.Group();
   group.name = "tellus-distant-archipelago";
   for (const spec of distantIslandSpecs) {
-    group.add(createDistantIsland(spec));
+    group.add(createDistantIsland(spec, useWebGPU));
   }
   return group;
 }
