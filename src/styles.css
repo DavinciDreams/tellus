@@ -161,7 +161,9 @@ textarea::placeholder {
     radial-gradient(circle at 50% 50%, rgb(21 70 50 / 62%), rgb(6 24 20 / 88%)),
     rgb(13 42 33 / 82%);
   box-shadow: 0 16px 44px rgb(0 0 0 / 30%), var(--hud-inset);
-  pointer-events: none;
+  /* auto (was none) so the minimap captures clicks for click-to-warp; markers/disc bubble to the section's
+     handler, the info panel re-asserts its own pointer-events + the handler ignores clicks on it. */
+  pointer-events: auto;
   overflow: hidden;
 }
 

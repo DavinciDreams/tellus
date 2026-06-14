@@ -60,6 +60,7 @@ import {
 import {
   applyStaticToScreen,
   applyVideoToScreen,
+  setTvHeadActive,
   createRemoteVisitorMesh,
   createVisitorMesh,
   tickSharedStatic,
@@ -97,7 +98,7 @@ import {
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides } from "./tellus-types";
-import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, CENTRAL_WALK_RADIUS, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, DEFAULT_DAY_NIGHT_CYCLE_MS, DEFAULT_DAY_NIGHT_START, MIN_DAY_NIGHT_CYCLE_MS, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, chunkedWorldCenter } from "./tellus-constants";
+import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, CENTRAL_WALK_RADIUS, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, DEFAULT_DAY_NIGHT_CYCLE_MS, DEFAULT_DAY_NIGHT_START, MIN_DAY_NIGHT_CYCLE_MS, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, boundedNumber, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig } from "./tellus-runtime-config";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, toAssetId } from "./tellus-urls-identity";
@@ -357,6 +358,7 @@ function createTellusWorld(
     }
     const screen = mesh.userData.tvScreenRef as THREE.Mesh | undefined;
     if (!screen) return;
+    setTvHeadActive(mesh, !!stream); // show the TV head only while this peer is transmitting
     if (stream) {
       applyVideoToScreen(screen, stream);
       applyRemoteAudio(screen); // honor the current Listen state for the new <video>
@@ -382,6 +384,7 @@ function createTellusWorld(
     selfStream = stream;
     const screen = visitor?.userData.tvScreenRef as THREE.Mesh | undefined;
     if (!screen) return;
+    if (visitor) setTvHeadActive(visitor, !!stream); // your own TV head appears only while transmitting
     if (stream) {
       applyVideoToScreen(screen, stream);
     } else {
@@ -1377,7 +1380,39 @@ function createTellusWorld(
     publish();
   };
 
+  // Chunked worlds hold NO inline classic grid — terrain lives in per-chunk grains. So a sculpt must go to
+  // the SERVER as a terrain.sculpt action (world grain → owning chunk grain(s) → chunk.updated patch →
+  // chunkRenderer.reloadChunk), NOT edit the hidden 97² classic grid the way classic worlds do.
+  const sendChunkedSculpt = (mode: TerrainEditMode, center: Vec3) => {
+    if (!tellusWorldBackendAvailable) return;
+    const action = {
+      type: "terrain.sculpt",
+      visitorId,
+      mode,
+      center: { x: center.x, y: 0, z: center.z },
+    };
+    if (worldSocket?.readyState === WebSocket.OPEN) {
+      worldSocket.send(JSON.stringify(action));
+    } else {
+      void fetch(tellusWorldHttpUrl("action"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(action),
+      }).catch((error) => console.warn("Tellus chunked sculpt failed", error));
+    }
+    addLog({
+      agentId: "visitor",
+      agentName: "Visitor",
+      tool: "interact",
+      text: `${isTerrainPaintMode(mode) ? `paint ${mode}` : mode} terrain (chunked)`,
+    });
+  };
+
   const sculptTerrain = (mode: TerrainEditMode) => {
+    if (isChunked) {
+      sendChunkedSculpt(mode, visitorPosition);
+      return;
+    }
     sculptTerrainAt(mode, visitorPosition, "visitor", "Visitor");
   };
 
@@ -2340,6 +2375,17 @@ function createTellusWorld(
     publish();
   };
 
+  // Warp the player to a world (x,z) — the click-map teleport. Grounds onto the terrain (chunked-aware via
+  // groundedPosition), cancels any fall/run-accel, and republishes presence so peers see the jump.
+  const warpTo = (x: number, z: number) => {
+    visitorPosition = groundedPosition(x, z, visitorPosition);
+    playerAirborne = false;
+    playerVy = 0;
+    moveHoldStartMs = 0;
+    sendPresenceUpdate(true);
+    publish();
+  };
+
   const moveGenerated = (id: string, dx: number, dz: number) => {
     const thing = thingById(id);
     if (!thing) return;
@@ -3096,6 +3142,25 @@ function createTellusWorld(
   // ── Player physics: jump, fall, and obstacle pushout (trees + large placed things) ──
   let playerVy = 0;
   let playerAirborne = false;
+  // Free-fly (toggle with F): ignore gravity, hold Space to ascend / C to descend. Also powers air-mount
+  // vertical control. MAX_ALTITUDE is a generous ceiling for surveying large chunked worlds from above.
+  let flying = false;
+  const FLY_VERTICAL_SPEED = 16;
+  const MAX_ALTITUDE = 260;
+  // Accelerating run: hold a movement key and speed ramps up EXPONENTIALLY after a short grace — normal
+  // walk for ~2s, then "quicker and quicker" up to a cap — so crossing a big chunked world to test
+  // streaming is fast. Resets the instant movement stops. Tunables: grace before ramp, exp base/second,
+  // and the multiplier cap. RUN_EXP_BASE^heldS reaches the 6× cap in ~3.5s of sustained running.
+  let moveHoldStartMs = 0;
+  const RUN_GRACE_MS = 2000;
+  const RUN_EXP_BASE = 1.7; // exponential growth per second past the grace
+  const RUN_MAX_MULT = 6; // top speed = 6× walk
+  const runSpeedMultiplier = (nowMs: number): number => {
+    if (moveHoldStartMs === 0) return 1;
+    const heldS = (nowMs - moveHoldStartMs - RUN_GRACE_MS) / 1000;
+    if (heldS <= 0) return 1;
+    return Math.min(RUN_MAX_MULT, Math.pow(RUN_EXP_BASE, heldS));
+  };
   let obstacleCache: ObstacleCircle[] = [];
   let obstacleCacheAt = 0;
   const footprintCache = new Map<string, { radius: number; height: number }>();
@@ -3162,27 +3227,49 @@ function createTellusWorld(
     if (keys.has("a") || keys.has("arrowright")) movement.add(right);
     if (keys.has("d") || keys.has("arrowleft")) movement.sub(right);
     const hasInput = movement.lengthSq() > 0;
-    if (!sailingThingId && keys.has(" ") && !playerAirborne) {
+    const ascend = keys.has(" ");
+    const descend = keys.has("c") || keys.has("shift");
+    const verticalInput = ascend || descend;
+    // Jump only in NORMAL mode; in fly mode or on an air mount, Space = ascend (handled below).
+    if (!flying && !sailingThingId && ascend && !playerAirborne) {
       playerVy = 8.6;
       playerAirborne = true;
     }
-    if (!hasInput && !playerAirborne) return;
-    if (hasInput) movement.normalize().multiplyScalar(scaledPlayerSpeed() * delta);
+    // Accelerating run: start/extend the hold while moving, reset it the moment input stops.
+    if (hasInput) {
+      if (moveHoldStartMs === 0) moveHoldStartMs = performance.now();
+    } else {
+      moveHoldStartMs = 0;
+    }
+    // Proceed if there's horizontal input, we're mid-air, free-flying, or giving vertical input on a mount.
+    if (!hasInput && !playerAirborne && !flying && !(sailingThingId && verticalInput)) return;
+    if (hasInput) movement.normalize().multiplyScalar(scaledPlayerSpeed() * runSpeedMultiplier(performance.now()) * delta);
     if (sailingThingId) {
       playerAirborne = false;
       playerVy = 0;
-      if (!hasInput) return;
       const boat = thingById(sailingThingId);
       if (!boat) {
         sailingThingId = undefined;
         return;
       }
-      boat.position = movedVehiclePosition(
-        boat,
-        boat.position.x + movement.x,
-        boat.position.z + movement.z,
-        boat.position,
-      );
+      if (vehicleMode(boat) === "air") {
+        // Air mount: horizontal via airPosition (keeps world-bounds clamping), vertical via Space/C with a
+        // high ceiling — no longer pinned to a fixed +12 altitude.
+        const horiz = airPosition(boat.position.x + movement.x, boat.position.z + movement.z);
+        let y = boat.position.y;
+        if (ascend) y += FLY_VERTICAL_SPEED * delta;
+        if (descend) y -= FLY_VERTICAL_SPEED * delta;
+        const floor = (groundHeightAt(horiz.x, horiz.z) ?? SEA_LEVEL) + 2;
+        boat.position = { x: horiz.x, y: clamp(y, floor, MAX_ALTITUDE), z: horiz.z };
+      } else {
+        if (!hasInput) return;
+        boat.position = movedVehiclePosition(
+          boat,
+          boat.position.x + movement.x,
+          boat.position.z + movement.z,
+          boat.position,
+        );
+      }
       visitorPosition = { ...boat.position };
       const mesh = generatedMeshes.get(boat.id);
       if (mesh) {
@@ -3195,6 +3282,18 @@ function createTellusWorld(
       publishGeneratedThing(boat);
       sendPresenceUpdate();
       publish();
+      return;
+    }
+    // Free-fly (on foot): no gravity; move horizontally + ascend/descend, clamped above ground to the ceiling.
+    if (flying) {
+      const nx = visitorPosition.x + movement.x;
+      const nz = visitorPosition.z + movement.z;
+      let ny = visitorPosition.y;
+      if (ascend) ny += FLY_VERTICAL_SPEED * delta;
+      if (descend) ny -= FLY_VERTICAL_SPEED * delta;
+      const floor = groundHeightAt(nx, nz) ?? SEA_LEVEL;
+      visitorPosition = { x: nx, y: clamp(ny, floor, MAX_ALTITUDE), z: nz };
+      sendPresenceUpdate();
       return;
     }
     // obstacle pushout, then ground/air vertical dynamics
@@ -3812,7 +3911,7 @@ function createTellusWorld(
       const ldx = visitorPosition.x - lastLocalAvatarPos.x;
       const ldz = visitorPosition.z - lastLocalAvatarPos.z;
       localRig.setMoving(Math.hypot(ldx, ldz) / delta);
-      localRig.setAirborne(playerAirborne);
+      localRig.setAirborne(playerAirborne || flying);
     }
     lastLocalAvatarPos.x = visitorPosition.x;
     lastLocalAvatarPos.z = visitorPosition.z;
@@ -3906,6 +4005,20 @@ function createTellusWorld(
       !event.altKey
     ) {
       setCameraMode(cameraMode === "first" ? "third" : "first");
+      return;
+    }
+    // F toggles free-fly (not while riding a vehicle — air mounts have their own ascend/descend).
+    if (
+      event.key.toLowerCase() === "f" &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !sailingThingId
+    ) {
+      flying = !flying;
+      playerAirborne = false;
+      playerVy = 0;
+      addLog({ agentId: "visitor", agentName: "Visitor", tool: "interact", text: flying ? "fly mode ON (Space up / C down)" : "fly mode off" });
       return;
     }
     keys.add(event.key.toLowerCase());
@@ -4356,6 +4469,7 @@ function createTellusWorld(
     selectGenerated,
     goToGenerated,
     moveGenerated,
+    warpTo,
     rotateGenerated,
     scaleGenerated,
     resetGeneratedScale,
@@ -5988,10 +6102,33 @@ function App(): React.ReactElement {
   const selectedThingVehicleMode = selectedThing ? vehicleMode(selectedThing) : null;
   const selectedThingIsMount = selectedThing ? isMountThing(selectedThing) : false;
   const mapRadius = OCEAN_RADIUS * 0.42;
+  // The minimap maps world (x,z) → a [0,1] fraction. Classic worlds are origin-centred (0,0 → mid-map);
+  // chunked worlds put origin at a CORNER and span [0, N*96), so they map linearly from 0. The inverse
+  // (mapFracToWorld) powers click-to-warp and MUST mirror the forward map so a click lands where it shows.
+  const chunkedMapDims = isChunkedWorldId(activeWorldId ?? "") ? getChunkedWorldChunks() : null;
+  const mapExtentX = chunkedMapDims ? chunkedMapDims.w * CHUNK_SPAN : mapRadius * 2;
+  const mapExtentZ = chunkedMapDims ? chunkedMapDims.h * CHUNK_SPAN : mapRadius * 2;
+  const mapFracX = (x: number) => (chunkedMapDims ? x / mapExtentX : x / (mapRadius * 2) + 0.5);
+  const mapFracZ = (z: number) => (chunkedMapDims ? z / mapExtentZ : z / (mapRadius * 2) + 0.5);
+  const mapFracToWorld = (fx: number, fz: number): { x: number; z: number } =>
+    chunkedMapDims
+      ? { x: fx * mapExtentX, z: fz * mapExtentZ }
+      : { x: (fx - 0.5) * mapRadius * 2, z: (fz - 0.5) * mapRadius * 2 };
   const mapPointStyle = (position: Vec3): React.CSSProperties => ({
-    left: `${clamp(((position.x / (mapRadius * 2)) + 0.5) * 100, 0, 100)}%`,
-    top: `${clamp(((position.z / (mapRadius * 2)) + 0.5) * 100, 0, 100)}%`,
+    left: `${clamp(mapFracX(position.x) * 100, 0, 100)}%`,
+    top: `${clamp(mapFracZ(position.z) * 100, 0, 100)}%`,
   });
+  const handleWorldMapClick = (event: React.MouseEvent<HTMLElement>) => {
+    // Ignore clicks on the overlaid info panel / status badge — only the map plane warps.
+    const target = event.target as HTMLElement;
+    if (target.closest(".world-info-panel") || target.closest(".world-map-status")) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const fx = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+    const fz = clamp((event.clientY - rect.top) / rect.height, 0, 1);
+    const pos = mapFracToWorld(fx, fz);
+    worldRef.current?.warpTo(pos.x, pos.z);
+  };
   const pendingGenerated = snapshot.generated.filter(
     (thing) =>
       thing.generationStatus === "queued" ||
@@ -7228,7 +7365,13 @@ function App(): React.ReactElement {
         )}
         {worldMapOpen && (
           <aside className="world-right-hud" aria-label="World systems">
-            <section className="world-map" aria-label="World map">
+            <section
+              className="world-map"
+              aria-label="World map — click to warp"
+              title="Click to warp here"
+              style={{ cursor: "crosshair" }}
+              onClick={handleWorldMapClick}
+            >
               <div className="world-map-disc" />
               {snapshot.visitorPosition && (
                 <span

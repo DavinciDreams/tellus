@@ -230,6 +230,15 @@ export function createRemoteVisitorMesh(
   neck.position.y = 2.12;
   group.add(neck);
   bodyParts.push(neck);
+  // Default (no-video) head — a compact box shown INSTEAD of the TV head whenever the visitor isn't
+  // transmitting, so a non-streaming robot isn't headless. A body part, so the VRM upgrade hides it too.
+  const defaultHead = new THREE.Mesh(
+    new THREE.BoxGeometry(0.46, 0.42, 0.42),
+    bodyMaterial,
+  );
+  defaultHead.position.y = 2.46;
+  group.add(defaultHead);
+  bodyParts.push(defaultHead);
   // TV head (box) + front-face screen plane.
   const tv = new THREE.Mesh(
     new THREE.BoxGeometry(0.86, 0.68, 0.7),
@@ -261,8 +270,25 @@ export function createRemoteVisitorMesh(
   group.userData.tvScreenRef = screen;
   group.userData.robotBodyParts = bodyParts;
   group.userData.tvBoxRef = tv;
+  group.userData.defaultHeadRef = defaultHead;
   group.userData.markerRef = marker;
+  // Start NOT transmitting: TV head hidden, default head shown.
+  setTvHeadActive(group, false);
   return group;
+}
+
+/// Show the TV head (box + video screen) only while a visitor is transmitting video/audio; otherwise hide
+/// it and (for a non-upgraded robot) show the compact default head instead. For a VRM-upgraded avatar the
+/// procedural body — incl. the default head — is already hidden, so only the TV toggles (it floats over the
+/// VRM while streaming, vanishes when not). Called on every TX on/off transition.
+export function setTvHeadActive(group: THREE.Group, active: boolean): void {
+  const tvBox = group.userData.tvBoxRef as THREE.Object3D | undefined;
+  const screen = group.userData.tvScreenRef as THREE.Object3D | undefined;
+  const defaultHead = group.userData.defaultHeadRef as THREE.Object3D | undefined;
+  const vrmUpgraded = Boolean(group.userData.avatarMountedModel);
+  if (tvBox) tvBox.visible = active;
+  if (screen) screen.visible = active;
+  if (defaultHead) defaultHead.visible = !active && !vrmUpgraded;
 }
 
 // The LOCAL player's avatar — same robot + TV-head as remotes (so self-video renders on it), with a
