@@ -69,6 +69,7 @@ import {
   AVATAR_SCALE_MAX,
   AVATAR_SCALE_MIN,
   clampAvatarScale,
+  emoteClipNamesSync,
   getAvatarUserScale,
   restoreProceduralAvatar,
   setAvatarUserScale,
@@ -1182,6 +1183,19 @@ function createTellusWorld(
       visitorId,
       terrain: tellusState(),
     }));
+  };
+
+  // Play a one-shot emote on the LOCAL avatar and best-effort broadcast it so nearby clients see it
+  // too. Plays locally regardless of the socket (the "AI pilots its own body" guarantee); the
+  // broadcast mirrors the inbound emote frame and is harmless if the server doesn't relay it.
+  const playLocalEmote = (animation: string): boolean => {
+    const name = animation.trim();
+    if (!name) return false;
+    avatarRigs.get(visitorId)?.playEmote(name);
+    if (worldSocket?.readyState === WebSocket.OPEN) {
+      worldSocket.send(JSON.stringify({ type: "emote", emote: { visitorId, animation: name } }));
+    }
+    return true;
   };
 
   const connectTellusWorldRealtime = () => {
@@ -4449,7 +4463,10 @@ function createTellusWorld(
         distanceToSummit: Math.hypot(visitorPosition.x, visitorPosition.z),
         distanceToShore: Math.max(0, WORLD_RADIUS - Math.hypot(visitorPosition.x, visitorPosition.z)),
         nearby: tellusAgent.getNearby(radius),
-        verbs: ["moveSelf", "generate", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater"],
+        verbs: ["moveSelf", "generate", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "playAnimation"],
+        // The emote clip names the agent can pass to playAnimation (its avatar-body vocabulary). Best-
+        // effort from the cached VRMA catalogue; the store feed enriches it once fetched.
+        animations: emoteClipNamesSync(),
       };
     },
     sendAction(verb: string, args: Record<string, unknown> = {}) {
@@ -4499,6 +4516,14 @@ function createTellusWorld(
         case "moveAssetToWater": {
           if (typeof a.targetId !== "string") return { ok: false, error: "moveAssetToWater requires a targetId" };
           moveGeneratedToWater(a.targetId);
+          return { ok: true };
+        }
+        case "playAnimation": {
+          const name = typeof a.name === "string" ? a.name : typeof a.animation === "string" ? a.animation : "";
+          if (!name.trim()) return { ok: false, error: "playAnimation requires a name" };
+          // Plays on the local avatar immediately and best-effort broadcasts to nearby clients. A name
+          // outside the avatar's vocabulary simply doesn't play (matches the rig's ignore-unknown rule).
+          playLocalEmote(name);
           return { ok: true };
         }
         default:
