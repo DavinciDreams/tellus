@@ -193,6 +193,8 @@ export interface TellusSnapshot {
   instantMeshTarget: InstantMeshTarget;
   userId: string;
   visitorPosition?: Vec3;
+  visitorYaw?: number;
+  viewDistance?: number;
   remoteVisitors: WorldPresence[];
   selectedThingId?: string;
   sailingThingId?: string;

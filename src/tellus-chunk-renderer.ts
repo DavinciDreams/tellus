@@ -111,17 +111,25 @@ export interface ChunkRenderer {
   dispose(): void;
 }
 
-export function createChunkRenderer(scene: THREE.Scene): ChunkRenderer {
+export function createChunkRenderer(
+  scene: THREE.Scene,
+  // Optional shared terrain material (the procedural-detail material from createTerrainMaterial, so
+  // chunked worlds get the same fractal mottling/slope-darkening as the central terrain). Tests omit
+  // it and fall back to a plain vertex-color material — jsdom can't build the WebGPU node material.
+  terrainMaterial?: THREE.Material,
+): ChunkRenderer {
   const group = new THREE.Group();
   group.name = "tellus-chunk-terrain";
   scene.add(group);
 
   // ONE shared material across all chunk meshes (never disposed per-evict; only on dispose()).
-  const material = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.88,
-    metalness: 0,
-  });
+  const material =
+    terrainMaterial ??
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.88,
+      metalness: 0,
+    });
 
   const active = new Map<string, ActiveChunk>();
   const inflight = new Map<string, AbortController>();

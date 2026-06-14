@@ -167,6 +167,22 @@ textarea::placeholder {
   overflow: hidden;
 }
 
+/* View-direction cone: faint wedge from the player marker showing facing + how far we can see. Sits above
+   the disc, below the markers; never intercepts clicks (warp passes through). */
+.world-map-cone {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+.world-map-cone path {
+  fill: rgb(245 240 184 / 16%);
+  stroke: rgb(245 240 184 / 38%);
+  stroke-width: 0.5;
+}
+
 .world-right-hud {
   position: absolute;
   top: 18px;
@@ -187,11 +203,11 @@ textarea::placeholder {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: 7px;
-  width: min(270px, calc(100vw - 40px));
+  width: min(400px, calc(100vw - 40px));
   min-width: 220px;
-  max-width: min(520px, calc(100vw - 40px));
-  min-height: 150px;
-  max-height: min(460px, calc(100dvh - 140px));
+  max-width: min(640px, calc(100vw - 40px));
+  min-height: 240px;
+  max-height: min(72dvh, calc(100dvh - 110px));
   border: 1px solid var(--hud-border);
   background: rgb(12 38 33 / 88%);
   box-shadow: var(--hud-shadow), var(--hud-inset);
@@ -296,6 +312,7 @@ textarea::placeholder {
   background: #f5f0dc;
   box-shadow: 0 0 0 1px rgb(255 255 255 / 18%);
   transform: translate(-50%, -50%);
+  z-index: 2; /* above the view cone (.world-map-cone, z-index 1) */
 }
 
 .map-marker.player {
@@ -341,6 +358,22 @@ textarea::placeholder {
   font-size: 9px;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+/* Position readout under the minimap: small, copy-friendly, monospace so digits don't jitter. */
+.world-pos-readout {
+  align-self: stretch;
+  padding: 4px 8px;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(8 28 24 / 78%);
+  color: var(--hud-gold-bright);
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  text-align: center;
+  user-select: text;
+  cursor: text;
 }
 
 @keyframes map-pulse {
@@ -1493,6 +1526,21 @@ textarea::placeholder {
 
 .asset-list {
   max-height: min(420px, 44dvh);
+}
+
+/* Asset-store browse results: responsive square tiles that scale to the drawer width (was a fixed 3-col
+   grid with no height cap → oversized tiles that overflowed the subwindow). Tiles stay ~72–96px and the
+   grid scrolls within the drawer instead of growing unbounded. */
+.asset-browse-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+  max-height: min(360px, 40dvh);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.asset-browse-grid > button {
+  min-width: 0; /* let the square tiles shrink to the column width instead of forcing overflow */
 }
 
 .asset-row {

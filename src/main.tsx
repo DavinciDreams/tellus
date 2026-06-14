@@ -565,6 +565,7 @@ function createTellusWorld(
   });
   const isChunked = isChunkedWorldId(runtimeConfig.worldId);
   let chunkRenderer: ChunkRenderer | null = null;
+  let lastActiveChunkCount = -1; // re-ground placed assets when the active chunk set changes
   const terrain = new THREE.Mesh(
     createTerrainGeometry(terrainRenderSegments),
     createTerrainMaterial(useWebGPU, { roughness: 0.88 }),
@@ -574,7 +575,12 @@ function createTellusWorld(
     // Chunked worlds tile terrain per-grain; the single-grid mesh stays inert (kept so the many
     // code paths that reference `terrain` keep compiling) and the streamer owns the heightfield.
     terrain.visible = false;
-    chunkRenderer = createChunkRenderer(scene); // adds its own group to the scene
+    // Pass the procedural-detail terrain material so streamed chunks get the same fractal
+    // mottling/slope-darkening as the central terrain (Lisa's #36 surface detail, applied per-chunk).
+    chunkRenderer = createChunkRenderer(
+      scene,
+      createTerrainMaterial(useWebGPU, { roughness: 0.88 }),
+    ); // adds its own group to the scene
     // Walk the sculpted chunk heightfield where chunks are loaded (flat base elsewhere).
     setChunkedHeightProvider((x, z) => chunkRenderer!.sampleHeight(x, z));
   }
@@ -822,6 +828,8 @@ function createTellusWorld(
     instantMeshTarget: runtimeConfig.instantMeshTarget,
     userId,
     visitorPosition: { ...visitorPosition },
+    visitorYaw: yaw, // facing direction (radians) for the minimap view cone
+    viewDistance: scene.fog instanceof THREE.Fog ? scene.fog.far : 200 * WORLD_SCALE, // how far we can see
     remoteVisitors: Array.from(remoteVisitors.values()).map((presence) => ({
       ...presence,
       position: presence.position ? { ...presence.position } : undefined,
@@ -1873,7 +1881,18 @@ function createTellusWorld(
       updateSelectionIndicator();
       return;
     }
-    placeObjectAboveGround(mesh, thing.position, 0.04);
+    // Chunked worlds: the stored thing.position.y may have been grounded against the flat base
+    // (sampleHeight returns null until the owning chunk streams in), so once the sculpted chunk
+    // loads the asset would sit BELOW the surface. Re-sample the live ground height here so the
+    // model's feet rest flush on the sculpted terrain. Falls through to the stored y otherwise.
+    const liveGround = isChunked
+      ? groundHeightAt(thing.position.x, thing.position.z)
+      : null;
+    const placeAt =
+      liveGround !== null && Number.isFinite(liveGround)
+        ? { ...thing.position, y: liveGround }
+        : thing.position;
+    placeObjectAboveGround(mesh, placeAt, 0.04);
     refreshInstancedThingMatrix(thing);
     updateSelectionIndicator();
   };
@@ -3147,6 +3166,10 @@ function createTellusWorld(
   let flying = false;
   const FLY_VERTICAL_SPEED = 16;
   const MAX_ALTITUDE = 260;
+  // Republish (throttled) when the player turns in place so the minimap view-cone tracks facing — yaw
+  // changes from camera drag don't otherwise trigger a snapshot.
+  let lastConeYaw = 0;
+  let lastConePublishMs = 0;
   // Accelerating run: hold a movement key and speed ramps up EXPONENTIALLY after a short grace — normal
   // walk for ~2s, then "quicker and quicker" up to a cap — so crossing a big chunked world to test
   // streaming is fast. Resets the instant movement stops. Tunables: grace before ramp, exp base/second,
@@ -3184,15 +3207,21 @@ function createTellusWorld(
       obstacleCacheAt = nowMs;
       const list: ObstacleCircle[] = [...vegetation.getTreeColliders()];
       for (const thing of generated) {
+        // Pass through: the vehicle you're riding, ambient-physics props (their own collision),
+        // and the thing you're actively dragging (else it shoves you around as you place it).
         if (thing.id === sailingThingId || ambientPhysics.has(thing.id)) continue;
+        if (thing.id === draggingThingId) continue;
         const fp = thingFootprint(thing);
+        // Skip tiny/flat items you should be able to walk over (rugs, coins, low debris).
         if (!fp || fp.height < 1.4 || fp.radius < 0.55) continue;
         // only solid when the player can actually run into it (not lifted into the sky)
         if (thing.position.y > visitorPosition.y + 2.2) continue;
         list.push({
           x: thing.position.x,
           z: thing.position.z,
-          r: Math.min(fp.radius * 0.7, 2.6),
+          // Solid radius scales with the model's footprint (capped so huge props stay passable
+          // around the edges); the 0.7 factor lets you brush past rather than bumping a fat box.
+          r: clamp(fp.radius * 0.7, 0.55, 2.6),
         });
       }
       obstacleCache = list;
@@ -3933,6 +3962,23 @@ function createTellusWorld(
     if (chunkRenderer) {
       chunkRenderer.update(visitorPosition.x, visitorPosition.z); // throttles internally on cell change
       chunkRenderer.flush(); // once/frame rebuild discipline
+      // When the active chunk set changes (chunks streamed in/out), re-ground placed assets so they
+      // rest flush on the freshly-loaded sculpted surface instead of the flat base they were placed
+      // against. Cheap: only runs on a chunk-count change, not every frame.
+      const activeChunks = chunkRenderer.stats().active;
+      if (activeChunks !== lastActiveChunkCount) {
+        lastActiveChunkCount = activeChunks;
+        for (const thing of generated) {
+          if (isFreeMovingVehicle(thing) || isIntentionallyElevated(thing)) continue;
+          updateThingMeshPosition(thing);
+        }
+      }
+    }
+    // Keep the minimap view-cone live while turning in place (~10fps, only on a real yaw change).
+    if (Math.abs(yaw - lastConeYaw) > 0.02 && now - lastConePublishMs > 100) {
+      lastConeYaw = yaw;
+      lastConePublishMs = now;
+      publish();
     }
     flushPublish();
     vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
@@ -7373,6 +7419,29 @@ function App(): React.ReactElement {
               onClick={handleWorldMapClick}
             >
               <div className="world-map-disc" />
+              {snapshot.visitorPosition && snapshot.visitorYaw !== undefined && (() => {
+                // View cone: from the player marker, along the facing yaw, reaching the view distance —
+                // shows which way you're looking and how far you can see. forward = (sin yaw, cos yaw) in
+                // world (x→right, z→down on the map), so the same trig maps onto the minimap.
+                const px = clamp(mapFracX(snapshot.visitorPosition.x) * 100, 0, 100);
+                const pz = clamp(mapFracZ(snapshot.visitorPosition.z) * 100, 0, 100);
+                const yawV = snapshot.visitorYaw;
+                // The cone should reach as far as you can actually see. The fog far-plane (viewDistance)
+                // under-reads the real visible reach (terrain stays legible well past the fog midpoint), so
+                // scale it up ~1.8× and lift the clamp ceiling so the wedge clearly extends across the map.
+                const reach = (snapshot.viewDistance ?? 120) * 1.8;
+                const r = clamp((reach / Math.max(mapExtentX, mapExtentZ)) * 100, 8, 280);
+                const half = (78 / 2) * (Math.PI / 180); // ~78° cone (≈ the camera's horizontal FOV)
+                const e1x = px + r * Math.sin(yawV - half);
+                const e1z = pz + r * Math.cos(yawV - half);
+                const e2x = px + r * Math.sin(yawV + half);
+                const e2z = pz + r * Math.cos(yawV + half);
+                return (
+                  <svg className="world-map-cone" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                    <path d={`M ${px.toFixed(2)} ${pz.toFixed(2)} L ${e1x.toFixed(2)} ${e1z.toFixed(2)} L ${e2x.toFixed(2)} ${e2z.toFixed(2)} Z`} />
+                  </svg>
+                );
+              })()}
               {snapshot.visitorPosition && (
                 <span
                   className="map-marker player"
@@ -7420,6 +7489,22 @@ function App(): React.ReactElement {
                 </dl>
               </section>
             </section>
+            {snapshot.visitorPosition && (() => {
+              // Position readout: where you are, so you can tell others. Chunked worlds also show the
+              // chunk cell (origin at a corner, CHUNK_SPAN units/chunk); classic worlds just world coords.
+              const pos = snapshot.visitorPosition;
+              const wx = Math.round(pos.x);
+              const wz = Math.round(pos.z);
+              const chunked = isChunkedWorldId(activeWorldId ?? "");
+              const cell = chunked
+                ? `chunk ${Math.floor(pos.x / CHUNK_SPAN)},${Math.floor(pos.z / CHUNK_SPAN)} · `
+                : "";
+              return (
+                <div className="world-pos-readout" title="Your location — copy to share">
+                  {cell}({wx}, {wz})
+                </div>
+              );
+            })()}
           </aside>
         )}
         {snapshot.sailingThingId && (
@@ -7865,13 +7950,7 @@ function App(): React.ReactElement {
                   )}
                 </div>
                 {assetBrowse.length > 0 && (
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(3, 1fr)",
-                      gap: 8,
-                    }}
-                  >
+                  <div className="asset-browse-grid">
                     {assetBrowse.map((model) => (
                       <AssetTile
                         key={model.id}
