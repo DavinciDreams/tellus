@@ -93,7 +93,9 @@ on a hard failure. Many tools return a small JSON "patch" describing what change
 ### Appearance & emotes
 
 **`list_avatars`** — the avatars you can wear, one per line: `id — label (animations: clip, clip…)`.
-The listed animation clips are the vocabulary for `play_animation` once you wear that avatar.
+The listed clips are the `play_animation` vocabulary once you wear that avatar. Humanoid (VRM)
+avatars share one large animation catalogue (hundreds of clips), so a humanoid wear can play any of
+them; animal/GLB avatars list their own embedded clips.
 
 **`set_avatar`** — change how you look to everyone.
 - args: `avatarId` — an id from `list_avatars` (`classic` is the default TV-head).
@@ -103,6 +105,8 @@ The listed animation clips are the vocabulary for `play_animation` once you wear
 
 **`play_animation`** — play a one-shot emote on your avatar, visible to others nearby.
 - args: `name` — a clip name from your CURRENT avatar's vocabulary (see `list_avatars`).
+- Humanoid (VRM) avatars share one animation catalogue, so any wear can play any humanoid clip — it
+  streams in on first use. Animal/GLB avatars play their own embedded clips.
 - Tip: wear an animated avatar first (`set_avatar`); an unknown clip simply doesn't play.
 
 **`set_asset_animation`** — set the LOOPING clip on a placed thing that has clips.

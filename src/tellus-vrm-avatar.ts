@@ -296,6 +296,136 @@ async function loadOptionalClip(
   }
 }
 
+// ── VRMA animation catalogue ────────────────────────────────────────────────────────────────────
+// The full set of one-shot emotes any humanoid VRM rig can play, keyed by human-readable name. The AI
+// pilots its avatar with play_animation(name), so `name` is the contract — not a store id.
+//
+// Source of truth is the store's GET /api/vrma feed ({ clips: [{ id, name, downloadUrl }] }), fetched
+// once and cached. Until that endpoint ships it 404s harmlessly and we fall back to the built-in
+// CLIP_IDS names (idle/walk/jump/wave). When it lands, the catalogue lights up automatically — no rig
+// changes — and every VRM avatar can play every clip the store serves.
+export interface VrmaCatalogEntry {
+  /** Human-readable clip name — what play_animation receives and the HUD shows. */
+  name: string;
+  /** Download URL for the .vrma binary (fed straight to loadVrmaAnimation). */
+  url: string;
+  /** Optional provenance ("mixamo", "uploaded", …) the store may attach. */
+  source?: string;
+}
+
+// name (lowercased) → entry. Seeded from the built-in clips so the rig works before /api/vrma exists.
+const builtinVrmaCatalog = (): Map<string, VrmaCatalogEntry> => {
+  const map = new Map<string, VrmaCatalogEntry>();
+  for (const [name, id] of Object.entries(CLIP_IDS)) {
+    if (id) map.set(name.toLowerCase(), { name, url: assetDownloadUrl(id), source: "builtin" });
+  }
+  return map;
+};
+
+let vrmaCatalogPromise: Promise<Map<string, VrmaCatalogEntry>> | undefined;
+// Resolved clip-name snapshot for synchronous readers (emoteClipNamesSync); null until first load.
+let vrmaCatalogSnapshot: string[] | null = null;
+
+function vrmaFeedUrl(): string | null {
+  if (!runtimeConfig.worldApiBase) return null;
+  // The store serves the catalogue at /api/vrma; Tellus reaches the store through its header-free
+  // proxy, which prefixes store paths with /api/assets (same convention as assetDownloadUrl's
+  // /api/assets/download/{id}). Live shape (3d.flobots.xyz/api/vrma):
+  //   { animations: [ { id, name, download_url: "/api/download/{id}", source, ... } ] }
+  return `${runtimeConfig.worldApiBase}/api/assets/vrma`;
+}
+
+/** Fetch + cache the VRMA catalogue. Always resolves (never rejects): the built-in clips are the
+ * floor, store clips merge on top, and a fetch failure just leaves the floor in place. */
+export function loadVrmaCatalog(): Promise<Map<string, VrmaCatalogEntry>> {
+  if (vrmaCatalogPromise) return vrmaCatalogPromise;
+  vrmaCatalogPromise = (async () => {
+    const catalog = builtinVrmaCatalog();
+    const feed = vrmaFeedUrl();
+    if (!feed) return catalog;
+    try {
+      const response = await fetch(feed, { cache: "no-store" });
+      if (!response.ok) return catalog;
+      const parsed = (await response.json()) as unknown;
+      // Live shape: { animations: [...] }. Accept `clips` / a bare array too for resilience.
+      const list = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray((parsed as { animations?: unknown }).animations)
+          ? (parsed as { animations: unknown[] }).animations
+          : Array.isArray((parsed as { clips?: unknown }).clips)
+            ? (parsed as { clips: unknown[] }).clips
+            : [];
+      for (const raw of list) {
+        if (!raw || typeof raw !== "object") continue;
+        const c = raw as Record<string, unknown>;
+        const name = typeof c.name === "string" ? c.name.trim() : "";
+        if (!name) continue;
+        // The feed's download_url is a RELATIVE store path (/api/download/{id}) that won't resolve
+        // cross-origin, so derive the fetch URL from the id via the proven /api/assets proxy
+        // (assetDownloadUrl) — the same path the built-in clips already load through. Only fall back
+        // to an explicit URL when it's absolute and no id is present.
+        const id =
+          typeof c.id === "string" ? c.id : typeof c.model_id === "string" ? c.model_id : "";
+        const explicit =
+          typeof c.downloadUrl === "string"
+            ? c.downloadUrl
+            : typeof c.download_url === "string"
+              ? c.download_url
+              : "";
+        const url = id
+          ? assetDownloadUrl(id)
+          : explicit.startsWith("http")
+            ? explicit
+            : "";
+        if (!url) continue;
+        catalog.set(name.toLowerCase(), {
+          name,
+          url,
+          source: typeof c.source === "string" ? c.source : "store",
+        });
+      }
+    } catch {
+      // network/parse failure → keep the built-in floor
+    }
+    vrmaCatalogSnapshot = Array.from(catalog.values(), (e) => e.name);
+    return catalog;
+  })();
+  vrmaCatalogPromise.catch(() => {
+    vrmaCatalogPromise = undefined; // allow a later retry if the whole thing somehow threw
+  });
+  return vrmaCatalogPromise;
+}
+
+/** Resolve a clip NAME to a catalogue entry (case-insensitive, loose substring fallback). */
+export async function resolveVrmaCatalogEntry(
+  name: string,
+): Promise<VrmaCatalogEntry | undefined> {
+  const wanted = name.trim().toLowerCase();
+  if (!wanted) return undefined;
+  const catalog = await loadVrmaCatalog();
+  const direct = catalog.get(wanted);
+  if (direct) return direct;
+  for (const [key, entry] of catalog) {
+    if (key.includes(wanted) || wanted.includes(key)) return entry;
+  }
+  return undefined;
+}
+
+/** The full emote vocabulary (clip names) — drives list_avatars / the Animation HUD. Resolves to the
+ * built-in names synchronously-ish; the store feed enriches it once fetched. */
+export async function emoteClipNames(): Promise<string[]> {
+  const catalog = await loadVrmaCatalog();
+  return Array.from(catalog.values(), (e) => e.name);
+}
+
+/** Synchronous best-effort emote vocabulary: the latest resolved catalogue, or the built-in floor
+ * until the store feed lands. Triggers a (cached) catalogue fetch so the snapshot fills in. */
+export function emoteClipNamesSync(): string[] {
+  if (vrmaCatalogSnapshot) return vrmaCatalogSnapshot.slice();
+  void loadVrmaCatalog(); // warms the snapshot for next call
+  return Array.from(builtinVrmaCatalog().values(), (e) => e.name);
+}
+
 // ── The shared rig state machine (idle ⇄ walk, + airborne hold) ────────────────────────────────
 // Subclasses provide the actions (VRMA-retargeted clips for VRM robots; embedded GLB clips for the
 // animals) and any per-frame extra work via afterMixerUpdate (VRM spring bones).
@@ -488,10 +618,23 @@ export abstract class LocomotionAvatarRig implements AvatarRig {
 // ── The VRM robot rig: VRMA clips retargeted onto the loaded VRM ───────────────────────────────
 class VrmAvatarRig extends LocomotionAvatarRig {
   private readonly vrm: VRM;
+  private readonly rendererIsWebGPU: boolean;
+  // Emote clips loaded on demand from the VRMA catalogue, retargeted onto THIS vrm, keyed by clip
+  // name (lowercased). idle/walk/jump/wave live in `this.actions`; everything else streams in here on
+  // first play so any VRM can play any catalogue clip without preloading the whole set per avatar.
+  private readonly dynamicEmotes = new Map<string, THREE.AnimationAction>();
+  // Names currently being loaded — dedupes concurrent play requests for the same clip.
+  private readonly loadingEmotes = new Set<string>();
 
-  constructor(root: THREE.Group, vrm: VRM, clips: Partial<Record<RigClipName, VRMAnimation>>) {
+  constructor(
+    root: THREE.Group,
+    vrm: VRM,
+    clips: Partial<Record<RigClipName, VRMAnimation>>,
+    rendererIsWebGPU: boolean,
+  ) {
     super(root, new THREE.AnimationMixer(vrm.scene));
     this.vrm = vrm;
+    this.rendererIsWebGPU = rendererIsWebGPU;
     for (const name of ["idle", "walk", "jump", "wave"] as const) {
       const animation = clips[name];
       if (!animation) continue;
@@ -500,6 +643,47 @@ class VrmAvatarRig extends LocomotionAvatarRig {
       this.actions[name] = this.mixer.clipAction(clip);
     }
     this.play("idle", 0);
+  }
+
+  // Resolve against the locomotion set first (base), then any dynamically-loaded catalogue emote.
+  protected override resolveEmoteAction(name: string): THREE.AnimationAction | undefined {
+    const base = super.resolveEmoteAction(name);
+    if (base) return base;
+    return this.dynamicEmotes.get(name.trim().toLowerCase());
+  }
+
+  // Play ANY catalogue clip by name. Already-loaded clips (locomotion or previously-streamed emotes)
+  // play immediately via the base. An unknown name is loaded from the VRMA catalogue, retargeted onto
+  // this VRM, cached, then played — so the first use has a small load delay and every use after is
+  // instant (the VRMA binary is also shared across avatars via vrmaCache).
+  override playEmote(name: string): void {
+    if (this.disposed) return;
+    if (this.resolveEmoteAction(name)) {
+      super.playEmote(name);
+      return;
+    }
+    const key = name.trim().toLowerCase();
+    if (!key || this.loadingEmotes.has(key)) return;
+    this.loadingEmotes.add(key);
+    void (async () => {
+      try {
+        const entry = await resolveVrmaCatalogEntry(name);
+        if (!entry || this.disposed) return;
+        const animation = await loadVrmaAnimation(entry.url, this.rendererIsWebGPU);
+        if (this.disposed) return;
+        if (!this.dynamicEmotes.has(key)) {
+          const clip = createVRMAnimationClip(animation, this.vrm);
+          clip.name = entry.name;
+          this.dynamicEmotes.set(key, this.mixer.clipAction(clip));
+        }
+        // Re-issue now that the action exists (only if no newer emote has taken over since).
+        super.playEmote(name);
+      } catch {
+        // Unknown/failed clip → leave the avatar as-is (matches the base "ignore unknown" contract).
+      } finally {
+        this.loadingEmotes.delete(key);
+      }
+    })();
   }
 
   protected override afterMixerUpdate(dt: number): void {
@@ -806,6 +990,9 @@ export async function attachVrmAvatar(
 ): Promise<AvatarRig | null> {
   if (!storeId && classicAvatarRequested()) return null;
   if (!runtimeConfig.worldApiBase) return null;
+  // Warm the emote catalogue in the background so the first play_animation isn't waiting on a cold
+  // fetch (resolves to the built-in clips immediately if /api/vrma isn't live yet).
+  void loadVrmaCatalog();
   try {
     const [vrm, idle, walk, jump, wave] = await Promise.all([
       loadVrm(assetDownloadUrl(storeId ?? pickAvatarId(visitorId)), rendererIsWebGPU),
@@ -825,7 +1012,7 @@ export async function attachVrmAvatar(
       return null;
     }
     mountVrmOnAvatar(group, vrm);
-    return new VrmAvatarRig(group, vrm, { idle, walk, jump, wave });
+    return new VrmAvatarRig(group, vrm, { idle, walk, jump, wave }, rendererIsWebGPU);
   } catch (error) {
     if (!warnedVrmLoadFailure) {
       warnedVrmLoadFailure = true;

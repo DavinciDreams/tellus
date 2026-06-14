@@ -4,6 +4,22 @@ Tellus — the 3D web "world" game client (React + three.js), backed by the in-c
 Newest first. Versions are the deployed image tag (`192.168.1.187:30500/tellus:<tag>`); a `v<tag>` git tag
 on the gnostr-cloud `master` triggers the CI build + rollout.
 
+## 0.8.11
+- **Every VRM avatar can play any animation.** VRM avatars used to preload exactly four clips
+  (`idle`/`walk`/`jump`/`wave`); now they draw from the store's full VRMA catalogue. A new catalogue
+  layer (`loadVrmaCatalog`) fetches `GET /api/assets/vrma` once and keys it by clip name; the rig's
+  `playEmote(name)` resolves any name against it, then **lazily loads + retargets + caches** the VRMA
+  onto that VRM on first use (subsequent plays — and other avatars, via the shared `vrmaCache` — are
+  instant). `idle`/`walk` stay preloaded; emotes stream in on demand. The built-in `CLIP_IDS` remain
+  the floor, so a missing/withheld catalogue degrades gracefully to the old four. This is mainly so
+  AI agents can pilot their avatar body — the local `window.tellusAgent` gains a `playAnimation` verb
+  and reports its clip vocabulary (`getState().animations`, via `emoteClipNamesSync`).
+  - **Server dependency:** the store serves the catalogue at `…/api/vrma`
+    (`{ animations: [{ id, name, download_url, … }] }`, ~445 clips); Tellus reaches it through the
+    header-free asset proxy, so the proxy must forward **`/api/assets/vrma` → `{store}/api/vrma`**
+    (same mapping as the existing `/api/assets/download/{id}`). Per-clip binaries load via the proven
+    `assetDownloadUrl(id)` path — the feed's `download_url` is a relative store path and is ignored.
+
 ## 0.8.10
 - **Placed VRM objects animate.** The auton/Atlantean store models are VRMs (skin + `VRMC_vrm`,
   zero embedded clips). As avatars they already animate; placed as world OBJECTS they went through
