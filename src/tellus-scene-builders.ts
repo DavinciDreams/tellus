@@ -55,6 +55,10 @@ import { createGltfLoader, gltfObjectCache } from "./tellus-generation-client";
 import { tryLoadVrmObject, VrmObjectRig } from "./tellus-vrm-avatar";
 import { createTerrainMaterial } from "./tellus-terrain-material";
 
+const SKYBOX_MODEL_VERTICAL_OFFSETS: Record<string, number> = {
+  "/skybox/free_-_skybox_basic_sky.glb": -30,
+};
+
 export function createFlowerSpriteTexture(petalColor: string): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = 64;
@@ -640,7 +644,18 @@ export async function loadGeneratedGltfObject(
   return { model: skeletonClone(scene), animations };
 }
 
-export function prepareSkyboxModel(model: THREE.Object3D): THREE.Object3D {
+export function prepareSkyboxModel(
+  model: THREE.Object3D,
+  sourceUrl?: string,
+): THREE.Object3D {
+  let rotationSpeed: unknown;
+  let horizonOffset: unknown;
+  let yawOffset: unknown;
+  model.traverse((child) => {
+    rotationSpeed ??= child.userData.tellusSkyboxRotationSpeed;
+    horizonOffset ??= child.userData.tellusSkyboxHorizonOffset;
+    yawOffset ??= child.userData.tellusSkyboxYawOffset;
+  });
   const bounds = new THREE.Box3().setFromObject(model);
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
@@ -649,10 +664,29 @@ export function prepareSkyboxModel(model: THREE.Object3D): THREE.Object3D {
 
   model.name = "tellus-external-skybox";
   model.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+  const modelVerticalOffset = sourceUrl ? SKYBOX_MODEL_VERTICAL_OFFSETS[sourceUrl] ?? 0 : 0;
+  if (modelVerticalOffset) {
+    model.position.y += modelVerticalOffset;
+    model.userData.skyboxModelVerticalOffset = modelVerticalOffset;
+  }
   model.scale.setScalar(scale);
   model.renderOrder = -100;
   model.userData.skyboxBoundsCenter = center;
   model.userData.skyboxBoundsScale = scale;
+  if (typeof rotationSpeed === "number" && Number.isFinite(rotationSpeed)) {
+    model.userData.skyboxRotationSpeed = rotationSpeed;
+  }
+  const skyboxHorizonOffset =
+    typeof horizonOffset === "number" && Number.isFinite(horizonOffset)
+      ? horizonOffset
+      : 0;
+  if (skyboxHorizonOffset) {
+    model.userData.skyboxHorizonOffset = skyboxHorizonOffset;
+  }
+  if (typeof yawOffset === "number" && Number.isFinite(yawOffset)) {
+    model.rotation.y = yawOffset;
+    model.userData.skyboxYawOffset = yawOffset;
+  }
 
   model.traverse((child) => {
     child.frustumCulled = false;
@@ -661,6 +695,10 @@ export function prepareSkyboxModel(model: THREE.Object3D): THREE.Object3D {
     const skyMaterials = materials.map((material) => {
       const mappedMaterial = material as MaterialWithTextureMaps;
       const map = mappedMaterial.map ?? mappedMaterial.emissiveMap ?? null;
+      if (map && skyboxHorizonOffset) {
+        map.offset.y = skyboxHorizonOffset;
+        map.needsUpdate = true;
+      }
       const skyMaterial = new THREE.MeshBasicMaterial({
         map,
         color: map ? 0xffffff : 0xaac8f2,
@@ -747,11 +785,11 @@ export function prepareMoonModel(model: THREE.Object3D): {
   return { model, materials: moonMaterials };
 }
 
-export async function loadSkyboxModel(): Promise<
+export async function loadSkyboxModel(primaryUrl = runtimeConfig.skyboxUrl): Promise<
   { model: THREE.Object3D; url: string } | null
 > {
   const urls = [
-    runtimeConfig.skyboxUrl,
+    primaryUrl,
     ...SKYBOX_FALLBACK_URLS,
   ].filter(
     (url, index, all): url is string =>
@@ -762,7 +800,7 @@ export async function loadSkyboxModel(): Promise<
 
   for (const url of urls) {
     try {
-      return { model: prepareSkyboxModel(await loadGltfObject(url)), url };
+      return { model: prepareSkyboxModel(await loadGltfObject(url), url), url };
     } catch {
       continue;
     }

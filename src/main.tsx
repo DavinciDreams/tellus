@@ -105,7 +105,7 @@ import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeCo
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, toAssetId } from "./tellus-urls-identity";
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyElevated, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
-import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createMoonHorizonOccluderTexture, createMoonCloudVeil, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
+import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial } from "./tellus-terrain-material";
 import { installSessionFetch } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip } from "./tellus-auth-ui";
@@ -198,7 +198,19 @@ const SKYBOX_OPTIONS: Array<{ url: string; label: string }> = [
   { url: "/skybox/skybox_skydays_3.glb", label: "Sky Days" },
   { url: "/skybox/tellus-starry-night/scene.gltf", label: "Starry Night" },
   { url: "/skybox/tellus-blue-clouds/scene.gltf", label: "Blue Clouds" },
+  { url: "/skybox/tellus-storm-ocean/scene.gltf", label: "Storm Ocean" },
+  { url: "/skybox/tellus-desert-sunset/scene.gltf", label: "Desert Sunset" },
+  { url: "/skybox/tellus-alien-rings/scene.gltf", label: "Alien Rings" },
+  { url: "/skybox/tellus-aurora-sky/scene.gltf", label: "Aurora Sky" },
 ];
+
+const LEGACY_BASIC_SKY_URL = "/skybox/free_-_skybox_basic_sky/scene.gltf";
+const BASIC_SKY_URL = "/skybox/free_-_skybox_basic_sky.glb";
+
+function normalizeSkyboxUrl(url: string): string {
+  const trimmed = url.trim();
+  return trimmed === LEGACY_BASIC_SKY_URL ? BASIC_SKY_URL : trimmed;
+}
 
 function worldTemplateLabel(template: WorldTemplateId): string {
   return (
@@ -208,7 +220,8 @@ function worldTemplateLabel(template: WorldTemplateId): string {
 }
 
 function skyboxLabel(url: string): string {
-  return SKYBOX_OPTIONS.find((option) => option.url === url)?.label ?? "Custom Sky";
+  const normalized = normalizeSkyboxUrl(url);
+  return SKYBOX_OPTIONS.find((option) => option.url === normalized)?.label ?? "Custom Sky";
 }
 
 function AgentToolChipPill({ chip }: { chip: AgentToolChip }) {
@@ -272,9 +285,10 @@ function createTellusWorld(
   let selectedThingId: string | undefined;
   let sailingThingId: string | undefined;
   let externalSkybox: THREE.Object3D | null = null;
+  let activeSkyboxUrl = "";
+  let skyboxLoadSeq = 0;
   let moonModel: THREE.Object3D | null = null;
   const moonMaterials = new Set<THREE.MeshStandardMaterial>();
-  const moonCloudVeil = createMoonCloudVeil();
   let directGenerationAvailable = true;
   let worldSocket: WebSocket | null = null;
   let worldSocketReconnectTimer: number | undefined;
@@ -597,7 +611,6 @@ function createTellusWorld(
     pondWater,
     flowerPatchGroup,
     createFloatingRim(),
-    moonCloudVeil.group,
   );
 
   let transformControls: TransformControls | null = null;
@@ -3508,11 +3521,59 @@ function createTellusWorld(
       typeof externalSkybox.userData.skyboxBoundsScale === "number"
         ? externalSkybox.userData.skyboxBoundsScale
         : 1;
+    const skyboxModelVerticalOffset =
+      typeof externalSkybox.userData.skyboxModelVerticalOffset === "number"
+        ? externalSkybox.userData.skyboxModelVerticalOffset
+        : 0;
     externalSkybox.position.set(
       cameraPosition.x - skyboxCenter.x * skyboxScale,
-      cameraPosition.y + SKYBOX_VERTICAL_OFFSET - skyboxCenter.y * skyboxScale,
+      cameraPosition.y +
+        SKYBOX_VERTICAL_OFFSET +
+        skyboxModelVerticalOffset -
+        skyboxCenter.y * skyboxScale,
       cameraPosition.z - skyboxCenter.z * skyboxScale,
     );
+  };
+
+  const setSkyboxUrl = async (url: string): Promise<void> => {
+    const requestedUrl = url.trim();
+    if (requestedUrl && requestedUrl === activeSkyboxUrl) return;
+
+    const seq = ++skyboxLoadSeq;
+    const skyboxResult = await loadSkyboxModel(requestedUrl);
+    if (!skyboxResult || destroyed || seq !== skyboxLoadSeq) return;
+
+    if (fallbackSky.parent) {
+      scene.remove(fallbackSky);
+      if (fallbackSky.material instanceof THREE.MeshBasicMaterial) {
+        skyboxTintMaterials.delete(fallbackSky.material);
+      }
+      fallbackSky.geometry.dispose();
+      disposeMaterial(fallbackSky.material);
+    }
+
+    if (externalSkybox) {
+      for (const material of collectSkyboxTintMaterials(externalSkybox)) {
+        skyboxTintMaterials.delete(material);
+      }
+      scene.remove(externalSkybox);
+      disposeObject(externalSkybox);
+    }
+
+    activeSkyboxUrl = skyboxResult.url;
+    externalSkybox = skyboxResult.model;
+    for (const material of collectSkyboxTintMaterials(externalSkybox)) {
+      skyboxTintMaterials.add(material);
+    }
+    scene.add(skyboxResult.model);
+    updateDayNightCycle(Date.now());
+    syncExternalSkyboxToCamera(camera.position);
+    addLog({
+      agentId: "world",
+      agentName: "Tellus",
+      tool: "interact",
+      text: `Loaded external skybox: ${skyboxResult.url}`,
+    });
   };
 
   const daylightBackground = new THREE.Color(0xa7c3ef);
@@ -3621,8 +3682,6 @@ function createTellusWorld(
         (1 - THREE.MathUtils.smoothstep(moonArcProgress, 0.86, 0.98));
       const moonArcHeight =
         0.04 + Math.sin(moonArcProgress * Math.PI) * 0.72;
-      const moonHorizonAmount =
-        1 - THREE.MathUtils.smoothstep(moonArcHeight, 0.24, 0.48);
       const baseMoonX = Math.sin(MOON_ARC_AZIMUTH);
       const baseMoonZ = Math.cos(MOON_ARC_AZIMUTH);
       const sideMoonX = Math.cos(MOON_ARC_AZIMUTH);
@@ -3642,33 +3701,11 @@ function createTellusWorld(
       moonModel.lookAt(camera.position);
       moonModel.rotateY(animationNow * 0.000018);
       moonModel.visible = moonVisibility > 0.01;
-      moonArcDirection.set(
-        baseMoonX + sideMoonX * moonLateral,
-        0.13,
-        baseMoonZ + sideMoonZ * moonLateral,
-      );
-      moonDirection.copy(moonArcDirection).normalize();
-      moonCloudVeil.group.position.copy(camera.position).addScaledVector(
-        moonDirection,
-        MOON_DISTANCE - 0.55,
-      );
-      moonCloudVeil.group.lookAt(camera.position);
-      moonCloudVeil.group.visible = moonHorizonAmount > 0.03 && moonVisibility > 0.02;
       moonMaterialColor.copy(moonDayTint).lerp(moonNightTint, night);
       for (const material of moonMaterials) {
         material.color.copy(moonMaterialColor);
         material.emissive.copy(moonMaterialColor).multiplyScalar(2.2 + night * 1.45);
       }
-      moonCloudVeil.materials.forEach((material) => {
-        material.color.copy(oceanColor);
-        material.opacity =
-          moonVisibility *
-          moonHorizonAmount *
-          (0.72 + night * 0.28);
-        if (material.map) {
-          material.map.offset.x = (animationNow * 0.000004) % 1;
-        }
-      });
     }
 
     hemiSkyColor
@@ -3778,18 +3815,16 @@ function createTellusWorld(
     try {
       agentViewTarget ??= new THREE.WebGLRenderTarget(AGENT_VIEW_W, AGENT_VIEW_H);
       const prevTarget = renderer.getRenderTarget() as THREE.WebGLRenderTarget | null;
-      // celestials follow the player camera — recenter them on the POV for this off-screen draw
+      // Celestials follow the player camera; recenter the moon on the POV for this off-screen draw.
       povSkyDelta.copy(povCamera.position).sub(camera.position);
       syncExternalSkyboxToCamera(povCamera.position);
       if (moonModel) moonModel.position.add(povSkyDelta);
-      moonCloudVeil.group.position.add(povSkyDelta);
       try {
         renderer.setRenderTarget(agentViewTarget);
         renderer.render(scene, povCamera);
       } finally {
         renderer.setRenderTarget(prevTarget);
         if (moonModel) moonModel.position.sub(povSkyDelta);
-        moonCloudVeil.group.position.sub(povSkyDelta);
         syncExternalSkyboxToCamera(camera.position);
       }
       const gpuRenderer = renderer as unknown as {
@@ -3861,14 +3896,13 @@ function createTellusWorld(
     let savedScissorTest = false;
     try {
 
-      // The skybox dome + moon + cloud veil are repositioned every frame to follow the PLAYER camera
+      // The skybox dome + moon are repositioned every frame to follow the PLAYER camera
       // (updateCamera / updateDayNightCycle). Without this they stay centered on the player, so the PiP
       // shows the player's sky/moon, not the agent's. Shift them by (POV - player) for this render, then
       // undo it in the finally so the next main-loop frame starts from a clean player-centered state.
       povSkyDelta.copy(povCamera.position).sub(camera.position);
       syncExternalSkyboxToCamera(povCamera.position);
       if (moonModel) moonModel.position.add(povSkyDelta);
-      moonCloudVeil.group.position.add(povSkyDelta);
       skyShifted = true;
 
       // Save the current viewport/scissor state (logical pixels) before clobbering it.
@@ -3902,7 +3936,6 @@ function createTellusWorld(
         // but undo the moon shift here so a mid-frame read never sees the POV-shifted position).
         if (skyShifted) {
           if (moonModel) moonModel.position.sub(povSkyDelta);
-          moonCloudVeil.group.position.sub(povSkyDelta);
           syncExternalSkyboxToCamera(camera.position);
         }
         if (viewportSaved) {
@@ -3970,6 +4003,15 @@ function createTellusWorld(
     tickSharedStatic(now);
     updateSelectionIndicator(now);
     syncTransformControls();
+    if (externalSkybox) {
+      const rotationSpeed =
+        typeof externalSkybox.userData.skyboxRotationSpeed === "number"
+          ? externalSkybox.userData.skyboxRotationSpeed
+          : 0;
+      if (rotationSpeed) {
+        externalSkybox.rotation.y += delta * rotationSpeed;
+      }
+    }
     updateCamera();
     updateDayNightCycle(Date.now(), now);
     flushTerrain();
@@ -4347,31 +4389,7 @@ function createTellusWorld(
       resize();
       requestAnimationFrame(resize);
       publish();
-      void loadSkyboxModel()
-        .then((skyboxResult) => {
-          if (!skyboxResult || destroyed) return;
-          scene.remove(fallbackSky);
-          if (fallbackSky.material instanceof THREE.MeshBasicMaterial) {
-            skyboxTintMaterials.delete(fallbackSky.material);
-          }
-          fallbackSky.geometry.dispose();
-          disposeMaterial(fallbackSky.material);
-          externalSkybox = skyboxResult.model;
-          for (const material of collectSkyboxTintMaterials(externalSkybox)) {
-            skyboxTintMaterials.add(material);
-          }
-          scene.add(skyboxResult.model);
-          updateDayNightCycle(Date.now());
-          syncExternalSkyboxToCamera(camera.position);
-          addLog({
-            agentId: "world",
-            agentName: "Tellus",
-            tool: "interact",
-            text: `Loaded external skybox: ${
-              skyboxResult.url.split("/").pop() ?? skyboxResult.url
-            }`,
-          });
-        })
+      void setSkyboxUrl(runtimeConfig.skyboxUrl)
         .catch((error) => {
           addLog({
             agentId: "world",
@@ -4553,6 +4571,7 @@ function createTellusWorld(
     disembark,
     sculptTerrain,
     importGeneratedThings,
+    setSkyboxUrl,
     setGenerationProvider,
     setPlayerGenerationProvider,
     setAgentGenerationProvider,
@@ -5532,7 +5551,7 @@ function App(): React.ReactElement {
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
   );
   const [newWorldSkyboxUrl, setNewWorldSkyboxUrl] = useState(
-    runtimeConfig.skyboxUrl ||
+    normalizeSkyboxUrl(runtimeConfig.skyboxUrl) ||
       defaultSkyboxUrlForTemplate(parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus")),
   );
   const [newWorldPrivate, setNewWorldPrivate] = useState(false);
@@ -5545,13 +5564,14 @@ function App(): React.ReactElement {
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
   );
   const [currentWorldSkyboxUrl, setCurrentWorldSkyboxUrl] = useState(
-    runtimeConfig.skyboxUrl ||
+    normalizeSkyboxUrl(runtimeConfig.skyboxUrl) ||
       defaultSkyboxUrlForTemplate(parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus")),
   );
   const [currentWorldPrivate, setCurrentWorldPrivate] = useState(false);
   const [worldCreateNote, setWorldCreateNote] = useState<string | null>(null);
   const worldCreateNoteTimerRef = useRef<number | undefined>(undefined);
   const KNOWN_WORLDS_KEY = "tellus.knownWorlds";
+  const WORLD_PROFILES_KEY = "tellus.worldProfiles";
   const ACTIVE_WORLD_KEY = "tellus.activeWorldId";
   const NEW_WORLD_TEMPLATE_KEY = "tellus.newWorldTemplate";
   const NEW_WORLD_SKYBOX_KEY = "tellus.newWorldSkyboxUrl";
@@ -5581,9 +5601,9 @@ function App(): React.ReactElement {
           : undefined;
     const skyboxUrl =
       typeof value.skyboxUrl === "string" && value.skyboxUrl.trim()
-        ? value.skyboxUrl.trim()
+        ? normalizeSkyboxUrl(value.skyboxUrl)
         : typeof value.skybox_url === "string" && value.skybox_url.trim()
-          ? value.skybox_url.trim()
+          ? normalizeSkyboxUrl(value.skybox_url)
           : undefined;
     const landShape = parseLandShapeOverrides(
       value.landShape ?? value.land_shape,
@@ -5597,6 +5617,31 @@ function App(): React.ReactElement {
     return { worldTemplate, skyboxUrl, landShape, isPublic };
   };
 
+  const loadLocalWorldProfiles = (): Record<string, WorldRenderProfile> => {
+    try {
+      const raw = window.localStorage.getItem(WORLD_PROFILES_KEY);
+      const value = raw ? (JSON.parse(raw) as unknown) : {};
+      if (!isRecord(value)) return {};
+      const profiles: Record<string, WorldRenderProfile> = {};
+      for (const [worldId, profile] of Object.entries(value)) {
+        profiles[worldId] = parseWorldRenderProfile(profile);
+      }
+      return profiles;
+    } catch {
+      return {};
+    }
+  };
+
+  const rememberWorldProfile = (worldId: string, profile: WorldRenderProfile) => {
+    try {
+      const profiles = loadLocalWorldProfiles();
+      profiles[worldId] = { ...profiles[worldId], ...profile };
+      window.localStorage.setItem(WORLD_PROFILES_KEY, JSON.stringify(profiles));
+    } catch {
+      /* ignore */
+    }
+  };
+
   const resolveWorldRenderProfile = async (worldId: string): Promise<{
     template: WorldTemplateId;
     skyboxUrl: string;
@@ -5607,6 +5652,7 @@ function App(): React.ReactElement {
       worldId,
       defaultWorldTemplateRef.current,
     );
+    const localProfile = loadLocalWorldProfiles()[worldId] ?? {};
     let profile: WorldRenderProfile = {};
     if (runtimeConfig.worldApiBase) {
       try {
@@ -5621,13 +5667,15 @@ function App(): React.ReactElement {
         /* no world metadata endpoint (or offline) */
       }
     }
-    const template = profile.worldTemplate ?? templateFallback;
-    const skyboxUrl =
+    const template = profile.worldTemplate ?? localProfile.worldTemplate ?? templateFallback;
+    const skyboxUrl = normalizeSkyboxUrl(
       profile.skyboxUrl ??
-      defaultSkyboxUrlForTemplate(template) ??
-      defaultSkyboxUrlRef.current;
-    const landShape = profile.landShape ?? defaultLandShapeRef.current;
-    return { template, skyboxUrl, landShape, isPublic: profile.isPublic };
+        localProfile.skyboxUrl ??
+        defaultSkyboxUrlForTemplate(template) ??
+        defaultSkyboxUrlRef.current,
+    );
+    const landShape = profile.landShape ?? localProfile.landShape ?? defaultLandShapeRef.current;
+    return { template, skyboxUrl, landShape, isPublic: profile.isPublic ?? localProfile.isPublic };
   };
   const loadKnownWorlds = (): string[] => {
     try {
@@ -5708,9 +5756,15 @@ function App(): React.ReactElement {
       newWorldTemplate,
       defaultWorldTemplateRef.current,
     );
-    const pickedSkybox =
-      newWorldSkyboxUrl || defaultSkyboxUrlForTemplate(pickedTemplate);
+    const pickedSkybox = normalizeSkyboxUrl(
+      newWorldSkyboxUrl || defaultSkyboxUrlForTemplate(pickedTemplate),
+    );
     const makePrivate = newWorldPrivate;
+    rememberWorldProfile(id, {
+      worldTemplate: pickedTemplate,
+      skyboxUrl: pickedSkybox,
+      isPublic: !makePrivate,
+    });
     const enter = () => switchWorld(id);
     if (runtimeConfig.worldApiBase) {
       // Seed metadata up front so template + skybox are world-specific before first entry.
@@ -5753,6 +5807,29 @@ function App(): React.ReactElement {
       setWorldCreateNote(null);
       worldCreateNoteTimerRef.current = undefined;
     }, 2800);
+  };
+  const updateActiveWorldSkybox = (skyboxUrl: string) => {
+    const next = normalizeSkyboxUrl(skyboxUrl);
+    if (!next) return;
+    setNewWorldSkyboxUrl(next);
+    setCurrentWorldSkyboxUrl(next);
+    runtimeConfig.skyboxUrl = next;
+    if (activeWorldId) {
+      rememberWorldProfile(activeWorldId, { skyboxUrl: next });
+    }
+    void worldRef.current?.setSkyboxUrl(next).catch((error) => {
+      console.warn("Tellus skybox update failed", error);
+    });
+    if (runtimeConfig.worldApiBase && activeWorldId) {
+      void fetch(
+        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ skyboxUrl: next }),
+        },
+      ).catch(() => undefined);
+    }
   };
   const [assetLibrary, setAssetLibrary] = useState<AssetLibraryModel[]>([]);
   // Store browse/search (server-side over the 3D Asset Manager): debounced query + paged results.
@@ -6158,6 +6235,14 @@ function App(): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorldId]);
 
+  useEffect(() => {
+    if (!activeWorldId || !currentWorldSkyboxUrl) return;
+    runtimeConfig.skyboxUrl = currentWorldSkyboxUrl;
+    void worldRef.current?.setSkyboxUrl(currentWorldSkyboxUrl).catch((error) => {
+      console.warn("Tellus skybox update failed", error);
+    });
+  }, [activeWorldId, currentWorldSkyboxUrl]);
+
   const selectedThing = useMemo(
     () =>
       snapshot.generated.find((thing) => thing.id === snapshot.selectedThingId) ??
@@ -6462,10 +6547,10 @@ function App(): React.ReactElement {
             <div style={{ display: "grid", gap: 2 }}>
               <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>Sky</span>
               <select
-                aria-label="New world skybox"
-                title="Skybox for newly created worlds"
+                aria-label="World skybox"
+                title="Skybox for the active world and newly created worlds"
                 value={newWorldSkyboxUrl}
-                onChange={(e) => setNewWorldSkyboxUrl(e.target.value)}
+                onChange={(e) => updateActiveWorldSkybox(e.target.value)}
                 style={{
                   background: "rgba(0,0,0,0.5)",
                   color: "#dfe7d8",

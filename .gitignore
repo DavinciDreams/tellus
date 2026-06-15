@@ -27,11 +27,29 @@ public/skybox/**/*.png
 !public/skybox/tellus-blue-clouds/skybox.bin
 !public/skybox/tellus-blue-clouds/cubemap/
 !public/skybox/tellus-blue-clouds/cubemap/*.png
+!public/skybox/tellus-blue-clouds/panorama.png
 !public/skybox/tellus-starry-night/
 !public/skybox/tellus-starry-night/scene.gltf
 !public/skybox/tellus-starry-night/skybox.bin
 !public/skybox/tellus-starry-night/cubemap/
 !public/skybox/tellus-starry-night/cubemap/*.png
+!public/skybox/tellus-starry-night/panorama.png
+!public/skybox/tellus-storm-ocean/
+!public/skybox/tellus-storm-ocean/scene.gltf
+!public/skybox/tellus-storm-ocean/skybox.bin
+!public/skybox/tellus-storm-ocean/panorama.png
+!public/skybox/tellus-desert-sunset/
+!public/skybox/tellus-desert-sunset/scene.gltf
+!public/skybox/tellus-desert-sunset/skybox.bin
+!public/skybox/tellus-desert-sunset/panorama.png
+!public/skybox/tellus-alien-rings/
+!public/skybox/tellus-alien-rings/scene.gltf
+!public/skybox/tellus-alien-rings/skybox.bin
+!public/skybox/tellus-alien-rings/panorama.png
+!public/skybox/tellus-aurora-sky/
+!public/skybox/tellus-aurora-sky/scene.gltf
+!public/skybox/tellus-aurora-sky/skybox.bin
+!public/skybox/tellus-aurora-sky/panorama.png
 
 # vitest coverage output
 coverage/

@@ -112,6 +112,10 @@ export function chunkedWorldCenter(): { x: number; z: number } | null {
 
 export const SKYBOX_FALLBACK_URLS = [
   "/skybox/free_-_skybox_in_the_cloud/scene.gltf",
+  "/skybox/tellus-storm-ocean/scene.gltf",
+  "/skybox/tellus-desert-sunset/scene.gltf",
+  "/skybox/tellus-alien-rings/scene.gltf",
+  "/skybox/tellus-aurora-sky/scene.gltf",
   "/skybox/free_-_skybox_in_the_cloud.glb",
   "/skybox/skybox_skydays_3.glb",
   "/skybox/free_-_skybox_basic_sky.glb",
