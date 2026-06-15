@@ -253,6 +253,11 @@ export interface TellusWorldApi {
   // "tellus.cameraMode"; toolbelt Eye button + the V key toggle it.
   setCameraMode(mode: "first" | "third"): void;
   getCameraMode(): "first" | "third";
+  // ── Chunked-world draw distance (the HUD "Chunks" slider; no-op on classic worlds) ──
+  // Sets how many chunk-rings load around the player: radius r → (2r+1)² loaded chunks. The
+  // renderer clamps 1–12 and re-evaluates the load/evict ring immediately. Persists in
+  // localStorage "tellus.chunkLoadRadius" (applied to the renderer on world init).
+  setChunkLoadRadius(radius: number): void;
   // ── Per-thing animation (placed models with embedded clips) ──
   // Clip names of the loaded model for the selected-object HUD ([] = none loaded / no clips).
   getGeneratedClipNames(id: string): string[];
