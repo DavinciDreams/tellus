@@ -5393,8 +5393,41 @@ function createTellusWorld(
     }
   };
 
+  // TELLUS INFINITY: create a portal at the player's feet (the server owner-gates + stamps it). A world portal
+  // links to another world; a door opens a fresh interior room (procedural — no asset needed). The server
+  // rejects if you don't own this world; the rejection surfaces as an action.rejected log line.
+  const sendPortalUpsert = (portal: Record<string, unknown>) => {
+    const frame = { type: "portal.upsert", visitorId, portal };
+    if (worldSocket?.readyState === WebSocket.OPEN) worldSocket.send(JSON.stringify(frame));
+    else if (tellusWorldBackendAvailable)
+      void fetch(tellusWorldHttpUrl("action"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(frame) }).catch(() => undefined);
+  };
+  const createPortalHere = (targetWorldId: string, label?: string) => {
+    const target = targetWorldId.trim();
+    if (!target) return;
+    sendPortalUpsert({
+      id: makeId("portal"),
+      label: (label || target).slice(0, 48),
+      position: { x: Math.round(visitorPosition.x), y: 0, z: Math.round(visitorPosition.z) },
+      radius: 2.2,
+      target: { kind: "world", worldId: target, spawn: { x: 0, y: 0, z: 0 } },
+    });
+  };
+  const createDoorHere = (label?: string) => {
+    const interiorId = `interior-${runtimeConfig.worldId}-${makeId("room").slice(0, 12)}`;
+    sendPortalUpsert({
+      id: makeId("door"),
+      label: (label || "Door").slice(0, 48),
+      position: { x: Math.round(visitorPosition.x), y: 0, z: Math.round(visitorPosition.z) },
+      radius: 2.2,
+      target: { kind: "interior", worldId: interiorId, spawn: { x: 0, y: 0, z: 2 } },
+    });
+  };
+
   return {
     enterPortal,
+    createPortalHere,
+    createDoorHere,
     generate,
     addLibraryAsset,
     interact,
@@ -7824,48 +7857,66 @@ function App(): React.ReactElement {
           </div>
         </div>
         {snapshot.biomeCells && snapshot.biomeCells.length > 0 && <BiomeMap cells={snapshot.biomeCells} />}
-        {snapshot.portals && snapshot.portals.length > 0 && (
-          <aside
-            className="portal-panel"
-            aria-label="Portals"
-            style={{
-              position: "fixed",
-              right: 12,
-              bottom: 128,
-              zIndex: 20,
-              background: "rgba(0,0,0,0.55)",
-              color: "#dfe7d8",
-              borderRadius: 10,
-              padding: "8px 10px",
-              maxWidth: 230,
-              font: "600 12px/1.3 ui-sans-serif, system-ui",
-            }}
-          >
-            <div style={{ opacity: 0.7, marginBottom: 4 }}>Portals</div>
-            {snapshot.portals.map((p) => (
+        {(() => {
+          const portalBtn = {
+            display: "block",
+            width: "100%",
+            textAlign: "left" as const,
+            margin: "2px 0",
+            background: "rgba(255,255,255,0.08)",
+            color: "inherit",
+            border: "1px solid rgba(255,255,255,0.16)",
+            borderRadius: 8,
+            padding: "4px 8px",
+            cursor: "pointer",
+            font: "inherit",
+          };
+          return (
+            <aside
+              className="portal-panel"
+              aria-label="Portals"
+              style={{
+                position: "fixed",
+                right: 12,
+                bottom: 128,
+                zIndex: 20,
+                background: "rgba(0,0,0,0.55)",
+                color: "#dfe7d8",
+                borderRadius: 10,
+                padding: "8px 10px",
+                maxWidth: 230,
+                font: "600 12px/1.3 ui-sans-serif, system-ui",
+              }}
+            >
+              <div style={{ opacity: 0.7, marginBottom: 4 }}>Portals</div>
+              {(snapshot.portals ?? []).map((p) => (
+                <button key={p.id} type="button" title={`Enter ${p.label || p.target.worldId} (${p.target.kind})`} onClick={() => worldRef.current?.enterPortal(p.id)} style={portalBtn}>
+                  ⮕ {p.label || p.target.worldId} <small style={{ opacity: 0.6 }}>{p.target.kind}</small>
+                </button>
+              ))}
+              {/* Create at your feet (owner-only — the server rejects otherwise; the rejection shows in the log). */}
               <button
-                key={p.id}
                 type="button"
-                title={`Enter ${p.label || p.target.worldId} (${p.target.kind})`}
-                onClick={() => worldRef.current?.enterPortal(p.id)}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  margin: "2px 0",
-                  background: "rgba(255,255,255,0.08)",
-                  color: "inherit",
-                  border: "1px solid rgba(255,255,255,0.16)",
-                  borderRadius: 8,
-                  padding: "4px 8px",
-                  cursor: "pointer",
-                }}
+                title="Open a door to a fresh interior room at your position"
+                onClick={() => worldRef.current?.createDoorHere(window.prompt("Door label?", "Door") || "Door")}
+                style={{ ...portalBtn, marginTop: 6, borderColor: "rgba(255,207,106,0.5)" }}
               >
-                ⮕ {p.label || p.target.worldId} <small style={{ opacity: 0.6 }}>{p.target.kind}</small>
+                ＋ Door here
               </button>
-            ))}
-          </aside>
-        )}
+              <button
+                type="button"
+                title="Create a portal at your position to another world"
+                onClick={() => {
+                  const target = window.prompt("Target world id (e.g. main, aurora-test, chunked-12-cone):", "");
+                  if (target) worldRef.current?.createPortalHere(target, window.prompt("Portal label?", target) || target);
+                }}
+                style={{ ...portalBtn, borderColor: "rgba(106,208,255,0.5)" }}
+              >
+                ＋ Portal here
+              </button>
+            </aside>
+          );
+        })()}
         {worldMenuOpen && (
         <aside className="world-menu-panel" aria-label="World menu">
           <div className="top-left-cluster" style={{ position: "relative" }}>
