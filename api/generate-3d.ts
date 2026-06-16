@@ -1546,6 +1546,10 @@ async function executeHyadesGeneration(params: {
     prompt,
     provider: backend,
     share_to_store: true, // Tellus generations belong in the shared game asset library
+    // Tag the shared asset as player-made so it's filterable/findable alongside agent-made content
+    // (Hyades adds `tellus,generated,<creator_kind>` tags + names it from the prompt). This is the
+    // client/player generation path; in-world agents generate server-side via the world grain.
+    creator_kind: "player",
   };
   if (imageUrl) submitBody.image_url = imageUrl;
   if (typeof payload.sampleSteps === "number" && payload.sampleSteps > 0) {
