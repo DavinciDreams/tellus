@@ -172,6 +172,24 @@ export const buildGrassTemplate = (): Template =>
     true,
   );
 
+export const buildHairGrassTemplate = (): Template =>
+  bladeTemplate(
+    Array.from({ length: 14 }, (_, i) => {
+      const ring = i % 7;
+      const side = i % 2 === 0 ? 1 : -1;
+      return {
+        yaw: (i * 2.399963229728653) % (Math.PI * 2),
+        lean: side * (0.07 + ring * 0.018),
+        height: 0.42 + ring * 0.055 + (i % 3) * 0.018,
+        width: 0.014 + (i % 4) * 0.003,
+      };
+    }),
+    new THREE.Color(0x243916),
+    new THREE.Color(0x5f8933),
+    new THREE.Color(0xc6e884),
+    true,
+  );
+
 export const buildFernTemplate = (): Template =>
   bladeTemplate(
     Array.from({ length: 6 }, (_, i) => ({

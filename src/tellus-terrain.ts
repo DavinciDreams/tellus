@@ -760,6 +760,11 @@ export function isIntentionallyElevated(thing: GeneratedThing): boolean {
   return groundY !== null && thing.position.y > groundY + 0.35;
 }
 
+export function isIntentionallyOffsetFromGround(thing: GeneratedThing): boolean {
+  const groundY = groundHeightAt(thing.position.x, thing.position.z);
+  return groundY !== null && Math.abs(thing.position.y - groundY) > 0.35;
+}
+
 export function normalizedDiscPosition(x: number, z: number): Vec3 {
   if (chunkedFlatGround !== null) return { x, y: chunkedGroundY(x, z), z };
   const radius = Math.hypot(x, z);

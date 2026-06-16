@@ -1233,23 +1233,27 @@ textarea::placeholder {
 
 .selected-transform-hud {
   position: absolute;
-  left: 50%;
+  right: 20px;
   bottom: 104px;
   z-index: 31;
   display: grid;
-  grid-template-columns: minmax(120px, 220px) auto auto auto auto;
-  align-items: center;
+  grid-template-columns: minmax(112px, 1fr) repeat(3, 34px);
+  grid-template-rows: auto auto;
+  align-items: start;
   gap: 8px;
-  max-width: min(820px, calc(100vw - 300px));
+  width: 300px;
+  max-width: calc(100vw - 40px);
   border: 1px solid var(--hud-border-soft);
   background: rgb(11 28 15 / 82%);
   box-shadow: var(--hud-shadow);
   padding: 7px;
-  transform: translateX(-50%);
+  transform: none;
   pointer-events: auto;
 }
 
 .selected-transform-label {
+  grid-column: 1 / -1;
+  grid-row: 1;
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   grid-template-rows: auto auto;
@@ -1295,7 +1299,7 @@ textarea::placeholder {
   grid-column: 2;
   grid-row: 2;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -1344,6 +1348,28 @@ textarea::placeholder {
   grid-template-rows: repeat(2, 34px);
   gap: 5px;
   align-items: center;
+}
+
+.selected-nudge-pad {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.selected-place-actions {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.selected-transform-stack {
+  grid-row: 2;
+}
+
+.selected-transform-stack:nth-of-type(4) {
+  grid-column: 3;
+}
+
+.selected-transform-stack:nth-of-type(5) {
+  grid-column: 4;
 }
 
 .selected-transform-stack .icon-button,
@@ -2910,8 +2936,10 @@ textarea::placeholder {
 @media (max-width: 1199px) {
   .selected-transform-hud {
     bottom: 62px;
-    max-width: min(660px, calc(100vw - 240px));
-    grid-template-columns: minmax(120px, 1fr) auto auto auto auto;
+    right: 14px;
+    width: 288px;
+    max-width: calc(100vw - 28px);
+    grid-template-columns: minmax(104px, 1fr) repeat(3, 32px);
   }
 
   .selected-transform-label {
@@ -2924,11 +2952,30 @@ textarea::placeholder {
     left: 12px;
     right: 104px;
     bottom: 58px;
+    width: auto;
     max-width: none;
     grid-template-columns: minmax(96px, 1fr) auto auto auto auto;
     justify-content: center;
     padding: 5px;
     transform: none;
+  }
+
+  .selected-transform-label {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .selected-name-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .selected-nudge-pad,
+  .selected-place-actions,
+  .selected-transform-stack,
+  .selected-transform-stack:nth-of-type(4),
+  .selected-transform-stack:nth-of-type(5) {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .selected-transform-label {
