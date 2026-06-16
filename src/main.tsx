@@ -1330,11 +1330,6 @@ function createTellusWorld(
     centralTerrainDirty = true;
     paintDirtyBounds = null; // full rebuild requested — discard any pending localized region
   };
-  onTerrainTemplateLoaded(() => {
-    refreshTerrainGeometry();
-    refreshFlowerPatches();
-    vegetation.notifyTerrainChanged();
-  });
   // Request a cheap color-only refresh over a brush AABB. Falls back to a full rebuild automatically if
   // a full rebuild is already pending this frame.
   const refreshTerrainPaintRegion = (
@@ -2250,6 +2245,26 @@ function createTellusWorld(
   };
 
   const updateSelectionIndicator = (_now?: number) => undefined;
+
+  const regroundClassicTerrainActorsAndThings = () => {
+    visitorPosition = groundedPosition(visitorPosition.x, visitorPosition.z, visitorPosition);
+    for (const thing of generated) {
+      if (!isFreeMovingVehicle(thing) && !isIntentionallyElevated(thing)) {
+        thing.position = groundedPosition(thing.position.x, thing.position.z, thing.position);
+        updateThingMeshPosition(thing);
+      }
+    }
+  };
+
+  onTerrainTemplateLoaded(() => {
+    if (isChunked) return;
+    refreshTerrainGeometry();
+    updatePondSurfacePosition();
+    regroundClassicTerrainActorsAndThings();
+    refreshFlowerPatches();
+    vegetation.notifyTerrainChanged();
+    publish();
+  });
 
   const commitTransformControlRotation = () => {
     if (!selectedThingId || !transformControlsObject) return;
