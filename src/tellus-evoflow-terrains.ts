@@ -32,7 +32,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     semanticUrl: "/evoflow/demo_coral_canyon/world_1c1a355ce3af/assets/semantic.png",
     previewUrl: "/evoflow/demo_coral_canyon/world_1c1a355ce3af/assets/preview.png",
     heightScale: 30,
-    heightOffset: -8.5,
+    heightOffset: -1.8,
   },
   "evoflow-coral-canyon-child": {
     id: "evoflow-coral-canyon-child",
@@ -43,7 +43,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     semanticUrl: "/evoflow/demo_coral_canyon/world_0b80fecab0f7/assets/semantic.png",
     previewUrl: "/evoflow/demo_coral_canyon/world_0b80fecab0f7/assets/preview.png",
     heightScale: 31,
-    heightOffset: -8.75,
+    heightOffset: -2.2,
   },
   "evoflow-spires": {
     id: "evoflow-spires",
@@ -54,7 +54,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     semanticUrl: "/evoflow/coral_canyon_expanded/world_c5d89d03d08c/assets/semantic.png",
     previewUrl: "/evoflow/coral_canyon_expanded/world_c5d89d03d08c/assets/preview.png",
     heightScale: 34,
-    heightOffset: -9.25,
+    heightOffset: -0.4,
   },
   "evoflow-glass-ridge": {
     id: "evoflow-glass-ridge",
@@ -65,7 +65,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     semanticUrl: "/evoflow/coral_canyon_expanded/world_f7fc2be95d4b/assets/semantic.png",
     previewUrl: "/evoflow/coral_canyon_expanded/world_f7fc2be95d4b/assets/preview.png",
     heightScale: 35,
-    heightOffset: -10.5,
+    heightOffset: -3.1,
   },
   "evoflow-lichen-basin": {
     id: "evoflow-lichen-basin",
@@ -76,7 +76,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     semanticUrl: "/evoflow/coral_canyon_expanded/world_f966d912f9ea/assets/semantic.png",
     previewUrl: "/evoflow/coral_canyon_expanded/world_f966d912f9ea/assets/preview.png",
     heightScale: 33,
-    heightOffset: -9.75,
+    heightOffset: -0.8,
   },
   "evoflow-copper-terraces": {
     id: "evoflow-copper-terraces",
@@ -87,7 +87,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     semanticUrl: "/evoflow/coral_canyon_expanded/world_be4f6e7753dc/assets/semantic.png",
     previewUrl: "/evoflow/coral_canyon_expanded/world_be4f6e7753dc/assets/preview.png",
     heightScale: 32,
-    heightOffset: -9.35,
+    heightOffset: -8.1,
   },
   "evoflow-basalt-teeth": {
     id: "evoflow-basalt-teeth",
@@ -98,7 +98,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     semanticUrl: "/evoflow/coral_canyon_expanded/world_b499c5e223c5/assets/semantic.png",
     previewUrl: "/evoflow/coral_canyon_expanded/world_b499c5e223c5/assets/preview.png",
     heightScale: 34,
-    heightOffset: -9.5,
+    heightOffset: 0.5,
   },
   "evoflow-coral-fold": {
     id: "evoflow-coral-fold",
@@ -109,7 +109,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     semanticUrl: "/evoflow/coral_canyon_expanded/world_15b3b531fc46/assets/semantic.png",
     previewUrl: "/evoflow/coral_canyon_expanded/world_15b3b531fc46/assets/preview.png",
     heightScale: 32,
-    heightOffset: -9,
+    heightOffset: -8,
   },
 };
 
