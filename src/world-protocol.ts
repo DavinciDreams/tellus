@@ -87,6 +87,30 @@ export interface WorldChatMessage {
   createdAt: string;
 }
 
+// TELLUS INFINITY — portals (Phase 2; defined now, DARK). NESTED target (frozen wire shape): keeps
+// exterior-world, indoor-scene, and future non-world targets extensible without changing the wire. Mirrors
+// the Hyades WorldPortal/WorldPortalTarget DTOs (docs/TELLUS_COMPAT_MATRIX.md).
+export interface WorldPortalTarget {
+  kind: "world" | "interior";
+  worldId: string;
+  spawn?: Vec3;
+  sceneUrl?: string;
+  returnPortalId?: string;
+}
+
+export interface WorldPortal {
+  id: string;
+  worldId: string;
+  label: string;
+  position: Vec3;
+  radius: number;
+  rotation?: Vec3;
+  target: WorldPortalTarget;
+  createdBy?: string;
+  createdAt?: string;
+  anchorThingId?: string;
+}
+
 export type WorldAction =
   | {
       type: "presence.update";
@@ -139,6 +163,11 @@ export type WorldPatch =
       generated: WorldGeneratedThing[];
       chat?: WorldChatMessage[];
       queuedGenerationJobs: QueuedGenerationJob[];
+      // TELLUS INFINITY: render/gameplay substrate the client provider-selector negotiates on a cold load
+      // (classic|chunked|tiles|interior|evoflow). Omitted by legacy backends ⇒ infer from the worldId prefix.
+      terrainProviderKind?: string;
+      // Portals in this world (Phase 2; omitted while the backend flag is dark).
+      portals?: WorldPortal[];
     }
   | {
       type: "presence.updated";
