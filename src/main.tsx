@@ -770,6 +770,7 @@ function createTellusWorld(
           : centralTerrainPaintAt,
         bounds: chunkedVegetationBounds,
         sectorsEnabled: !isChunked,
+        grassOnly: isChunked,
         isExcluded: isChunked
           ? () => false
           : (x, z, h) => {
