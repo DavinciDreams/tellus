@@ -1,5 +1,7 @@
 import type {
+  DayNightMode,
   InstantMeshTarget,
+  LightingMood,
   RoleGenerationProvider,
   TellusRuntimeConfig,
 } from "./tellus-types";
@@ -13,6 +15,30 @@ import {
   parseLandShapeOverrides,
   parseWorldTemplateId,
 } from "./tellus-world-templates";
+
+const DAY_NIGHT_MODES = ["cycle", "day", "night", "golden", "pause"] as const;
+const LIGHTING_MOODS = [
+  "natural",
+  "bright-build",
+  "soft-warm",
+  "cool-dream",
+  "moonlit",
+  "dramatic-sunset",
+] as const;
+
+function parseDayNightMode(value: unknown, fallback: DayNightMode): DayNightMode {
+  return typeof value === "string" &&
+    DAY_NIGHT_MODES.includes(value as DayNightMode)
+    ? (value as DayNightMode)
+    : fallback;
+}
+
+function parseLightingMood(value: unknown, fallback: LightingMood): LightingMood {
+  return typeof value === "string" &&
+    LIGHTING_MOODS.includes(value as LightingMood)
+    ? (value as LightingMood)
+    : fallback;
+}
 
 export const runtimeConfig: TellusRuntimeConfig = {
   apiBase:
@@ -61,6 +87,14 @@ export const runtimeConfig: TellusRuntimeConfig = {
     DEFAULT_DAY_NIGHT_START,
     0,
     1,
+  ),
+  dayNightMode: parseDayNightMode(
+    import.meta.env.VITE_TELLUS_DAY_NIGHT_MODE,
+    "cycle",
+  ),
+  lightingMood: parseLightingMood(
+    import.meta.env.VITE_TELLUS_LIGHTING_MOOD,
+    "natural",
   ),
   instanceStaticDuplicates:
     import.meta.env.VITE_TELLUS_INSTANCE_STATIC === "true",
@@ -203,6 +237,15 @@ export function applyRuntimeConfig(config: unknown): void {
       1,
     );
   }
+
+  runtimeConfig.dayNightMode = parseDayNightMode(
+    config.dayNightMode ?? config.day_night_mode,
+    runtimeConfig.dayNightMode,
+  );
+  runtimeConfig.lightingMood = parseLightingMood(
+    config.lightingMood ?? config.lighting_mood,
+    runtimeConfig.lightingMood,
+  );
 
   const worldApiBase = config.worldApiBase;
   if (

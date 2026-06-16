@@ -16,6 +16,8 @@
   },
   "dayNightCycleMs": 600000,
   "dayNightStart": 0.18,
+  "dayNightMode": "cycle",
+  "lightingMood": "natural",
   "enabledAgents": ["johnny"],
   "avatars": {
     "johnny": "https://cdn.example.com/tellus/johnny.glb",

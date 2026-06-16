@@ -10,8 +10,10 @@ import {
   Box,
   CircleHelp,
   Eye,
+  Globe2,
   Layers,
   Map as MapIcon,
+  MessageCircle,
   Mic,
   Minus,
   Mountain,
@@ -106,7 +108,7 @@ import {
   type WorldChatMessage,
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
-import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides } from "./tellus-types";
+import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood } from "./tellus-types";
 import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, CENTRAL_WALK_RADIUS, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, DEFAULT_DAY_NIGHT_CYCLE_MS, DEFAULT_DAY_NIGHT_START, MIN_DAY_NIGHT_CYCLE_MS, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, boundedNumber, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig } from "./tellus-runtime-config";
@@ -222,12 +224,183 @@ const SKYBOX_OPTIONS: Array<{ url: string; label: string }> = [
   { url: "/skybox/tellus-aurora-sky/scene.gltf", label: "Aurora Sky" },
 ];
 
+const DAY_NIGHT_MODE_OPTIONS: Array<{ id: DayNightMode; label: string }> = [
+  { id: "cycle", label: "Cycle" },
+  { id: "day", label: "Day Only" },
+  { id: "night", label: "Night Only" },
+  { id: "golden", label: "Golden Hour" },
+  { id: "pause", label: "Pause" },
+];
+
+const LIGHTING_MOOD_OPTIONS: Array<{ id: LightingMood; label: string }> = [
+  { id: "natural", label: "Natural" },
+  { id: "bright-build", label: "Bright Build" },
+  { id: "soft-warm", label: "Soft Warm" },
+  { id: "cool-dream", label: "Cool Dream" },
+  { id: "moonlit", label: "Moonlit" },
+  { id: "dramatic-sunset", label: "Dramatic Sunset" },
+];
+
+const DAY_NIGHT_MODES = DAY_NIGHT_MODE_OPTIONS.map((option) => option.id);
+const LIGHTING_MOODS = LIGHTING_MOOD_OPTIONS.map((option) => option.id);
+const MAX_DAY_NIGHT_CYCLE_MS = 60 * 60 * 1000;
+
+type LightingMoodProfile = {
+  sun: number;
+  moon: number;
+  hemi: number;
+  env: number;
+  fogNear: number;
+  fogFar: number;
+  opacity: number;
+  backgroundTint?: THREE.Color;
+  backgroundTintStrength?: number;
+  skyTint?: THREE.Color;
+  skyTintStrength?: number;
+  sunTint?: THREE.Color;
+  sunTintStrength?: number;
+  hemiSkyTint?: THREE.Color;
+  hemiGroundTint?: THREE.Color;
+  hemiTintStrength?: number;
+  oceanTint?: THREE.Color;
+  oceanTintStrength?: number;
+};
+
+const LIGHTING_MOOD_PROFILES: Record<LightingMood, LightingMoodProfile> = {
+  natural: { sun: 1, moon: 1, hemi: 1, env: 1, fogNear: 1, fogFar: 1, opacity: 1 },
+  "bright-build": {
+    sun: 1.16,
+    moon: 0.92,
+    hemi: 1.22,
+    env: 1.18,
+    fogNear: 1.08,
+    fogFar: 1.18,
+    opacity: 0.9,
+    backgroundTint: new THREE.Color(0xe8f4ff),
+    backgroundTintStrength: 0.1,
+    skyTint: new THREE.Color(0xf5fbff),
+    skyTintStrength: 0.16,
+    hemiSkyTint: new THREE.Color(0xdcecff),
+    hemiGroundTint: new THREE.Color(0x6f8353),
+    hemiTintStrength: 0.16,
+    oceanTint: new THREE.Color(0x8ad4ff),
+    oceanTintStrength: 0.08,
+  },
+  "soft-warm": {
+    sun: 1.02,
+    moon: 0.82,
+    hemi: 1.05,
+    env: 1.02,
+    fogNear: 0.96,
+    fogFar: 1.04,
+    opacity: 1,
+    backgroundTint: new THREE.Color(0xffe2c2),
+    backgroundTintStrength: 0.16,
+    skyTint: new THREE.Color(0xffd4aa),
+    skyTintStrength: 0.2,
+    sunTint: new THREE.Color(0xffc08a),
+    sunTintStrength: 0.22,
+    hemiSkyTint: new THREE.Color(0xffd7b1),
+    hemiGroundTint: new THREE.Color(0x7c6f45),
+    hemiTintStrength: 0.18,
+    oceanTint: new THREE.Color(0xffc792),
+    oceanTintStrength: 0.1,
+  },
+  "cool-dream": {
+    sun: 0.9,
+    moon: 1.28,
+    hemi: 1.1,
+    env: 1.06,
+    fogNear: 0.9,
+    fogFar: 1.08,
+    opacity: 1,
+    backgroundTint: new THREE.Color(0x9ed3ff),
+    backgroundTintStrength: 0.18,
+    skyTint: new THREE.Color(0xaec7ff),
+    skyTintStrength: 0.24,
+    sunTint: new THREE.Color(0xdce8ff),
+    sunTintStrength: 0.14,
+    hemiSkyTint: new THREE.Color(0x9dbdff),
+    hemiGroundTint: new THREE.Color(0x4c6372),
+    hemiTintStrength: 0.2,
+    oceanTint: new THREE.Color(0x84c9ff),
+    oceanTintStrength: 0.12,
+  },
+  moonlit: {
+    sun: 0.72,
+    moon: 1.65,
+    hemi: 0.82,
+    env: 0.86,
+    fogNear: 0.82,
+    fogFar: 0.96,
+    opacity: 1.08,
+    backgroundTint: new THREE.Color(0x172241),
+    backgroundTintStrength: 0.28,
+    skyTint: new THREE.Color(0x8fa8ff),
+    skyTintStrength: 0.25,
+    sunTint: new THREE.Color(0xcad7ff),
+    sunTintStrength: 0.18,
+    hemiSkyTint: new THREE.Color(0x7894ff),
+    hemiGroundTint: new THREE.Color(0x28344a),
+    hemiTintStrength: 0.28,
+    oceanTint: new THREE.Color(0x405d95),
+    oceanTintStrength: 0.2,
+  },
+  "dramatic-sunset": {
+    sun: 1.12,
+    moon: 0.9,
+    hemi: 0.96,
+    env: 0.95,
+    fogNear: 0.88,
+    fogFar: 1,
+    opacity: 1,
+    backgroundTint: new THREE.Color(0xff9c5f),
+    backgroundTintStrength: 0.3,
+    skyTint: new THREE.Color(0xff7f6f),
+    skyTintStrength: 0.34,
+    sunTint: new THREE.Color(0xff8f4f),
+    sunTintStrength: 0.32,
+    hemiSkyTint: new THREE.Color(0xffb17a),
+    hemiGroundTint: new THREE.Color(0x6e4f63),
+    hemiTintStrength: 0.24,
+    oceanTint: new THREE.Color(0xff8758),
+    oceanTintStrength: 0.18,
+  },
+};
+
 const LEGACY_BASIC_SKY_URL = "/skybox/free_-_skybox_basic_sky/scene.gltf";
 const BASIC_SKY_URL = "/skybox/free_-_skybox_basic_sky.glb";
 
 function normalizeSkyboxUrl(url: string): string {
   const trimmed = url.trim();
   return trimmed === LEGACY_BASIC_SKY_URL ? BASIC_SKY_URL : trimmed;
+}
+
+function parseDayNightMode(value: unknown, fallback: DayNightMode = "cycle"): DayNightMode {
+  return typeof value === "string" && DAY_NIGHT_MODES.includes(value as DayNightMode)
+    ? (value as DayNightMode)
+    : fallback;
+}
+
+function parseLightingMood(value: unknown, fallback: LightingMood = "natural"): LightingMood {
+  return typeof value === "string" && LIGHTING_MOODS.includes(value as LightingMood)
+    ? (value as LightingMood)
+    : fallback;
+}
+
+function normalizeDayNightCycleMs(value: unknown, fallback = DEFAULT_DAY_NIGHT_CYCLE_MS): number {
+  return boundedNumber(value as string | number | undefined, fallback, MIN_DAY_NIGHT_CYCLE_MS, MAX_DAY_NIGHT_CYCLE_MS);
+}
+
+function liveDayNightPhase(ignorePause = false): number {
+  if (!ignorePause && runtimeConfig.dayNightMode === "pause") {
+    return ((runtimeConfig.dayNightStart % 1) + 1) % 1;
+  }
+  return (
+    (runtimeConfig.dayNightStart + Date.now() / runtimeConfig.dayNightCycleMs) %
+    1 +
+    1
+  ) % 1;
 }
 
 function worldTemplateLabel(template: WorldTemplateId): string {
@@ -877,6 +1050,7 @@ function createTellusWorld(
     agentGenerationProvider: runtimeConfig.agentGenerationProvider,
     instantMeshTarget: runtimeConfig.instantMeshTarget,
     userId,
+    visitorId,
     visitorPosition: { ...visitorPosition },
     visitorYaw: yaw, // facing direction (radians) for the minimap view cone
     viewDistance: scene.fog instanceof THREE.Fog ? scene.fog.far : 200 * WORLD_SCALE, // how far we can see
@@ -929,7 +1103,14 @@ function createTellusWorld(
       ...message,
       text,
       senderName: message.senderName?.trim() || displayNameForVisitor(message.visitorId),
-      channel: message.channel === "nearby" ? "nearby" : "world",
+      channel:
+        message.channel === "nearby"
+          ? "nearby"
+          : message.channel === "dm"
+            ? "dm"
+            : "world",
+      recipientId: message.recipientId?.trim() || undefined,
+      recipientName: message.recipientName?.trim() || undefined,
       position: message.position ? { ...message.position } : undefined,
     };
     worldChat.push(normalized);
@@ -960,15 +1141,22 @@ function createTellusWorld(
     text: string,
     channel: WorldChatChannel = "world",
     senderName?: string,
+    recipientId?: string,
+    recipientName?: string,
   ): WorldChatMessage | null => {
     const trimmed = text.trim().slice(0, 800);
     if (!trimmed) return null;
+    const normalizedChannel =
+      channel === "nearby" ? "nearby" : channel === "dm" ? "dm" : "world";
+    if (normalizedChannel === "dm" && !recipientId?.trim()) return null;
     const message: WorldChatMessage = {
       id: makeId("chat"),
       visitorId,
       senderName: senderName?.trim() || displayNameForVisitor(visitorId),
       text: trimmed,
-      channel: channel === "nearby" ? "nearby" : "world",
+      channel: normalizedChannel,
+      recipientId: normalizedChannel === "dm" ? recipientId?.trim() : undefined,
+      recipientName: normalizedChannel === "dm" ? recipientName?.trim() : undefined,
       position: { ...visitorPosition },
       createdAt: new Date().toISOString(),
     };
@@ -3739,9 +3927,20 @@ function createTellusWorld(
   const moonDirection = new THREE.Vector3();
   const moonArcDirection = new THREE.Vector3();
 
+  const currentDayNightPhase = (cycleNow: number) =>
+    (runtimeConfig.dayNightStart + cycleNow / runtimeConfig.dayNightCycleMs) % 1;
+
   const updateDayNightCycle = (cycleNow: number, animationNow = performance.now()) => {
-    const phase =
-      (runtimeConfig.dayNightStart + cycleNow / runtimeConfig.dayNightCycleMs) % 1;
+    let phase = currentDayNightPhase(cycleNow);
+    if (runtimeConfig.dayNightMode === "day") phase = 0.25;
+    if (runtimeConfig.dayNightMode === "night") phase = 0.75;
+    if (runtimeConfig.dayNightMode === "golden") phase = 0.53;
+    if (runtimeConfig.dayNightMode === "pause") {
+      phase = ((runtimeConfig.dayNightStart % 1) + 1) % 1;
+    }
+    const mood =
+      LIGHTING_MOOD_PROFILES[runtimeConfig.lightingMood] ??
+      LIGHTING_MOOD_PROFILES.natural;
     const angle = phase * Math.PI * 2;
     const sunHeight = Math.sin(angle);
     const skySunHeight = sunHeight + 0.18;
@@ -3771,35 +3970,44 @@ function createTellusWorld(
       .copy(nightBackground)
       .lerp(daylightBackground, daylight)
       .lerp(twilightBackground, twilight * 0.78);
+    if (mood.backgroundTint && mood.backgroundTintStrength) {
+      backgroundColor.lerp(mood.backgroundTint, mood.backgroundTintStrength);
+    }
     if (scene.background instanceof THREE.Color) {
       scene.background.copy(backgroundColor);
     }
     if (scene.fog instanceof THREE.Fog) {
       scene.fog.color.copy(backgroundColor);
-      scene.fog.near = (54 + daylight * 18) * WORLD_SCALE;
-      scene.fog.far = (176 + daylight * 54) * WORLD_SCALE;
+      scene.fog.near = (54 + daylight * 18) * WORLD_SCALE * mood.fogNear;
+      scene.fog.far = (176 + daylight * 54) * WORLD_SCALE * mood.fogFar;
     }
     {
       // Environment (ambient PBR reflections) brightens with the day and warms at the golden hours.
-      scene.environmentIntensity = 0.16 + daylight * 0.5 + twilight * 0.18;
+      scene.environmentIntensity = (0.16 + daylight * 0.5 + twilight * 0.18) * mood.env;
     }
 
     skyboxTint
       .copy(nightSkyboxTint)
       .lerp(daylightSkyboxTint, daylight)
       .lerp(twilightSkyboxTint, twilight * 0.62);
+    if (mood.skyTint && mood.skyTintStrength) {
+      skyboxTint.lerp(mood.skyTint, mood.skyTintStrength);
+    }
     for (const material of skyboxTintMaterials) {
       material.color.copy(skyboxTint);
     }
 
     sun.position.set(Math.cos(angle) * -72, sunHeight * 88, Math.sin(angle) * 58);
-    sun.intensity = 0.05 + daylight * 4.15 + twilight * 0.55;
+    sun.intensity = (0.05 + daylight * 4.15 + twilight * 0.55) * mood.sun;
     sunColor.copy(nightSun).lerp(daylightSun, daylight).lerp(duskSun, twilight);
+    if (mood.sunTint && mood.sunTintStrength) {
+      sunColor.lerp(mood.sunTint, mood.sunTintStrength);
+    }
     sun.color.copy(sunColor);
 
     moon.position.copy(sun.position).multiplyScalar(-1);
     moon.position.y = Math.max(18, moon.position.y);
-    moon.intensity = 0.42 + night * 3.35;
+    moon.intensity = (0.42 + night * 3.35) * mood.moon;
     if (moonModel) {
       const moonRisePhase = 0.54;
       const moonVisibleDuration = 0.4;
@@ -3844,14 +4052,23 @@ function createTellusWorld(
       .lerp(daylightHemiSky, daylight)
       .lerp(duskHemiSky, twilight * 0.55);
     hemiGroundColor.copy(nightHemiGround).lerp(daylightHemiGround, daylight);
+    if (mood.hemiSkyTint && mood.hemiTintStrength) {
+      hemiSkyColor.lerp(mood.hemiSkyTint, mood.hemiTintStrength);
+    }
+    if (mood.hemiGroundTint && mood.hemiTintStrength) {
+      hemiGroundColor.lerp(mood.hemiGroundTint, mood.hemiTintStrength);
+    }
     hemisphere.color.copy(hemiSkyColor);
     hemisphere.groundColor.copy(hemiGroundColor);
-    hemisphere.intensity = 0.82 + daylight * 1.55 + twilight * 0.3;
+    hemisphere.intensity = (0.82 + daylight * 1.55 + twilight * 0.3) * mood.hemi;
 
     const oceanMaterial = ocean.material;
     if (oceanMaterial instanceof THREE.MeshBasicMaterial) {
+      if (mood.oceanTint && mood.oceanTintStrength) {
+        oceanColor.lerp(mood.oceanTint, mood.oceanTintStrength);
+      }
       oceanMaterial.color.copy(oceanColor);
-      oceanMaterial.opacity = 0.58 + daylight * 0.14;
+      oceanMaterial.opacity = (0.58 + daylight * 0.14) * mood.opacity;
     }
   };
 
@@ -4712,17 +4929,29 @@ function createTellusWorld(
         selected: entry.id === localAvatarId,
       }));
     },
-    getChat(opts: { radius?: number; channel?: WorldChatChannel } = {}) {
-      return nearbyWorldChat(
+    getChat(opts: { radius?: number; channel?: WorldChatChannel; recipientId?: string } = {}) {
+      const messages = nearbyWorldChat(
         typeof opts.radius === "number" ? opts.radius : 36,
-        opts.channel === "nearby" || opts.channel === "world" ? opts.channel : undefined,
+        opts.channel === "nearby" || opts.channel === "world" || opts.channel === "dm" ? opts.channel : undefined,
       );
+      const recipientId = typeof opts.recipientId === "string" ? opts.recipientId.trim() : "";
+      return recipientId
+        ? messages.filter(
+            (message) =>
+              message.channel === "dm" &&
+              (message.recipientId === recipientId || message.visitorId === recipientId),
+          )
+        : messages;
     },
-    sayChat(text: string, opts: { channel?: WorldChatChannel } = {}) {
+    sayChat(text: string, opts: { channel?: WorldChatChannel; recipientId?: string; recipientName?: string } = {}) {
+      const channel =
+        opts.channel === "nearby" ? "nearby" : opts.channel === "dm" ? "dm" : "world";
       const message = sendWorldChat(
         text,
-        opts.channel === "nearby" ? "nearby" : "world",
+        channel,
         displayNameForVisitor(visitorId),
+        opts.recipientId,
+        opts.recipientName,
       );
       return message ? { ok: true, message } : { ok: false, error: "sayChat requires text" };
     },
@@ -4761,8 +4990,10 @@ function createTellusWorld(
         }
         case "sayChat": {
           const text = typeof a.text === "string" ? a.text : typeof a.message === "string" ? a.message : "";
-          const channel = a.channel === "nearby" ? "nearby" : "world";
-          const message = sendWorldChat(text, channel, displayNameForVisitor(visitorId));
+          const channel = a.channel === "nearby" ? "nearby" : a.channel === "dm" ? "dm" : "world";
+          const recipientId = typeof a.recipientId === "string" ? a.recipientId : undefined;
+          const recipientName = typeof a.recipientName === "string" ? a.recipientName : undefined;
+          const message = sendWorldChat(text, channel, displayNameForVisitor(visitorId), recipientId, recipientName);
           return message ? { ok: true, message } : { ok: false, error: "sayChat requires text" };
         }
         case "sculptTerrain": {
@@ -5272,6 +5503,7 @@ function App(): React.ReactElement {
     agentGenerationProvider: runtimeConfig.agentGenerationProvider,
     instantMeshTarget: runtimeConfig.instantMeshTarget,
     userId: tellusUserId(),
+    visitorId: tellusVisitorId(),
     remoteVisitors: [],
   });
   const [prompt, setPrompt] = useState("");
@@ -5281,6 +5513,11 @@ function App(): React.ReactElement {
   const isAdmin = (account?.role ?? "").toLowerCase() === "admin";
   const [worldChatInput, setWorldChatInput] = useState("");
   const [worldChatChannel, setWorldChatChannel] = useState<WorldChatChannel>("world");
+  const [worldChatDmTarget, setWorldChatDmTarget] = useState<{
+    visitorId: string;
+    name: string;
+    kind: "player" | "agent";
+  } | null>(null);
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
   const [showFps, setShowFps] = useState(false);
   const [fps, setFps] = useState(0);
@@ -5953,6 +6190,16 @@ function App(): React.ReactElement {
       defaultSkyboxUrlForTemplate(parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus")),
   );
   const [currentWorldPrivate, setCurrentWorldPrivate] = useState(false);
+  const [currentDayNightMode, setCurrentDayNightMode] = useState<DayNightMode>(
+    runtimeConfig.dayNightMode,
+  );
+  const [currentDayNightCycleMs, setCurrentDayNightCycleMs] = useState(
+    runtimeConfig.dayNightCycleMs,
+  );
+  const [currentLightingMood, setCurrentLightingMood] = useState<LightingMood>(
+    runtimeConfig.lightingMood,
+  );
+  const [worldRenderRevision, setWorldRenderRevision] = useState(0);
   const [worldCreateNote, setWorldCreateNote] = useState<string | null>(null);
   const worldCreateNoteTimerRef = useRef<number | undefined>(undefined);
   // Admin-only world delete: a two-step inline confirm. First click arms (sets the world id here),
@@ -5979,6 +6226,10 @@ function App(): React.ReactElement {
     skyboxUrl?: string;
     landShape?: LandShapeOverrides;
     isPublic?: boolean;
+    dayNightMode?: DayNightMode;
+    dayNightCycleMs?: number;
+    dayNightStart?: number;
+    lightingMood?: LightingMood;
   }
 
   const parseWorldRenderProfile = (value: unknown): WorldRenderProfile => {
@@ -6004,7 +6255,37 @@ function App(): React.ReactElement {
         : typeof value.is_public === "boolean"
           ? value.is_public
           : undefined;
-    return { worldTemplate, skyboxUrl, landShape, isPublic };
+    const dayNightModeValue = value.dayNightMode ?? value.day_night_mode;
+    const dayNightMode =
+      dayNightModeValue === undefined
+        ? undefined
+        : parseDayNightMode(dayNightModeValue, runtimeConfig.dayNightMode);
+    const dayNightCycleMsValue = value.dayNightCycleMs ?? value.day_night_cycle_ms;
+    const dayNightCycleMs =
+      dayNightCycleMsValue === undefined
+        ? undefined
+        : normalizeDayNightCycleMs(dayNightCycleMsValue, runtimeConfig.dayNightCycleMs);
+    const dayNightStart =
+      typeof value.dayNightStart === "number"
+        ? clamp(value.dayNightStart, 0, 1)
+        : typeof value.day_night_start === "number"
+          ? clamp(value.day_night_start, 0, 1)
+          : undefined;
+    const lightingMoodValue = value.lightingMood ?? value.lighting_mood;
+    const lightingMood =
+      lightingMoodValue === undefined
+        ? undefined
+        : parseLightingMood(lightingMoodValue, runtimeConfig.lightingMood);
+    return {
+      worldTemplate,
+      skyboxUrl,
+      landShape,
+      isPublic,
+      dayNightMode,
+      dayNightCycleMs,
+      dayNightStart,
+      lightingMood,
+    };
   };
 
   const loadLocalWorldProfiles = (): Record<string, WorldRenderProfile> => {
@@ -6037,6 +6318,10 @@ function App(): React.ReactElement {
     skyboxUrl: string;
     landShape?: LandShapeOverrides;
     isPublic?: boolean;
+    dayNightMode: DayNightMode;
+    dayNightCycleMs: number;
+    dayNightStart: number;
+    lightingMood: LightingMood;
   }> => {
     const templateFallback = templateForWorldId(
       worldId,
@@ -6065,7 +6350,22 @@ function App(): React.ReactElement {
         defaultSkyboxUrlRef.current,
     );
     const landShape = profile.landShape ?? localProfile.landShape ?? defaultLandShapeRef.current;
-    return { template, skyboxUrl, landShape, isPublic: profile.isPublic ?? localProfile.isPublic };
+    return {
+      template,
+      skyboxUrl,
+      landShape,
+      isPublic: profile.isPublic ?? localProfile.isPublic,
+      dayNightMode:
+        profile.dayNightMode ?? localProfile.dayNightMode ?? runtimeConfig.dayNightMode,
+      dayNightCycleMs:
+        profile.dayNightCycleMs ??
+        localProfile.dayNightCycleMs ??
+        runtimeConfig.dayNightCycleMs,
+      dayNightStart:
+        profile.dayNightStart ?? localProfile.dayNightStart ?? runtimeConfig.dayNightStart,
+      lightingMood:
+        profile.lightingMood ?? localProfile.lightingMood ?? runtimeConfig.lightingMood,
+    };
   };
   const loadKnownWorlds = (): string[] => {
     try {
@@ -6226,6 +6526,10 @@ function App(): React.ReactElement {
       worldTemplate: pickedTemplate,
       skyboxUrl: pickedSkybox,
       isPublic: !makePrivate,
+      dayNightMode: currentDayNightMode,
+      dayNightCycleMs: currentDayNightCycleMs,
+      dayNightStart: runtimeConfig.dayNightStart,
+      lightingMood: currentLightingMood,
     });
     const enter = () => switchWorld(id);
     if (runtimeConfig.worldApiBase) {
@@ -6239,6 +6543,10 @@ function App(): React.ReactElement {
             isPublic: !makePrivate,
             worldTemplate: pickedTemplate,
             skyboxUrl: pickedSkybox,
+            dayNightMode: currentDayNightMode,
+            dayNightCycleMs: currentDayNightCycleMs,
+            dayNightStart: runtimeConfig.dayNightStart,
+            lightingMood: currentLightingMood,
           }),
         },
       )
@@ -6256,14 +6564,9 @@ function App(): React.ReactElement {
       window.clearTimeout(worldCreateNoteTimerRef.current);
     }
     setWorldCreateNote(
-      `Copied current world settings: ${worldTemplateLabel(currentWorldTemplate)} · ${
-        currentWorldPrivate ? "Private" : "Public"
-      }`,
-    );
-    setWorldCreateNote(
       `Copied current world settings: ${worldTemplateLabel(currentWorldTemplate)} - ${skyboxLabel(currentWorldSkyboxUrl)} - ${
         currentWorldPrivate ? "Private" : "Public"
-      }`,
+      } - ${LIGHTING_MOOD_OPTIONS.find((option) => option.id === currentLightingMood)?.label ?? currentLightingMood}`,
     );
     worldCreateNoteTimerRef.current = window.setTimeout(() => {
       setWorldCreateNote(null);
@@ -6289,6 +6592,69 @@ function App(): React.ReactElement {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ skyboxUrl: next }),
+        },
+      ).catch(() => undefined);
+    }
+  };
+  const updateActiveWorldTemplate = (template: WorldTemplateId) => {
+    const next = parseWorldTemplateId(template, defaultWorldTemplateRef.current);
+    setNewWorldTemplate(next);
+    if (!activeWorldId || next === currentWorldTemplate) return;
+    setCurrentWorldTemplate(next);
+    runtimeConfig.worldTemplate = next;
+    runtimeConfig.landShape = undefined;
+    rememberWorldProfile(activeWorldId, { worldTemplate: next, landShape: undefined });
+    applyWorldTerrainTemplate(next, undefined);
+    setWorldRenderRevision((revision) => revision + 1);
+    if (runtimeConfig.worldApiBase) {
+      void fetch(
+        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ worldTemplate: next }),
+        },
+      ).catch(() => undefined);
+    }
+  };
+  const updateActiveWorldLighting = (patch: Partial<WorldRenderProfile>) => {
+    if (!activeWorldId) return;
+    const nextMode = patch.dayNightMode ?? currentDayNightMode;
+    const nextCycleMs = normalizeDayNightCycleMs(
+      patch.dayNightCycleMs ?? currentDayNightCycleMs,
+      currentDayNightCycleMs,
+    );
+    const nextMood = patch.lightingMood ?? currentLightingMood;
+    let nextStart =
+      typeof patch.dayNightStart === "number"
+        ? clamp(patch.dayNightStart, 0, 1)
+        : runtimeConfig.dayNightStart;
+    if (patch.dayNightMode === "pause") {
+      nextStart = liveDayNightPhase(true);
+    } else if (currentDayNightMode === "pause" && patch.dayNightMode === "cycle") {
+      nextStart = liveDayNightPhase() - Date.now() / nextCycleMs;
+    }
+    setCurrentDayNightMode(nextMode);
+    setCurrentDayNightCycleMs(nextCycleMs);
+    setCurrentLightingMood(nextMood);
+    runtimeConfig.dayNightMode = nextMode;
+    runtimeConfig.dayNightCycleMs = nextCycleMs;
+    runtimeConfig.dayNightStart = nextStart;
+    runtimeConfig.lightingMood = nextMood;
+    const profile: WorldRenderProfile = {
+      dayNightMode: nextMode,
+      dayNightCycleMs: nextCycleMs,
+      dayNightStart: nextStart,
+      lightingMood: nextMood,
+    };
+    rememberWorldProfile(activeWorldId, profile);
+    if (runtimeConfig.worldApiBase) {
+      void fetch(
+        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(profile),
         },
       ).catch(() => undefined);
     }
@@ -6416,7 +6782,10 @@ function App(): React.ReactElement {
   const [openToolMenus, setOpenToolMenus] = useState<ToolMenu[]>([]);
   const [createPromptOpen, setCreatePromptOpen] = useState(false);
   const [createPromptFocused, setCreatePromptFocused] = useState(false);
+  const [worldMenuOpen, setWorldMenuOpen] = useState(false);
+  const [worldChatOpen, setWorldChatOpen] = useState(false);
   const [worldMapOpen, setWorldMapOpen] = useState(true);
+  const [mapActorList, setMapActorList] = useState<"players" | "agents" | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const { listening, supported, start } = useSpeechInput((text) =>
     setPrompt(text),
@@ -6673,9 +7042,16 @@ function App(): React.ReactElement {
         setCurrentWorldTemplate(profile.template);
         setCurrentWorldSkyboxUrl(profile.skyboxUrl);
         setCurrentWorldPrivate(profile.isPublic === false);
+        setCurrentDayNightMode(profile.dayNightMode);
+        setCurrentDayNightCycleMs(profile.dayNightCycleMs);
+        setCurrentLightingMood(profile.lightingMood);
         runtimeConfig.worldTemplate = profile.template;
         runtimeConfig.skyboxUrl = profile.skyboxUrl;
         runtimeConfig.landShape = profile.landShape;
+        runtimeConfig.dayNightMode = profile.dayNightMode;
+        runtimeConfig.dayNightCycleMs = profile.dayNightCycleMs;
+        runtimeConfig.dayNightStart = profile.dayNightStart;
+        runtimeConfig.lightingMood = profile.lightingMood;
         applyWorldTerrainTemplate(profile.template, profile.landShape);
         // World scale BEFORE any terrain/state work: derived from the world NAME (large-* → 3×,
         // mega-* → 5×) so every client — and the Hyades terrain port — agrees with no protocol change.
@@ -6697,7 +7073,7 @@ function App(): React.ReactElement {
       worldRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWorldId]);
+  }, [activeWorldId, worldRenderRevision]);
 
   useEffect(() => {
     if (!activeWorldId || !currentWorldSkyboxUrl) return;
@@ -6741,7 +7117,11 @@ function App(): React.ReactElement {
   const handleWorldMapClick = (event: React.MouseEvent<HTMLElement>) => {
     // Ignore clicks on the overlaid info panel / status badge — only the map plane warps.
     const target = event.target as HTMLElement;
-    if (target.closest(".world-info-panel") || target.closest(".world-map-status")) return;
+    if (
+      target.closest(".world-info-panel") ||
+      target.closest(".world-map-status") ||
+      target.closest(".world-map-actor-list")
+    ) return;
     const rect = event.currentTarget.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
     const fx = clamp((event.clientX - rect.left) / rect.width, 0, 1);
@@ -6760,13 +7140,63 @@ function App(): React.ReactElement {
   const remotePlayers = snapshot.remoteVisitors.filter(
     (visitor) => !visitor.visitorId.startsWith("agent:"),
   );
+  const playerList = [
+    ...(snapshot.visitorPosition
+      ? [{ visitorId: "local-player", name: "You", position: snapshot.visitorPosition }]
+      : []),
+    ...remotePlayers,
+  ];
+  const actorName = (visitor: { visitorId: string; name?: string }): string => {
+    const name = visitor.name?.trim();
+    if (name) return name;
+    if (visitor.visitorId === "local-player") return "You";
+    if (visitor.visitorId.startsWith("agent:")) {
+      return visitor.visitorId.slice("agent:".length) || "Agent";
+    }
+    return `Player ${visitor.visitorId.slice(0, 6)}`;
+  };
+  const chatTargets = [...remoteAgents, ...remotePlayers].map((visitor) => ({
+    visitorId: visitor.visitorId,
+    name: actorName(visitor),
+    kind: visitor.visitorId.startsWith("agent:") ? "agent" as const : "player" as const,
+  }));
+  const openDirectChatFor = (visitor: { visitorId: string; name?: string }) => {
+    const target = {
+      visitorId: visitor.visitorId,
+      name: actorName(visitor),
+      kind: visitor.visitorId.startsWith("agent:") ? "agent" as const : "player" as const,
+    };
+    setWorldChatOpen(true);
+    setWorldChatChannel("dm");
+    setWorldChatDmTarget(target);
+    setWorldChatInput("");
+  };
   const visibleWorldChat = snapshot.worldChat.filter((message) => {
-    if (message.channel !== "nearby") return true;
+    if (worldChatChannel === "world") return message.channel === "world";
+    if (worldChatChannel === "dm") {
+      if (message.channel !== "dm") return false;
+      const selfId = snapshot.visitorId;
+      const targetId = worldChatDmTarget?.visitorId;
+      const involvesSelf =
+        !selfId || message.visitorId === selfId || message.recipientId === selfId;
+      if (!targetId) return involvesSelf;
+      return (
+        involvesSelf &&
+        (message.visitorId === targetId || message.recipientId === targetId)
+      );
+    }
+    if (message.channel !== "nearby") return false;
     if (!message.position || !snapshot.visitorPosition) return true;
     return distance2D(snapshot.visitorPosition, message.position) <= 36;
   });
   const sendWorldChatMessage = () => {
-    const sent = worldRef.current?.sendWorldChat(worldChatInput, worldChatChannel);
+    if (worldChatChannel === "dm" && !worldChatDmTarget) return;
+    const sent = worldRef.current?.sendWorldChat(
+      worldChatInput,
+      worldChatChannel,
+      worldChatDmTarget?.visitorId,
+      worldChatDmTarget?.name,
+    );
     if (sent) setWorldChatInput("");
   };
   const inventory = snapshot.generated.filter(
@@ -6860,70 +7290,187 @@ function App(): React.ReactElement {
     >
       <section className="world-panel" aria-label="Tellus world">
         <div ref={containerRef} className="world-canvas" />
-        <aside className="world-mini-chat" aria-label="World chat">
-          <header>
-            <span>World Chat</span>
-            <span>{visibleWorldChat.length}</span>
-          </header>
-          <div className="mini-chat-log" role="log" aria-live="polite">
-            {visibleWorldChat.slice(-24).map((message) => (
-              <article
-                key={message.id}
-                className={`mini-chat-entry ${message.channel}`}
-                title={
-                  message.position
-                    ? `${message.channel} at x ${Math.round(message.position.x)}, z ${Math.round(message.position.z)}`
-                    : message.channel
-                }
-              >
-                <strong>
-                  {message.senderName || "Visitor"}
-                  <span>{message.channel === "nearby" ? "nearby" : "world"}</span>
-                </strong>
-                <p>{message.text}</p>
-              </article>
-            ))}
-            {visibleWorldChat.length === 0 && (
-              <article className="mini-chat-entry empty">
-                <strong>World</strong>
-                <p>No messages yet.</p>
-              </article>
+        {worldChatOpen && (
+          <aside className="world-mini-chat" aria-label="World chat">
+            <header>
+              <span>
+                {worldChatChannel === "dm"
+                  ? worldChatDmTarget
+                    ? `DM - ${worldChatDmTarget.name}`
+                    : "DMs"
+                  : worldChatChannel === "nearby"
+                    ? "Nearby Chat"
+                    : "World Chat"}
+              </span>
+              <button type="button" className="panel-mini-button" onClick={() => setWorldChatOpen(false)}>
+                Close
+              </button>
+            </header>
+            <nav className="mini-chat-tabs" aria-label="Chat channels">
+              {(["world", "nearby", "dm"] as const).map((channel) => (
+                <button
+                  key={channel}
+                  type="button"
+                  className={worldChatChannel === channel ? "active" : ""}
+                  onClick={() => setWorldChatChannel(channel)}
+                >
+                  {channel === "dm" ? "DMs" : channel[0].toUpperCase() + channel.slice(1)}
+                </button>
+              ))}
+            </nav>
+            {worldChatChannel === "dm" && (
+              <div className="mini-chat-dm-targets" aria-label="DM recipients">
+                {chatTargets.length === 0 ? (
+                  <span>No players or agents visible.</span>
+                ) : (
+                  <>
+                    <span>To</span>
+                    <div>
+                      {chatTargets.map((target) => (
+                        <button
+                          key={target.visitorId}
+                          type="button"
+                          className={worldChatDmTarget?.visitorId === target.visitorId ? "active" : ""}
+                          title={target.visitorId}
+                          onClick={() => setWorldChatDmTarget(target)}
+                        >
+                          {target.name}
+                          <small>{target.kind}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
-          </div>
-          <textarea
-            className="mini-chat-input"
-            value={worldChatInput}
-            maxLength={800}
-            rows={2}
-            placeholder={worldChatChannel === "nearby" ? "Say something nearby" : "Say something to the world"}
-            onChange={(event) => setWorldChatInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                sendWorldChatMessage();
+            <div className="mini-chat-log" role="log" aria-live="polite">
+              {visibleWorldChat.slice(-24).map((message) => (
+                <article
+                  key={message.id}
+                  className={`mini-chat-entry ${message.channel}`}
+                  title={
+                    message.position
+                      ? `${message.channel} at x ${Math.round(message.position.x)}, z ${Math.round(message.position.z)}`
+                      : message.channel
+                  }
+                >
+                  <strong>
+                    {message.senderName || "Visitor"}
+                    <span>
+                      {message.channel === "dm"
+                        ? message.recipientName
+                          ? `dm to ${message.recipientName}`
+                          : "dm"
+                        : message.channel === "nearby"
+                          ? "nearby"
+                          : "world"}
+                    </span>
+                  </strong>
+                  <p>{message.text}</p>
+                </article>
+              ))}
+              {visibleWorldChat.length === 0 && (
+                <article className="mini-chat-entry empty">
+                  <strong>
+                    {worldChatChannel === "dm"
+                      ? "DMs"
+                      : worldChatChannel === "nearby"
+                        ? "Nearby"
+                        : "World"}
+                  </strong>
+                  <p>
+                    {worldChatChannel === "dm" && !worldChatDmTarget
+                      ? "Pick a player or agent to start a DM."
+                      : "No messages yet."}
+                  </p>
+                </article>
+              )}
+            </div>
+            <textarea
+              className="mini-chat-input"
+              value={worldChatInput}
+              maxLength={800}
+              rows={2}
+              disabled={worldChatChannel === "dm" && !worldChatDmTarget}
+              placeholder={
+                worldChatChannel === "dm"
+                  ? worldChatDmTarget
+                    ? `Message ${worldChatDmTarget.name}`
+                    : "Choose someone to DM"
+                  : worldChatChannel === "nearby"
+                    ? "Say something nearby"
+                    : "Say something to the world"
               }
-            }}
-          />
-          <div className="mini-chat-actions">
-            <select
-              aria-label="Chat channel"
-              value={worldChatChannel}
-              onChange={(event) => setWorldChatChannel(event.target.value === "nearby" ? "nearby" : "world")}
-            >
-              <option value="world">World</option>
-              <option value="nearby">Nearby</option>
-            </select>
-            <button
-              type="button"
-              className="mini-chat-submit"
-              disabled={!worldChatInput.trim()}
-              onClick={sendWorldChatMessage}
-            >
-              Send
-            </button>
-          </div>
-        </aside>
+              onChange={(event) => setWorldChatInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  sendWorldChatMessage();
+                }
+              }}
+            />
+            <div className="mini-chat-actions">
+              <span className="mini-chat-channel-label">
+                {worldChatChannel === "dm"
+                  ? worldChatDmTarget?.name || "No DM target"
+                  : worldChatChannel === "nearby"
+                    ? "Nearby"
+                    : "World"}
+              </span>
+              <button
+                type="button"
+                className="mini-chat-submit"
+                disabled={!worldChatInput.trim() || (worldChatChannel === "dm" && !worldChatDmTarget)}
+                onClick={sendWorldChatMessage}
+              >
+                Send
+              </button>
+            </div>
+          </aside>
+        )}
         <div className="world-top-bar">
+          <div className="top-left-cluster" style={{ position: "relative" }}>
+            <div
+              className="brand-mark"
+              onClick={handleBrandTripleClick}
+              style={{ userSelect: "none" }}
+            >
+              <span className="brand-sigil">T</span>
+              <span>Tellus</span>
+              <small>World Weaver</small>
+            </div>
+            <div className="brand-hud-actions">
+              <AuthControls />
+              <details className="world-help">
+                <summary title="Controls" aria-label="Controls">
+                  <CircleHelp size={16} />
+                </summary>
+                <div className="world-help-list">
+                  <span>
+                    <strong>Move</strong>
+                    <small>WASD / arrows</small>
+                  </span>
+                  <span>
+                    <strong>Look</strong>
+                    <small>drag</small>
+                  </span>
+                  <span>
+                    <strong>Zoom</strong>
+                    <small>scroll</small>
+                  </span>
+                  {snapshot.sailingThingId && (
+                    <span>
+                      <strong>Pilot</strong>
+                      <small>active</small>
+                    </span>
+                  )}
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+        {worldMenuOpen && (
+        <aside className="world-menu-panel" aria-label="World menu">
           <div className="top-left-cluster" style={{ position: "relative" }}>
             <div
               className="brand-mark"
@@ -7094,16 +7641,16 @@ function App(): React.ReactElement {
               </div>
             )}
             <div style={{ display: "grid", gap: 2 }}>
-              <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>Terrain</span>
-              <select
-                aria-label="New world template"
-                title="Terrain template for newly created worlds"
-                value={newWorldTemplate}
-                onChange={(e) =>
-                  setNewWorldTemplate(
-                    parseWorldTemplateId(e.target.value, defaultWorldTemplateRef.current),
-                  )
-                }
+                <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>Terrain</span>
+                <select
+                  aria-label="Active world terrain"
+                  title="Terrain template for the active world and newly created worlds"
+                  value={currentWorldTemplate}
+                  onChange={(e) =>
+                    updateActiveWorldTemplate(
+                      parseWorldTemplateId(e.target.value, defaultWorldTemplateRef.current),
+                    )
+                  }
                 style={{
                   background: "rgba(0,0,0,0.5)",
                   color: "#dfe7d8",
@@ -7144,6 +7691,67 @@ function App(): React.ReactElement {
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="world-lighting-controls" aria-label="Lighting settings">
+              <label className="world-lighting-control">
+                <span>Time</span>
+                <select
+                  aria-label="Day night mode"
+                  title="Cycle, lock day or night, hold golden hour, or pause the current time"
+                  value={currentDayNightMode}
+                  onChange={(e) =>
+                    updateActiveWorldLighting({
+                      dayNightMode: parseDayNightMode(e.target.value, currentDayNightMode),
+                    })
+                  }
+                >
+                  {DAY_NIGHT_MODE_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="world-lighting-control cycle-length">
+                <span>Minutes</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  step={1}
+                  aria-label="Day night cycle length in minutes"
+                  title="Length of a full day/night cycle"
+                  disabled={currentDayNightMode !== "cycle"}
+                  value={Math.round(currentDayNightCycleMs / 60000)}
+                  onChange={(e) =>
+                    updateActiveWorldLighting({
+                      dayNightCycleMs: normalizeDayNightCycleMs(
+                        Number(e.target.value) * 60000,
+                        currentDayNightCycleMs,
+                      ),
+                    })
+                  }
+                />
+              </label>
+              <label className="world-lighting-control mood">
+                <span>Mood</span>
+                <select
+                  aria-label="Lighting mood"
+                  title="Global lighting preset for world objects and avatars"
+                  value={currentLightingMood}
+                  onChange={(e) =>
+                    updateActiveWorldLighting({
+                      lightingMood: parseLightingMood(e.target.value, currentLightingMood),
+                    })
+                  }
+                >
+                  {LIGHTING_MOOD_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
             <div style={{ display: "grid", gap: 2 }}>
               <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>Visibility</span>
@@ -7242,7 +7850,8 @@ function App(): React.ReactElement {
               </div>
             </details>
           </div>
-        </div>
+        </aside>
+        )}
         <aside className="world-left-toolbelt" aria-label="Toolbelt">
           <button
             type="button"
@@ -7261,6 +7870,24 @@ function App(): React.ReactElement {
           >
             <Box size={18} />
             <span>Assets</span>
+          </button>
+          <button
+            type="button"
+            className={worldChatOpen ? "toolbelt-button active" : "toolbelt-button"}
+            title="World chat"
+            onClick={() => setWorldChatOpen((open) => !open)}
+          >
+            <MessageCircle size={18} />
+            <span>Chat</span>
+          </button>
+          <button
+            type="button"
+            className={worldMenuOpen ? "toolbelt-button active" : "toolbelt-button"}
+            title="World menu"
+            onClick={() => setWorldMenuOpen((open) => !open)}
+          >
+            <Globe2 size={18} />
+            <span>World</span>
           </button>
           <button
             type="button"
@@ -8329,12 +8956,90 @@ function App(): React.ReactElement {
                 </span>
               )}
               <section className="world-info-panel mini" aria-label="World info">
-                <dl>
-                  <div><dt>Items</dt><dd>{snapshot.generated.length}</dd></div>
-                  <div><dt>Players</dt><dd>{remotePlayers.length + 1}</dd></div>
-                  <div><dt>Agents</dt><dd>{remoteAgents.length}</dd></div>
-                </dl>
+                <select
+                  className="world-map-title-select"
+                  aria-label="Map world"
+                  title="Switch world"
+                  value={activeWorldId ?? ""}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => {
+                    event.stopPropagation();
+                    switchWorld(event.target.value);
+                  }}
+                >
+                  {!activeWorldId && <option value="">main</option>}
+                  {worlds.map((worldId) => (
+                    <option key={worldId} value={worldId}>
+                      {worldId}
+                    </option>
+                  ))}
+                </select>
+                <div className="world-info-stats">
+                  <div>
+                    <span className="world-info-label">Items</span>
+                    <span className="world-info-value">{snapshot.generated.length}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className={mapActorList === "players" ? "active" : ""}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMapActorList((current) => current === "players" ? null : "players");
+                    }}
+                  >
+                    <span className="world-info-label">Players</span>
+                    <span className="world-info-value">{playerList.length}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={mapActorList === "agents" ? "active" : ""}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMapActorList((current) => current === "agents" ? null : "agents");
+                    }}
+                  >
+                    <span className="world-info-label">Agents</span>
+                    <span className="world-info-value">{remoteAgents.length}</span>
+                  </button>
+                </div>
               </section>
+              {mapActorList && (
+                <section className="world-map-actor-list" aria-label={`${mapActorList} in world`}>
+                  {(mapActorList === "players" ? playerList : remoteAgents).length === 0 && (
+                    <p>No {mapActorList} visible.</p>
+                  )}
+                  {(mapActorList === "players" ? playerList : remoteAgents).map((visitor) => {
+                    const name = actorName(visitor);
+                    return (
+                      <div key={visitor.visitorId} className="world-map-actor-row">
+                        <span title={visitor.visitorId}>{name}</span>
+                        <button
+                          type="button"
+                          disabled={!visitor.position}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (visitor.position) worldRef.current?.warpTo(visitor.position.x, visitor.position.z);
+                          }}
+                        >
+                          Go to
+                        </button>
+                        <button
+                          type="button"
+                          disabled={visitor.visitorId === "local-player"}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (visitor.visitorId !== "local-player") {
+                              openDirectChatFor(visitor);
+                            }
+                          }}
+                        >
+                          Chat
+                        </button>
+                      </div>
+                    );
+                  })}
+                </section>
+              )}
             </section>
             {snapshot.visitorPosition && (() => {
               // Position readout: where you are, so you can tell others. Chunked worlds also show the
