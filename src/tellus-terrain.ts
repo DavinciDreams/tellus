@@ -183,6 +183,53 @@ function fbm2(x: number, z: number, octaves: number): number {
   return norm > 0 ? total / norm : 0;
 }
 
+function gaussian(cx: number, cz: number, x: number, z: number, radius: number): number {
+  return Math.exp(-((cx - x) ** 2 + (cz - z) ** 2) / radius);
+}
+
+function lowlandRiverStrength(cx: number, cz: number): number {
+  const riverCenter = Math.sin((cz + 18) * 0.105) * 15 - 5 + Math.sin(cz * 0.035) * 6;
+  const width = 5.5 + smoothstep(-52, 24, cz) * 3.5;
+  const distance = Math.abs(cx - riverCenter);
+  return 1 - smoothstep(width, width + 5.5, distance);
+}
+
+function templateProfileHeight(cx: number, cz: number, r: number): number {
+  if (activeTemplate === "wide-island") {
+    const eastPeninsula = gaussian(cx, cz, 39, -2, 720) * 3.8;
+    const westHeadland = gaussian(cx, cz, -42, 18, 520) * 2.9;
+    const northShelf = gaussian(cx, cz, 5, 40, 820) * 2.1;
+    const innerLagoon = gaussian(cx, cz, 17, -5, 245) * 2.8;
+    const southCove = gaussian(cx, cz, -9, -42, 520) * 1.75;
+    const reefShelf = Math.sin(Math.atan2(cz, cx) * 5.0 + r * 0.065) * 0.55 *
+      smoothstep(24, 60, r);
+    return eastPeninsula + westHeadland + northShelf + reefShelf - innerLagoon - southCove;
+  }
+
+  if (activeTemplate === "lowlands") {
+    const river = lowlandRiverStrength(cx, cz);
+    const floodplain = river * 2.25;
+    const westMeadow = gaussian(cx, cz, -34, 4, 980) * 1.35;
+    const eastMeadow = gaussian(cx, cz, 32, -18, 760) * 1.15;
+    const shallowBasin = gaussian(cx, cz, 4, 18, 640) * 1.6;
+    const levee = Math.max(0, smoothstep(0.18, 0.52, river) - smoothstep(0.66, 0.95, river)) * 0.9;
+    return westMeadow + eastMeadow + levee - floodplain - shallowBasin;
+  }
+
+  if (activeTemplate === "ridge") {
+    const angle = Math.atan2(cz + 2, cx - 4);
+    const spineDistance = Math.abs(Math.sin(angle - 0.72) * r);
+    const spine = (1 - smoothstep(8, 34, spineDistance)) * smoothstep(7, 58, r) * 5.4;
+    const saddle = gaussian(cx, cz, -12, 9, 165) * 2.1;
+    const cirque = gaussian(cx, cz, 23, -20, 260) * 2.7;
+    return spine - saddle - cirque;
+  }
+
+  const valley = gaussian(cx, cz, -26, -20, 360) * 1.35;
+  const foothills = gaussian(cx, cz, 30, 24, 580) * 1.55;
+  return foothills - valley;
+}
+
 function terrainDetailHeight(cx: number, cz: number, r: number): number {
   const detail = activeLandShape.detail;
   if (detail.amplitude <= 0 && detail.ridgeAmplitude <= 0 && detail.terraceAmplitude <= 0) {
@@ -713,8 +760,9 @@ export function baseTerrainHeight(x: number, z: number): number {
       -((cx - shape.pond.x) ** 2 + (cz - shape.pond.z) ** 2) /
       shape.pond.falloff,
     ) * shape.pond.depth;
+  const profile = templateProfileHeight(cx, cz, r);
   const detail = terrainDetailHeight(cx, cz, r);
-  return mound + shoulder + southernRise + ridge + detail - rimDrop - pond + shape.baseOffset;
+  return mound + shoulder + southernRise + ridge + profile + detail - rimDrop - pond + shape.baseOffset;
 }
 
 export function terrainHeight(x: number, z: number): number {
@@ -727,6 +775,11 @@ export function terrainKind(x: number, z: number, y: number): TerrainKind {
   // Classic-space: kind bands follow the scaled island features (matches the server port).
   const cx = x / WORLD_SCALE;
   const cz = z / WORLD_SCALE;
+  if (activeTemplate === "lowlands") {
+    const river = lowlandRiverStrength(cx, cz);
+    if (river > 0.72 && y < 1.25) return "water";
+    if (river > 0.45 && y < 2.15) return "beach";
+  }
   const pondDistance = Math.hypot(cx - activeLandShape.pond.x, cz - activeLandShape.pond.z);
   if (pondDistance < activeLandShape.pond.radius && y < 1.9) return "water";
   if (y > 13.5) return "snow";

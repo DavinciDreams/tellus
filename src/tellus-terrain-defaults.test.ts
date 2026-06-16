@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyWorldTerrainTemplate,
   baseTerrainHeight,
+  terrainKind,
 } from "./tellus-terrain";
 
 function sampleHeights(radius = 48): number[] {
@@ -47,5 +48,14 @@ describe("Tellus terrain defaults", () => {
     const ridgeRelief = relief(sampleHeights());
 
     expect(ridgeRelief).toBeGreaterThan(lowlandRelief + 3);
+  });
+
+  it("gives lowlands a visible wetland corridor", () => {
+    applyWorldTerrainTemplate("lowlands");
+
+    const height = baseTerrainHeight(-8, -18);
+
+    expect(terrainKind(-8, -18, height)).toBe("water");
+    expect(height).toBeLessThan(1.25);
   });
 });
