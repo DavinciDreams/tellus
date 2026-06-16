@@ -168,6 +168,8 @@ export type WorldPatch =
       terrainProviderKind?: string;
       // Portals in this world (Phase 2; omitted while the backend flag is dark).
       portals?: WorldPortal[];
+      // Phase 3 interiors: a GLB scene url the client renders instead of terrain (cold-load aware).
+      sceneUrl?: string;
     }
   | {
       type: "presence.updated";
@@ -413,6 +415,30 @@ export interface PortalEntered {
   toWorldId: string;
   spawn?: Vec3;
   sceneUrl?: string;
+}
+
+// ── TELLUS INFINITY biomes (Phase 6 frontend) ──
+export interface WorldBiomeCell {
+  cx: number;
+  cz: number;
+  biome: string;
+  becoming?: string;
+  intensity?: number;
+}
+
+export function isWorldBiomeCell(value: unknown): value is WorldBiomeCell {
+  return (
+    isRecord(value) &&
+    typeof value.cx === "number" &&
+    typeof value.cz === "number" &&
+    typeof value.biome === "string"
+  );
+}
+
+/** Changed (or seeded) biome cells from a world.biome.patch, or null. Diff-only — merge into the local grid. */
+export function biomeCellsFromWorldPatch(parsed: unknown): WorldBiomeCell[] | null {
+  if (!isRecord(parsed) || parsed.type !== "world.biome.patch" || !Array.isArray(parsed.biomeCells)) return null;
+  return parsed.biomeCells.filter(isWorldBiomeCell);
 }
 
 /** A world.portal.entered patch — the signal to switch the client to the target world. */

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ClassicTerrainProvider,
   ChunkedTerrainProvider,
+  TilesTerrainProvider,
   inferSubstrate,
   selectTerrainProvider,
 } from "./tellus-terrain-provider";
@@ -55,15 +56,26 @@ describe("TerrainProvider parity + selection", () => {
     expect(inferSubstrate("main")).toBe("classic");
   });
 
-  it("selectTerrainProvider honors explicit kind then prefix, chunked needs a renderer", () => {
-    const fake = { sampleHeight: () => 0 };
+  it("selectTerrainProvider honors explicit kind then prefix, chunked/tiles need a renderer", () => {
+    const fake = { sampleHeight: (x: number) => (x > 0 ? 2 : null) };
     expect(selectTerrainProvider("main", null).kind).toBe("classic");
     expect(selectTerrainProvider("chunked-5", null, { chunkRenderer: fake }).kind).toBe("chunked");
     // chunked id but no renderer → safe classic fallback (never throws)
     expect(selectTerrainProvider("chunked-5", "chunked").kind).toBe("classic");
     // explicit kind wins over prefix
     expect(selectTerrainProvider("main", "chunked", { chunkRenderer: fake }).kind).toBe("chunked");
-    // tiles/interior stub → classic until their phase
+    // tiles world grounds on the chunk-baked heightfield (gameplay substrate); no renderer → classic fallback.
+    const tiles = selectTerrainProvider("tiles-sf", "tiles", { chunkRenderer: fake });
+    expect(tiles.kind).toBe("tiles");
+    expect(tiles.sampleHeight(5, 0)).toBe(2);
+    expect(tiles.sampleHeight(-5, 0)).toBeNull(); // unbaked chunk → flat fallback
     expect(selectTerrainProvider("tiles-x", "tiles").kind).toBe("classic");
+  });
+
+  it("TilesTerrainProvider delegates grounding to the chunk-baked heightfield", () => {
+    const p = new TilesTerrainProvider({ sampleHeight: () => 7.5 });
+    expect(p.kind).toBe("tiles");
+    expect(p.sampleHeight(1, 1)).toBe(7.5);
+    expect(p.terrainKind(0, 0, 0)).toBe("meadow");
   });
 });

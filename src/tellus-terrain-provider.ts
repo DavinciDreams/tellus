@@ -69,6 +69,26 @@ export class ChunkedTerrainProvider implements TerrainProvider {
 }
 
 /**
+ * Tile-backed substrate (Phase 4 — experimental spike). The RENDER substrate is a 3D Tileset (a
+ * `3d-tiles-renderer` mounted in the existing Three scene — a separate, flagged integration that needs the
+ * lib + a tileset URL + perf measurement, per the PRD). The GAMEPLAY substrate, however, is a derived
+ * heightfield BAKED into the same chunk grains the chunked provider streams — so agents + players ground on
+ * the SAME sampler regardless of the fancy visual. That's why this delegates sampleHeight to the chunk
+ * renderer exactly like the chunked provider: the gameplay substrate is solved + consistent today; only the
+ * tileset visual is the spike. (Until a chunk is baked, sampleHeight returns null → flat fallback.)
+ */
+export class TilesTerrainProvider implements TerrainProvider {
+  readonly kind: TerrainProviderKind = "tiles";
+  constructor(private readonly renderer: Pick<ChunkRenderer, "sampleHeight">) {}
+  sampleHeight(x: number, z: number): number | null {
+    return this.renderer.sampleHeight(x, z);
+  }
+  terrainKind(_x: number, _z: number, _y: number): TerrainKind {
+    return "meadow"; // a coarse slope/height-band kind is the spike's follow-up
+  }
+}
+
+/**
  * Pick the gameplay provider for a world. The explicit kind (from the snapshot's terrainProviderKind, which
  * the server stamps + a persisted value wins) takes precedence; null falls back to a worldId-prefix inference
  * mirroring the server's TellusChunkKey.InferSubstrate. tiles/interior providers arrive in their phases and
@@ -83,7 +103,10 @@ export function selectTerrainProvider(
   if (resolved === "chunked" && deps.chunkRenderer) {
     return new ChunkedTerrainProvider(deps.chunkRenderer);
   }
-  // classic | evoflow | tiles(stub) | interior(stub) | chunked-without-renderer → classic math
+  if (resolved === "tiles" && deps.chunkRenderer) {
+    return new TilesTerrainProvider(deps.chunkRenderer);
+  }
+  // classic | evoflow | interior | (chunked|tiles)-without-renderer → classic math
   return new ClassicTerrainProvider();
 }
 

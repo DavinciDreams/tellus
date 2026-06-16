@@ -105,6 +105,8 @@ import {
   portalsFromWorldPatch,
   portalDeletedFromWorldPatch,
   portalEnteredFromWorldPatch,
+  biomeCellsFromWorldPatch,
+  type WorldBiomeCell,
   isTellusTerrainState,
   isWorldGeneratedThing,
   type WorldChatChannel,
@@ -118,7 +120,7 @@ import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayer
 import { readJsonResponse, boundedNumber, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig } from "./tellus-runtime-config";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, toAssetId } from "./tellus-urls-identity";
-import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyElevated, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, onTerrainTemplateLoaded } from "./tellus-terrain";
+import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyElevated, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial } from "./tellus-terrain-material";
@@ -429,6 +431,55 @@ function skyboxLabel(url: string): string {
   return SKYBOX_OPTIONS.find((option) => option.url === normalized)?.label ?? "Custom Sky";
 }
 
+// TELLUS INFINITY: a compact biome minimap (24×24 cells = the server BiomeGrid). Cells default to meadow;
+// the diff-merged worldBiomeCells color the evolved regions. A cell mid-transition (becoming) gets a ring.
+const BIOME_COLORS: Record<string, string> = {
+  meadow: "#5f9e6a",
+  forest: "#264d2e",
+  desert: "#cdb277",
+  snow: "#e8eef2",
+  dirt: "#8a6a44",
+  water: "#3a6ea5",
+  alien: "#a45cc0",
+};
+function BiomeMap({ cells }: { cells: WorldBiomeCell[] }) {
+  const N = 24;
+  const byCell = new Map(cells.map((c) => [`${c.cx}:${c.cz}`, c]));
+  return (
+    <aside
+      aria-label="Biome map"
+      style={{
+        position: "fixed",
+        left: 12,
+        bottom: 12,
+        zIndex: 20,
+        background: "rgba(0,0,0,0.55)",
+        color: "#dfe7d8",
+        borderRadius: 10,
+        padding: "8px 10px",
+        font: "600 11px/1.2 ui-sans-serif, system-ui",
+      }}
+    >
+      <div style={{ opacity: 0.7, marginBottom: 4 }}>Biomes (live)</div>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${N}, 5px)`, gridAutoRows: "5px", gap: 0 }}>
+        {Array.from({ length: N * N }, (_, i) => {
+          const cx = i % N;
+          const cz = Math.floor(i / N);
+          const c = byCell.get(`${cx}:${cz}`);
+          const color = BIOME_COLORS[c?.biome ?? "meadow"] ?? BIOME_COLORS.meadow;
+          return (
+            <div
+              key={i}
+              title={c ? `${c.biome}${c.becoming ? ` → ${c.becoming}` : ""}` : "meadow"}
+              style={{ width: 5, height: 5, background: color, boxShadow: c?.becoming ? "inset 0 0 0 1px rgba(255,255,255,0.6)" : undefined }}
+            />
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
 function AgentToolChipPill({ chip }: { chip: AgentToolChip }) {
   const label = chip.summary ? `${chip.name} · ${chip.summary}` : chip.name;
   return (
@@ -466,6 +517,8 @@ function createTellusWorld(
   // layer consumes to switch worlds (with spawn). Both ride the snapshot bridge.
   let worldPortals: WorldPortal[] = [];
   let pendingPortalSwitch: PortalEntered | null = null;
+  // TELLUS INFINITY biomes: the world's biome cells keyed "cx:cz" (diff-merged from world.biome.patch).
+  const worldBiomeCells = new Map<string, WorldBiomeCell>();
   const seenWorldChatIds = new Set<string>();
   const generatedMeshes = new Map<string, THREE.Object3D>();
   const generatedAnimationMixers = new Map<string, THREE.AnimationMixer>();
@@ -862,6 +915,37 @@ function createTellusWorld(
     createFloatingRim(),
   );
 
+  // TELLUS INFINITY (Phase 3) interiors: when the world snapshot carries a sceneUrl, this world is an INTERIOR
+  // — render its GLB room instead of the outdoor terrain. Idempotent (loads each url once); the outdoor meshes
+  // are hidden, the player grounds on the room floor (flat y≈0 — interiors have no heightfield).
+  let interiorObject: THREE.Object3D | null = null;
+  let interiorSceneUrl: string | null = null;
+  const applyInterior = (sceneUrl: string) => {
+    const u = sceneUrl.trim();
+    if (!u || u === interiorSceneUrl) return;
+    interiorSceneUrl = u;
+    for (const m of [ocean, archipelago, terrain, pondWater, flowerPatchGroup]) m.visible = false;
+    setChunkedFlatGround(0); // ground the player on the room floor (no heightfield inside)
+    void loadGltfObject(u)
+      .then((obj) => {
+        if (destroyed) {
+          disposeObject(obj);
+          return;
+        }
+        if (interiorObject) {
+          scene.remove(interiorObject);
+          disposeObject(interiorObject);
+        }
+        obj.name = "tellus-interior";
+        interiorObject = obj;
+        scene.add(obj);
+        addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `Entered interior scene: ${u}` });
+      })
+      .catch((error) =>
+        addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `interior scene failed to load: ${error}` }),
+      );
+  };
+
   let transformControls: TransformControls | null = null;
   let transformControlsHelper: THREE.Object3D | null = null;
   let transformControlsObject: THREE.Object3D | null = null;
@@ -1103,6 +1187,7 @@ function createTellusWorld(
     sailingThingId,
     portals: worldPortals.map((p) => ({ ...p, position: { ...p.position }, target: { ...p.target } })),
     portalSwitch: pendingPortalSwitch ?? undefined,
+    biomeCells: worldBiomeCells.size > 0 ? Array.from(worldBiomeCells.values()).map((c) => ({ ...c })) : undefined,
   });
 
   // Coalesce HUD publishes to at most one per animation frame. publish() can be called many times per frame
@@ -1603,6 +1688,9 @@ function createTellusWorld(
       // portal.updated patches one; the world.portal.entered frame is React's signal to switch worlds.
       if ((parsed as { type?: string } | null)?.type === "world.snapshot") {
         worldPortals = portalsFromWorldPatch(parsed) ?? [];
+        // Phase 3: an interior snapshot carries a sceneUrl → render the GLB room instead of terrain.
+        const sceneUrl = (parsed as { sceneUrl?: unknown }).sceneUrl;
+        if (typeof sceneUrl === "string" && sceneUrl) applyInterior(sceneUrl);
         publish();
       } else {
         const portalUpsert = portalsFromWorldPatch(parsed);
@@ -1622,6 +1710,12 @@ function createTellusWorld(
       if (entered) {
         pendingPortalSwitch = entered;
         addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `Entering portal → ${entered.toWorldId}` });
+        publish();
+      }
+      // TELLUS INFINITY biomes: diff-merge the changed cells into the local grid (a seed sends the full set).
+      const biomeCells = biomeCellsFromWorldPatch(parsed);
+      if (biomeCells) {
+        for (const c of biomeCells) worldBiomeCells.set(`${c.cx}:${c.cz}`, c);
         publish();
       }
       // Emote frames: play that clip ONCE over the avatar's locomotion, then resume. Rigless
@@ -7593,6 +7687,7 @@ function App(): React.ReactElement {
             </div>
           </div>
         </div>
+        {snapshot.biomeCells && snapshot.biomeCells.length > 0 && <BiomeMap cells={snapshot.biomeCells} />}
         {snapshot.portals && snapshot.portals.length > 0 && (
           <aside
             className="portal-panel"
