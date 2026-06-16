@@ -9,6 +9,8 @@ const TEMPLATE_IDS = new Set<WorldTemplateId>([
   "wide-island",
   "lowlands",
   "ridge",
+  "evoflow-coral-canyon",
+  "evoflow-coral-canyon-child",
 ]);
 
 const TEMPLATE_PRESETS: Record<
@@ -95,6 +97,46 @@ const TEMPLATE_PRESETS: Record<
       baseOffset: -0.7,
     },
   },
+  "evoflow-coral-canyon": {
+    defaultSkyboxUrl: "/skybox/tellus-alien-rings/scene.gltf",
+    landShape: {
+      mountain: { height: 10, radius: 34, exponent: 1.8 },
+      shoulder: { x: -18, z: 16, radius: 320, height: 3.2 },
+      southernRise: { x: 18, z: -24, radius: 280, height: 2.6 },
+      ridge: { sinScale: 0.7, cosScale: 0.52, diagonalScale: 0.36 },
+      shore: { startRatio: 0.78, widthRatio: 0.22, drop: 4.8 },
+      pond: { x: 16, z: -10, radius: 8.8, depth: 2, falloff: 95 },
+      detail: {
+        amplitude: 1.2,
+        scale: 0.035,
+        warp: 9,
+        ridgeAmplitude: 1.15,
+        terraceAmplitude: 0.22,
+        terraceFrequency: 0.68,
+      },
+      baseOffset: -0.85,
+    },
+  },
+  "evoflow-coral-canyon-child": {
+    defaultSkyboxUrl: "/skybox/tellus-alien-rings/scene.gltf",
+    landShape: {
+      mountain: { height: 11, radius: 32, exponent: 1.95 },
+      shoulder: { x: -20, z: 12, radius: 300, height: 3.5 },
+      southernRise: { x: 20, z: -22, radius: 260, height: 2.8 },
+      ridge: { sinScale: 0.78, cosScale: 0.55, diagonalScale: 0.4 },
+      shore: { startRatio: 0.78, widthRatio: 0.22, drop: 4.9 },
+      pond: { x: 15, z: -12, radius: 8.4, depth: 2.1, falloff: 90 },
+      detail: {
+        amplitude: 1.28,
+        scale: 0.037,
+        warp: 10,
+        ridgeAmplitude: 1.25,
+        terraceAmplitude: 0.25,
+        terraceFrequency: 0.7,
+      },
+      baseOffset: -0.9,
+    },
+  },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -142,6 +184,9 @@ export function templateForWorldId(
 ): WorldTemplateId {
   const id = worldId.trim().toLowerCase();
   if (id.includes("ridge") || id.includes("mountain")) return "ridge";
+  if (id.includes("evoflow") || id.includes("coral") || id.includes("canyon")) {
+    return "evoflow-coral-canyon";
+  }
   if (id.includes("low") || id.includes("flat") || id.includes("meadow")) return "lowlands";
   if (id.includes("wide") || id.includes("archipelago") || id.includes("isle")) {
     return "wide-island";

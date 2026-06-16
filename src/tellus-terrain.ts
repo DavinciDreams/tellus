@@ -51,6 +51,10 @@ import {
   parseWorldTemplateId,
   resolveLandShapeConfig,
 } from "./tellus-world-templates";
+import {
+  type EvoflowTerrainSource,
+  evoflowTerrainSourceFor,
+} from "./tellus-evoflow-terrains";
 import type {
   LandShapeOverrides,
   WorldTemplateId,
@@ -65,6 +69,24 @@ export let terrainStateDirty = false;
 export let terrainStateLoaded = false;
 export let terrainStateRevision = 0;
 export let tellusWorldBackendAvailable = false;
+
+interface EvoflowRaster {
+  width: number;
+  height: number;
+  heightData: Uint8ClampedArray;
+  semanticData: Uint8ClampedArray | null;
+  source: EvoflowTerrainSource;
+}
+
+const evoflowRasterCache = new Map<WorldTemplateId, EvoflowRaster>();
+let activeEvoflowRaster: EvoflowRaster | null = null;
+let activeEvoflowLoadToken = 0;
+let terrainTemplateLoadedCallback: (() => void) | null = null;
+
+export function onTerrainTemplateLoaded(callback: (() => void) | null): void {
+  terrainTemplateLoadedCallback = callback;
+  if (callback && activeEvoflowRaster) callback();
+}
 
 // Chunked worlds have NO radial island — they're a flat tiled plane (chunk base y=0) + per-chunk
 // sculpts. When set (non-null), grounding ignores the classic origin-centred island math and returns
@@ -132,12 +154,154 @@ export function applyWorldTerrainTemplate(
 ): void {
   activeTemplate = template;
   activeLandShape = resolveLandShapeConfig(template, overrides);
+  beginEvoflowTerrainLoad(template);
   setClassicPondShape(
     activeLandShape.pond.x,
     activeLandShape.pond.z,
     activeLandShape.pond.radius,
   );
 }
+
+function readImageData(url: string): Promise<ImageData> {
+  return new Promise((resolve, reject) => {
+    if (typeof document === "undefined" || typeof Image === "undefined") {
+      reject(new Error("image decoding unavailable"));
+      return;
+    }
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth || image.width;
+      canvas.height = image.naturalHeight || image.height;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) {
+        reject(new Error("canvas unavailable"));
+        return;
+      }
+      ctx.drawImage(image, 0, 0);
+      resolve(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    };
+    image.onerror = () => reject(new Error(`failed to load ${url}`));
+    image.src = url;
+  });
+}
+
+async function beginEvoflowTerrainLoad(template: WorldTemplateId): Promise<void> {
+  const source = evoflowTerrainSourceFor(template);
+  activeEvoflowLoadToken++;
+  const token = activeEvoflowLoadToken;
+  if (!source) {
+    activeEvoflowRaster = null;
+    return;
+  }
+
+  const cached = evoflowRasterCache.get(template);
+  if (cached) {
+    activeEvoflowRaster = cached;
+    return;
+  }
+
+  activeEvoflowRaster = null;
+  try {
+    const [heightImage, semanticImage] = await Promise.all([
+      readImageData(source.heightUrl),
+      readImageData(source.semanticUrl).catch(() => null),
+    ]);
+    const raster: EvoflowRaster = {
+      width: heightImage.width,
+      height: heightImage.height,
+      heightData: heightImage.data,
+      semanticData: semanticImage?.data ?? null,
+      source,
+    };
+    evoflowRasterCache.set(template, raster);
+    if (token !== activeEvoflowLoadToken || activeTemplate !== template) return;
+    activeEvoflowRaster = raster;
+    terrainTemplateLoadedCallback?.();
+  } catch (error) {
+    console.warn("Tellus Evoflow terrain load failed", source.heightUrl, error);
+  }
+}
+
+function sampleRasterChannel(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  u: number,
+  v: number,
+): number {
+  const x = clamp(u, 0, 1) * (width - 1);
+  const y = clamp(v, 0, 1) * (height - 1);
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = Math.min(width - 1, x0 + 1);
+  const y1 = Math.min(height - 1, y0 + 1);
+  const tx = x - x0;
+  const ty = y - y0;
+  const at = (px: number, py: number) => data[(py * width + px) * 4] ?? 0;
+  const a = at(x0, y0);
+  const b = at(x1, y0);
+  const c = at(x0, y1);
+  const d = at(x1, y1);
+  return (
+    a * (1 - tx) * (1 - ty) +
+    b * tx * (1 - ty) +
+    c * (1 - tx) * ty +
+    d * tx * ty
+  );
+}
+
+function evoflowUv(cx: number, cz: number): { u: number; v: number } {
+  return {
+    u: cx / (CLASSIC_WORLD_RADIUS * 2) + 0.5,
+    v: cz / (CLASSIC_WORLD_RADIUS * 2) + 0.5,
+  };
+}
+
+function evoflowBaseTerrainHeight(cx: number, cz: number, r: number): number | null {
+  if (!activeEvoflowRaster) return null;
+  const { u, v } = evoflowUv(cx, cz);
+  const raw = sampleRasterChannel(
+    activeEvoflowRaster.heightData,
+    activeEvoflowRaster.width,
+    activeEvoflowRaster.height,
+    u,
+    v,
+  );
+  const normalized = raw / 255;
+  const source = activeEvoflowRaster.source;
+  const shoreFade = 1 - smoothstep(
+    CLASSIC_WORLD_RADIUS * 0.84,
+    CLASSIC_WORLD_RADIUS * 0.99,
+    r,
+  );
+  const rimDrop = Math.max(0, (r - CLASSIC_WORLD_RADIUS * 0.9) / (CLASSIC_WORLD_RADIUS * 0.1)) * 4.5;
+  return (normalized - 0.33) * source.heightScale * Math.max(0.28, shoreFade) + source.heightOffset - rimDrop;
+}
+
+function evoflowTerrainKind(cx: number, cz: number, y: number): TerrainKind | null {
+  if (!activeEvoflowRaster?.semanticData) return null;
+  const { u, v } = evoflowUv(cx, cz);
+  const label = Math.round(
+    sampleRasterChannel(
+      activeEvoflowRaster.semanticData,
+      activeEvoflowRaster.width,
+      activeEvoflowRaster.height,
+      u,
+      v,
+    ),
+  );
+  if (label <= 0 && y < -1.5) return "water";
+  if (label === 1) return "dirt";
+  if (label === 3) return "rock";
+  if (label === 4) return "flowers";
+  if (label === 5) return "meadow";
+  if (y > 12.5) return "rock";
+  if (y < -1.5) return "beach";
+  return "meadow";
+}
+
+void beginEvoflowTerrainLoad(activeTemplate);
 
 function fade(t: number): number {
   return t * t * (3 - 2 * t);
@@ -736,6 +900,8 @@ export function baseTerrainHeight(x: number, z: number): number {
   const cz = z / WORLD_SCALE;
   const shape = activeLandShape;
   const r = Math.hypot(cx, cz);
+  const evoflowHeight = evoflowBaseTerrainHeight(cx, cz, r);
+  if (evoflowHeight !== null) return evoflowHeight;
   const mountain = Math.max(0, 1 - r / shape.mountain.radius);
   const mound = Math.pow(mountain, shape.mountain.exponent) * shape.mountain.height;
   const shoulder =
@@ -775,6 +941,8 @@ export function terrainKind(x: number, z: number, y: number): TerrainKind {
   // Classic-space: kind bands follow the scaled island features (matches the server port).
   const cx = x / WORLD_SCALE;
   const cz = z / WORLD_SCALE;
+  const evoflowKind = evoflowTerrainKind(cx, cz, y);
+  if (evoflowKind) return evoflowKind;
   if (activeTemplate === "lowlands") {
     const river = lowlandRiverStrength(cx, cz);
     if (river > 0.72 && y < 1.25) return "water";

@@ -15,7 +15,13 @@ export type TerrainKind =
   | "water";
 export type TerrainPaintKind = Exclude<TerrainKind, "water">;
 export type TerrainEditMode = "raise" | "lower" | "flatten" | TerrainPaintKind;
-export type WorldTemplateId = "tellus" | "wide-island" | "lowlands" | "ridge";
+export type WorldTemplateId =
+  | "tellus"
+  | "wide-island"
+  | "lowlands"
+  | "ridge"
+  | "evoflow-coral-canyon"
+  | "evoflow-coral-canyon-child";
 
 export interface TerrainMountainShape {
   height: number;
