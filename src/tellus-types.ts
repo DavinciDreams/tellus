@@ -15,7 +15,19 @@ export type TerrainKind =
   | "water";
 export type TerrainPaintKind = Exclude<TerrainKind, "water">;
 export type TerrainEditMode = "raise" | "lower" | "flatten" | TerrainPaintKind;
-export type WorldTemplateId = "tellus" | "wide-island" | "lowlands" | "ridge";
+export type WorldTemplateId =
+  | "tellus"
+  | "wide-island"
+  | "lowlands"
+  | "ridge"
+  | "evoflow-coral-canyon"
+  | "evoflow-coral-canyon-child"
+  | "evoflow-spires"
+  | "evoflow-glass-ridge"
+  | "evoflow-lichen-basin"
+  | "evoflow-copper-terraces"
+  | "evoflow-basalt-teeth"
+  | "evoflow-coral-fold";
 
 export interface TerrainMountainShape {
   height: number;
@@ -50,6 +62,15 @@ export interface TerrainPondShape {
   falloff: number;
 }
 
+export interface TerrainDetailShape {
+  amplitude: number;
+  scale: number;
+  warp: number;
+  ridgeAmplitude: number;
+  terraceAmplitude: number;
+  terraceFrequency: number;
+}
+
 export interface LandShapeConfig {
   mountain: TerrainMountainShape;
   shoulder: TerrainBumpShape;
@@ -57,6 +78,7 @@ export interface LandShapeConfig {
   ridge: TerrainRidgeShape;
   shore: TerrainShoreShape;
   pond: TerrainPondShape;
+  detail: TerrainDetailShape;
   baseOffset: number;
 }
 
@@ -67,6 +89,7 @@ export interface LandShapeOverrides {
   ridge?: Partial<TerrainRidgeShape>;
   shore?: Partial<TerrainShoreShape>;
   pond?: Partial<Omit<TerrainPondShape, "falloff">> & { falloff?: number };
+  detail?: Partial<TerrainDetailShape>;
   baseOffset?: number;
 }
 

@@ -1,0 +1,53 @@
+{
+  "concept": "coral cathedral city grown inside a canyon",
+  "created_at": "2026-05-09T09:04:02.215668",
+  "id": "world_1c1a355ce3af",
+  "lineage": {
+    "generation": 0,
+    "operation": "generate"
+  },
+  "modules": {
+    "camera": {
+      "height": 0.432,
+      "radius": 0.624,
+      "views": 8
+    },
+    "fractal": {
+      "amplitude": 0.299,
+      "folds": 7,
+      "frequency": 1.789
+    },
+    "graph": {
+      "landmarks": 7,
+      "path_width": 10,
+      "settlement_bias": 0.599
+    },
+    "materials": {
+      "detail_density": 0.662,
+      "palette": "glass-basalt"
+    },
+    "semantics": {
+      "landmark_label": 4,
+      "path_label": 1,
+      "regions": [
+        "void",
+        "path",
+        "lowland",
+        "ridge",
+        "landmark",
+        "wild"
+      ]
+    },
+    "terrain": {
+      "basin_strength": 0.34,
+      "octaves": 4,
+      "ridge_strength": 0.367,
+      "roughness": 0.506,
+      "size": 256
+    }
+  },
+  "parents": [],
+  "schema_version": "0.1.0",
+  "scores": {},
+  "seed": 43
+}
