@@ -117,6 +117,7 @@ import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThi
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial } from "./tellus-terrain-material";
+import { largeWorldTerrainKind } from "./tellus-large-world-terrain";
 import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
@@ -732,37 +733,61 @@ function createTellusWorld(
   // trees/rocks) and the lightweight physics world (thrown things, player jump/obstacles). Both are
   // deterministic from the synced terrain state — no protocol changes.
   //
-  // Vegetation is OFF by default (per-frame streaming/stamping cost); the localStorage
-  // "tellus.grass"="1" escape hatch re-enables the full system. When off, a no-op stub stands in so
-  // every call site (per-frame update, terrain-change notify, tree colliders, stats, dispose) stays
-  // branch-free — zero per-frame cost.
+  // Classic-world vegetation remains opt-in via localStorage "tellus.grass"="1"; chunked worlds
+  // enable the lighter near-player grass layer by default, with "tellus.grass"="0" as an escape hatch.
+  // When off, a no-op stub stands in so every call site stays branch-free.
+  const isChunked = isChunkedWorldId(runtimeConfig.worldId);
+  const chunkedDims = isChunked ? getChunkedWorldChunks() : null;
+  const chunkedVegetationBounds = chunkedDims
+    ? {
+        minX: 0,
+        maxX: chunkedDims.w * CHUNK_SPAN,
+        minZ: 0,
+        maxZ: chunkedDims.h * CHUNK_SPAN,
+      }
+    : undefined;
   const grassEnabled = (() => {
     try {
-      return window.localStorage.getItem("tellus.grass") === "1";
+      const pref = window.localStorage.getItem("tellus.grass");
+      if (pref !== null) return pref === "1";
+      return isChunked;
     } catch {
-      return false;
+      return isChunked;
     }
   })();
   const vegetation = grassEnabled
     ? createVegetation({
         scene,
         useWebGPU,
-        sampleHeight: terrainHeight,
-        samplePaint: centralTerrainPaintAt,
-        isExcluded: (x, z, h) => {
-          const pdx = x - POND_CENTER.x;
-          const pdz = z - POND_CENTER.z;
-          return (
-            pdx * pdx + pdz * pdz < (POND_RADIUS + 0.6) * (POND_RADIUS + 0.6) &&
-            h < pondWaterLevel() + 0.35
-          );
-        },
-        pondRing: {
-          x: POND_CENTER.x,
-          z: POND_CENTER.z,
-          radius: POND_RADIUS,
-          level: pondWaterLevel(),
-        },
+        sampleHeight: isChunked
+          ? (x, z) => groundHeightAt(x, z) ?? 0
+          : terrainHeight,
+        samplePaint: isChunked
+          ? (x, z) => {
+              const kind = largeWorldTerrainKind(x, z);
+              return kind === "water" ? null : kind;
+            }
+          : centralTerrainPaintAt,
+        bounds: chunkedVegetationBounds,
+        sectorsEnabled: !isChunked,
+        isExcluded: isChunked
+          ? () => false
+          : (x, z, h) => {
+              const pdx = x - POND_CENTER.x;
+              const pdz = z - POND_CENTER.z;
+              return (
+                pdx * pdx + pdz * pdz < (POND_RADIUS + 0.6) * (POND_RADIUS + 0.6) &&
+                h < pondWaterLevel() + 0.35
+              );
+            },
+        pondRing: isChunked
+          ? undefined
+          : {
+              x: POND_CENTER.x,
+              z: POND_CENTER.z,
+              radius: POND_RADIUS,
+              level: pondWaterLevel(),
+            },
       })
     : {
         update: () => undefined,
@@ -783,7 +808,6 @@ function createTellusWorld(
     },
     worldRadius: OCEAN_RADIUS - 6,
   });
-  const isChunked = isChunkedWorldId(runtimeConfig.worldId);
   let chunkRenderer: ChunkRenderer | null = null;
   let lastActiveChunkCount = -1; // re-ground placed assets when the active chunk set changes
   const terrain = new THREE.Mesh(

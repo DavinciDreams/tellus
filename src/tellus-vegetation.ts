@@ -63,6 +63,8 @@ export interface VegetationOptions {
   useWebGPU: boolean;
   sampleHeight: (x: number, z: number) => number;
   samplePaint: (x: number, z: number) => TerrainPaintKind | null;
+  bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
+  sectorsEnabled?: boolean;
   /** Extra exclusion test (the pond bowl) — return true to keep this spot clear. */
   isExcluded: (x: number, z: number, height: number) => boolean;
   /** Pond ring info for reed placement. */
@@ -146,9 +148,30 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   const { scene, useWebGPU, sampleHeight, samplePaint, isExcluded, pondRing } = options;
 
   // World geometry captured at construction (setWorldScale ran before the world was created).
+  const minWorldX = options.bounds?.minX ?? -WORLD_RADIUS;
+  const maxWorldX = options.bounds?.maxX ?? WORLD_RADIUS;
+  const minWorldZ = options.bounds?.minZ ?? -WORLD_RADIUS;
+  const maxWorldZ = options.bounds?.maxZ ?? WORLD_RADIUS;
+  const spanX = maxWorldX - minWorldX;
+  const spanZ = maxWorldZ - minWorldZ;
+  const classicDiscBounds = !options.bounds;
   const halfWorld = WORLD_RADIUS;
-  const grid = Math.ceil((2 * halfWorld) / CHUNK);
-  const sectorsPerSide = Math.ceil((2 * halfWorld) / SECTOR);
+  const gridX = Math.ceil(spanX / CHUNK);
+  const gridZ = Math.ceil(spanZ / CHUNK);
+  const sectorsPerSideX = Math.ceil(spanX / SECTOR);
+  const sectorsPerSideZ = Math.ceil(spanZ / SECTOR);
+  const sectorsEnabled = options.sectorsEnabled ?? true;
+  const inWorld = (x: number, z: number, margin = 0) => {
+    if (!classicDiscBounds) {
+      return (
+        x >= minWorldX + margin &&
+        x <= maxWorldX - margin &&
+        z >= minWorldZ + margin &&
+        z <= maxWorldZ - margin
+      );
+    }
+    return x * x + z * z <= (halfWorld - margin) * (halfWorld - margin);
+  };
 
   // Templates
   const grassTpl = buildGrassTemplate();
@@ -317,15 +340,14 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   // ── Chunk build: grass + flowers + small flora ──
   const buildChunk = (chunk: ActiveChunk) => {
     const { cx, cz, pooled } = chunk;
-    const ox = cx * CHUNK - halfWorld;
-    const oz = cz * CHUNK - halfWorld;
+    const ox = minWorldX + cx * CHUNK;
+    const oz = minWorldZ + cz * CHUNK;
     const rng = mulberry32(cellSeed(cx, cz, 0x5eed));
     const cur: StampCursor = { v: 0, i: 0 };
     const tierCap = Math.round(MAX_TUFTS * TIERS[tier].density);
     let placed = 0;
     let minY = Infinity;
     let maxY = -Infinity;
-    const edge2 = (halfWorld - 1.2) * (halfWorld - 1.2);
     const track = (h: number, top: number) => {
       if (h < minY) minY = h;
       if (h + top > maxY) maxY = h + top;
@@ -338,7 +360,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       const yawJit = rng();
       const tintJit = rng();
       const phaseJit = rng();
-      if (x * x + z * z > edge2) continue;
+      if (!inWorld(x, z, 1.2)) continue;
       const h = sampleHeight(x, z);
       if (h < SEA_LEVEL + 0.45) continue;
       if (isExcluded(x, z, h)) continue;
@@ -359,7 +381,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       const roll = rng();
       const pick = rng();
       const yawJit = rng();
-      if (x * x + z * z > edge2) continue;
+      if (!inWorld(x, z, 1.2)) continue;
       const paint = samplePaint(x, z);
       const accept = paint === "flowers" ? 0.5 : paint === "meadow" || paint === null ? 0.055 : 0;
       if (roll > accept * TIERS[tier].density) continue;
@@ -377,7 +399,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       const roll = rng();
       const pick = rng();
       const yawJit = rng();
-      if (x * x + z * z > edge2) continue;
+      if (!inWorld(x, z, 1.2)) continue;
       const h = sampleHeight(x, z);
       if (isExcluded(x, z, h)) continue;
       const paint = samplePaint(x, z);
@@ -433,13 +455,15 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     rocks: PooledMesh | null;
   }
   const sectors: Sector[] = [];
-  for (let sx = 0; sx < sectorsPerSide; sx++) {
-    for (let sz = 0; sz < sectorsPerSide; sz++) {
-      const centerX = sx * SECTOR - halfWorld + SECTOR / 2;
-      const centerZ = sz * SECTOR - halfWorld + SECTOR / 2;
-      // skip sectors entirely outside the island disc
-      if (Math.hypot(centerX, centerZ) - SECTOR * 0.71 > halfWorld) continue;
-      sectors.push({ sx, sz, trees: null, rocks: null });
+  if (sectorsEnabled) {
+    for (let sx = 0; sx < sectorsPerSideX; sx++) {
+      for (let sz = 0; sz < sectorsPerSideZ; sz++) {
+        const centerX = minWorldX + sx * SECTOR + SECTOR / 2;
+        const centerZ = minWorldZ + sz * SECTOR + SECTOR / 2;
+        // skip sectors entirely outside the island disc
+        if (classicDiscBounds && Math.hypot(centerX, centerZ) - SECTOR * 0.71 > halfWorld) continue;
+        sectors.push({ sx, sz, trees: null, rocks: null });
+      }
     }
   }
   let treeColliders: TreeCollider[] = [];
@@ -479,8 +503,8 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   };
 
   const buildSector = (sector: Sector) => {
-    const ox = sector.sx * SECTOR - halfWorld;
-    const oz = sector.sz * SECTOR - halfWorld;
+    const ox = minWorldX + sector.sx * SECTOR;
+    const oz = minWorldZ + sector.sz * SECTOR;
     // trees
     sector.trees ??= makePooled(TREES_PER_SECTOR * maxTreeVerts, TREES_PER_SECTOR * maxTreeIdx, treeMaterial);
     sector.trees.mesh.castShadow = true;
@@ -488,14 +512,13 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     let minY = Infinity;
     let maxY = -Infinity;
     let stamped = 0;
-    const edge2 = (halfWorld - 3) * (halfWorld - 3);
     for (let gx = ox + 3; gx < ox + SECTOR && stamped < TREES_PER_SECTOR; gx += 7.5) {
       for (let gz = oz + 3; gz < oz + SECTOR && stamped < TREES_PER_SECTOR; gz += 7.5) {
         const rng = mulberry32(cellSeed(Math.round(gx * 3), Math.round(gz * 3), 0x7ee5));
         const x = gx + rng() * 6;
         const z = gz + rng() * 6;
         if (x < ox || z < oz || x >= ox + SECTOR || z >= oz + SECTOR) continue;
-        if (x * x + z * z > edge2) continue;
+        if (!inWorld(x, z, 3)) continue;
         const h = sampleHeight(x, z);
         if (h < SEA_LEVEL + 0.45) continue;
         if (isExcluded(x, z, h)) continue;
@@ -534,7 +557,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
         const x = gx + rng() * 4.4;
         const z = gz + rng() * 4.4;
         if (x < ox || z < oz || x >= ox + SECTOR || z >= oz + SECTOR) continue;
-        if (x * x + z * z > (halfWorld - 2) * (halfWorld - 2)) continue;
+        if (!inWorld(x, z, 2)) continue;
         const h = sampleHeight(x, z);
         if (h < SEA_LEVEL + 0.3) continue;
         if (isExcluded(x, z, h)) continue;
@@ -571,15 +594,15 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   const diffChunks = (px: number, pz: number) => {
     const radius = TIERS[tier].radius;
     const reach = radius + CHUNK * 0.71;
-    const minCx = Math.max(0, Math.floor((px - reach + halfWorld) / CHUNK));
-    const maxCx = Math.min(grid - 1, Math.floor((px + reach + halfWorld) / CHUNK));
-    const minCz = Math.max(0, Math.floor((pz - reach + halfWorld) / CHUNK));
-    const maxCz = Math.min(grid - 1, Math.floor((pz + reach + halfWorld) / CHUNK));
+    const minCx = Math.max(0, Math.floor((px - reach - minWorldX) / CHUNK));
+    const maxCx = Math.min(gridX - 1, Math.floor((px + reach - minWorldX) / CHUNK));
+    const minCz = Math.max(0, Math.floor((pz - reach - minWorldZ) / CHUNK));
+    const maxCz = Math.min(gridZ - 1, Math.floor((pz + reach - minWorldZ) / CHUNK));
     const wanted = new Set<string>();
     for (let cx = minCx; cx <= maxCx; cx++) {
       for (let cz = minCz; cz <= maxCz; cz++) {
-        const dx = cx * CHUNK - halfWorld + CHUNK / 2 - px;
-        const dz = cz * CHUNK - halfWorld + CHUNK / 2 - pz;
+        const dx = minWorldX + cx * CHUNK + CHUNK / 2 - px;
+        const dz = minWorldZ + cz * CHUNK + CHUNK / 2 - pz;
         if (dx * dx + dz * dz > reach * reach) continue;
         const key = chunkKey(cx, cz);
         wanted.add(key);
