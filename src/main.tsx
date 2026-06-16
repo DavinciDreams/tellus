@@ -113,6 +113,7 @@ import { createTerrainMaterial } from "./tellus-terrain-material";
 import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
+import { buildAgentMapLocation, resolveAgentMoveTarget } from "./tellus-agent-location";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseWorldTemplateId, templateForWorldId } from "./tellus-world-templates";
 import "./styles.css";
 
@@ -4632,10 +4633,30 @@ function createTellusWorld(
     },
     getState(radius = 30) {
       const groundHeight = terrainHeight(visitorPosition.x, visitorPosition.z);
-      return {
-        visitorId,
-        position: { ...visitorPosition },
+      const mapLocation = buildAgentMapLocation({
+        worldId: runtimeConfig.worldId,
+        position: visitorPosition,
+        worldScale: WORLD_SCALE,
+        worldRadius: WORLD_RADIUS,
+        oceanRadius: OCEAN_RADIUS,
         terrainType: terrainKind(visitorPosition.x, visitorPosition.z, groundHeight),
+        terrainHeight: groundHeight,
+        pondCenter: POND_CENTER,
+        chunkedWorldChunks: isChunked ? getChunkedWorldChunks() : null,
+        chunkSpan: CHUNK_SPAN,
+      });
+      return {
+        worldId: runtimeConfig.worldId,
+        visitorId,
+        location: mapLocation,
+        mapLocation: mapLocation.mapLocation,
+        coordinates: mapLocation.coordinates,
+        position: { ...visitorPosition },
+        facing: {
+          yawRadians: yaw,
+          yawDegrees: Math.round((((yaw * 180) / Math.PI) % 360 + 360) % 360),
+        },
+        terrainType: mapLocation.terrain.type,
         terrainHeight: groundHeight,
         distanceToPond: Math.hypot(visitorPosition.x - POND_CENTER.x, visitorPosition.z - POND_CENTER.z),
         distanceToSummit: Math.hypot(visitorPosition.x, visitorPosition.z),
@@ -4667,13 +4688,22 @@ function createTellusWorld(
       const a = args ?? {};
       switch (verb) {
         case "moveSelf": {
-          visitorPosition = groundedPosition(
-            visitorPosition.x + clamp(num(a.dx, 0), -8, 8),
-            visitorPosition.z + clamp(num(a.dz, 0), -8, 8),
+          const moved = resolveAgentMoveTarget(
+            a,
             visitorPosition,
+            8,
+            (x, z) => groundedPosition(x, z, visitorPosition),
           );
+          visitorPosition = moved.position;
           sendPresenceUpdate(true);
-          return { ok: true, position: { ...visitorPosition } };
+          return {
+            ok: true,
+            worldId: runtimeConfig.worldId,
+            position: { ...visitorPosition },
+            target: moved.target,
+            distanceRemaining: moved.distanceRemaining,
+            reached: moved.reached,
+          };
         }
         case "generate": {
           if (typeof a.prompt !== "string" || !a.prompt.trim()) return { ok: false, error: "generate requires a prompt" };
