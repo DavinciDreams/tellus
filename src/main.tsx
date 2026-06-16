@@ -94,8 +94,11 @@ import {
   type WorldPatch,
   emoteFromWorldPatch,
   chunkUpdatedFromWorldPatch,
+  worldChatFromWorldPatch,
   isTellusTerrainState,
   isWorldGeneratedThing,
+  type WorldChatChannel,
+  type WorldChatMessage,
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides } from "./tellus-types";
@@ -252,6 +255,8 @@ function createTellusWorld(
 
   const generated: GeneratedThing[] = [];
   const logs: TellusLog[] = [];
+  const worldChat: WorldChatMessage[] = [];
+  const seenWorldChatIds = new Set<string>();
   const generatedMeshes = new Map<string, THREE.Object3D>();
   const generatedAnimationMixers = new Map<string, THREE.AnimationMixer>();
   // Placed VRM things (auton/Atlantean store models) animate through a real VRM rig — a VRMA idle clip
@@ -836,6 +841,7 @@ function createTellusWorld(
       position: { ...thing.position },
     })),
     logs: logs.slice(-80),
+    worldChat: worldChat.slice(-120),
     generationProvider: runtimeConfig.generationProvider,
     playerGenerationProvider: runtimeConfig.playerGenerationProvider,
     agentGenerationProvider: runtimeConfig.agentGenerationProvider,
@@ -875,6 +881,96 @@ function createTellusWorld(
     if (logs.length > 120) logs.shift();
     publish();
     return log;
+  };
+
+  const displayNameForVisitor = (id: string): string => {
+    if (id === visitorId) {
+      return window.__hyadesIdentity?.visitorId?.startsWith("agent:") ? "Agent" : "You";
+    }
+    if (id === "world") return "World";
+    if (id.startsWith("agent:")) return "Agent";
+    return remoteVisitors.get(id)?.name?.trim() || "Visitor";
+  };
+
+  const addWorldChatMessage = (message: WorldChatMessage): WorldChatMessage | null => {
+    const text = message.text.trim().slice(0, 800);
+    if (!text || seenWorldChatIds.has(message.id)) return null;
+    const normalized: WorldChatMessage = {
+      ...message,
+      text,
+      senderName: message.senderName?.trim() || displayNameForVisitor(message.visitorId),
+      channel: message.channel === "nearby" ? "nearby" : "world",
+      position: message.position ? { ...message.position } : undefined,
+    };
+    worldChat.push(normalized);
+    seenWorldChatIds.add(normalized.id);
+    while (worldChat.length > 160) {
+      const removed = worldChat.shift();
+      if (removed) seenWorldChatIds.delete(removed.id);
+    }
+    publish();
+    return normalized;
+  };
+
+  const mergeWorldChatMessages = (messages: WorldChatMessage[]) => {
+    for (const message of messages) addWorldChatMessage(message);
+  };
+
+  const nearbyWorldChat = (radius = 36, channel?: WorldChatChannel): WorldChatMessage[] =>
+    worldChat
+      .filter((message) => {
+        if (channel && message.channel !== channel) return false;
+        if (message.channel !== "nearby") return true;
+        if (!message.position) return true;
+        return distance2D(visitorPosition, message.position) <= radius;
+      })
+      .slice(-40);
+
+  const sendWorldChat = (
+    text: string,
+    channel: WorldChatChannel = "world",
+    senderName?: string,
+  ): WorldChatMessage | null => {
+    const trimmed = text.trim().slice(0, 800);
+    if (!trimmed) return null;
+    const message: WorldChatMessage = {
+      id: makeId("chat"),
+      visitorId,
+      senderName: senderName?.trim() || displayNameForVisitor(visitorId),
+      text: trimmed,
+      channel: channel === "nearby" ? "nearby" : "world",
+      position: { ...visitorPosition },
+      createdAt: new Date().toISOString(),
+    };
+    addWorldChatMessage(message);
+    const frame = { type: "world.chat", visitorId, message };
+    if (worldSocket?.readyState === WebSocket.OPEN) {
+      worldSocket.send(JSON.stringify(frame));
+    } else if (tellusWorldBackendAvailable) {
+      void fetch(tellusWorldHttpUrl("action"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(frame),
+      }).catch(() => undefined);
+    }
+    return message;
+  };
+
+  const announceWorldChat = (text: string, position?: Vec3) => {
+    const message: WorldChatMessage = {
+      id: makeId("chat"),
+      visitorId: "world",
+      senderName: "World",
+      text,
+      channel: "world",
+      position: position ? { ...position } : undefined,
+      createdAt: new Date().toISOString(),
+    };
+    addWorldChatMessage(message);
+    const frame = { type: "world.chat", visitorId, message };
+    if (worldSocket?.readyState === WebSocket.OPEN) {
+      worldSocket.send(JSON.stringify(frame));
+    }
   };
 
   const updatePondSurfacePosition = () => {
@@ -1234,6 +1330,10 @@ function createTellusWorld(
       const remoteThings = generatedFromWorldPatch(parsed);
       if (remoteThings) {
         applyRemoteGeneratedThings(remoteThings);
+      }
+      const chatMessages = worldChatFromWorldPatch(parsed);
+      if (chatMessages) {
+        mergeWorldChatMessages(chatMessages);
       }
       // Emote frames: play that clip ONCE over the avatar's locomotion, then resume. Rigless
       // avatars (classic TV-heads, not-yet-loaded rigs) and unknown clips are simply ignored.
@@ -2773,6 +2873,7 @@ function createTellusWorld(
       tool: "generate",
       text: `Visitor generated ${thing.kind}: ${request.prompt}`,
     });
+    announceWorldChat(`${displayNameForVisitor(String(request.creatorId))} started building ${thing.kind}: ${request.prompt}`, thing.position);
     publishGeneratedThing(thing);
 
     const showLocalFallbackMesh = () => {
@@ -4481,11 +4582,27 @@ function createTellusWorld(
         distanceToSummit: Math.hypot(visitorPosition.x, visitorPosition.z),
         distanceToShore: Math.max(0, WORLD_RADIUS - Math.hypot(visitorPosition.x, visitorPosition.z)),
         nearby: tellusAgent.getNearby(radius),
-        verbs: ["moveSelf", "generate", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "playAnimation"],
+        chat: nearbyWorldChat(radius),
+        nearbyChat: nearbyWorldChat(radius, "nearby"),
+        verbs: ["moveSelf", "generate", "sayChat", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "playAnimation"],
         // The emote clip names the agent can pass to playAnimation (its avatar-body vocabulary). Best-
         // effort from the cached VRMA catalogue; the store feed enriches it once fetched.
         animations: emoteClipNamesSync(),
       };
+    },
+    getChat(opts: { radius?: number; channel?: WorldChatChannel } = {}) {
+      return nearbyWorldChat(
+        typeof opts.radius === "number" ? opts.radius : 36,
+        opts.channel === "nearby" || opts.channel === "world" ? opts.channel : undefined,
+      );
+    },
+    sayChat(text: string, opts: { channel?: WorldChatChannel } = {}) {
+      const message = sendWorldChat(
+        text,
+        opts.channel === "nearby" ? "nearby" : "world",
+        displayNameForVisitor(visitorId),
+      );
+      return message ? { ok: true, message } : { ok: false, error: "sayChat requires text" };
     },
     sendAction(verb: string, args: Record<string, unknown> = {}) {
       const a = args ?? {};
@@ -4510,6 +4627,12 @@ function createTellusWorld(
             scale: typeof a.scale === "number" ? a.scale : undefined,
           });
           return { ok: true, id: thing.id };
+        }
+        case "sayChat": {
+          const text = typeof a.text === "string" ? a.text : typeof a.message === "string" ? a.message : "";
+          const channel = a.channel === "nearby" ? "nearby" : "world";
+          const message = sendWorldChat(text, channel, displayNameForVisitor(visitorId));
+          return message ? { ok: true, message } : { ok: false, error: "sayChat requires text" };
         }
         case "sculptTerrain": {
           const mode = (typeof a.mode === "string" ? a.mode : typeof a.terrainMode === "string" ? a.terrainMode : "flatten") as TerrainEditMode;
@@ -4577,6 +4700,7 @@ function createTellusWorld(
     setAgentGenerationProvider,
     setInstantMeshTarget,
     submitVisitorPrompt,
+    sendWorldChat,
     snapshot,
     getFps: () => fpsValue,
     setRxEnabled: (on: boolean) => {
@@ -4986,6 +5110,7 @@ function App(): React.ReactElement {
   const [snapshot, setSnapshot] = useState<TellusSnapshot>({
     generated: [],
     logs: [],
+    worldChat: [],
     generationProvider: runtimeConfig.generationProvider,
     playerGenerationProvider: runtimeConfig.playerGenerationProvider,
     agentGenerationProvider: runtimeConfig.agentGenerationProvider,
@@ -4994,6 +5119,8 @@ function App(): React.ReactElement {
     remoteVisitors: [],
   });
   const [prompt, setPrompt] = useState("");
+  const [worldChatInput, setWorldChatInput] = useState("");
+  const [worldChatChannel, setWorldChatChannel] = useState<WorldChatChannel>("world");
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
   const [showFps, setShowFps] = useState(false);
   const [fps, setFps] = useState(0);
@@ -6290,6 +6417,21 @@ function App(): React.ReactElement {
       thing.generationStatus === "queued" ||
       thing.generationStatus === "generating",
   );
+  const remoteAgents = snapshot.remoteVisitors.filter((visitor) =>
+    visitor.visitorId.startsWith("agent:"),
+  );
+  const remotePlayers = snapshot.remoteVisitors.filter(
+    (visitor) => !visitor.visitorId.startsWith("agent:"),
+  );
+  const visibleWorldChat = snapshot.worldChat.filter((message) => {
+    if (message.channel !== "nearby") return true;
+    if (!message.position || !snapshot.visitorPosition) return true;
+    return distance2D(snapshot.visitorPosition, message.position) <= 36;
+  });
+  const sendWorldChatMessage = () => {
+    const sent = worldRef.current?.sendWorldChat(worldChatInput, worldChatChannel);
+    if (sent) setWorldChatInput("");
+  };
   const inventory = snapshot.generated.filter(
     (thing) => thing.ownerUserId === snapshot.userId,
   );
@@ -6375,13 +6517,75 @@ function App(): React.ReactElement {
       className={[
         "tellus-shell",
         openToolMenus.length > 0 || assetPanelOpen ? "" : "mesh-tools-hidden",
-        "world-log-hidden",
       ]
         .filter(Boolean)
         .join(" ")}
     >
       <section className="world-panel" aria-label="Tellus world">
         <div ref={containerRef} className="world-canvas" />
+        <aside className="world-mini-chat" aria-label="World chat">
+          <header>
+            <span>World Chat</span>
+            <span>{visibleWorldChat.length}</span>
+          </header>
+          <div className="mini-chat-log" role="log" aria-live="polite">
+            {visibleWorldChat.slice(-24).map((message) => (
+              <article
+                key={message.id}
+                className={`mini-chat-entry ${message.channel}`}
+                title={
+                  message.position
+                    ? `${message.channel} at x ${Math.round(message.position.x)}, z ${Math.round(message.position.z)}`
+                    : message.channel
+                }
+              >
+                <strong>
+                  {message.senderName || "Visitor"}
+                  <span>{message.channel === "nearby" ? "nearby" : "world"}</span>
+                </strong>
+                <p>{message.text}</p>
+              </article>
+            ))}
+            {visibleWorldChat.length === 0 && (
+              <article className="mini-chat-entry empty">
+                <strong>World</strong>
+                <p>No messages yet.</p>
+              </article>
+            )}
+          </div>
+          <textarea
+            className="mini-chat-input"
+            value={worldChatInput}
+            maxLength={800}
+            rows={2}
+            placeholder={worldChatChannel === "nearby" ? "Say something nearby" : "Say something to the world"}
+            onChange={(event) => setWorldChatInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                sendWorldChatMessage();
+              }
+            }}
+          />
+          <div className="mini-chat-actions">
+            <select
+              aria-label="Chat channel"
+              value={worldChatChannel}
+              onChange={(event) => setWorldChatChannel(event.target.value === "nearby" ? "nearby" : "world")}
+            >
+              <option value="world">World</option>
+              <option value="nearby">Nearby</option>
+            </select>
+            <button
+              type="button"
+              className="mini-chat-submit"
+              disabled={!worldChatInput.trim()}
+              onClick={sendWorldChatMessage}
+            >
+              Send
+            </button>
+          </div>
+        </aside>
         <div className="world-top-bar">
           <div className="top-left-cluster" style={{ position: "relative" }}>
             <div
@@ -7553,24 +7757,42 @@ function App(): React.ReactElement {
                 );
               })()}
               {snapshot.visitorPosition && (
-                <span
+                <button
+                  type="button"
                   className="map-marker player"
                   style={mapPointStyle(snapshot.visitorPosition)}
                   title="You"
+                  aria-label="Go to your location"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const pos = snapshot.visitorPosition;
+                    if (pos) worldRef.current?.warpTo(pos.x, pos.z);
+                  }}
                 />
               )}
               {snapshot.remoteVisitors.map((visitor) =>
                 visitor.position ? (
-                  <span
+                  <button
+                    type="button"
                     key={visitor.visitorId}
-                    className="map-marker remote-player"
+                    className={[
+                      "map-marker",
+                      visitor.visitorId.startsWith("agent:") ? "agent" : "remote-player",
+                    ].join(" ")}
                     style={mapPointStyle(visitor.position)}
-                    title="Remote player"
+                    title={visitor.visitorId.startsWith("agent:") ? "Agent" : "Remote player"}
+                    aria-label={`Go to ${visitor.visitorId.startsWith("agent:") ? "agent" : "remote player"}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      const pos = visitor.position;
+                      if (pos) worldRef.current?.warpTo(pos.x, pos.z);
+                    }}
                   />
                 ) : null,
               )}
               {snapshot.generated.map((thing) => (
-                <span
+                <button
+                  type="button"
                   key={thing.id}
                   className={[
                     "map-marker",
@@ -7585,6 +7807,11 @@ function App(): React.ReactElement {
                     .join(" ")}
                   style={mapPointStyle(thing.position)}
                   title={`${thing.kind}: ${thing.prompt}`}
+                  aria-label={`Go to ${thing.kind}: ${thing.prompt}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    worldRef.current?.goToGenerated(thing.id);
+                  }}
                 />
               ))}
               {pendingGenerated.length > 0 && (
@@ -7594,8 +7821,9 @@ function App(): React.ReactElement {
               )}
               <section className="world-info-panel mini" aria-label="World info">
                 <dl>
-                  <div><dt>Generated</dt><dd>{snapshot.generated.length}</dd></div>
-                  <div><dt>Players</dt><dd>{snapshot.remoteVisitors.length + 1}</dd></div>
+                  <div><dt>Items</dt><dd>{snapshot.generated.length}</dd></div>
+                  <div><dt>Players</dt><dd>{remotePlayers.length + 1}</dd></div>
+                  <div><dt>Agents</dt><dd>{remoteAgents.length}</dd></div>
                 </dl>
               </section>
             </section>

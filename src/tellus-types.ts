@@ -1,7 +1,7 @@
 import type { createRoot } from "react-dom/client";
 import type * as THREE from "three";
 import type { MeshStats } from "./webrtc-mesh";
-import type { WorldGeneratedThing, WorldPresence } from "./world-protocol";
+import type { WorldChatChannel, WorldChatMessage, WorldGeneratedThing, WorldPresence } from "./world-protocol";
 
 export type AgentId = "johnny" | "mira" | "sol" | "atlas";
 
@@ -187,6 +187,7 @@ export interface InteractRequest {
 export interface TellusSnapshot {
   generated: GeneratedThing[];
   logs: TellusLog[];
+  worldChat: WorldChatMessage[];
   generationProvider: GenerationProvider;
   playerGenerationProvider: RoleGenerationProvider;
   agentGenerationProvider: RoleGenerationProvider;
@@ -226,6 +227,7 @@ export interface TellusWorldApi {
   setAgentGenerationProvider(provider: RoleGenerationProvider): void;
   setInstantMeshTarget(target: InstantMeshTarget): void;
   submitVisitorPrompt(prompt: string): void;
+  sendWorldChat(text: string, channel?: WorldChatChannel): WorldChatMessage | null;
   snapshot(): TellusSnapshot;
   getFps(): number;
   // ── P2P video controls (RX inbound video, TX local camera) ──
@@ -382,6 +384,8 @@ declare global {
     tellusAgent?: {
       getState: (radius?: number) => unknown;
       getNearby: (radius?: number) => unknown;
+      getChat: (opts?: { radius?: number; channel?: WorldChatChannel }) => unknown;
+      sayChat: (text: string, opts?: { channel?: WorldChatChannel }) => unknown;
       sendAction: (verb: string, args?: Record<string, unknown>) => unknown;
     };
     __tellusSnapshot?: () => TellusSnapshot;

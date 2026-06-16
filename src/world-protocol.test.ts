@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   emoteFromWorldPatch,
+  isWorldChatMessage,
   isTellusTerrainState,
   isWorldAction,
   isWorldGeneratedThing,
+  worldChatFromWorldPatch,
 } from "./world-protocol";
 
 const terrainState = {
@@ -118,5 +120,37 @@ describe("world protocol validators", () => {
     expect(emoteFromWorldPatch({ type: "emote" })).toBeNull();
     expect(emoteFromWorldPatch({ type: "presence.updated", presence: [] })).toBeNull();
     expect(emoteFromWorldPatch(null)).toBeNull();
+  });
+
+  it("accepts world chat actions and extracts chat patches", () => {
+    const message = {
+      id: "chat-1",
+      visitorId: "visitor-1",
+      senderName: "Ari",
+      text: "meet by the pond",
+      channel: "nearby",
+      position: { x: 1, y: 2, z: 3 },
+      createdAt: "2026-06-16T00:00:00.000Z",
+    };
+    expect(isWorldChatMessage(message)).toBe(true);
+    expect(isWorldAction({ type: "world.chat", visitorId: "visitor-1", message })).toBe(true);
+    expect(worldChatFromWorldPatch({ type: "world.chat", message })).toEqual([message]);
+    expect(worldChatFromWorldPatch({ type: "world.snapshot", chat: [message, { ...message, id: "" }] })).toEqual([
+      message,
+    ]);
+  });
+
+  it("rejects malformed world chat messages", () => {
+    const base = {
+      id: "chat-1",
+      visitorId: "visitor-1",
+      text: "hello",
+      channel: "world",
+      createdAt: "2026-06-16T00:00:00.000Z",
+    };
+    expect(isWorldChatMessage(base)).toBe(true);
+    expect(isWorldChatMessage({ ...base, text: "   " })).toBe(false);
+    expect(isWorldChatMessage({ ...base, channel: "private" })).toBe(false);
+    expect(isWorldChatMessage({ ...base, position: { x: 1, y: 2 } })).toBe(false);
   });
 });
