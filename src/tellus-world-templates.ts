@@ -124,7 +124,7 @@ const TEMPLATE_PRESETS: Record<
     },
   },
   "evoflow-coral-canyon-child": {
-    defaultSkyboxUrl: "/skybox/tellus-alien-rings/scene.gltf",
+    defaultSkyboxUrl: "/skybox/tellus-starry-night/scene.gltf",
     landShape: {
       mountain: { height: 11, radius: 32, exponent: 1.95 },
       shoulder: { x: -20, z: 12, radius: 300, height: 3.5 },
@@ -144,7 +144,7 @@ const TEMPLATE_PRESETS: Record<
     },
   },
   "evoflow-spires": {
-    defaultSkyboxUrl: "/skybox/tellus-alien-rings/scene.gltf",
+    defaultSkyboxUrl: "/skybox/tellus-blue-clouds/scene.gltf",
     landShape: {
       mountain: { height: 12, radius: 30, exponent: 2 },
       shoulder: { x: -18, z: 14, radius: 290, height: 3.4 },
@@ -157,7 +157,7 @@ const TEMPLATE_PRESETS: Record<
     },
   },
   "evoflow-glass-ridge": {
-    defaultSkyboxUrl: "/skybox/tellus-alien-rings/scene.gltf",
+    defaultSkyboxUrl: "/skybox/tellus-aurora-sky/scene.gltf",
     landShape: {
       mountain: { height: 13, radius: 31, exponent: 2.05 },
       shoulder: { x: -16, z: 12, radius: 280, height: 3.2 },
@@ -209,7 +209,7 @@ const TEMPLATE_PRESETS: Record<
     },
   },
   "evoflow-coral-fold": {
-    defaultSkyboxUrl: "/skybox/tellus-alien-rings/scene.gltf",
+    defaultSkyboxUrl: "/skybox/tellus-starry-night/scene.gltf",
     landShape: {
       mountain: { height: 10.5, radius: 33, exponent: 1.9 },
       shoulder: { x: -18, z: 15, radius: 315, height: 3.1 },
