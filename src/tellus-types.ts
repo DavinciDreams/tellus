@@ -82,6 +82,14 @@ export type DirectGenerationProvider = Extract<
 >;
 export type RoleGenerationProvider = DirectGenerationProvider | "local";
 export type InstantMeshTarget = "dgx" | "local";
+export type DayNightMode = "cycle" | "day" | "night" | "golden" | "pause";
+export type LightingMood =
+  | "natural"
+  | "bright-build"
+  | "soft-warm"
+  | "cool-dream"
+  | "moonlit"
+  | "dramatic-sunset";
 export type GeneratedKind =
   | "tree"
   | "flower"
@@ -193,6 +201,7 @@ export interface TellusSnapshot {
   agentGenerationProvider: RoleGenerationProvider;
   instantMeshTarget: InstantMeshTarget;
   userId: string;
+  visitorId?: string;
   visitorPosition?: Vec3;
   visitorYaw?: number;
   viewDistance?: number;
@@ -227,7 +236,12 @@ export interface TellusWorldApi {
   setAgentGenerationProvider(provider: RoleGenerationProvider): void;
   setInstantMeshTarget(target: InstantMeshTarget): void;
   submitVisitorPrompt(prompt: string): void;
-  sendWorldChat(text: string, channel?: WorldChatChannel): WorldChatMessage | null;
+  sendWorldChat(
+    text: string,
+    channel?: WorldChatChannel,
+    recipientId?: string,
+    recipientName?: string,
+  ): WorldChatMessage | null;
   snapshot(): TellusSnapshot;
   getFps(): number;
   // ── P2P video controls (RX inbound video, TX local camera) ──
@@ -301,6 +315,8 @@ export interface TellusRuntimeConfig {
   landShape?: LandShapeOverrides;
   dayNightCycleMs: number;
   dayNightStart: number;
+  dayNightMode: DayNightMode;
+  lightingMood: LightingMood;
   // When true, fold non-selected static (no-animation) duplicate generated placements that share a modelUrl
   // into a shared THREE.InstancedMesh per sub-mesh to cut draw calls. Default OFF — opt in via
   // VITE_TELLUS_INSTANCE_STATIC=true or a runtime-config `instanceStaticDuplicates: true`.
@@ -384,8 +400,8 @@ declare global {
     tellusAgent?: {
       getState: (radius?: number) => unknown;
       getNearby: (radius?: number) => unknown;
-      getChat: (opts?: { radius?: number; channel?: WorldChatChannel }) => unknown;
-      sayChat: (text: string, opts?: { channel?: WorldChatChannel }) => unknown;
+      getChat: (opts?: { radius?: number; channel?: WorldChatChannel; recipientId?: string }) => unknown;
+      sayChat: (text: string, opts?: { channel?: WorldChatChannel; recipientId?: string; recipientName?: string }) => unknown;
       sendAction: (verb: string, args?: Record<string, unknown>) => unknown;
     };
     __tellusSnapshot?: () => TellusSnapshot;

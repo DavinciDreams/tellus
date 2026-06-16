@@ -36,6 +36,8 @@ data:
       "skyboxUrl": "/skybox/free_-_skybox_in_the_cloud/scene.gltf",
       "dayNightCycleMs": 600000,
       "dayNightStart": 0.18,
+      "dayNightMode": "cycle",
+      "lightingMood": "natural",
       "enabledAgents": ["johnny"],
       "instanceStaticDuplicates": true,
       "avatars": {}
