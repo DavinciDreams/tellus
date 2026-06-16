@@ -28,6 +28,23 @@ export function tellusAssetLibraryUrl(path: string): string {
   return `${runtimeConfig.worldApiBase}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+// A generated model can arrive as a RAW asset-store URL (e.g. https://3d.flobots.xyz/api/view/{id})
+// straight from the Hyades 3D backend — both the player path (api/generate-3d) and agent/remote things
+// synced through the world backend carry it. The asset store sends NO `Access-Control-Allow-Origin`
+// header, so a cross-origin GLTFLoader fetch from the Tellus origin is blocked and the model silently
+// never renders — the "generated fine but didn't load until I re-added it from the asset library" bug
+// (the library path already loads through the same-origin /api/assets proxy, which is why it works).
+// Route any raw asset-store model URL through that same proxy: same-origin (CORS-safe) + game-optimized
+// with original-GLB fallback. Non-store URLs (procedural://, data:, blob:, /generated-assets, a relative
+// path, or an already-proxied /api/assets/... url) pass through unchanged.
+export function proxiedGeneratedModelUrl(url: string): string {
+  if (!url || !/^https?:\/\//i.test(url)) return url; // relative / procedural:// / data: — leave alone
+  if (url.includes("/api/assets/")) return url; // already same-origin proxied
+  const match = /\/api\/(?:view|download|model)\/([^/?#]+)/i.exec(url);
+  if (!match) return url; // not an asset-store model URL
+  return tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(match[1])}/game-optimized`);
+}
+
 export function tellusWorldWebSocketUrl(visitorId: string): string {
   const httpUrl = new URL(tellusWorldHttpUrl("state"), window.location.href);
   httpUrl.pathname = httpUrl.pathname.replace(/\/state\/?$/, "/live");
