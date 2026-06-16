@@ -52,6 +52,7 @@ import {
   vehicleMode,
 } from "./tellus-terrain";
 import { createGltfLoader, gltfObjectCache } from "./tellus-generation-client";
+import { proxiedGeneratedModelUrl } from "./tellus-urls-identity";
 import { tryLoadVrmObject, VrmObjectRig } from "./tellus-vrm-avatar";
 import { createTerrainMaterial } from "./tellus-terrain-material";
 
@@ -853,6 +854,11 @@ export async function loadGeneratedModel(
   thing: GeneratedThing,
   rendererIsWebGPU = false,
 ): Promise<THREE.Object3D> {
+  // A raw asset-store URL (e.g. the Hyades 3D backend's https://3d.flobots.xyz/api/view/{id}) has no
+  // CORS header, so loading it cross-origin fails silently. Route it through the same-origin /api/assets
+  // proxy so generated models render the moment they finish — no manual library re-add. No-op for
+  // procedural://, data:, /generated-assets, and already-proxied urls.
+  url = proxiedGeneratedModelUrl(url);
   // procedural:// assets build locally (no fetch) and then ride the exact same fit/rotate/place
   // pipeline as a downloaded GLB.
   const proceduralUrl = sanitizeProceduralModelUrl(url);
