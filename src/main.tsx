@@ -29,6 +29,7 @@ import {
   Waves,
 } from "lucide-react";
 import * as THREE from "three";
+import { TilesRenderer } from "3d-tiles-renderer";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { createVegetation } from "./tellus-vegetation";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
@@ -920,30 +921,149 @@ function createTellusWorld(
   // are hidden, the player grounds on the room floor (flat y≈0 — interiors have no heightfield).
   let interiorObject: THREE.Object3D | null = null;
   let interiorSceneUrl: string | null = null;
+  // A procedural fallback room so an interior is ALWAYS visible — even before/without a GLB asset: a floor +
+  // four walls + a ceiling, warmly lit. A real sceneUrl GLB (when it loads) is added INSIDE it.
+  const buildProceduralRoom = (): THREE.Object3D => {
+    const room = new THREE.Group();
+    room.name = "tellus-interior-room";
+    const W = 16, H = 5;
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x6b5a44, roughness: 0.9 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x8a7a63, roughness: 0.95, side: THREE.DoubleSide });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, W), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W, W), wallMat);
+    ceil.rotation.x = Math.PI / 2;
+    ceil.position.y = H;
+    room.add(floor, ceil);
+    const walls: Array<[number, number, number]> = [[0, -W / 2, 0], [0, W / 2, Math.PI], [-W / 2, 0, Math.PI / 2], [W / 2, 0, -Math.PI / 2]];
+    for (const [x, z, ry] of walls) {
+      const wall = new THREE.Mesh(new THREE.PlaneGeometry(W, H), wallMat);
+      wall.position.set(x, H / 2, z);
+      wall.rotation.y = ry;
+      room.add(wall);
+    }
+    room.add(new THREE.PointLight(0xffe0b0, 1.1, 40).translateY(H - 0.6));
+    room.add(new THREE.AmbientLight(0xffffff, 0.35));
+    return room;
+  };
   const applyInterior = (sceneUrl: string) => {
     const u = sceneUrl.trim();
     if (!u || u === interiorSceneUrl) return;
     interiorSceneUrl = u;
     for (const m of [ocean, archipelago, terrain, pondWater, flowerPatchGroup]) m.visible = false;
     setChunkedFlatGround(0); // ground the player on the room floor (no heightfield inside)
+    if (interiorObject) {
+      scene.remove(interiorObject);
+      disposeObject(interiorObject);
+    }
+    // Always show the procedural room immediately; the GLB (if the asset exists) layers in.
+    const container = new THREE.Group();
+    container.name = "tellus-interior";
+    container.add(buildProceduralRoom());
+    interiorObject = container;
+    scene.add(container);
+    addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `Entered interior ${u}` });
     void loadGltfObject(u)
       .then((obj) => {
-        if (destroyed) {
+        if (destroyed || interiorObject !== container) {
           disposeObject(obj);
           return;
         }
-        if (interiorObject) {
-          scene.remove(interiorObject);
-          disposeObject(interiorObject);
-        }
-        obj.name = "tellus-interior";
-        interiorObject = obj;
-        scene.add(obj);
-        addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `Entered interior scene: ${u}` });
+        obj.name = "tellus-interior-glb";
+        container.add(obj);
       })
-      .catch((error) =>
-        addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `interior scene failed to load: ${error}` }),
-      );
+      .catch(() => {
+        /* no GLB asset yet — the procedural room stands in. */
+      });
+  };
+
+  // ── TELLUS INFINITY tiles (Phase 4) ── mount a 3D Tileset as the RENDER substrate (the gameplay height
+  // still comes from the baked chunk heightfield, so agents + players agree). Experimental spike: a tiles-*
+  // world's snapshot carries a tileSetUrl; we hide the placeholder terrain + stream the tileset.
+  let tilesRenderer: TilesRenderer | null = null;
+  let tileSetUrl: string | null = null;
+  const mountTileset = (url: string) => {
+    const u = url.trim();
+    if (!u || u === tileSetUrl || !renderer) return;
+    tileSetUrl = u;
+    for (const m of [ocean, archipelago, terrain]) m.visible = false;
+    try {
+      tilesRenderer = new TilesRenderer(u);
+      tilesRenderer.setCamera(camera);
+      tilesRenderer.setResolutionFromRenderer(camera, renderer as THREE.WebGLRenderer);
+      scene.add(tilesRenderer.group);
+      addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `Mounted 3D tileset: ${u}` });
+    } catch (error) {
+      addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `tileset mount failed: ${error}` });
+    }
+  };
+
+  // ── TELLUS INFINITY portal MARKERS (3D) ── a glowing ring + light pillar at each portal, synced from the
+  // world's portal set. A per-frame proximity check (in animate) auto-enters when the player walks into the
+  // trigger radius (debounced so it fires once per approach). No art assets — pure THREE primitives.
+  const portalMarkerGroup = new THREE.Group();
+  portalMarkerGroup.name = "tellus-portal-markers";
+  scene.add(portalMarkerGroup);
+  const portalMarkers = new Map<string, THREE.Object3D>();
+  let lastPortalEnterAt = 0;
+  let insidePortalId: string | null = null;
+  const makePortalMarker = (interior: boolean): THREE.Object3D => {
+    const g = new THREE.Group();
+    const color = interior ? 0xffcf6a : 0x6ad0ff;
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(1.5, 0.16, 10, 28),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 }),
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.1;
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.18, 6, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: THREE.DoubleSide }),
+    );
+    pillar.position.y = 3;
+    g.add(ring, pillar);
+    return g;
+  };
+  const syncPortalMarkers = () => {
+    const seen = new Set<string>();
+    for (const p of worldPortals) {
+      seen.add(p.id);
+      let marker = portalMarkers.get(p.id);
+      if (!marker) {
+        marker = makePortalMarker(p.target.kind === "interior");
+        portalMarkers.set(p.id, marker);
+        portalMarkerGroup.add(marker);
+      }
+      const y = (groundHeightAt(p.position.x, p.position.z) ?? 0) + 0.05;
+      marker.position.set(p.position.x, y, p.position.z);
+    }
+    for (const [id, marker] of portalMarkers) {
+      if (seen.has(id)) continue;
+      portalMarkerGroup.remove(marker);
+      disposeObject(marker);
+      portalMarkers.delete(id);
+    }
+  };
+  // Called each frame: spin the rings, and auto-enter when the player stands in a portal's trigger volume.
+  const updatePortals = (now: number) => {
+    if (portalMarkers.size === 0) return;
+    portalMarkerGroup.rotation.y += 0.01;
+    let nearId: string | null = null;
+    for (const p of worldPortals) {
+      const d = Math.hypot(visitorPosition.x - p.position.x, visitorPosition.z - p.position.z);
+      if (d <= Math.max(1.2, p.radius)) {
+        nearId = p.id;
+        break;
+      }
+    }
+    if (nearId && nearId !== insidePortalId && now - lastPortalEnterAt > 2500) {
+      lastPortalEnterAt = now;
+      insidePortalId = nearId;
+      enterPortal(nearId);
+    } else if (!nearId) {
+      insidePortalId = null;
+    }
   };
 
   let transformControls: TransformControls | null = null;
@@ -1691,6 +1811,10 @@ function createTellusWorld(
         // Phase 3: an interior snapshot carries a sceneUrl → render the GLB room instead of terrain.
         const sceneUrl = (parsed as { sceneUrl?: unknown }).sceneUrl;
         if (typeof sceneUrl === "string" && sceneUrl) applyInterior(sceneUrl);
+        // Phase 4: a tiles world carries a tileSetUrl → mount the 3D tileset as the render substrate.
+        const tileUrl = (parsed as { tileSetUrl?: unknown }).tileSetUrl;
+        if (typeof tileUrl === "string" && tileUrl) mountTileset(tileUrl);
+        syncPortalMarkers();
         publish();
       } else {
         const portalUpsert = portalsFromWorldPatch(parsed);
@@ -1698,12 +1822,14 @@ function createTellusWorld(
           const byId = new Map(worldPortals.map((p) => [p.id, p]));
           for (const p of portalUpsert) byId.set(p.id, p);
           worldPortals = Array.from(byId.values());
+          syncPortalMarkers();
           publish();
         }
       }
       const portalDeleted = portalDeletedFromWorldPatch(parsed);
       if (portalDeleted) {
         worldPortals = worldPortals.filter((p) => p.id !== portalDeleted);
+        syncPortalMarkers();
         publish();
       }
       const entered = portalEnteredFromWorldPatch(parsed);
@@ -4530,6 +4656,11 @@ function createTellusWorld(
     lastTime = now;
     tick++;
     moveVisitor(delta);
+    updatePortals(now); // TELLUS INFINITY: spin portal rings + auto-enter on walk-into
+    if (tilesRenderer) {
+      camera.updateMatrixWorld();
+      tilesRenderer.update(); // stream the 3D tileset against the current camera
+    }
     for (const mixer of generatedAnimationMixers.values()) {
       mixer.update(delta);
     }
@@ -5411,6 +5542,11 @@ function createTellusWorld(
         window.clearTimeout(worldSocketReconnectTimer);
       }
       worldSocket?.close();
+      if (tilesRenderer) {
+        scene.remove(tilesRenderer.group);
+        tilesRenderer.dispose();
+        tilesRenderer = null;
+      }
       delete window.__tellusAvatarDebug;
       delete window.__tellusViewDebug;
       delete window.__tellusThingsDebug;

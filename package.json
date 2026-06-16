@@ -20,6 +20,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "3d-tiles-renderer": "^0.4.28",
     "@gltf-transform/core": "^4.4.0",
     "@gltf-transform/extensions": "^4.4.0",
     "@gltf-transform/functions": "^4.4.0",

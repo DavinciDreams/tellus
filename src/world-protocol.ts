@@ -170,6 +170,8 @@ export type WorldPatch =
       portals?: WorldPortal[];
       // Phase 3 interiors: a GLB scene url the client renders instead of terrain (cold-load aware).
       sceneUrl?: string;
+      // Phase 4 tiles: a 3D Tileset url the client mounts as the render substrate (gameplay = baked chunks).
+      tileSetUrl?: string;
     }
   | {
       type: "presence.updated";
