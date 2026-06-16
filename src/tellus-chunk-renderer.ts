@@ -14,6 +14,10 @@ import {
   terrainVertexColor,
 } from "./tellus-terrain";
 import {
+  largeWorldBaseHeight,
+  largeWorldTerrainKind,
+} from "./tellus-large-world-terrain";
+import {
   tellusWorldChunkUrl,
 } from "./tellus-urls-identity";
 import type { ChunkData } from "./world-protocol";
@@ -49,14 +53,14 @@ export function createChunkTerrainGeometry(
     for (let i = 0; i <= seg; i++) {
       const xi = Math.round(i * stride);
       const lx = (i / seg) * CHUNK_SPAN; // local x in [0,96]
-      const py = sculptAt(chunk.sculptOffsets, xi, zi); // flat base (Phase 2.5 = island base)
       const wx = worldX0 + lx;
       const wz = worldZ0 + lz;
+      const py = largeWorldBaseHeight(wx, wz) + sculptAt(chunk.sculptOffsets, xi, zi);
       const paintCode = chunk.paint.length
         ? (chunk.paint[zi * CHUNK_VERTEX_COUNT + xi] ?? 0)
         : 0;
       const kind = paintCode ? terrainPaintKindFromCode(paintCode) : null;
-      const resolvedKind = kind ?? terrainKind(wx, wz, py);
+      const resolvedKind = kind ?? largeWorldTerrainKind(wx, wz, py) ?? terrainKind(wx, wz, py);
       const color = terrainVertexColor(resolvedKind, wx, wz, xi * 1009 + zi * 9176);
       positions.push(lx, py, lz);
       colors.push(color.r, color.g, color.b);
@@ -285,7 +289,7 @@ export function createChunkRenderer(
     const cz = Math.floor(worldZ / CHUNK_SPAN);
     const a = active.get(key(cx, cz));
     if (!a) return null; // chunk not loaded -> grounding falls back to the flat base
-    if (a.sculptOffsets.length === 0) return 0; // loaded but flat
+    if (a.sculptOffsets.length === 0) return largeWorldBaseHeight(worldX, worldZ);
     // Local coords within the chunk, in [0, CHUNK_SPAN]; convert to the 65-grid index space.
     const lx = worldX - cx * CHUNK_SPAN;
     const lz = worldZ - cz * CHUNK_SPAN;
@@ -301,12 +305,13 @@ export function createChunkRenderer(
     const h10 = sculptAt(a.sculptOffsets, x1, z0);
     const h01 = sculptAt(a.sculptOffsets, x0, z1);
     const h11 = sculptAt(a.sculptOffsets, x1, z1);
-    return (
+    const sculptOffset = (
       h00 * (1 - tx) * (1 - tz) +
       h10 * tx * (1 - tz) +
       h01 * (1 - tx) * tz +
       h11 * tx * tz
     );
+    return largeWorldBaseHeight(worldX, worldZ) + sculptOffset;
   };
 
   const dispose = () => {

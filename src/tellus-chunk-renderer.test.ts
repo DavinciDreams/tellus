@@ -9,6 +9,7 @@ import {
   createChunkRenderer,
   createChunkTerrainGeometry,
 } from "./tellus-chunk-renderer";
+import { largeWorldBaseHeight } from "./tellus-large-world-terrain";
 import {
   CHUNK_SEGMENTS,
   CHUNK_SPAN,
@@ -29,12 +30,16 @@ function makeChunk(over: Partial<ChunkData> = {}): ChunkData {
 }
 
 describe("createChunkTerrainGeometry", () => {
-  it("renders a flat chunk (empty sculptOffsets) with all y === 0", () => {
+  it("renders empty sculptOffsets as natural large-world terrain", () => {
     const geometry = createChunkTerrainGeometry(makeChunk());
     const pos = geometry.getAttribute("position");
+    let minY = Infinity;
+    let maxY = -Infinity;
     for (let i = 0; i < pos.count; i++) {
-      expect(pos.getY(i)).toBe(0);
+      minY = Math.min(minY, pos.getY(i));
+      maxY = Math.max(maxY, pos.getY(i));
     }
+    expect(maxY - minY).toBeGreaterThan(2);
   });
 
   it("has CHUNK_VERTEX_COUNT² vertices at full LOD", () => {
@@ -82,7 +87,9 @@ describe("createChunkTerrainGeometry", () => {
     const pos = geometry.getAttribute("position");
     // Full LOD: vertex index in the built grid is j*(seg+1)+i with i=xi, j=zi.
     const vtx = zi * CHUNK_VERTEX_COUNT + xi;
-    expect(pos.getY(vtx)).toBeCloseTo(7.5, 5);
+    const wx = (xi / CHUNK_SEGMENTS) * CHUNK_SPAN;
+    const wz = (zi / CHUNK_SEGMENTS) * CHUNK_SPAN;
+    expect(pos.getY(vtx)).toBeCloseTo(largeWorldBaseHeight(wx, wz) + 7.5, 5);
   });
 });
 
@@ -196,10 +203,10 @@ describe("createChunkRenderer sampleHeight (walk the sculpted chunk height)", ()
     // Grid vertex (xi,zi) maps to local world (xi/64*96, zi/64*96) in chunk (0,0).
     const wx = (xi / CHUNK_SEGMENTS) * CHUNK_SPAN;
     const wz = (zi / CHUNK_SEGMENTS) * CHUNK_SPAN;
-    expect(r.sampleHeight(wx, wz)).toBeCloseTo(7.5, 5);
+    expect(r.sampleHeight(wx, wz)).toBeCloseTo(largeWorldBaseHeight(wx, wz) + 7.5, 5);
     // A neighbouring grid vertex (still 0) stays 0 — confirms it's not a blanket constant.
     const wx2 = ((xi + 1) / CHUNK_SEGMENTS) * CHUNK_SPAN;
-    expect(r.sampleHeight(wx2, wz)).toBeCloseTo(0, 5);
+    expect(r.sampleHeight(wx2, wz)).toBeCloseTo(largeWorldBaseHeight(wx2, wz), 5);
     r.dispose();
   });
 
@@ -212,11 +219,14 @@ describe("createChunkRenderer sampleHeight (walk the sculpted chunk height)", ()
     r.dispose();
   });
 
-  it("returns 0 for a flat (empty-offsets) loaded chunk", async () => {
+  it("returns natural base height for an empty-offsets loaded chunk", async () => {
     const scene = new THREE.Scene();
     const r = createChunkRenderer(scene);
     await loadRing(0, 0, r); // default makeChunk has sculptOffsets: []
-    expect(r.sampleHeight(CHUNK_SPAN * 0.5, CHUNK_SPAN * 0.5)).toBe(0);
+    expect(r.sampleHeight(CHUNK_SPAN * 0.5, CHUNK_SPAN * 0.5)).toBeCloseTo(
+      largeWorldBaseHeight(CHUNK_SPAN * 0.5, CHUNK_SPAN * 0.5),
+      5,
+    );
     r.dispose();
   });
 });
