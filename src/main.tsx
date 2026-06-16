@@ -69,22 +69,27 @@ import {
   AVATAR_SCALE_MAX,
   AVATAR_SCALE_MIN,
   clampAvatarScale,
-  emoteClipNamesSync,
+  emoteClipNamesByCategorySync,
   getAvatarUserScale,
+  recommendedEmoteClipNamesSync,
   restoreProceduralAvatar,
   setAvatarUserScale,
   tickAvatarScale,
+  vrmaCategorySummarySync,
+  type VrmaCategoryId,
   VrmObjectRig,
   type AvatarRig,
 } from "./tellus-vrm-avatar";
 import {
-  AVATAR_CATALOG,
   attachAvatarRig,
+  avatarCatalogSync,
   avatarThumbnailUrl,
+  loadAvatarCatalog,
   setStoredAvatarId,
   setStoredAvatarScale,
   storedAvatarId,
   storedAvatarScale,
+  subscribeAvatarCatalog,
   type AvatarCatalogEntry,
 } from "./tellus-avatar-catalog";
 import {
@@ -4555,6 +4560,15 @@ function createTellusWorld(
   const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
   const nearToLocation = (near: unknown): GenerateRequest["location"] =>
     near === "mountain" ? "near-mountain" : near === "pond" ? "near-pond" : near === "agent" ? "near-agent" : { ...visitorPosition };
+  const vrmaCategoryIds: readonly VrmaCategoryId[] = ["core", "gesture", "dance", "action", "sport", "locomotion", "pose", "other"];
+  const setLocalAvatarSelection = (avatarId: string): boolean => {
+    if (avatarId === localAvatarId) return false;
+    localAvatarId = avatarId;
+    setStoredAvatarId(avatarId);
+    applyAvatarTo(visitor, visitorId, avatarId); // local rig rebuilds immediately
+    sendPresenceUpdate(true); // broadcast the new pick right away (not on the 300ms cadence)
+    return true;
+  };
   const tellusAgent = {
     getNearby(radius = 30) {
       return generated
@@ -4584,11 +4598,39 @@ function createTellusWorld(
         nearby: tellusAgent.getNearby(radius),
         chat: nearbyWorldChat(radius),
         nearbyChat: nearbyWorldChat(radius, "nearby"),
-        verbs: ["moveSelf", "generate", "sayChat", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "playAnimation"],
-        // The emote clip names the agent can pass to playAnimation (its avatar-body vocabulary). Best-
-        // effort from the cached VRMA catalogue; the store feed enriches it once fetched.
-        animations: emoteClipNamesSync(),
+        verbs: ["moveSelf", "generate", "sayChat", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "playAnimation", "listAnimations", "listAvatars", "setAvatar", "setAvatarScale"],
+        // A small default vocabulary for embodied agents. The full VRMA feed is available by category
+        // through listAnimations so agents don't have to reason over hundreds of near-duplicate clips.
+        animations: recommendedEmoteClipNamesSync(),
+        animationCategories: vrmaCategorySummarySync(),
+        avatarId: localAvatarId,
+        avatarScale: localAvatarScale,
       };
+    },
+    listAnimations(opts: { category?: string; limit?: number } = {}) {
+      const limit = clamp(num(opts.limit, 24), 1, 100);
+      const category = typeof opts.category === "string" ? opts.category.trim().toLowerCase() : "";
+      if (vrmaCategoryIds.includes(category as VrmaCategoryId)) {
+        return {
+          category,
+          animations: emoteClipNamesByCategorySync(category as VrmaCategoryId, limit),
+          categories: vrmaCategorySummarySync(),
+        };
+      }
+      return {
+        animations: recommendedEmoteClipNamesSync(limit),
+        categories: vrmaCategorySummarySync(),
+      };
+    },
+    listAvatars() {
+      void loadAvatarCatalog();
+      return avatarCatalogSync().map((entry) => ({
+        id: entry.id,
+        label: entry.label,
+        kind: entry.kind,
+        source: entry.source ?? "built-in",
+        selected: entry.id === localAvatarId,
+      }));
     },
     getChat(opts: { radius?: number; channel?: WorldChatChannel } = {}) {
       return nearbyWorldChat(
@@ -4667,6 +4709,29 @@ function createTellusWorld(
           playLocalEmote(name);
           return { ok: true };
         }
+        case "listAnimations":
+          return tellusAgent.listAnimations({
+            category: typeof a.category === "string" ? a.category : undefined,
+            limit: typeof a.limit === "number" ? a.limit : undefined,
+          });
+        case "listAvatars":
+          return tellusAgent.listAvatars();
+        case "setAvatar": {
+          const avatarId = typeof a.avatarId === "string" ? a.avatarId : typeof a.id === "string" ? a.id : "";
+          if (!avatarId.trim()) return { ok: false, error: "setAvatar requires an avatarId" };
+          setLocalAvatarSelection(avatarId.trim());
+          return { ok: true, avatarId: localAvatarId };
+        }
+        case "setAvatarScale": {
+          const next = clampAvatarScale(num(a.scale, num(a.avatarScale, localAvatarScale)));
+          if (next !== localAvatarScale) {
+            localAvatarScale = next;
+            setStoredAvatarScale(next);
+            setAvatarUserScale(visitor, next);
+            sendPresenceUpdate(true);
+          }
+          return { ok: true, avatarScale: localAvatarScale };
+        }
         default:
           return { ok: false, error: `unknown verb: ${verb}` };
       }
@@ -4725,11 +4790,7 @@ function createTellusWorld(
     getP2pStats: () => latestP2pStats,
     getSelfStream: () => selfStream,
     setAvatarSelection: (avatarId: string) => {
-      if (avatarId === localAvatarId) return;
-      localAvatarId = avatarId;
-      setStoredAvatarId(avatarId);
-      applyAvatarTo(visitor, visitorId, avatarId); // local rig rebuilds immediately
-      sendPresenceUpdate(true); // broadcast the new pick right away (not on the 300ms cadence)
+      setLocalAvatarSelection(avatarId);
     },
     getAvatarSelection: () => localAvatarId,
     setAvatarScale: (scale: number) => {
@@ -4946,6 +5007,7 @@ function AvatarTile({
         background: selected ? "rgba(111,174,70,0.22)" : "rgba(255,255,255,0.05)",
         color: "#dfe7d8",
         cursor: "pointer",
+        minWidth: 0,
       }}
     >
       {thumbUrl && !thumbFailed ? (
@@ -4956,6 +5018,7 @@ function AvatarTile({
           style={{
             width: "100%",
             aspectRatio: "1 / 1",
+            display: "block",
             objectFit: "cover",
             borderRadius: 6,
             background: "rgba(0,0,0,0.35)",
@@ -5174,7 +5237,21 @@ function App(): React.ReactElement {
   };
   // ── Avatar picker state (catalog selection; "" = deterministic default robot) ──
   const [avatarPanelOpen, setAvatarPanelOpen] = useState(false);
+  const [avatarCatalog, setAvatarCatalog] = useState<readonly AvatarCatalogEntry[]>(() => avatarCatalogSync());
   const [avatarSelection, setAvatarSelection] = useState<string>(() => storedAvatarId());
+  useEffect(() => subscribeAvatarCatalog(() => setAvatarCatalog(avatarCatalogSync())), []);
+  useEffect(() => {
+    if (!avatarPanelOpen) return;
+    let cancelled = false;
+    loadAvatarCatalog()
+      .then((catalog) => {
+        if (!cancelled) setAvatarCatalog(catalog);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [avatarPanelOpen]);
   const onAvatarPick = (entry: AvatarCatalogEntry) => {
     setAvatarSelection(entry.id);
     worldRef.current?.setAvatarSelection(entry.id); // persists + swaps the rig + broadcasts
@@ -6974,7 +7051,7 @@ function App(): React.ReactElement {
             style={{
               position: "absolute",
               bottom: 92,
-              left: 12,
+              right: 12,
               width: 300,
               maxHeight: "min(560px, calc(100dvh - 120px))",
               overflowY: "auto",
@@ -6998,11 +7075,11 @@ function App(): React.ReactElement {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
                 gap: 8,
               }}
             >
-              {AVATAR_CATALOG.map((entry) => (
+              {avatarCatalog.map((entry) => (
                 <AvatarTile
                   key={entry.id}
                   entry={entry}

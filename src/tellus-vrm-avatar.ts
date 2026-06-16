@@ -22,6 +22,7 @@ import {
   type VRMAnimation,
 } from "@pixiv/three-vrm-animation";
 import { runtimeConfig } from "./tellus-runtime-config";
+import { tellusAssetLibraryUrl } from "./tellus-urls-identity";
 
 // ── Asset-store ids (the ONLY thing to touch when new avatars/clips land) ──────────────────────
 // All are plain GETs on the header-free /api/assets proxy (no session header on purpose).
@@ -190,7 +191,7 @@ export function classicAvatarRequested(): boolean {
 }
 
 export function assetDownloadUrl(id: string): string {
-  return `${runtimeConfig.worldApiBase}/api/assets/download/${encodeURIComponent(id)}`;
+  return tellusAssetLibraryUrl(`/api/assets/download/${encodeURIComponent(id)}`);
 }
 
 /** Stable FNV-1a hash → each visitorId (players AND agent:* ids) always gets the same robot. */
@@ -313,6 +314,56 @@ export interface VrmaCatalogEntry {
   source?: string;
 }
 
+export type VrmaCategoryId = "core" | "gesture" | "dance" | "action" | "sport" | "locomotion" | "pose" | "other";
+
+export interface VrmaCategorySummary {
+  id: VrmaCategoryId;
+  label: string;
+  count: number;
+  examples: string[];
+}
+
+const VRMA_CATEGORY_LABELS: Record<VrmaCategoryId, string> = {
+  core: "Core",
+  gesture: "Gestures",
+  dance: "Dance",
+  action: "Action",
+  sport: "Sports",
+  locomotion: "Movement",
+  pose: "Poses",
+  other: "Other",
+};
+
+const RECOMMENDED_VRMA_PATTERNS: readonly RegExp[] = [
+  /^idle$/i,
+  /^walk(?:ing)?$/i,
+  /^jump$/i,
+  /^wave$/i,
+  /stand up and wave/i,
+  /greeting/i,
+  /acknowledg/i,
+  /head nod/i,
+  /^bow$/i,
+  /happy hand gesture/i,
+  /^ballet$/i,
+  /hip hop dance/i,
+  /breakdance ready/i,
+];
+
+function vrmaCategoryForName(name: string): VrmaCategoryId {
+  const n = name.trim().toLowerCase();
+  if (/^(idle|walk|walking|jump|wave)$/.test(n) || /stand up and wave/.test(n)) return "core";
+  if (/dance|ballet|breakdance|hip hop|flair|uprock|freeze|twerk|cartwheel/.test(n)) return "dance";
+  if (/wave|greet|bow|nod|shake|gesture|beckon|kiss|acknowledg|dismiss|happy hand|angry gesture/.test(n)) {
+    return "gesture";
+  }
+  if (/walk|run|jump|idle|crawl|climb|fly|flying|float|locomotion/.test(n)) return "locomotion";
+  if (/kick|punch|stab|block|gun|attack|dagger|ninja|slash|fight|combat/.test(n)) return "action";
+  if (/golf|fish|sport|throw|catch|basket|soccer|tennis|baseball/.test(n)) return "sport";
+  if (/pose|kneel|lay|lying|crouch|stand|look|sitting|lean/.test(n)) return "pose";
+  return "other";
+}
+
 // name (lowercased) → entry. Seeded from the built-in clips so the rig works before /api/vrma exists.
 const builtinVrmaCatalog = (): Map<string, VrmaCatalogEntry> => {
   const map = new Map<string, VrmaCatalogEntry>();
@@ -325,6 +376,7 @@ const builtinVrmaCatalog = (): Map<string, VrmaCatalogEntry> => {
 let vrmaCatalogPromise: Promise<Map<string, VrmaCatalogEntry>> | undefined;
 // Resolved clip-name snapshot for synchronous readers (emoteClipNamesSync); null until first load.
 let vrmaCatalogSnapshot: string[] | null = null;
+let vrmaCatalogEntriesSnapshot: VrmaCatalogEntry[] | null = null;
 
 function vrmaFeedUrl(): string | null {
   if (!runtimeConfig.worldApiBase) return null;
@@ -332,7 +384,7 @@ function vrmaFeedUrl(): string | null {
   // proxy, which prefixes store paths with /api/assets (same convention as assetDownloadUrl's
   // /api/assets/download/{id}). Live shape (3d.flobots.xyz/api/vrma):
   //   { animations: [ { id, name, download_url: "/api/download/{id}", source, ... } ] }
-  return `${runtimeConfig.worldApiBase}/api/assets/vrma`;
+  return tellusAssetLibraryUrl("/api/assets/vrma");
 }
 
 /** Fetch + cache the VRMA catalogue. Always resolves (never rejects): the built-in clips are the
@@ -387,7 +439,8 @@ export function loadVrmaCatalog(): Promise<Map<string, VrmaCatalogEntry>> {
     } catch {
       // network/parse failure → keep the built-in floor
     }
-    vrmaCatalogSnapshot = Array.from(catalog.values(), (e) => e.name);
+    vrmaCatalogEntriesSnapshot = Array.from(catalog.values());
+    vrmaCatalogSnapshot = vrmaCatalogEntriesSnapshot.map((e) => e.name);
     return catalog;
   })();
   vrmaCatalogPromise.catch(() => {
@@ -424,6 +477,58 @@ export function emoteClipNamesSync(): string[] {
   if (vrmaCatalogSnapshot) return vrmaCatalogSnapshot.slice();
   void loadVrmaCatalog(); // warms the snapshot for next call
   return Array.from(builtinVrmaCatalog().values(), (e) => e.name);
+}
+
+function vrmaEntriesSync(): VrmaCatalogEntry[] {
+  if (vrmaCatalogEntriesSnapshot) return vrmaCatalogEntriesSnapshot.slice();
+  void loadVrmaCatalog();
+  return Array.from(builtinVrmaCatalog().values());
+}
+
+export function recommendedEmoteClipNamesSync(limit = 14): string[] {
+  const entries = vrmaEntriesSync();
+  const selected: string[] = [];
+  const seen = new Set<string>();
+  const add = (entry: VrmaCatalogEntry | undefined) => {
+    if (!entry || selected.length >= limit) return;
+    const key = entry.name.trim().toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    selected.push(entry.name);
+  };
+  for (const pattern of RECOMMENDED_VRMA_PATTERNS) {
+    add(entries.find((entry) => pattern.test(entry.name)));
+  }
+  for (const category of ["core", "gesture", "dance", "locomotion"] as const) {
+    for (const entry of entries) {
+      if (selected.length >= limit) break;
+      if (vrmaCategoryForName(entry.name) === category) add(entry);
+    }
+  }
+  return selected;
+}
+
+export function emoteClipNamesByCategorySync(category: VrmaCategoryId, limit = 50): string[] {
+  return vrmaEntriesSync()
+    .filter((entry) => category === "other" ? vrmaCategoryForName(entry.name) === "other" : vrmaCategoryForName(entry.name) === category)
+    .slice(0, limit)
+    .map((entry) => entry.name);
+}
+
+export function vrmaCategorySummarySync(): VrmaCategorySummary[] {
+  const buckets = new Map<VrmaCategoryId, string[]>();
+  for (const entry of vrmaEntriesSync()) {
+    const category = vrmaCategoryForName(entry.name);
+    const list = buckets.get(category) ?? [];
+    list.push(entry.name);
+    buckets.set(category, list);
+  }
+  return (Object.keys(VRMA_CATEGORY_LABELS) as VrmaCategoryId[])
+    .map((id) => {
+      const names = buckets.get(id) ?? [];
+      return { id, label: VRMA_CATEGORY_LABELS[id], count: names.length, examples: names.slice(0, 8) };
+    })
+    .filter((summary) => summary.count > 0);
 }
 
 // ── The shared rig state machine (idle ⇄ walk, + airborne hold) ────────────────────────────────
