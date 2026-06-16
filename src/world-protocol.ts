@@ -73,6 +73,18 @@ export interface EmoteFrame {
   animation: string;
 }
 
+export type WorldChatChannel = "world" | "nearby";
+
+export interface WorldChatMessage {
+  id: string;
+  visitorId: string;
+  senderName?: string;
+  text: string;
+  channel: WorldChatChannel;
+  position?: Vec3;
+  createdAt: string;
+}
+
 export type WorldAction =
   | {
       type: "presence.update";
@@ -109,6 +121,11 @@ export type WorldAction =
       type: "generated.delete";
       visitorId: string;
       id: string;
+    }
+  | {
+      type: "world.chat";
+      visitorId: string;
+      message: WorldChatMessage;
     };
 
 export type WorldPatch =
@@ -118,6 +135,7 @@ export type WorldPatch =
       terrain: TellusTerrainState;
       presence: WorldPresence[];
       generated: WorldGeneratedThing[];
+      chat?: WorldChatMessage[];
       queuedGenerationJobs: QueuedGenerationJob[];
     }
   | {
@@ -146,6 +164,10 @@ export type WorldPatch =
   | {
       type: "emote";
       emote: EmoteFrame;
+    }
+  | {
+      type: "world.chat";
+      message: WorldChatMessage;
     }
   | {
       type: "action.rejected";
@@ -289,6 +311,33 @@ export function emoteFromWorldPatch(parsed: unknown): EmoteFrame | null {
   return { visitorId: emote.visitorId, animation: emote.animation };
 }
 
+export function isWorldChatMessage(value: unknown): value is WorldChatMessage {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.length > 0 &&
+    typeof value.visitorId === "string" &&
+    value.visitorId.length > 0 &&
+    (value.senderName === undefined || typeof value.senderName === "string") &&
+    typeof value.text === "string" &&
+    value.text.trim().length > 0 &&
+    (value.channel === "world" || value.channel === "nearby") &&
+    (value.position === undefined || isVec3(value.position)) &&
+    typeof value.createdAt === "string"
+  );
+}
+
+export function worldChatFromWorldPatch(parsed: unknown): WorldChatMessage[] | null {
+  if (!isRecord(parsed)) return null;
+  if (parsed.type === "world.snapshot" && Array.isArray(parsed.chat)) {
+    return parsed.chat.filter(isWorldChatMessage);
+  }
+  if (parsed.type === "world.chat" && isWorldChatMessage(parsed.message)) {
+    return [parsed.message];
+  }
+  return null;
+}
+
 /** Extract a chunk.updated patch from a live WS message; null when anything else or malformed. */
 export function chunkUpdatedFromWorldPatch(value: unknown): ChunkUpdatedPatch | null {
   if (!isRecord(value)) return null;
@@ -328,6 +377,9 @@ export function isWorldAction(value: unknown): value is WorldAction {
   }
   if (value.type === "generated.delete") {
     return typeof value.id === "string";
+  }
+  if (value.type === "world.chat") {
+    return isWorldChatMessage(value.message);
   }
   return false;
 }

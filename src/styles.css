@@ -251,11 +251,28 @@ textarea::placeholder {
   padding: 6px 7px;
 }
 
+.mini-chat-entry.nearby {
+  border-left-color: #7fd3c5;
+}
+
+.mini-chat-entry.empty {
+  opacity: 0.72;
+}
+
 .mini-chat-entry strong {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   color: var(--hud-gold-bright);
   font-size: 10px;
   text-transform: uppercase;
+}
+
+.mini-chat-entry strong span {
+  color: var(--hud-muted);
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .mini-chat-entry p {
@@ -283,12 +300,20 @@ textarea::placeholder {
 
 .mini-chat-actions {
   display: grid;
-  grid-template-columns: 36px 36px;
+  grid-template-columns: minmax(88px, 1fr) 72px;
   gap: 8px;
 }
 
+.mini-chat-actions select {
+  min-width: 0;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(4 10 5 / 42%);
+  color: var(--hud-text);
+  padding: 0 8px;
+}
+
 .mini-chat-submit {
-  width: 36px;
+  width: 72px;
   padding: 0;
 }
 
