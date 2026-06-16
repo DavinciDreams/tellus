@@ -3,8 +3,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyWorldTerrainTemplate,
   baseTerrainHeight,
+  isIntentionallyElevated,
+  isIntentionallyOffsetFromGround,
   terrainKind,
 } from "./tellus-terrain";
+import type { GeneratedThing } from "./tellus-types";
 
 function sampleHeights(radius = 48): number[] {
   const points: number[] = [];
@@ -23,6 +26,19 @@ function relief(heights: number[]): number {
 function localVariation(heights: number[]): number {
   const rounded = new Set(heights.map((height) => height.toFixed(1)));
   return rounded.size;
+}
+
+function thingAt(y: number): GeneratedThing {
+  return {
+    id: "test",
+    kind: "object",
+    prompt: "test object",
+    creatorId: "visitor",
+    position: { x: 0, y, z: 0 },
+    rotationY: 0,
+    scale: 1,
+    color: 0xffffff,
+  };
 }
 
 describe("Tellus terrain defaults", () => {
@@ -57,5 +73,16 @@ describe("Tellus terrain defaults", () => {
 
     expect(terrainKind(-8, -18, height)).toBe("water");
     expect(height).toBeLessThan(1.25);
+  });
+
+  it("treats lowered objects as intentionally offset from ground", () => {
+    applyWorldTerrainTemplate("tellus");
+    const ground = baseTerrainHeight(0, 0);
+
+    expect(isIntentionallyElevated(thingAt(ground + 2))).toBe(true);
+    expect(isIntentionallyOffsetFromGround(thingAt(ground + 2))).toBe(true);
+    expect(isIntentionallyElevated(thingAt(ground - 2))).toBe(false);
+    expect(isIntentionallyOffsetFromGround(thingAt(ground - 2))).toBe(true);
+    expect(isIntentionallyOffsetFromGround(thingAt(ground + 0.1))).toBe(false);
   });
 });

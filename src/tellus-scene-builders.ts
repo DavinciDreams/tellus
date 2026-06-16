@@ -44,7 +44,7 @@ import {
   distantIslandWorldPoint,
   distantTerrainPaintAt,
   isFreeMovingVehicle,
-  isIntentionallyElevated,
+  isIntentionallyOffsetFromGround,
   pondWaterLevel,
   terrainHeight,
   terrainKind,
@@ -1270,7 +1270,7 @@ export function createGeneratedMesh(thing: GeneratedThing): THREE.Object3D {
 
   if (
     isFreeMovingVehicle(thing) ||
-    isIntentionallyElevated(thing) ||
+    isIntentionallyOffsetFromGround(thing) ||
     Math.hypot(thing.position.x, thing.position.z) > WORLD_RADIUS
   ) {
     group.position.set(thing.position.x, thing.position.y, thing.position.z);
@@ -1285,7 +1285,7 @@ export function createGeneratedMesh(thing: GeneratedThing): THREE.Object3D {
     group.scale.multiplyScalar(scale);
     if (
       isFreeMovingVehicle(thing) ||
-      isIntentionallyElevated(thing) ||
+      isIntentionallyOffsetFromGround(thing) ||
       Math.hypot(thing.position.x, thing.position.z) > WORLD_RADIUS
     ) {
       group.position.set(thing.position.x, thing.position.y, thing.position.z);
