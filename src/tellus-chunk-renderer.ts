@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import {
-  CHUNK_KEEP_RADIUS,
   CHUNK_LOAD_RADIUS,
   CHUNK_LOD_FAR_SEGMENTS,
   CHUNK_LOD_NEAR_RADIUS,
@@ -97,6 +96,8 @@ interface ActiveChunk {
 export interface ChunkRenderer {
   /** Per-frame from animate(); re-evaluates the load/evict ring only when the center chunk changes. */
   update(worldX: number, worldZ: number): void;
+  /** Set how many chunk-rings load around the player (radius in chunks; (2r+1)² chunks). Forces a re-eval. */
+  setLoadRadius(radius: number): void;
   /** /live chunk.updated -> mark dirty + refetch that chunk (rebuilt in the next flush). */
   reloadChunk(chunkX: number, chunkZ: number): void;
   /** Rebuild any chunks whose data arrived since last frame — call once/frame next to flushTerrain(). */
@@ -138,6 +139,10 @@ export function createChunkRenderer(
   let centerCx = NaN;
   let centerCz = NaN;
   let disposed = false;
+  // Runtime-tunable load ring (the chunk slider). loadRadius = chunks fetched around the centre ((2r+1)²);
+  // keepRadius = loadRadius + 1 for the same evict hysteresis the CHUNK_LOAD/KEEP constants had (2 → 3).
+  let loadRadius = CHUNK_LOAD_RADIUS;
+  const keepRadius = () => loadRadius + 1;
 
   // Uniform full-res LOD: per-ring decimation produced T-junction CRACKS at every near/far seam
   // (a 65-edge-vertex chunk next to a 17-edge-vertex chunk leaves gaps). Until edge-skirts/stitching
@@ -190,8 +195,8 @@ export function createChunkRenderer(
 
     // Ensure chunks within the load radius are fetched (skip already-active at the right LOD).
     const bounds = getChunkedWorldChunks(); // {w,h} in chunks, or null until the manifest loads
-    for (let dz = -CHUNK_LOAD_RADIUS; dz <= CHUNK_LOAD_RADIUS; dz++) {
-      for (let dx = -CHUNK_LOAD_RADIUS; dx <= CHUNK_LOAD_RADIUS; dx++) {
+    for (let dz = -loadRadius; dz <= loadRadius; dz++) {
+      for (let dx = -loadRadius; dx <= loadRadius; dx++) {
         const tcx = cx + dx;
         const tcz = cz + dz;
         if (tcx < 0 || tcz < 0) continue; // world coords are [0, N*SPAN)
@@ -213,7 +218,7 @@ export function createChunkRenderer(
       const parts = k.split(",");
       const kcx = Number(parts[0]);
       const kcz = Number(parts[1]);
-      if (Math.max(Math.abs(kcx - cx), Math.abs(kcz - cz)) > CHUNK_KEEP_RADIUS) evict(k);
+      if (Math.max(Math.abs(kcx - cx), Math.abs(kcz - cz)) > keepRadius()) evict(k);
     }
   };
 
@@ -251,7 +256,7 @@ export function createChunkRenderer(
       // an evict pass and this flush.)
       if (
         Number.isFinite(centerCx) &&
-        Math.max(Math.abs(data.cx - centerCx), Math.abs(data.cz - centerCz)) > CHUNK_KEEP_RADIUS
+        Math.max(Math.abs(data.cx - centerCx), Math.abs(data.cz - centerCz)) > keepRadius()
       ) {
         continue;
       }
@@ -319,8 +324,19 @@ export function createChunkRenderer(
     scene.remove(group);
   };
 
+  const setLoadRadius = (radius: number) => {
+    const r = Math.max(1, Math.min(12, Math.round(radius)));
+    if (r === loadRadius) return;
+    loadRadius = r;
+    // Force the next update() to re-evaluate the ring (load new chunks / evict shrunk-out ones) even though
+    // the centre chunk hasn't moved — the early-out compares against centerCx/centerCz.
+    centerCx = NaN;
+    centerCz = NaN;
+  };
+
   return {
     update,
+    setLoadRadius,
     reloadChunk,
     flush,
     sampleHeight,

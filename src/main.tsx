@@ -110,8 +110,8 @@ import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThi
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial } from "./tellus-terrain-material";
-import { installSessionFetch } from "./tellus-auth";
-import { AuthControls, PremiumUpsellChip } from "./tellus-auth-ui";
+import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
+import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseWorldTemplateId, templateForWorldId } from "./tellus-world-templates";
 import "./styles.css";
@@ -140,12 +140,14 @@ interface AgentStatus {
   lastTickAt: string | null;
   /** True while the agent is mid-turn (LLM call in flight) — the "thinking" indicator. */
   processing?: boolean;
+  /** The agent's own durable `remember` notes (newest first) — surfaced live in the memories block. */
+  memories?: AgentRememberNote[];
 }
 
-// One turn of the server-side agent's recent conversation (its dialog). role "assistant" = the agent speaking;
-// "tool" = a tool call/result (rendered dimmer/smaller in the feed).
+// One turn of the server-side agent's recent conversation. "assistant" = the agent speaking; "tool" = a tool
+// call/result (dimmer); "user" = the owner's own chat line (restored from the thread so it survives a reload).
 interface AgentTranscriptMessage {
-  role: "assistant" | "tool";
+  role: "assistant" | "tool" | "user";
   text: string;
 }
 
@@ -161,11 +163,18 @@ interface AgentMemoryEntry {
   newValue?: string;
 }
 
-// Shape of GET .../agent/memories — current self-section + recent edit log.
+// One of the agent's OWN durable notes (its `remember` tool) — distinct from the owner-edited persona.
+interface AgentRememberNote {
+  text?: string;
+  at?: string;
+}
+
+// Shape of GET .../agent/memories — current self-section + recent edit log + the agent's own notes.
 interface AgentMemoriesResponse {
   selfSection?: string;
   log?: AgentMemoryEntry[];
   entries?: AgentMemoryEntry[];
+  memories?: AgentRememberNote[];
 }
 
 // Compact tool chip: one-line pill in the feed's dimmed style language (same HUD palette as the old
@@ -236,6 +245,10 @@ function AgentToolChipPill({ chip }: { chip: AgentToolChip }) {
     </span>
   );
 }
+
+// Chunk-load radius (the chunked-world HUD slider): rings of chunks loaded around the player →
+// (2r+1)² loaded chunks. Persisted here, read by both the world closure (on init) and the React HUD.
+const CHUNK_LOAD_RADIUS_STORAGE_KEY = "tellus.chunkLoadRadius";
 
 function createTellusWorld(
   container: HTMLElement,
@@ -601,6 +614,17 @@ function createTellusWorld(
       scene,
       createTerrainMaterial(useWebGPU, { roughness: 0.88 }),
     ); // adds its own group to the scene
+    // Apply the persisted chunk-load radius (the HUD slider) so draw distance survives a reload.
+    const savedRadius = (() => {
+      try {
+        const raw = window.localStorage.getItem(CHUNK_LOAD_RADIUS_STORAGE_KEY);
+        const n = raw ? Math.round(Number(raw)) : NaN;
+        return Number.isFinite(n) ? n : null;
+      } catch {
+        return null;
+      }
+    })();
+    if (savedRadius !== null) chunkRenderer.setLoadRadius(savedRadius);
     // Walk the sculpted chunk heightfield where chunks are loaded (flat base elsewhere).
     setChunkedHeightProvider((x, z) => chunkRenderer!.sampleHeight(x, z));
   }
@@ -3904,8 +3928,10 @@ function createTellusWorld(
   // ── Agent vision capture: render the agent's POV into a small offscreen target and return a JPEG
   // data URL. The owner's client ships this to Hyades so the agent's LLM turn can SEE — no headless
   // browser anywhere. Works on both backends (async readback on WebGPU, sync on WebGL). ──
-  const AGENT_VIEW_W = 256;
-  const AGENT_VIEW_H = 144;
+  // 720p 16:9 — vision models (holo3.1) read a full-size frame fine; the old 256×144 was so small + JPEG-
+  // crushed that the model often couldn't make anything out (and reported the frame as "inverted / low-res").
+  const AGENT_VIEW_W = 1280;
+  const AGENT_VIEW_H = 720;
   let agentViewTarget: THREE.WebGLRenderTarget | null = null;
   let agentViewCanvas: HTMLCanvasElement | null = null;
   let agentViewBusy = false;
@@ -3920,11 +3946,23 @@ function createTellusWorld(
       povSkyDelta.copy(povCamera.position).sub(camera.position);
       syncExternalSkyboxToCamera(povCamera.position);
       if (moonModel) moonModel.position.add(povSkyDelta);
+      // First-person POV: hide our OWN avatar (body + the presence ring over its head) so the agent doesn't
+      // see itself — otherwise the head ring renders as a white band across the top of every captured frame.
+      const selfAvatar = remoteVisitorMeshes.get(visitorId);
+      const selfWasVisible = selfAvatar?.visible ?? true;
+      if (selfAvatar) selfAvatar.visible = false;
+      // The agent's OWNER (this local user) must always be visible to the agent, even when the
+      // user is in first-person (which hides their own `visitor` mesh globally). Force it visible
+      // for this POV render, restore the user's own choice after.
+      const userWasVisible = visitor.visible;
+      visitor.visible = true;
       try {
         renderer.setRenderTarget(agentViewTarget);
         renderer.render(scene, povCamera);
       } finally {
         renderer.setRenderTarget(prevTarget);
+        visitor.visible = userWasVisible;
+        if (selfAvatar) selfAvatar.visible = selfWasVisible;
         if (moonModel) moonModel.position.sub(povSkyDelta);
         syncExternalSkyboxToCamera(camera.position);
       }
@@ -3967,7 +4005,7 @@ function createTellusWorld(
         img.data.set(pixels.subarray(src, src + AGENT_VIEW_W * 4), y * AGENT_VIEW_W * 4);
       }
       ctx2d.putImageData(img, 0, 0);
-      return agentViewCanvas.toDataURL("image/jpeg", 0.55);
+      return agentViewCanvas.toDataURL("image/jpeg", 0.82);
     } catch {
       return null;
     } finally {
@@ -3992,6 +4030,14 @@ function createTellusWorld(
   const renderAgentViewport = () => {
     if (!renderer || !agentViewportVisitorId) return;
     if (!poseAgentPovCamera(agentViewportVisitorId)) return;
+    // First-person: hide our own avatar (incl. the head presence-ring) for the on-screen PiP too.
+    const selfAvatar = remoteVisitorMeshes.get(agentViewportVisitorId);
+    const selfWasVisible = selfAvatar?.visible ?? true;
+    // The agent's OWNER (this local user) must stay visible to the agent in the PiP even when the
+    // user is in first-person (which hides their own `visitor` mesh globally). Force visible for
+    // this POV render; restored in the finally.
+    const userWasVisible = visitor.visible;
+    visitor.visible = true;
     let skyShifted = false;
     let viewportSaved = false;
     let savedScissorTest = false;
@@ -4028,11 +4074,14 @@ function createTellusWorld(
       renderer.setScissorTest(true);
       renderer.setScissor(marginX, y, pipW, pipH);
       renderer.setViewport(marginX, y, pipW, pipH);
+      if (selfAvatar) selfAvatar.visible = false;
       renderer.render(scene, povCamera);
     } catch {
       /* a bad PiP frame must never break the main loop */
     } finally {
       try {
+        visitor.visible = userWasVisible;
+        if (selfAvatar) selfAvatar.visible = selfWasVisible;
         // Restore the celestials to the player camera (next frame's updateCamera re-syncs the skybox too,
         // but undo the moon shift here so a mid-frame read never sees the POV-shifted position).
         if (skyShifted) {
@@ -4219,8 +4268,18 @@ function createTellusWorld(
       !sailingThingId
     ) {
       flying = !flying;
-      playerAirborne = false;
       playerVy = 0;
+      if (flying) {
+        // Entering fly: free-fly owns vertical, so clear any in-progress fall.
+        playerAirborne = false;
+      } else {
+        // Leaving fly while still above the ground would otherwise FREEZE the player mid-air —
+        // the movement update early-returns when there's no input, !playerAirborne and !flying, so
+        // gravity never runs and they hover until a reload. Hand off to gravity instead: mark them
+        // airborne so the next frame falls them to the ground; only settle to grounded if already low.
+        const floor = groundHeightAt(visitorPosition.x, visitorPosition.z) ?? SEA_LEVEL;
+        playerAirborne = visitorPosition.y > floor + 0.05;
+      }
       addLog({ agentId: "visitor", agentName: "Visitor", tool: "interact", text: flying ? "fly mode ON (Space up / C down)" : "fly mode off" });
       return;
     }
@@ -4745,6 +4804,10 @@ function createTellusWorld(
     getAvatarScale: () => localAvatarScale,
     setCameraMode,
     getCameraMode: () => cameraMode,
+    // Chunked-world draw distance: rings of chunks loaded around the player (no-op on classic worlds).
+    setChunkLoadRadius: (radius: number) => {
+      chunkRenderer?.setLoadRadius(radius);
+    },
     getGeneratedClipNames: (id: string) => generatedClipNamesForThing(id),
     setGeneratedAnimation: (id: string, animation: string) => {
       const thing = thingById(id);
@@ -5119,6 +5182,10 @@ function App(): React.ReactElement {
     remoteVisitors: [],
   });
   const [prompt, setPrompt] = useState("");
+  // Live Tellus account (null when logged out). The world-delete control is gated on the admin role
+  // (server-side ITellusAccountGrain role === "admin"); the server re-checks via RequireAdminAsync.
+  const account = useTellusAuth();
+  const isAdmin = (account?.role ?? "").toLowerCase() === "admin";
   const [worldChatInput, setWorldChatInput] = useState("");
   const [worldChatChannel, setWorldChatChannel] = useState<WorldChatChannel>("world");
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
@@ -5172,6 +5239,33 @@ function App(): React.ReactElement {
     setCameraModeState(next);
     worldRef.current?.setCameraMode(next);
   };
+  // ── Chunk-load radius (chunked-world draw distance; only shown for chunked worlds) ──
+  // r rings → (2r+1)² loaded chunks. UI range 1–8 (subset of the renderer's 1–12). Persisted in
+  // localStorage; the world closure applies the saved value to the renderer on init.
+  const CHUNK_LOAD_RADIUS_MIN = 1;
+  const CHUNK_LOAD_RADIUS_MAX = 8;
+  const [chunkLoadRadius, setChunkLoadRadiusState] = useState<number>(() => {
+    try {
+      const raw = window.localStorage.getItem("tellus.chunkLoadRadius");
+      const n = raw ? Math.round(Number(raw)) : NaN;
+      if (Number.isFinite(n)) {
+        return Math.min(CHUNK_LOAD_RADIUS_MAX, Math.max(CHUNK_LOAD_RADIUS_MIN, n));
+      }
+    } catch {
+      /* private mode — fall through to the default */
+    }
+    return 2;
+  });
+  const onChunkLoadRadius = (raw: number) => {
+    const next = Math.min(CHUNK_LOAD_RADIUS_MAX, Math.max(CHUNK_LOAD_RADIUS_MIN, Math.round(raw)));
+    setChunkLoadRadiusState(next);
+    worldRef.current?.setChunkLoadRadius(next);
+    try {
+      window.localStorage.setItem("tellus.chunkLoadRadius", String(next));
+    } catch {
+      /* private mode — the change just won't persist */
+    }
+  };
   // ── Avatar picker state (catalog selection; "" = deterministic default robot) ──
   const [avatarPanelOpen, setAvatarPanelOpen] = useState(false);
   const [avatarSelection, setAvatarSelection] = useState<string>(() => storedAvatarId());
@@ -5198,6 +5292,8 @@ function App(): React.ReactElement {
   const [agentChat, setAgentChat] = useState<AgentChatLine[]>([]);
   const [agentChatInput, setAgentChatInput] = useState("");
   const [agentViewportOn, setAgentViewportOn] = useState(false);
+  // Expanded chat: a fullscreen overlay of the same agent thread for comfortable reading/long convos.
+  const [chatExpanded, setChatExpanded] = useState(false);
   // Reset-thread escape hatch: two-step inline confirm + which collapsed chip groups are expanded.
   const [agentResetConfirm, setAgentResetConfirm] = useState(false);
   const [expandedChipGroups, setExpandedChipGroups] = useState<Set<string>>(() => new Set());
@@ -5417,7 +5513,7 @@ function App(): React.ReactElement {
     }
   }, [runAgentAction, agentPersonaDraft]);
 
-  // Edit history of the agent's self-section (its own `remember` writes + your persona saves).
+  // Load the agent's memory: the self-section edit history AND the agent's own `remember` notes.
   const loadMemoriesLog = useCallback(async () => {
     setMemoriesLog(null);
     try {
@@ -5441,7 +5537,7 @@ function App(): React.ReactElement {
       seen.add(key);
       additions.push({
         id: ++agentChatSeqRef.current,
-        who: m.role === "tool" ? "tool" : "agent",
+        who: m.role === "tool" ? "tool" : m.role === "user" ? "you" : "agent",
         text: m.text,
       });
     }
@@ -5455,6 +5551,9 @@ function App(): React.ReactElement {
       setAgentError("Start your agent before talking to it.");
       return;
     }
+    // Pre-seed the dedup key so the same line coming back from the transcript poll (as a `user` message)
+    // doesn't double-add it; on a fresh reload the seen set is empty so the transcript restores it cleanly.
+    agentMergedKeysRef.current.add(`user|${text}`);
     setAgentChat((prev) => [...prev, { id: ++agentChatSeqRef.current, who: "you", text }]);
     setAgentChatInput("");
     setAgentError(null);
@@ -5529,6 +5628,58 @@ function App(): React.ReactElement {
       return next;
     });
   }, []);
+
+  // One agent-thread feed item → JSX. Shared by the compact in-panel chat AND the expanded overlay so both
+  // render identically (prose lines, tool chips, collapsible chip groups, system lines).
+  const renderAgentFeedItem = (item: (typeof agentFeed)[number]) => {
+    if (item.kind === "chip") return <AgentToolChipPill key={item.key} chip={item.chip} />;
+    if (item.kind === "chipGroup") {
+      const open = expandedChipGroups.has(item.key);
+      const toggle = (
+        <button
+          type="button"
+          onClick={() => toggleChipGroup(item.key)}
+          style={{ ...agentChipStyle, cursor: "pointer" }}
+          title={open ? "Collapse" : "Expand"}
+        >
+          <span aria-hidden="true">🔧</span>
+          <span>
+            {item.chips.length} actions {open ? "▾" : "▸"}
+          </span>
+        </button>
+      );
+      if (!open) return <React.Fragment key={item.key}>{toggle}</React.Fragment>;
+      return (
+        <span key={item.key} style={{ display: "flex", flexDirection: "column", gap: 3, flex: "none" }}>
+          {toggle}
+          {item.chips.map((c) => (
+            <AgentToolChipPill key={c.key} chip={c.chip} />
+          ))}
+        </span>
+      );
+    }
+    if (item.who === "system") {
+      return (
+        <span key={item.key} style={{ fontSize: 10, opacity: 0.45, fontStyle: "italic", textAlign: "center" }}>
+          {item.text}
+        </span>
+      );
+    }
+    return (
+      <span
+        key={item.key}
+        style={{
+          fontSize: 12,
+          color: item.who === "you" ? "#9ec8ff" : "#dfe7d8",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+        }}
+      >
+        <b style={{ opacity: 0.7, fontWeight: 600 }}>{item.who === "you" ? "You: " : ""}</b>
+        {item.text}
+      </span>
+    );
+  };
 
   // Auto-scroll the chat thread to the newest line when it grows — but only if the user is already near the
   // bottom, so we don't snatch the view away from someone scrolled up reading older lines.
@@ -5697,6 +5848,11 @@ function App(): React.ReactElement {
   const [currentWorldPrivate, setCurrentWorldPrivate] = useState(false);
   const [worldCreateNote, setWorldCreateNote] = useState<string | null>(null);
   const worldCreateNoteTimerRef = useRef<number | undefined>(undefined);
+  // Admin-only world delete: a two-step inline confirm. First click arms (sets the world id here),
+  // second click within the window confirms; clicking elsewhere / a timeout disarms.
+  const [pendingDeleteWorld, setPendingDeleteWorld] = useState<string | null>(null);
+  const [deletingWorld, setDeletingWorld] = useState(false);
+  const pendingDeleteTimerRef = useRef<number | undefined>(undefined);
   const KNOWN_WORLDS_KEY = "tellus.knownWorlds";
   const WORLD_PROFILES_KEY = "tellus.worldProfiles";
   const ACTIVE_WORLD_KEY = "tellus.activeWorldId";
@@ -5853,6 +6009,78 @@ function App(): React.ReactElement {
     }
     setActiveWorldId(id);
     void refreshWorldList(id);
+  };
+  // Transient status line next to the world controls (reuses the create-note slot + its auto-clear).
+  const showWorldNote = (msg: string, ms = 2800) => {
+    if (worldCreateNoteTimerRef.current !== undefined) {
+      window.clearTimeout(worldCreateNoteTimerRef.current);
+    }
+    setWorldCreateNote(msg);
+    worldCreateNoteTimerRef.current = window.setTimeout(() => {
+      setWorldCreateNote(null);
+      worldCreateNoteTimerRef.current = undefined;
+    }, ms);
+  };
+  const disarmDeleteWorld = () => {
+    if (pendingDeleteTimerRef.current !== undefined) {
+      window.clearTimeout(pendingDeleteTimerRef.current);
+      pendingDeleteTimerRef.current = undefined;
+    }
+    setPendingDeleteWorld(null);
+  };
+  // Admin-only: DELETE {worldApiBase}/admin/tellus/worlds/{worldId}. That route is NOT under /api/,
+  // so installSessionFetch() does NOT auto-attach the session header — we set X-Tellus-Session here.
+  const deleteWorld = async (id: string) => {
+    if (!id || deletingWorld) return;
+    if (pendingDeleteWorld !== id) {
+      // First click: arm the confirm (auto-disarms after a short window).
+      if (pendingDeleteTimerRef.current !== undefined) {
+        window.clearTimeout(pendingDeleteTimerRef.current);
+      }
+      setPendingDeleteWorld(id);
+      pendingDeleteTimerRef.current = window.setTimeout(() => {
+        setPendingDeleteWorld(null);
+        pendingDeleteTimerRef.current = undefined;
+      }, 4000);
+      return;
+    }
+    // Second click: confirmed.
+    disarmDeleteWorld();
+    const token = getSession()?.token;
+    if (!token) {
+      showWorldNote("Delete failed: not signed in");
+      return;
+    }
+    setDeletingWorld(true);
+    try {
+      const res = await fetch(
+        `${runtimeConfig.worldApiBase}/admin/tellus/worlds/${encodeURIComponent(id)}`,
+        { method: "DELETE", headers: { [SESSION_HEADER]: token } },
+      );
+      if (!res.ok) {
+        const detail = res.status === 403 ? "not authorized (admin only)" : `HTTP ${res.status}`;
+        showWorldNote(`Delete failed: ${detail}`, 4000);
+        return;
+      }
+      // If the deleted world was active, get the user out of it before it vanishes from the list.
+      if (id === (activeWorldId ?? runtimeConfig.worldId)) {
+        const fallback =
+          worlds.find((w) => w !== id) ??
+          (runtimeConfig.worldId !== id ? runtimeConfig.worldId : "");
+        if (fallback) {
+          switchWorld(fallback);
+        } else {
+          await refreshWorldList();
+        }
+      } else {
+        await refreshWorldList();
+      }
+      showWorldNote(`Deleted world "${id}"`);
+    } catch {
+      showWorldNote("Delete failed: network error", 4000);
+    } finally {
+      setDeletingWorld(false);
+    }
   };
   const createNewWorld = () => {
     const raw = window.prompt(
@@ -6333,6 +6561,8 @@ function App(): React.ReactElement {
     void resolveWorldRenderProfile(activeWorldId)
       .then(async (profile) => {
         if (cancelled) return;
+        // The resolved profile already folds in the user's persisted per-world skybox pick
+        // (resolveWorldRenderProfile merges the local world profile over the server metadata).
         setCurrentWorldTemplate(profile.template);
         setCurrentWorldSkyboxUrl(profile.skyboxUrl);
         setCurrentWorldPrivate(profile.isPublic === false);
@@ -6647,28 +6877,64 @@ function App(): React.ReactElement {
           >
             <div style={{ display: "grid", gap: 2 }}>
               <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>World</span>
-              <select
-                aria-label="Active world"
-                title="Switch world"
-                value={activeWorldId ?? ""}
-                onChange={(e) => switchWorld(e.target.value)}
-                style={{
-                  background: "rgba(0,0,0,0.5)",
-                  color: "#dfe7d8",
-                  border: "1px solid rgba(255,255,255,0.18)",
-                  borderRadius: 8,
-                  padding: "4px 8px",
-                  font: "600 12px/1.2 ui-sans-serif, system-ui",
-                  maxWidth: 180,
-                }}
-              >
-                {!activeWorldId && <option value="">…</option>}
-                {worlds.map((w) => (
-                  <option key={w} value={w}>
-                    {w}
-                  </option>
-                ))}
-              </select>
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <select
+                  aria-label="Active world"
+                  title="Switch world"
+                  value={activeWorldId ?? ""}
+                  onChange={(e) => switchWorld(e.target.value)}
+                  style={{
+                    background: "rgba(0,0,0,0.5)",
+                    color: "#dfe7d8",
+                    border: "1px solid rgba(255,255,255,0.18)",
+                    borderRadius: 8,
+                    padding: "4px 8px",
+                    font: "600 12px/1.2 ui-sans-serif, system-ui",
+                    maxWidth: 180,
+                  }}
+                >
+                  {!activeWorldId && <option value="">…</option>}
+                  {worlds.map((w) => (
+                    <option key={w} value={w}>
+                      {w}
+                    </option>
+                  ))}
+                </select>
+                {isAdmin && activeWorldId &&
+                  (() => {
+                    const target = activeWorldId;
+                    const armed = pendingDeleteWorld === target;
+                    return (
+                      <button
+                        type="button"
+                        aria-label={armed ? `Confirm delete world ${target}` : `Delete world ${target}`}
+                        title={
+                          armed
+                            ? `Click again to permanently delete "${target}"`
+                            : `Delete world "${target}" (admin)`
+                        }
+                        disabled={deletingWorld}
+                        onClick={() => void deleteWorld(target)}
+                        onBlur={() => {
+                          if (pendingDeleteWorld === target) disarmDeleteWorld();
+                        }}
+                        style={{
+                          background: armed ? "rgba(190,40,40,0.85)" : "rgba(0,0,0,0.5)",
+                          color: armed ? "#fff" : "#e88",
+                          border: `1px solid ${armed ? "rgba(255,120,120,0.7)" : "rgba(255,255,255,0.18)"}`,
+                          borderRadius: 8,
+                          padding: "4px 8px",
+                          font: "700 12px/1.2 ui-sans-serif, system-ui",
+                          cursor: deletingWorld ? "default" : "pointer",
+                          opacity: deletingWorld ? 0.6 : 1,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {deletingWorld ? "…" : armed ? "Confirm?" : "🗑"}
+                      </button>
+                    );
+                  })()}
+              </div>
             </div>
             <div style={{ display: "grid", gap: 2 }}>
               <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>Kind</span>
@@ -7389,7 +7655,12 @@ function App(): React.ReactElement {
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <button
                 type="button"
-                onClick={() => setMemoriesOpen((open) => !open)}
+                onClick={() =>
+                  setMemoriesOpen((open) => {
+                    if (!open) void loadMemoriesLog(); // pull the agent's notes when the block opens
+                    return !open;
+                  })
+                }
                 style={{
                   background: "none",
                   border: "none",
@@ -7403,6 +7674,7 @@ function App(): React.ReactElement {
                 }}
               >
                 {memoriesOpen ? "▾" : "▸"} Personality &amp; memories
+                {agentStatus?.memories?.length ? ` (${agentStatus.memories.length})` : ""}
               </button>
               {!memoriesOpen ? (
                 <>
@@ -7504,6 +7776,45 @@ function App(): React.ReactElement {
                   >
                     {agentStatus?.selfSection?.trim() || "No memories yet."}
                   </pre>
+                  {agentStatus?.memories && agentStatus.memories.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <span style={{ fontSize: 10, opacity: 0.6, fontWeight: 600 }}>
+                        Remembers ({agentStatus.memories.length})
+                      </span>
+                      <div
+                        style={{
+                          maxHeight: 120,
+                          overflowY: "auto",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 5,
+                          padding: "6px 8px",
+                          background: "rgba(0,0,0,0.25)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: 6,
+                        }}
+                      >
+                        {agentStatus.memories.map((note, index) => (
+                          <span
+                            key={`${note.at ?? ""}-${index}`}
+                            style={{
+                              fontSize: 11,
+                              opacity: 0.8,
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                            }}
+                          >
+                            {note.at ? (
+                              <span style={{ opacity: 0.5, fontSize: 9 }}>
+                                {new Date(note.at).toLocaleString()} ·{" "}
+                              </span>
+                            ) : null}
+                            {note.text ?? ""}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div style={{ display: "flex", gap: 4 }}>
                     <button
                       type="button"
@@ -7577,7 +7888,26 @@ function App(): React.ReactElement {
             )}
             {/* Chat thread: the agent's dialog (assistant = dialog, tool = dimmed) plus the lines you send it. */}
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ fontSize: 11, opacity: 0.7 }}>Chat</span>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 11, opacity: 0.7 }}>Chat</span>
+                <button
+                  type="button"
+                  onClick={() => setChatExpanded(true)}
+                  title="Expand chat"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#dfe7d8",
+                    fontSize: 13,
+                    lineHeight: 1,
+                    opacity: 0.7,
+                    padding: 0,
+                    cursor: "pointer",
+                  }}
+                >
+                  ⤢
+                </button>
+              </div>
               <div
                 ref={agentTranscriptScrollRef}
                 style={{
@@ -7599,58 +7929,7 @@ function App(): React.ReactElement {
                       : "Start your agent, then say hello below."}
                   </span>
                 ) : (
-                  agentFeed.map((item) => {
-                    if (item.kind === "chip") return <AgentToolChipPill key={item.key} chip={item.chip} />;
-                    if (item.kind === "chipGroup") {
-                      const open = expandedChipGroups.has(item.key);
-                      const toggle = (
-                        <button
-                          type="button"
-                          onClick={() => toggleChipGroup(item.key)}
-                          style={{ ...agentChipStyle, cursor: "pointer" }}
-                          title={open ? "Collapse" : "Expand"}
-                        >
-                          <span aria-hidden="true">🔧</span>
-                          <span>
-                            {item.chips.length} actions {open ? "▾" : "▸"}
-                          </span>
-                        </button>
-                      );
-                      if (!open) return <React.Fragment key={item.key}>{toggle}</React.Fragment>;
-                      return (
-                        <span key={item.key} style={{ display: "flex", flexDirection: "column", gap: 3, flex: "none" }}>
-                          {toggle}
-                          {item.chips.map((c) => (
-                            <AgentToolChipPill key={c.key} chip={c.chip} />
-                          ))}
-                        </span>
-                      );
-                    }
-                    if (item.who === "system") {
-                      return (
-                        <span
-                          key={item.key}
-                          style={{ fontSize: 10, opacity: 0.45, fontStyle: "italic", textAlign: "center" }}
-                        >
-                          {item.text}
-                        </span>
-                      );
-                    }
-                    return (
-                      <span
-                        key={item.key}
-                        style={{
-                          fontSize: 12,
-                          color: item.who === "you" ? "#9ec8ff" : "#dfe7d8",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        <b style={{ opacity: 0.7, fontWeight: 600 }}>{item.who === "you" ? "You: " : ""}</b>
-                        {item.text}
-                      </span>
-                    );
-                  })
+                  agentFeed.map(renderAgentFeedItem)
                 )}
                 {agentStatus?.optedIn && agentStatus?.processing && (
                   <span style={{ fontSize: 11, color: "#9ec8ff", fontStyle: "italic", opacity: 0.85 }}>
@@ -7722,6 +8001,129 @@ function App(): React.ReactElement {
               Your agent acts as you in this world. Premium keeps it active while you're away.
             </div>
           </aside>
+        )}
+        {chatExpanded && (
+          <div
+            role="dialog"
+            aria-label="Agent chat (expanded)"
+            onClick={() => setChatExpanded(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 80,
+              background: "rgba(0,0,0,0.6)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "min(720px, 96vw)",
+                height: "min(80dvh, 720px)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                background: "rgba(18,22,17,0.96)",
+                border: "1px solid rgba(255,255,255,0.16)",
+                borderRadius: 12,
+                padding: 14,
+                boxShadow: "0 18px 60px rgba(0,0,0,0.5)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "#dfe7d8" }}>Chat</span>
+                <button
+                  type="button"
+                  onClick={() => setChatExpanded(false)}
+                  title="Close"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#dfe7d8",
+                    fontSize: 18,
+                    lineHeight: 1,
+                    opacity: 0.75,
+                    padding: 0,
+                    cursor: "pointer",
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: "auto",
+                  background: "rgba(0,0,0,0.32)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
+              >
+                {agentChat.length === 0 && !agentStatus?.processing ? (
+                  <span style={{ fontSize: 12, opacity: 0.5, fontStyle: "italic" }}>
+                    {agentStatus?.optedIn
+                      ? "Say hello to your agent below."
+                      : "Start your agent, then say hello below."}
+                  </span>
+                ) : (
+                  agentFeed.map(renderAgentFeedItem)
+                )}
+                {agentStatus?.optedIn && agentStatus?.processing && (
+                  <span style={{ fontSize: 12, color: "#9ec8ff", fontStyle: "italic", opacity: 0.85 }}>
+                    💭 thinking…
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  type="text"
+                  value={agentChatInput}
+                  onChange={(e) => setAgentChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void onAgentSend();
+                    }
+                  }}
+                  placeholder={agentStatus?.optedIn ? "Talk to your agent…" : "Start your agent first"}
+                  disabled={!agentStatus?.optedIn}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    fontSize: 13,
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(255,255,255,0.18)",
+                    background: "rgba(0,0,0,0.3)",
+                    color: "#eef2ea",
+                    opacity: agentStatus?.optedIn ? 1 : 0.5,
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => void onAgentSend()}
+                  disabled={!agentStatus?.optedIn || agentChatInput.trim().length === 0}
+                  style={{
+                    ...p2pBtnStyle(false),
+                    flex: "none",
+                    padding: "8px 16px",
+                    opacity: agentStatus?.optedIn && agentChatInput.trim().length > 0 ? 1 : 0.5,
+                    cursor: agentStatus?.optedIn && agentChatInput.trim().length > 0 ? "pointer" : "default",
+                  }}
+                >
+                  Send
+                </button>
+              </div>
+            </div>
+          </div>
         )}
         {worldMapOpen && (
           <aside className="world-right-hud" aria-label="World systems">
@@ -7840,6 +8242,56 @@ function App(): React.ReactElement {
               return (
                 <div className="world-pos-readout" title="Your location — copy to share">
                   {cell}({wx}, {wz})
+                </div>
+              );
+            })()}
+            {isChunkedWorldId(activeWorldId ?? "") && (() => {
+              // Chunk-load radius slider: how many chunk-rings stream around you. Higher = more draw
+              // distance (and more cost). Loaded chunks = (2r+1)² (a (2r+1)×(2r+1) square centred on you).
+              const side = 2 * chunkLoadRadius + 1;
+              return (
+                <div
+                  className="chunk-load-radius"
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                    marginTop: 8,
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    background: "rgba(12,16,22,0.55)",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    color: "#dfe7d8",
+                    font: "500 12px/1.4 system-ui, sans-serif",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontWeight: 600 }}>Draw distance</span>
+                    <span data-testid="chunk-load-radius-label" style={{ opacity: 0.8 }}>
+                      Chunks: {side}×{side} ({side * side})
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    aria-label="Chunk load radius"
+                    data-testid="chunk-load-radius-slider"
+                    min={CHUNK_LOAD_RADIUS_MIN}
+                    max={CHUNK_LOAD_RADIUS_MAX}
+                    step={1}
+                    value={chunkLoadRadius}
+                    onChange={(event) => onChunkLoadRadius(Number(event.target.value))}
+                    style={{ width: "100%" }}
+                  />
+                  <span style={{ fontSize: 10, opacity: 0.55 }}>
+                    higher = farther view · more chunks loaded (more cost)
+                  </span>
                 </div>
               );
             })()}
