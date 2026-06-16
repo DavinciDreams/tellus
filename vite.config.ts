@@ -123,18 +123,27 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: 3344,
       strictPort: true,
-      proxy: hyadesApiKey
-        ? {
-            "/api/tts": {
-              target: hyadesBaseUrl,
-              changeOrigin: true,
-              rewrite: () => "/tts",
-              headers: {
-                Authorization: `Bearer ${hyadesApiKey}`,
+      proxy: {
+        "/__hyades": {
+          target: "https://hyades.gnostr.cloud",
+          changeOrigin: true,
+          secure: true,
+          ws: true,
+          rewrite: (path) => path.replace(/^\/__hyades/, ""),
+        },
+        ...(hyadesApiKey
+          ? {
+              "/api/tts": {
+                target: hyadesBaseUrl,
+                changeOrigin: true,
+                rewrite: () => "/tts",
+                headers: {
+                  Authorization: `Bearer ${hyadesApiKey}`,
+                },
               },
-            },
-          }
-        : undefined,
+            }
+          : {}),
+      },
     },
     plugins: [
       react(),

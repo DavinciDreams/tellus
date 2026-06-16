@@ -138,6 +138,15 @@ describe("world protocol validators", () => {
     expect(worldChatFromWorldPatch({ type: "world.snapshot", chat: [message, { ...message, id: "" }] })).toEqual([
       message,
     ]);
+    const dm = {
+      ...message,
+      id: "chat-2",
+      channel: "dm",
+      recipientId: "agent:atlas",
+      recipientName: "Atlas",
+    };
+    expect(isWorldChatMessage(dm)).toBe(true);
+    expect(isWorldAction({ type: "world.chat", visitorId: "visitor-1", message: dm })).toBe(true);
   });
 
   it("rejects malformed world chat messages", () => {

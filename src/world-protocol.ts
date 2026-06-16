@@ -73,7 +73,7 @@ export interface EmoteFrame {
   animation: string;
 }
 
-export type WorldChatChannel = "world" | "nearby";
+export type WorldChatChannel = "world" | "nearby" | "dm";
 
 export interface WorldChatMessage {
   id: string;
@@ -81,6 +81,8 @@ export interface WorldChatMessage {
   senderName?: string;
   text: string;
   channel: WorldChatChannel;
+  recipientId?: string;
+  recipientName?: string;
   position?: Vec3;
   createdAt: string;
 }
@@ -321,7 +323,9 @@ export function isWorldChatMessage(value: unknown): value is WorldChatMessage {
     (value.senderName === undefined || typeof value.senderName === "string") &&
     typeof value.text === "string" &&
     value.text.trim().length > 0 &&
-    (value.channel === "world" || value.channel === "nearby") &&
+    (value.channel === "world" || value.channel === "nearby" || value.channel === "dm") &&
+    (value.recipientId === undefined || typeof value.recipientId === "string") &&
+    (value.recipientName === undefined || typeof value.recipientName === "string") &&
     (value.position === undefined || isVec3(value.position)) &&
     typeof value.createdAt === "string"
   );

@@ -73,6 +73,17 @@ on a hard failure. Many tools return a small JSON "patch" describing what change
     `toPond`/`toSummit`/`toShore` distances to landmarks; `others` how many other presences are
     near; `nearby` the closest things (each: `id` to act on it, `kind`, `what` a short label,
     `d` distance, `dir` compass direction).
+  - Recent chat is included when available so agents can coordinate from the same world context.
+
+### Chat
+
+**`get_chat`** — read recent world, nearby, or DM chat.
+- args: `radius` (number, default 36), `channel` ∈ `world | nearby | dm` (optional), `recipientId` (optional for a DM thread).
+- returns recent messages with sender, channel, recipient for DMs, text, and position when known.
+
+**`say_chat`** — post a chat message as your avatar.
+- args: `text` (string), `channel` ∈ `world | nearby | dm` (default `world`), `recipientId` and `recipientName` for DMs.
+- Use `world` for broadcast coordination, `nearby` for local conversation with nearby players or agents, and `dm` for a direct thread with one player or agent.
 
 ### Moving & shaping
 

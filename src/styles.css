@@ -195,13 +195,133 @@ textarea::placeholder {
   pointer-events: auto;
 }
 
+.world-menu-panel {
+  position: absolute;
+  left: 20px;
+  top: 18px;
+  bottom: auto;
+  z-index: 35;
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: min(760px, calc(100vw - 40px));
+  max-height: min(72dvh, calc(100dvh - 40px));
+  overflow: auto;
+  border: 1px solid var(--hud-border);
+  background: var(--hud-bg-strong);
+  box-shadow: var(--hud-shadow), var(--hud-inset);
+  padding: 8px;
+  pointer-events: auto;
+}
+
+.world-menu-panel > .top-left-cluster {
+  display: none;
+}
+
+.world-menu-panel .world-switcher {
+  flex: 1 1 420px;
+  flex-wrap: wrap;
+}
+
+.world-menu-panel .top-right-cluster {
+  display: none;
+}
+
+.world-lighting-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px 6px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  background: rgb(0 0 0 / 24%);
+}
+
+.world-lighting-control {
+  display: grid;
+  gap: 2px;
+  color: #dfe7d8;
+}
+
+.world-lighting-control span {
+  font-size: 10px;
+  color: rgb(223 231 216 / 72%);
+}
+
+.world-lighting-control select,
+.world-lighting-control input {
+  max-width: 142px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 50%);
+  color: #dfe7d8;
+  padding: 4px 8px;
+  font: 600 12px/1.2 ui-sans-serif, system-ui;
+}
+
+.world-menu-panel select,
+.world-menu-panel option,
+.world-map-title-select,
+.world-map-title-select option {
+  background-color: rgb(8 18 20);
+  color: #f3ecd1;
+}
+
+.world-lighting-control input {
+  width: 72px;
+}
+
+.world-lighting-control :disabled {
+  opacity: 0.48;
+}
+
+.brand-hud-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.world-top-bar .top-left-cluster {
+  display: grid;
+  gap: 0;
+}
+
+.world-top-bar .world-help {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+}
+
+.world-top-bar .world-help-list {
+  top: calc(100% + 8px);
+  bottom: auto;
+  left: 0;
+  right: auto;
+}
+
+.world-menu-panel .world-help {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+}
+
+.world-menu-panel .world-help-list {
+  top: calc(100% + 8px);
+  bottom: auto;
+  right: 0;
+}
+
 .world-mini-chat {
   position: absolute;
   left: 20px;
   bottom: 88px;
   z-index: 27;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
   gap: 7px;
   width: min(400px, calc(100vw - 40px));
   min-width: 220px;
@@ -236,6 +356,76 @@ textarea::placeholder {
   cursor: pointer;
 }
 
+.mini-chat-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.mini-chat-tabs button,
+.mini-chat-dm-targets button {
+  min-width: 0;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(0 0 0 / 20%);
+  color: var(--hud-muted);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+  overflow: hidden;
+  padding: 5px 6px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.mini-chat-tabs button.active,
+.mini-chat-dm-targets button.active {
+  border-color: var(--hud-border);
+  background: rgb(255 244 185 / 10%);
+  color: var(--hud-gold-bright);
+}
+
+.mini-chat-dm-targets {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--hud-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.mini-chat-dm-targets > div {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.mini-chat-dm-targets > div::-webkit-scrollbar {
+  display: none;
+}
+
+.mini-chat-dm-targets > span:only-child {
+  grid-column: 1 / -1;
+  color: var(--hud-muted);
+}
+
+.mini-chat-dm-targets button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 140px;
+  flex: 0 0 auto;
+  text-transform: none;
+}
+
+.mini-chat-dm-targets small {
+  color: var(--hud-muted);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
 .mini-chat-log {
   display: grid;
   align-content: start;
@@ -253,6 +443,10 @@ textarea::placeholder {
 
 .mini-chat-entry.nearby {
   border-left-color: #7fd3c5;
+}
+
+.mini-chat-entry.dm {
+  border-left-color: #d7a8ff;
 }
 
 .mini-chat-entry.empty {
@@ -304,12 +498,20 @@ textarea::placeholder {
   gap: 8px;
 }
 
-.mini-chat-actions select {
+.mini-chat-channel-label {
+  display: flex;
+  align-items: center;
   min-width: 0;
   border: 1px solid var(--hud-border-soft);
   background: rgb(4 10 5 / 42%);
   color: var(--hud-text);
   padding: 0 8px;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .mini-chat-submit {
@@ -690,22 +892,59 @@ textarea::placeholder {
   backdrop-filter: blur(10px);
 }
 
-.world-info-panel dl {
+.world-info-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
-  margin: 0;
 }
 
-.world-info-panel div {
+.world-map-title-select {
+  width: 100%;
+  margin-bottom: 4px;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(8 18 20 / 92%);
+  overflow: hidden;
+  color: var(--hud-gold-bright);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.1;
+  outline: none;
+  padding: 2px 4px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.world-map-title-select:focus,
+.world-map-title-select:hover {
+  border-color: var(--hud-border);
+  background: rgb(10 28 26 / 96%);
+}
+
+.world-info-panel div,
+.world-info-panel button {
   display: grid;
   gap: 1px;
   min-width: 0;
 }
 
-.world-info-panel dt,
-.world-info-panel dd {
-  margin: 0;
+.world-info-panel button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 1px 2px;
+  text-align: left;
+}
+
+.world-info-panel button:hover,
+.world-info-panel button.active {
+  border-color: var(--hud-border-soft);
+  background: rgb(255 244 185 / 8%);
+}
+
+.world-info-label,
+.world-info-value {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -713,16 +952,70 @@ textarea::placeholder {
   line-height: 1.1;
 }
 
-.world-info-panel dt {
+.world-info-label {
   color: var(--hud-gold);
   font-weight: 800;
   text-transform: uppercase;
 }
 
-.world-info-panel dd {
+.world-info-value {
   color: var(--hud-text);
   font-size: 9px;
   text-align: left;
+}
+
+.world-map-actor-list {
+  position: absolute;
+  top: 52px;
+  left: 6px;
+  right: 6px;
+  z-index: 4;
+  display: grid;
+  gap: 4px;
+  max-height: 112px;
+  overflow-y: auto;
+  border: 1px solid var(--hud-border);
+  background: rgb(7 26 23 / 92%);
+  box-shadow: var(--hud-shadow);
+  padding: 5px;
+  pointer-events: auto;
+}
+
+.world-map-actor-list p {
+  margin: 0;
+  color: var(--hud-muted);
+  font-size: 10px;
+}
+
+.world-map-actor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.world-map-actor-row span {
+  overflow: hidden;
+  color: var(--hud-text);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-map-actor-row button {
+  min-height: 22px;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(0 0 0 / 28%);
+  color: var(--hud-gold-bright);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+}
+
+.world-map-actor-row button:disabled {
+  opacity: 0.48;
+  cursor: default;
 }
 
 .creation-panel h2,
@@ -2703,7 +2996,13 @@ textarea::placeholder {
   flex-wrap: nowrap;
   gap: 4px;
   max-width: calc(100vw - 112px);
+  overflow-x: auto;
+  scrollbar-width: none;
   transform: translateX(-50%);
+}
+
+.world-left-toolbelt::-webkit-scrollbar {
+  display: none;
 }
 
 .toolbelt-button {
@@ -2736,6 +3035,11 @@ textarea::placeholder {
 
 .world-mini-chat {
   bottom: 72px;
+}
+
+.world-menu-panel {
+  top: 18px;
+  bottom: auto;
 }
 
 .selected-transform-hud {
@@ -2832,6 +3136,24 @@ textarea::placeholder {
     right: 8px !important;
     bottom: 56px !important;
     width: auto !important;
+  }
+
+  .world-menu-panel {
+    left: 8px;
+    right: 8px;
+    top: 8px;
+    bottom: auto;
+    width: auto;
+    max-width: none;
+    max-height: min(58dvh, calc(100dvh - 72px));
+  }
+
+  .world-mini-chat {
+    left: 8px;
+    right: 8px;
+    bottom: 56px;
+    width: auto;
+    max-width: none;
   }
 
   .world-mini-chat {
