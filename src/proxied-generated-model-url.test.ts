@@ -44,4 +44,9 @@ describe("proxiedGeneratedModelUrl", () => {
       "https://cdn.example/models/cow.glb",
     );
   });
+
+  it("leaves non-asset-store API model URLs unchanged", () => {
+    const url = "https://sketchfab.example/api/model/abc123";
+    expect(proxiedGeneratedModelUrl(url)).toBe(url);
+  });
 });

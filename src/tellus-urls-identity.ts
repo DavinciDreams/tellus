@@ -28,6 +28,8 @@ export function tellusAssetLibraryUrl(path: string): string {
   return `${runtimeConfig.worldApiBase}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+const RAW_ASSET_STORE_HOSTS = new Set(["3d.flobots.xyz"]);
+
 // A generated model can arrive as a RAW asset-store URL (e.g. https://3d.flobots.xyz/api/view/{id})
 // straight from the Hyades 3D backend — both the player path (api/generate-3d) and agent/remote things
 // synced through the world backend carry it. The asset store sends NO `Access-Control-Allow-Origin`
@@ -40,7 +42,14 @@ export function tellusAssetLibraryUrl(path: string): string {
 export function proxiedGeneratedModelUrl(url: string): string {
   if (!url || !/^https?:\/\//i.test(url)) return url; // relative / procedural:// / data: — leave alone
   if (url.includes("/api/assets/")) return url; // already same-origin proxied
-  const match = /\/api\/(?:view|download|model)\/([^/?#]+)/i.exec(url);
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  if (!RAW_ASSET_STORE_HOSTS.has(parsed.hostname.toLowerCase())) return url;
+  const match = /^\/api\/(?:view|download|model)\/([^/?#]+)/i.exec(parsed.pathname);
   if (!match) return url; // not an asset-store model URL
   return tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(match[1])}/game-optimized`);
 }
