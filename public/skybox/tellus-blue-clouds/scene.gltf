@@ -19,7 +19,7 @@
       "mesh": 0,
       "name": "Tellus_Skybox_Panorama",
       "extras": {
-        "tellusSkyboxHorizonOffset": 0.08
+        "tellusSkyboxHorizonOffset": 0.12
       }
     }
   ],

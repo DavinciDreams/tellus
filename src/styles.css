@@ -251,11 +251,28 @@ textarea::placeholder {
   padding: 6px 7px;
 }
 
+.mini-chat-entry.nearby {
+  border-left-color: #7fd3c5;
+}
+
+.mini-chat-entry.empty {
+  opacity: 0.72;
+}
+
 .mini-chat-entry strong {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   color: var(--hud-gold-bright);
   font-size: 10px;
   text-transform: uppercase;
+}
+
+.mini-chat-entry strong span {
+  color: var(--hud-muted);
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .mini-chat-entry p {
@@ -283,12 +300,20 @@ textarea::placeholder {
 
 .mini-chat-actions {
   display: grid;
-  grid-template-columns: 36px 36px;
+  grid-template-columns: minmax(88px, 1fr) 72px;
   gap: 8px;
 }
 
+.mini-chat-actions select {
+  min-width: 0;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(4 10 5 / 42%);
+  color: var(--hud-text);
+  padding: 0 8px;
+}
+
 .mini-chat-submit {
-  width: 36px;
+  width: 72px;
   padding: 0;
 }
 
@@ -307,29 +332,44 @@ textarea::placeholder {
   position: absolute;
   width: 8px;
   height: 8px;
+  padding: 0;
   border: 1px solid rgb(0 0 0 / 45%);
   border-radius: 999px;
   background: #f5f0dc;
   box-shadow: 0 0 0 1px rgb(255 255 255 / 18%);
   transform: translate(-50%, -50%);
   z-index: 2; /* above the view cone (.world-map-cone, z-index 1) */
+  appearance: none;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.map-marker:focus-visible {
+  outline: 2px solid #f5f0dc;
+  outline-offset: 3px;
 }
 
 .map-marker.player {
   width: 11px;
   height: 11px;
-  background: #f5f0dc;
-  box-shadow: 0 0 0 2px rgb(106 142 63 / 55%);
+  background: #35a7ff;
+  box-shadow:
+    0 0 0 2px rgb(245 240 220 / 82%),
+    0 0 10px rgb(53 167 255 / 82%);
 }
 
 .map-marker.remote-player {
   width: 8px;
   height: 8px;
-  background: #98a7ff;
+  background: #35a7ff;
+  box-shadow: 0 0 9px rgb(53 167 255 / 78%);
 }
 
 .map-marker.agent {
-  box-shadow: 0 0 8px currentColor;
+  width: 9px;
+  height: 9px;
+  background: #ff4fd8;
+  box-shadow: 0 0 10px rgb(255 79 216 / 82%);
 }
 
 .map-marker.asset {
