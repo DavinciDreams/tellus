@@ -953,6 +953,13 @@ function createTellusWorld(
     interiorSceneUrl = u;
     for (const m of [ocean, archipelago, terrain, pondWater, flowerPatchGroup]) m.visible = false;
     setChunkedFlatGround(0); // ground the player on the room floor (no heightfield inside)
+    // The procedural room is centered at the origin, but a non-chunked world defaults the player to an
+    // off-origin island spot — so drop them INTO the room (origin, flat floor) on entry.
+    visitorPosition.x = 0;
+    visitorPosition.y = 0;
+    visitorPosition.z = 0;
+    lastLocalAvatarPos.x = 0;
+    lastLocalAvatarPos.z = 0;
     if (interiorObject) {
       scene.remove(interiorObject);
       disposeObject(interiorObject);
