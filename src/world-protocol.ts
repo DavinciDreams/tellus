@@ -371,6 +371,63 @@ export function worldChatFromWorldPatch(parsed: unknown): WorldChatMessage[] | n
   return null;
 }
 
+// ── TELLUS INFINITY portals (Phase 2 frontend) ──
+export function isWorldPortal(value: unknown): value is WorldPortal {
+  if (!isRecord(value)) return false;
+  const t = value.target;
+  return (
+    typeof value.id === "string" &&
+    value.id.length > 0 &&
+    typeof value.label === "string" &&
+    isVec3(value.position) &&
+    typeof value.radius === "number" &&
+    isRecord(t) &&
+    (t.kind === "world" || t.kind === "interior") &&
+    typeof t.worldId === "string" &&
+    (t.spawn === undefined || isVec3(t.spawn)) &&
+    (t.sceneUrl === undefined || typeof t.sceneUrl === "string")
+  );
+}
+
+/** Portals carried by world.snapshot (full set) or portal.updated (single). null on anything else. */
+export function portalsFromWorldPatch(parsed: unknown): WorldPortal[] | null {
+  if (!isRecord(parsed)) return null;
+  if (parsed.type === "world.snapshot" && Array.isArray(parsed.portals)) {
+    return parsed.portals.filter(isWorldPortal);
+  }
+  if (parsed.type === "portal.updated" && isWorldPortal(parsed.portal)) {
+    return [parsed.portal];
+  }
+  return null;
+}
+
+/** A portal.deleted patch's id, or null. */
+export function portalDeletedFromWorldPatch(parsed: unknown): string | null {
+  if (!isRecord(parsed) || parsed.type !== "portal.deleted") return null;
+  return typeof parsed.portalId === "string" ? parsed.portalId : null;
+}
+
+export interface PortalEntered {
+  portalId: string;
+  fromWorldId: string;
+  toWorldId: string;
+  spawn?: Vec3;
+  sceneUrl?: string;
+}
+
+/** A world.portal.entered patch — the signal to switch the client to the target world. */
+export function portalEnteredFromWorldPatch(parsed: unknown): PortalEntered | null {
+  if (!isRecord(parsed) || parsed.type !== "world.portal.entered") return null;
+  if (typeof parsed.toWorldId !== "string" || parsed.toWorldId.length === 0) return null;
+  return {
+    portalId: typeof parsed.portalId === "string" ? parsed.portalId : "",
+    fromWorldId: typeof parsed.fromWorldId === "string" ? parsed.fromWorldId : "",
+    toWorldId: parsed.toWorldId,
+    spawn: isVec3(parsed.spawn) ? parsed.spawn : undefined,
+    sceneUrl: typeof parsed.sceneUrl === "string" ? parsed.sceneUrl : undefined,
+  };
+}
+
 /** Extract a chunk.updated patch from a live WS message; null when anything else or malformed. */
 export function chunkUpdatedFromWorldPatch(value: unknown): ChunkUpdatedPatch | null {
   if (!isRecord(value)) return null;

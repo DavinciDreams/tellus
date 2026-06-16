@@ -102,10 +102,15 @@ import {
   emoteFromWorldPatch,
   chunkUpdatedFromWorldPatch,
   worldChatFromWorldPatch,
+  portalsFromWorldPatch,
+  portalDeletedFromWorldPatch,
+  portalEnteredFromWorldPatch,
   isTellusTerrainState,
   isWorldGeneratedThing,
   type WorldChatChannel,
   type WorldChatMessage,
+  type WorldPortal,
+  type PortalEntered,
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood } from "./tellus-types";
@@ -457,6 +462,10 @@ function createTellusWorld(
   const generated: GeneratedThing[] = [];
   const logs: TellusLog[] = [];
   const worldChat: WorldChatMessage[] = [];
+  // TELLUS INFINITY portals: the current world's portals + a one-shot world.portal.entered signal the React
+  // layer consumes to switch worlds (with spawn). Both ride the snapshot bridge.
+  let worldPortals: WorldPortal[] = [];
+  let pendingPortalSwitch: PortalEntered | null = null;
   const seenWorldChatIds = new Set<string>();
   const generatedMeshes = new Map<string, THREE.Object3D>();
   const generatedAnimationMixers = new Map<string, THREE.AnimationMixer>();
@@ -1092,6 +1101,8 @@ function createTellusWorld(
     })),
     selectedThingId,
     sailingThingId,
+    portals: worldPortals.map((p) => ({ ...p, position: { ...p.position }, target: { ...p.target } })),
+    portalSwitch: pendingPortalSwitch ?? undefined,
   });
 
   // Coalesce HUD publishes to at most one per animation frame. publish() can be called many times per frame
@@ -1105,6 +1116,9 @@ function createTellusWorld(
     if (!publishPending) return;
     publishPending = false;
     onSnapshot(snapshot());
+    // The world.portal.entered signal is one-shot — the snapshot captured it by value, so clear it now so it
+    // doesn't re-fire the React world-switch effect on the next publish.
+    pendingPortalSwitch = null;
   };
 
   const addLog = (entry: Omit<TellusLog, "id" | "tick">): TellusLog => {
@@ -1584,6 +1598,31 @@ function createTellusWorld(
       const chatMessages = worldChatFromWorldPatch(parsed);
       if (chatMessages) {
         mergeWorldChatMessages(chatMessages);
+      }
+      // TELLUS INFINITY portals: snapshot is authoritative (resets the set, even to empty, on a world switch);
+      // portal.updated patches one; the world.portal.entered frame is React's signal to switch worlds.
+      if ((parsed as { type?: string } | null)?.type === "world.snapshot") {
+        worldPortals = portalsFromWorldPatch(parsed) ?? [];
+        publish();
+      } else {
+        const portalUpsert = portalsFromWorldPatch(parsed);
+        if (portalUpsert) {
+          const byId = new Map(worldPortals.map((p) => [p.id, p]));
+          for (const p of portalUpsert) byId.set(p.id, p);
+          worldPortals = Array.from(byId.values());
+          publish();
+        }
+      }
+      const portalDeleted = portalDeletedFromWorldPatch(parsed);
+      if (portalDeleted) {
+        worldPortals = worldPortals.filter((p) => p.id !== portalDeleted);
+        publish();
+      }
+      const entered = portalEnteredFromWorldPatch(parsed);
+      if (entered) {
+        pendingPortalSwitch = entered;
+        addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `Entering portal → ${entered.toWorldId}` });
+        publish();
       }
       // Emote frames: play that clip ONCE over the avatar's locomotion, then resume. Rigless
       // avatars (classic TV-heads, not-yet-loaded rigs) and unknown clips are simply ignored.
@@ -5111,7 +5150,26 @@ function createTellusWorld(
   };
   window.tellusAgent = tellusAgent;
 
+  // TELLUS INFINITY: ask the server to enter a portal. The server validates target access and replies with a
+  // world.portal.entered frame (handled in the WS dispatch → React switches worlds). Mirrors sendWorldChat's
+  // socket-then-REST send.
+  const enterPortal = (portalId: string) => {
+    const id = portalId.trim();
+    if (!id) return;
+    const frame = { type: "portal.enter", visitorId, portalId: id };
+    if (worldSocket?.readyState === WebSocket.OPEN) {
+      worldSocket.send(JSON.stringify(frame));
+    } else if (tellusWorldBackendAvailable) {
+      void fetch(tellusWorldHttpUrl("action"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(frame),
+      }).catch(() => undefined);
+    }
+  };
+
   return {
+    enterPortal,
     generate,
     addLibraryAsset,
     interact,
@@ -6470,6 +6528,19 @@ function App(): React.ReactElement {
     setActiveWorldId(id);
     void refreshWorldList(id);
   };
+  // TELLUS INFINITY: when the scene reports a world.portal.entered, switch to the target world and warp to the
+  // portal's spawn once the new scene is up (best-effort delayed warp — the world reloads async on the id change).
+  useEffect(() => {
+    const ps = snapshot.portalSwitch;
+    if (!ps || !ps.toWorldId || ps.toWorldId === activeWorldId) return;
+    switchWorld(ps.toWorldId);
+    if (ps.spawn) {
+      const { x, z } = ps.spawn;
+      const t = window.setTimeout(() => worldRef.current?.warpTo(x, z), 1400);
+      return () => window.clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot.portalSwitch]);
   // Transient status line next to the world controls (reuses the create-note slot + its auto-clear).
   const showWorldNote = (msg: string, ms = 2800) => {
     if (worldCreateNoteTimerRef.current !== undefined) {
@@ -7522,6 +7593,48 @@ function App(): React.ReactElement {
             </div>
           </div>
         </div>
+        {snapshot.portals && snapshot.portals.length > 0 && (
+          <aside
+            className="portal-panel"
+            aria-label="Portals"
+            style={{
+              position: "fixed",
+              right: 12,
+              bottom: 128,
+              zIndex: 20,
+              background: "rgba(0,0,0,0.55)",
+              color: "#dfe7d8",
+              borderRadius: 10,
+              padding: "8px 10px",
+              maxWidth: 230,
+              font: "600 12px/1.3 ui-sans-serif, system-ui",
+            }}
+          >
+            <div style={{ opacity: 0.7, marginBottom: 4 }}>Portals</div>
+            {snapshot.portals.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                title={`Enter ${p.label || p.target.worldId} (${p.target.kind})`}
+                onClick={() => worldRef.current?.enterPortal(p.id)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  margin: "2px 0",
+                  background: "rgba(255,255,255,0.08)",
+                  color: "inherit",
+                  border: "1px solid rgba(255,255,255,0.16)",
+                  borderRadius: 8,
+                  padding: "4px 8px",
+                  cursor: "pointer",
+                }}
+              >
+                ⮕ {p.label || p.target.worldId} <small style={{ opacity: 0.6 }}>{p.target.kind}</small>
+              </button>
+            ))}
+          </aside>
+        )}
         {worldMenuOpen && (
         <aside className="world-menu-panel" aria-label="World menu">
           <div className="top-left-cluster" style={{ position: "relative" }}>

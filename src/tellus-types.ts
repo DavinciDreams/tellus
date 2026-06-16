@@ -1,7 +1,7 @@
 import type { createRoot } from "react-dom/client";
 import type * as THREE from "three";
 import type { MeshStats } from "./webrtc-mesh";
-import type { WorldChatChannel, WorldChatMessage, WorldGeneratedThing, WorldPresence } from "./world-protocol";
+import type { WorldChatChannel, WorldChatMessage, WorldGeneratedThing, WorldPresence, WorldPortal, PortalEntered } from "./world-protocol";
 
 export type AgentId = "johnny" | "mira" | "sol" | "atlas";
 
@@ -231,9 +231,13 @@ export interface TellusSnapshot {
   remoteVisitors: WorldPresence[];
   selectedThingId?: string;
   sailingThingId?: string;
+  // TELLUS INFINITY portals: the current world's portals + a one-shot world-switch signal (consumed by React).
+  portals?: WorldPortal[];
+  portalSwitch?: PortalEntered;
 }
 
 export interface TellusWorldApi {
+  enterPortal(portalId: string): void;
   generate(request: GenerateRequest): GeneratedThing;
   addLibraryAsset(model: AssetLibraryModel): GeneratedThing;
   interact(request: InteractRequest): TellusLog;
