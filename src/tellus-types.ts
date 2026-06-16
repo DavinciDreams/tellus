@@ -50,6 +50,15 @@ export interface TerrainPondShape {
   falloff: number;
 }
 
+export interface TerrainDetailShape {
+  amplitude: number;
+  scale: number;
+  warp: number;
+  ridgeAmplitude: number;
+  terraceAmplitude: number;
+  terraceFrequency: number;
+}
+
 export interface LandShapeConfig {
   mountain: TerrainMountainShape;
   shoulder: TerrainBumpShape;
@@ -57,6 +66,7 @@ export interface LandShapeConfig {
   ridge: TerrainRidgeShape;
   shore: TerrainShoreShape;
   pond: TerrainPondShape;
+  detail: TerrainDetailShape;
   baseOffset: number;
 }
 
@@ -67,6 +77,7 @@ export interface LandShapeOverrides {
   ridge?: Partial<TerrainRidgeShape>;
   shore?: Partial<TerrainShoreShape>;
   pond?: Partial<Omit<TerrainPondShape, "falloff">> & { falloff?: number };
+  detail?: Partial<TerrainDetailShape>;
   baseOffset?: number;
 }
 

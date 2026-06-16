@@ -24,6 +24,14 @@ const TEMPLATE_PRESETS: Record<
       ridge: { sinScale: 1.05, cosScale: 0.72, diagonalScale: 0.42 },
       shore: { startRatio: 0.72, widthRatio: 0.28, drop: 5.8 },
       pond: { x: 18, z: -12, radius: 7.4, depth: 2.5, falloff: 65 },
+      detail: {
+        amplitude: 1.75,
+        scale: 0.043,
+        warp: 8.5,
+        ridgeAmplitude: 1.2,
+        terraceAmplitude: 0.28,
+        terraceFrequency: 0.72,
+      },
       baseOffset: -0.65,
     },
   },
@@ -36,6 +44,14 @@ const TEMPLATE_PRESETS: Record<
       ridge: { sinScale: 0.8, cosScale: 0.62, diagonalScale: 0.32 },
       shore: { startRatio: 0.78, widthRatio: 0.22, drop: 4.9 },
       pond: { x: 24, z: -8, radius: 9.6, depth: 2.15, falloff: 92 },
+      detail: {
+        amplitude: 1.25,
+        scale: 0.034,
+        warp: 10,
+        ridgeAmplitude: 0.78,
+        terraceAmplitude: 0.18,
+        terraceFrequency: 0.58,
+      },
       baseOffset: -0.75,
     },
   },
@@ -48,6 +64,14 @@ const TEMPLATE_PRESETS: Record<
       ridge: { sinScale: 0.48, cosScale: 0.42, diagonalScale: 0.2 },
       shore: { startRatio: 0.8, widthRatio: 0.2, drop: 4.1 },
       pond: { x: 14, z: -8, radius: 10.5, depth: 1.65, falloff: 104 },
+      detail: {
+        amplitude: 0.82,
+        scale: 0.028,
+        warp: 6.5,
+        ridgeAmplitude: 0.35,
+        terraceAmplitude: 0.12,
+        terraceFrequency: 0.45,
+      },
       baseOffset: -1.05,
     },
   },
@@ -60,6 +84,14 @@ const TEMPLATE_PRESETS: Record<
       ridge: { sinScale: 1.45, cosScale: 0.9, diagonalScale: 0.72 },
       shore: { startRatio: 0.74, widthRatio: 0.26, drop: 6.2 },
       pond: { x: -18, z: -16, radius: 8, depth: 2.2, falloff: 78 },
+      detail: {
+        amplitude: 2.15,
+        scale: 0.052,
+        warp: 11,
+        ridgeAmplitude: 1.85,
+        terraceAmplitude: 0.42,
+        terraceFrequency: 0.86,
+      },
       baseOffset: -0.7,
     },
   },
@@ -81,6 +113,7 @@ function cloneLandShape(shape: LandShapeConfig): LandShapeConfig {
     ridge: { ...shape.ridge },
     shore: { ...shape.shore },
     pond: { ...shape.pond },
+    detail: { ...shape.detail },
     baseOffset: shape.baseOffset,
   };
 }
@@ -165,10 +198,27 @@ export function parseLandShapeOverrides(value: unknown): LandShapeOverrides | un
         falloff: finiteNumber(value.pond.falloff),
       })
     : undefined;
+  const detail = isRecord(value.detail)
+    ? {
+        amplitude: finiteNumber(value.detail.amplitude),
+        scale: finiteNumber(value.detail.scale),
+        warp: finiteNumber(value.detail.warp),
+        ridgeAmplitude: finiteNumber(value.detail.ridgeAmplitude),
+        terraceAmplitude: finiteNumber(value.detail.terraceAmplitude),
+        terraceFrequency: finiteNumber(value.detail.terraceFrequency),
+      }
+    : undefined;
   const baseOffset = finiteNumber(value.baseOffset);
 
   const hasAny =
-    mountain || shoulder || southernRise || ridge || shore || pond || baseOffset !== undefined;
+    mountain ||
+    shoulder ||
+    southernRise ||
+    ridge ||
+    shore ||
+    pond ||
+    detail ||
+    baseOffset !== undefined;
   if (!hasAny) return undefined;
 
   return {
@@ -178,6 +228,7 @@ export function parseLandShapeOverrides(value: unknown): LandShapeOverrides | un
     ridge,
     shore,
     pond,
+    detail,
     baseOffset,
   };
 }
@@ -198,6 +249,7 @@ export function resolveLandShapeConfig(
     ridge: { ...preset.ridge, ...overrides.ridge },
     shore: { ...preset.shore, ...overrides.shore },
     pond: { ...preset.pond, ...pond },
+    detail: { ...preset.detail, ...overrides.detail },
     baseOffset:
       overrides.baseOffset !== undefined ? overrides.baseOffset : preset.baseOffset,
   };

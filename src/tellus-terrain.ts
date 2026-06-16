@@ -139,6 +139,89 @@ export function applyWorldTerrainTemplate(
   );
 }
 
+function fade(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
+function smoothstep(edge0: number, edge1: number, value: number): number {
+  if (edge0 === edge1) return value < edge0 ? 0 : 1;
+  const t = clamp((value - edge0) / (edge1 - edge0), 0, 1);
+  return fade(t);
+}
+
+function hash2(x: number, z: number): number {
+  let h = Math.imul(x, 374761393) ^ Math.imul(z, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+
+function valueNoise2(x: number, z: number): number {
+  const x0 = Math.floor(x);
+  const z0 = Math.floor(z);
+  const tx = fade(x - x0);
+  const tz = fade(z - z0);
+  const a = hash2(x0, z0);
+  const b = hash2(x0 + 1, z0);
+  const c = hash2(x0, z0 + 1);
+  const d = hash2(x0 + 1, z0 + 1);
+  const ab = a + (b - a) * tx;
+  const cd = c + (d - c) * tx;
+  return (ab + (cd - ab) * tz) * 2 - 1;
+}
+
+function fbm2(x: number, z: number, octaves: number): number {
+  let total = 0;
+  let amplitude = 0.5;
+  let frequency = 1;
+  let norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    total += valueNoise2(x * frequency, z * frequency) * amplitude;
+    norm += amplitude;
+    amplitude *= 0.5;
+    frequency *= 2.03;
+  }
+  return norm > 0 ? total / norm : 0;
+}
+
+function terrainDetailHeight(cx: number, cz: number, r: number): number {
+  const detail = activeLandShape.detail;
+  if (detail.amplitude <= 0 && detail.ridgeAmplitude <= 0 && detail.terraceAmplitude <= 0) {
+    return 0;
+  }
+
+  const shoreFade = 1 - smoothstep(
+    CLASSIC_WORLD_RADIUS * activeLandShape.shore.startRatio,
+    CLASSIC_WORLD_RADIUS * 0.98,
+    r,
+  );
+  const pondDistance = Math.hypot(cx - activeLandShape.pond.x, cz - activeLandShape.pond.z);
+  const pondFade = smoothstep(
+    activeLandShape.pond.radius * 0.72,
+    activeLandShape.pond.radius * 1.65,
+    pondDistance,
+  );
+  const landMask = shoreFade * pondFade;
+  if (landMask <= 0.001) return 0;
+
+  const warpA = fbm2(cx * detail.scale * 0.55 + 31.7, cz * detail.scale * 0.55 - 14.2, 3);
+  const warpB = fbm2(cx * detail.scale * 0.55 - 8.1, cz * detail.scale * 0.55 + 27.4, 3);
+  const wx = cx + warpA * detail.warp;
+  const wz = cz + warpB * detail.warp;
+
+  const macro = fbm2(wx * detail.scale, wz * detail.scale, 5) * detail.amplitude;
+  const micro = fbm2(wx * detail.scale * 2.7 + 7.5, wz * detail.scale * 2.7 - 19.5, 3) *
+    detail.amplitude *
+    0.32;
+  const ridgeNoise = fbm2(wx * detail.scale * 1.45 - 41, wz * detail.scale * 1.45 + 18, 4);
+  const ridgeFold = (1 - Math.abs(ridgeNoise)) * 2 - 1;
+  const ridges = ridgeFold * detail.ridgeAmplitude;
+  const terraceBase = macro + ridges * 0.45;
+  const terraces =
+    Math.sin(terraceBase * detail.terraceFrequency) * detail.terraceAmplitude;
+
+  return (macro + micro + ridges + terraces) * landMask;
+}
+
 export function terrainPaintCode(kind: TerrainPaintKind): number {
   return terrainPaintKinds.indexOf(kind) + 1;
 }
@@ -630,7 +713,8 @@ export function baseTerrainHeight(x: number, z: number): number {
       -((cx - shape.pond.x) ** 2 + (cz - shape.pond.z) ** 2) /
       shape.pond.falloff,
     ) * shape.pond.depth;
-  return mound + shoulder + southernRise + ridge - rimDrop - pond + shape.baseOffset;
+  const detail = terrainDetailHeight(cx, cz, r);
+  return mound + shoulder + southernRise + ridge + detail - rimDrop - pond + shape.baseOffset;
 }
 
 export function terrainHeight(x: number, z: number): number {
