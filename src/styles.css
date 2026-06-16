@@ -332,29 +332,44 @@ textarea::placeholder {
   position: absolute;
   width: 8px;
   height: 8px;
+  padding: 0;
   border: 1px solid rgb(0 0 0 / 45%);
   border-radius: 999px;
   background: #f5f0dc;
   box-shadow: 0 0 0 1px rgb(255 255 255 / 18%);
   transform: translate(-50%, -50%);
   z-index: 2; /* above the view cone (.world-map-cone, z-index 1) */
+  appearance: none;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.map-marker:focus-visible {
+  outline: 2px solid #f5f0dc;
+  outline-offset: 3px;
 }
 
 .map-marker.player {
   width: 11px;
   height: 11px;
-  background: #f5f0dc;
-  box-shadow: 0 0 0 2px rgb(106 142 63 / 55%);
+  background: #35a7ff;
+  box-shadow:
+    0 0 0 2px rgb(245 240 220 / 82%),
+    0 0 10px rgb(53 167 255 / 82%);
 }
 
 .map-marker.remote-player {
   width: 8px;
   height: 8px;
-  background: #98a7ff;
+  background: #35a7ff;
+  box-shadow: 0 0 9px rgb(53 167 255 / 78%);
 }
 
 .map-marker.agent {
-  box-shadow: 0 0 8px currentColor;
+  width: 9px;
+  height: 9px;
+  background: #ff4fd8;
+  box-shadow: 0 0 10px rgb(255 79 216 / 82%);
 }
 
 .map-marker.asset {

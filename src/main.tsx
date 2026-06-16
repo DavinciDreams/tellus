@@ -6417,6 +6417,12 @@ function App(): React.ReactElement {
       thing.generationStatus === "queued" ||
       thing.generationStatus === "generating",
   );
+  const remoteAgents = snapshot.remoteVisitors.filter((visitor) =>
+    visitor.visitorId.startsWith("agent:"),
+  );
+  const remotePlayers = snapshot.remoteVisitors.filter(
+    (visitor) => !visitor.visitorId.startsWith("agent:"),
+  );
   const visibleWorldChat = snapshot.worldChat.filter((message) => {
     if (message.channel !== "nearby") return true;
     if (!message.position || !snapshot.visitorPosition) return true;
@@ -7751,24 +7757,42 @@ function App(): React.ReactElement {
                 );
               })()}
               {snapshot.visitorPosition && (
-                <span
+                <button
+                  type="button"
                   className="map-marker player"
                   style={mapPointStyle(snapshot.visitorPosition)}
                   title="You"
+                  aria-label="Go to your location"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const pos = snapshot.visitorPosition;
+                    if (pos) worldRef.current?.warpTo(pos.x, pos.z);
+                  }}
                 />
               )}
               {snapshot.remoteVisitors.map((visitor) =>
                 visitor.position ? (
-                  <span
+                  <button
+                    type="button"
                     key={visitor.visitorId}
-                    className="map-marker remote-player"
+                    className={[
+                      "map-marker",
+                      visitor.visitorId.startsWith("agent:") ? "agent" : "remote-player",
+                    ].join(" ")}
                     style={mapPointStyle(visitor.position)}
-                    title="Remote player"
+                    title={visitor.visitorId.startsWith("agent:") ? "Agent" : "Remote player"}
+                    aria-label={`Go to ${visitor.visitorId.startsWith("agent:") ? "agent" : "remote player"}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      const pos = visitor.position;
+                      if (pos) worldRef.current?.warpTo(pos.x, pos.z);
+                    }}
                   />
                 ) : null,
               )}
               {snapshot.generated.map((thing) => (
-                <span
+                <button
+                  type="button"
                   key={thing.id}
                   className={[
                     "map-marker",
@@ -7783,6 +7807,11 @@ function App(): React.ReactElement {
                     .join(" ")}
                   style={mapPointStyle(thing.position)}
                   title={`${thing.kind}: ${thing.prompt}`}
+                  aria-label={`Go to ${thing.kind}: ${thing.prompt}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    worldRef.current?.goToGenerated(thing.id);
+                  }}
                 />
               ))}
               {pendingGenerated.length > 0 && (
@@ -7792,8 +7821,9 @@ function App(): React.ReactElement {
               )}
               <section className="world-info-panel mini" aria-label="World info">
                 <dl>
-                  <div><dt>Generated</dt><dd>{snapshot.generated.length}</dd></div>
-                  <div><dt>Players</dt><dd>{snapshot.remoteVisitors.length + 1}</dd></div>
+                  <div><dt>Items</dt><dd>{snapshot.generated.length}</dd></div>
+                  <div><dt>Players</dt><dd>{remotePlayers.length + 1}</dd></div>
+                  <div><dt>Agents</dt><dd>{remoteAgents.length}</dd></div>
                 </dl>
               </section>
             </section>
