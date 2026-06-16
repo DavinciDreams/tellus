@@ -391,6 +391,8 @@ declare global {
       getNearby: (radius?: number) => unknown;
       getChat: (opts?: { radius?: number; channel?: WorldChatChannel }) => unknown;
       sayChat: (text: string, opts?: { channel?: WorldChatChannel }) => unknown;
+      listAnimations?: (opts?: { category?: string; limit?: number }) => unknown;
+      listAvatars?: () => unknown;
       sendAction: (verb: string, args?: Record<string, unknown>) => unknown;
     };
     __tellusSnapshot?: () => TellusSnapshot;

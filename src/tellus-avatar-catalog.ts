@@ -9,6 +9,7 @@ import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { runtimeConfig } from "./tellus-runtime-config";
 import { createGltfLoader } from "./tellus-generation-client";
+import { tellusAssetLibraryUrl } from "./tellus-urls-identity";
 import {
   type AvatarRig,
   type RigClipName,
@@ -33,6 +34,8 @@ export interface AvatarCatalogEntry {
   heightHint?: number;
   /** Extra Y rotation (radians) for models whose rest pose doesn't face +Z (the group's forward). */
   rotateY?: number;
+  /** Whether this entry came from the fixed floor or was discovered from the asset store. */
+  source?: "built-in" | "asset-store";
 }
 
 // Animals were each loaded and their embedded clips inventoried (2026-06-11); the comment per entry
@@ -64,14 +67,43 @@ export const AVATAR_CATALOG: readonly AvatarCatalogEntry[] = [
   { id: "glb:6a211103cf0cffae65faeedd", label: "Baby Reindeer", kind: "glb", storeId: "6a211103cf0cffae65faeedd", heightHint: 0.55 },
 ];
 
+let avatarCatalogSnapshot: readonly AvatarCatalogEntry[] = AVATAR_CATALOG;
+let avatarCatalogPromise: Promise<readonly AvatarCatalogEntry[]> | undefined;
+const AVATAR_CATALOG_EVENT = "tellus:avatar-catalog";
+
+function publishAvatarCatalog(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AVATAR_CATALOG_EVENT));
+}
+
 export function catalogEntryById(id: string): AvatarCatalogEntry | undefined {
-  return AVATAR_CATALOG.find((entry) => entry.id === id);
+  const found = avatarCatalogSnapshot.find((entry) => entry.id === id) ?? AVATAR_CATALOG.find((entry) => entry.id === id);
+  if (found) return found;
+  if (id.startsWith("vrm:")) {
+    const storeId = id.slice(4);
+    if (storeId) return { id, label: `VRM ${storeId.slice(0, 8)}`, kind: "vrm", storeId, source: "asset-store" };
+  }
+  if (id.startsWith("glb:")) {
+    const storeId = id.slice(4);
+    if (storeId) return { id, label: `GLB ${storeId.slice(0, 8)}`, kind: "glb", storeId, heightHint: 0.55, source: "asset-store" };
+  }
+  return undefined;
+}
+
+export function avatarCatalogSync(): readonly AvatarCatalogEntry[] {
+  return avatarCatalogSnapshot;
+}
+
+export function subscribeAvatarCatalog(listener: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  window.addEventListener(AVATAR_CATALOG_EVENT, listener);
+  return () => window.removeEventListener(AVATAR_CATALOG_EVENT, listener);
 }
 
 /** Store thumbnail for a catalog entry (undefined for "classic" — render an initials tile). */
 export function avatarThumbnailUrl(entry: AvatarCatalogEntry): string | undefined {
   if (!entry.storeId || !runtimeConfig.worldApiBase) return undefined;
-  return `${runtimeConfig.worldApiBase}/api/assets/model/${encodeURIComponent(entry.storeId)}/thumbnail`;
+  return tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(entry.storeId)}/thumbnail`);
 }
 
 const AVATAR_STORAGE_KEY = "tellus.avatarId";
@@ -134,7 +166,7 @@ function loadAnimalGltf(storeId: string): Promise<GLTF> {
   let pending = glbCache.get(storeId);
   if (!pending) {
     pending = (async () => {
-      const optimizedUrl = `${runtimeConfig.worldApiBase}/api/assets/model/${encodeURIComponent(storeId)}/game-optimized`;
+      const optimizedUrl = tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(storeId)}/game-optimized`);
       try {
         const gltf = await fetchAndParseGlb(optimizedUrl);
         if (gltf.animations.length > 0) return gltf;
@@ -148,6 +180,154 @@ function loadAnimalGltf(storeId: string): Promise<GLTF> {
     glbCache.set(storeId, pending);
   }
   return pending;
+}
+
+interface AssetBrowseModel {
+  id?: string;
+  model_id?: string;
+  asset_id?: string;
+  name?: string;
+  file_format?: string;
+}
+
+function parseAssetModels(value: unknown): AssetBrowseModel[] {
+  if (Array.isArray(value)) return value as AssetBrowseModel[];
+  if (!value || typeof value !== "object") return [];
+  const record = value as {
+    models?: unknown;
+    avatars?: unknown;
+    vrms?: unknown;
+    animated_models?: unknown;
+    animatedModels?: unknown;
+    items?: unknown;
+    results?: unknown;
+    data?: unknown;
+  };
+  for (const candidate of [
+    record.models,
+    record.avatars,
+    record.vrms,
+    record.animated_models,
+    record.animatedModels,
+    record.items,
+    record.results,
+    record.data,
+  ]) {
+    if (Array.isArray(candidate)) return candidate as AssetBrowseModel[];
+  }
+  return [];
+}
+
+async function fetchVrmAvatarCandidates(): Promise<AssetBrowseModel[]> {
+  if (!runtimeConfig.worldApiBase) return [];
+  const response = await fetch(tellusAssetLibraryUrl("/api/assets/vrm-models"), {
+    cache: "no-store",
+  });
+  if (response.ok) return parseAssetModels(await response.json());
+
+  const params = new URLSearchParams({ search: "vrm", per_page: "80", sort: "newest" });
+  const fallback = await fetch(tellusAssetLibraryUrl(`/api/assets/models/browse?${params.toString()}`), {
+    cache: "no-store",
+  });
+  if (!fallback.ok) return [];
+  return parseAssetModels(await fallback.json());
+}
+
+async function fetchAnimatedAvatarCandidates(): Promise<AssetBrowseModel[]> {
+  if (!runtimeConfig.worldApiBase) return [];
+  const response = await fetch(tellusAssetLibraryUrl("/api/assets/animated-models"), {
+    cache: "no-store",
+  });
+  if (!response.ok) return [];
+  return parseAssetModels(await response.json());
+}
+
+function assetName(model: AssetBrowseModel): string {
+  return typeof model.name === "string" && model.name.trim() ? model.name.trim() : `Asset ${assetId(model).slice(0, 8)}`;
+}
+
+function assetId(model: AssetBrowseModel): string {
+  for (const value of [model.id, model.model_id, model.asset_id]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function isVrmModel(model: AssetBrowseModel): boolean {
+  const format = typeof model.file_format === "string" ? model.file_format.toLowerCase() : "";
+  return !format || format === "vrm";
+}
+
+function isAnimatedGlbModel(model: AssetBrowseModel): boolean {
+  const format = typeof model.file_format === "string" ? model.file_format.toLowerCase() : "";
+  return !format || format === "glb";
+}
+
+function inferredGlbHeight(model: AssetBrowseModel): number {
+  const name = assetName(model).toLowerCase();
+  return /dog|fox|wolf|reindeer|cat|horse|animal|quadruped/.test(name) ? 0.5 : 0.72;
+}
+
+function dedupeModels(models: readonly AssetBrowseModel[]): AssetBrowseModel[] {
+  const seen = new Set<string>();
+  const out: AssetBrowseModel[] = [];
+  for (const model of models) {
+    const id = assetId(model);
+    if (!id) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(model);
+  }
+  return out;
+}
+
+export function loadAvatarCatalog(): Promise<readonly AvatarCatalogEntry[]> {
+  if (avatarCatalogPromise) return avatarCatalogPromise;
+  avatarCatalogPromise = (async () => {
+    try {
+      const [vrmModels, animatedModels] = await Promise.all([
+        fetchVrmAvatarCandidates(),
+        fetchAnimatedAvatarCandidates(),
+      ]);
+      const existing = new Set(AVATAR_CATALOG.map((entry) => entry.id));
+      const vrms = dedupeModels(vrmModels)
+        .filter(isVrmModel)
+        .filter((model) => assetId(model))
+        .map((model) => ({
+          id: `vrm:${assetId(model)}`,
+          label: assetName(model),
+          kind: "vrm" as const,
+          storeId: assetId(model),
+          source: "asset-store" as const,
+        }))
+        .filter((entry) => !existing.has(entry.id))
+        .slice(0, 48);
+      const withVrms = new Set([...existing, ...vrms.map((entry) => entry.id)]);
+      const animatedGlbs = dedupeModels(animatedModels)
+        .filter(isAnimatedGlbModel)
+        .filter((model) => assetId(model))
+        .map((model) => ({
+          id: `glb:${assetId(model)}`,
+          label: assetName(model),
+          kind: "glb" as const,
+          storeId: assetId(model),
+          heightHint: inferredGlbHeight(model),
+          source: "asset-store" as const,
+        }))
+        .filter((entry) => !withVrms.has(entry.id))
+        .slice(0, 48);
+      avatarCatalogSnapshot = [...AVATAR_CATALOG, ...vrms, ...animatedGlbs];
+      publishAvatarCatalog();
+    } catch {
+      avatarCatalogSnapshot = AVATAR_CATALOG;
+      publishAvatarCatalog();
+    }
+    return avatarCatalogSnapshot;
+  })();
+  avatarCatalogPromise.catch(() => {
+    avatarCatalogPromise = undefined;
+  });
+  return avatarCatalogPromise;
 }
 
 // ── Embedded-clip heuristics ────────────────────────────────────────────────────────────────────

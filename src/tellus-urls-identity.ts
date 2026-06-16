@@ -1,4 +1,4 @@
-import { runtimeConfig } from "./tellus-runtime-config";
+import { runtimeConfig, worldApiUrl } from "./tellus-runtime-config";
 import { browserUuid } from "./tellus-utils";
 import { sessionAccountId } from "./tellus-auth";
 
@@ -8,24 +8,24 @@ let stableUserId: string | undefined;
 export function tellusWorldHttpUrl(route: "state" | "action"): string {
   // Carry the stable (anonymous) user id so private worlds bind to / gate on the visitor. The WS URL
   // inherits it because tellusWorldWebSocketUrl is derived from the "state" URL.
-  return `${runtimeConfig.worldApiBase}/api/world/${encodeURIComponent(runtimeConfig.worldId)}/${route}?userId=${encodeURIComponent(tellusUserId())}`;
+  return worldApiUrl(`/api/world/${encodeURIComponent(runtimeConfig.worldId)}/${route}?userId=${encodeURIComponent(tellusUserId())}`);
 }
 
 export function tellusWorldChunkUrl(cx: number, cz: number): string {
-  return `${runtimeConfig.worldApiBase}/api/world/${encodeURIComponent(runtimeConfig.worldId)}/chunk/${cx}/${cz}?userId=${encodeURIComponent(tellusUserId())}`;
+  return worldApiUrl(`/api/world/${encodeURIComponent(runtimeConfig.worldId)}/chunk/${cx}/${cz}?userId=${encodeURIComponent(tellusUserId())}`);
 }
 
 export function tellusWorldChunksManifestUrl(cx: number, cz: number, radius: number): string {
-  return `${runtimeConfig.worldApiBase}/api/world/${encodeURIComponent(runtimeConfig.worldId)}/chunks?cx=${cx}&cz=${cz}&radius=${radius}&userId=${encodeURIComponent(tellusUserId())}`;
+  return worldApiUrl(`/api/world/${encodeURIComponent(runtimeConfig.worldId)}/chunks?cx=${cx}&cz=${cz}&radius=${radius}&userId=${encodeURIComponent(tellusUserId())}`);
 }
 
 export function tellusAgentUrl(action: "start" | "stop" | "persona" | "status" | "transcript" | "say" | "view" | "memories" | "reset-thread"): string {
   // Per-user embodied-agent control endpoints; carry the stable user id (missing => 401 from the backend).
-  return `${runtimeConfig.worldApiBase}/api/world/${encodeURIComponent(runtimeConfig.worldId)}/agent/${action}?userId=${encodeURIComponent(tellusUserId())}`;
+  return worldApiUrl(`/api/world/${encodeURIComponent(runtimeConfig.worldId)}/agent/${action}?userId=${encodeURIComponent(tellusUserId())}`);
 }
 
 export function tellusAssetLibraryUrl(path: string): string {
-  return `${runtimeConfig.worldApiBase}${path.startsWith("/") ? path : `/${path}`}`;
+  return worldApiUrl(path);
 }
 
 const RAW_ASSET_STORE_HOSTS = new Set(["3d.flobots.xyz"]);
