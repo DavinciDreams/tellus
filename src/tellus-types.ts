@@ -21,7 +21,13 @@ export type WorldTemplateId =
   | "lowlands"
   | "ridge"
   | "evoflow-coral-canyon"
-  | "evoflow-coral-canyon-child";
+  | "evoflow-coral-canyon-child"
+  | "evoflow-spires"
+  | "evoflow-glass-ridge"
+  | "evoflow-lichen-basin"
+  | "evoflow-copper-terraces"
+  | "evoflow-basalt-teeth"
+  | "evoflow-coral-fold";
 
 export interface TerrainMountainShape {
   height: number;

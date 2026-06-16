@@ -212,6 +212,12 @@ const WORLD_TEMPLATE_OPTIONS: Array<{ id: WorldTemplateId; label: string }> = [
   { id: "ridge", label: "Ridge" },
   { id: "evoflow-coral-canyon", label: "Evoflow Coral Canyon" },
   { id: "evoflow-coral-canyon-child", label: "Evoflow Canyon Child" },
+  { id: "evoflow-spires", label: "Evoflow Spires" },
+  { id: "evoflow-glass-ridge", label: "Evoflow Glass Ridge" },
+  { id: "evoflow-lichen-basin", label: "Evoflow Lichen Basin" },
+  { id: "evoflow-copper-terraces", label: "Evoflow Copper Terraces" },
+  { id: "evoflow-basalt-teeth", label: "Evoflow Basalt Teeth" },
+  { id: "evoflow-coral-fold", label: "Evoflow Coral Fold" },
 ];
 
 const SKYBOX_OPTIONS: Array<{ url: string; label: string }> = [

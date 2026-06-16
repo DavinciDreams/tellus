@@ -1,0 +1,53 @@
+{
+  "concept": "coral cathedral canyon archipelago with luminous reef towers, hanging gardens, tidal caves, bridges, and ancient city terraces",
+  "created_at": "2026-06-16T18:48:18.229000",
+  "id": "world_be4f6e7753dc",
+  "lineage": {
+    "generation": 0,
+    "operation": "generate"
+  },
+  "modules": {
+    "camera": {
+      "height": 0.462,
+      "radius": 0.745,
+      "views": 8
+    },
+    "fractal": {
+      "amplitude": 0.379,
+      "folds": 3,
+      "frequency": 2.955
+    },
+    "graph": {
+      "landmarks": 5,
+      "path_width": 5,
+      "settlement_bias": 0.511
+    },
+    "materials": {
+      "detail_density": 0.484,
+      "palette": "sand-copper"
+    },
+    "semantics": {
+      "landmark_label": 4,
+      "path_label": 1,
+      "regions": [
+        "void",
+        "path",
+        "lowland",
+        "ridge",
+        "landmark",
+        "wild"
+      ]
+    },
+    "terrain": {
+      "basin_strength": 0.201,
+      "octaves": 4,
+      "ridge_strength": 0.228,
+      "roughness": 0.622,
+      "size": 256
+    }
+  },
+  "parents": [],
+  "schema_version": "0.1.0",
+  "scores": {},
+  "seed": 420
+}
