@@ -48,7 +48,18 @@ export function proxiedGeneratedModelUrl(url: string): string {
   } catch {
     return url;
   }
-  if (!RAW_ASSET_STORE_HOSTS.has(parsed.hostname.toLowerCase())) return url;
+  const worldApiHost = (() => {
+    try {
+      return runtimeConfig.worldApiBase ? new URL(runtimeConfig.worldApiBase).hostname.toLowerCase() : "";
+    } catch {
+      return "";
+    }
+  })();
+  const parsedHost = parsed.hostname.toLowerCase();
+  const isKnownAssetHost =
+    RAW_ASSET_STORE_HOSTS.has(parsedHost) ||
+    (worldApiHost.length > 0 && parsedHost === worldApiHost);
+  if (!isKnownAssetHost) return url;
   const match = /^\/api\/(?:view|download|model)\/([^/?#]+)/i.exec(parsed.pathname);
   if (!match) return url; // not an asset-store model URL
   return tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(match[1])}/game-optimized`);

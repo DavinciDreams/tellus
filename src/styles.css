@@ -1542,7 +1542,87 @@ textarea::placeholder {
 }
 
 .asset-tabs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.asset-create-tab {
+  gap: 10px;
+}
+
+.asset-create-tab label {
+  color: var(--hud-gold-bright);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.asset-create-tab textarea {
+  min-height: 118px;
+  max-height: 220px;
+  resize: vertical;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(0 0 0 / 24%);
+  color: var(--hud-text);
+  padding: 10px;
+  font: 600 13px/1.35 system-ui, sans-serif;
+}
+
+.asset-tab-note {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--hud-gold-bright);
+}
+
+.asset-tab-note span {
+  color: var(--hud-muted);
+  font-size: 11px;
+}
+
+.asset-avatar-grid {
+  display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.asset-avatar-scale {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--hud-border-soft);
+  padding-top: 10px;
+}
+
+.asset-avatar-scale > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--hud-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.asset-avatar-scale [data-testid="avatar-scale-label"] {
+  color: var(--hud-muted);
+  font-weight: 600;
+}
+
+.asset-avatar-scale button {
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(255 255 255 / 6%);
+  color: var(--hud-text);
+  cursor: pointer;
+  padding: 3px 9px;
+}
+
+.asset-avatar-scale button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.asset-avatar-scale small {
+  color: var(--hud-muted);
+  font-size: 10px;
 }
 
 .settings-card {
@@ -3136,9 +3216,9 @@ textarea::placeholder {
 }
 
 .terrain-card {
-  width: 292px;
+  width: 238px;
   max-width: calc(100vw - 40px);
-  padding: 10px;
+  padding: 8px;
 }
 
 .terrain-card .panel-strip {
@@ -3151,7 +3231,7 @@ textarea::placeholder {
 
 .terrain-card .terrain-hold,
 .terrain-card .terrain-actions.compact button:not(.terrain-hold) {
-  min-height: 34px;
+  min-height: 30px;
 }
 
 .terrain-card .terrain-material-swatches {
@@ -3159,12 +3239,12 @@ textarea::placeholder {
 }
 
 .terrain-card .terrain-swatch {
-  min-height: 74px;
-  padding: 7px;
+  min-height: 56px;
+  padding: 6px;
 }
 
 .terrain-card .terrain-swatch-preview {
-  height: 38px;
+  height: 26px;
 }
 
 .ai-card {
@@ -3195,7 +3275,7 @@ textarea::placeholder {
   }
 
   .terrain-card {
-    width: min(276px, calc(100vw - 16px));
+    width: min(238px, calc(100vw - 16px));
   }
 
   .ai-card {
@@ -3536,4 +3616,100 @@ textarea::placeholder {
 
 .auth-upsell-chip:hover {
   background: rgb(244 208 111 / 24%);
+}
+
+/* Keep selected-asset controls reachable while side drawers are open. */
+.selected-transform-hud {
+  top: 10px;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  z-index: 56;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: min(900px, calc(100vw - 260px));
+  max-width: calc(100vw - 260px);
+  min-height: 44px;
+  padding: 6px 8px;
+  transform: translateX(-50%);
+}
+
+.selected-transform-label {
+  display: flex;
+  flex: 1 1 300px;
+  align-items: center;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.selected-transform-label > svg {
+  flex: none;
+  align-self: center;
+  margin-top: 0;
+}
+
+.selected-transform-label select {
+  width: auto;
+  flex: 1 1 170px;
+  min-width: 120px;
+  padding-block: 6px;
+}
+
+.selected-transform-label select[aria-label="Animation"] {
+  flex-basis: 160px;
+}
+
+.selected-name-actions {
+  display: flex;
+  flex: 1 1 280px;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.selected-name-action {
+  width: auto;
+  min-width: 54px;
+  height: 30px;
+  padding: 0 8px;
+}
+
+.selected-nudge-pad {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+}
+
+.selected-nudge-pad .nudge-up,
+.selected-nudge-pad .nudge-left,
+.selected-nudge-pad .nudge-right,
+.selected-nudge-pad .nudge-down {
+  grid-column: auto;
+  grid-row: auto;
+}
+
+.selected-place-actions,
+.selected-transform-stack {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+@media (max-width: 900px) {
+  .selected-transform-hud {
+    top: 64px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: none;
+    transform: none;
+  }
+
+  .selected-transform-label {
+    flex-basis: 100%;
+  }
 }

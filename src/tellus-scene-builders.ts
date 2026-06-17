@@ -992,6 +992,7 @@ export function inferGeneratedKind(
     lower.includes("bird") ||
     lower.includes("eagle") ||
     lower.includes("horse") ||
+    lower.includes("unicorn") ||
     lower.includes("dolphin") ||
     lower.includes("orca") ||
     lower.includes("whale") ||
@@ -1078,6 +1079,34 @@ export function createGeneratedMesh(thing: GeneratedThing): THREE.Object3D {
   const group = new THREE.Group();
   group.name = thing.id;
   group.userData = { tellusId: thing.id, kind: thing.kind };
+
+  if (thing.generationStatus === "failed") {
+    group.userData.failedAsset = true;
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(0.9, 0.18, 0.9),
+      new THREE.MeshStandardMaterial({
+        color: 0x4a1616,
+        roughness: 0.9,
+        metalness: 0,
+      }),
+    );
+    base.position.y = 0.09;
+    const markerMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff6f4f,
+      emissive: 0x4a1008,
+      roughness: 0.72,
+      metalness: 0,
+    });
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.25, 8), markerMaterial);
+    post.position.y = 0.82;
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.16), markerMaterial);
+    cap.position.y = 1.52;
+    const capCross = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.5), markerMaterial);
+    capCross.position.y = 1.52;
+    group.add(base, post, cap, capCross);
+    placeObjectAboveGround(group, thing.position, 0.04);
+    return group;
+  }
 
   if (thing.kind === "tree") {
     const trunk = new THREE.Mesh(
@@ -1346,9 +1375,6 @@ export function createGenerationSwirl(thing: GeneratedThing): THREE.Object3D {
 
 export function shouldShowGenerationSwirl(thing: GeneratedThing): boolean {
   if (thing.generationStatus === "queued" || thing.generationStatus === "generating") {
-    return true;
-  }
-  if (thing.generationStatus === "failed" && !thing.modelUrl) {
     return true;
   }
   return Boolean(thing.modelUrl && thing.generationStatus === "ready");

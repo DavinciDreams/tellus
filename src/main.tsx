@@ -5,18 +5,18 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Backpack,
   Bot,
   Box,
+  Building2,
   CircleHelp,
   Eye,
   Globe2,
-  Layers,
   Map as MapIcon,
   MessageCircle,
   Mic,
   Minus,
   Mountain,
+  PawPrint,
   PersonStanding,
   Plus,
   RotateCcw,
@@ -24,6 +24,7 @@ import {
   Search,
   Send,
   Ship,
+  Sprout,
   Trash2,
   Video,
   Waves,
@@ -1368,9 +1369,9 @@ function createTellusWorld(
   const sendWorldChat = (
     text: string,
     channel: WorldChatChannel = "world",
-    senderName?: string,
     recipientId?: string,
     recipientName?: string,
+    senderName?: string,
   ): WorldChatMessage | null => {
     const trimmed = text.trim().slice(0, 800);
     if (!trimmed) return null;
@@ -1400,6 +1401,22 @@ function createTellusWorld(
       }).catch(() => undefined);
     }
     return message;
+  };
+
+  let worldChatPollTimer: number | undefined;
+  const pollWorldChatSnapshot = async () => {
+    if (!tellusWorldBackendAvailable || destroyed) return;
+    try {
+      const response = await fetch(tellusWorldHttpUrl("state"), { cache: "no-store" });
+      if (!response.ok) return;
+      const parsed = (await response.json()) as unknown;
+      const chatMessages = worldChatFromWorldPatch(parsed);
+      if (chatMessages) mergeWorldChatMessages(chatMessages);
+      const remoteThings = generatedFromWorldPatch(parsed);
+      if (remoteThings) reconcileGeneratedSnapshot(remoteThings);
+    } catch {
+      // Best-effort freshness fallback; the websocket remains the primary realtime path.
+    }
   };
 
   const announceWorldChat = (text: string, position?: Vec3) => {
@@ -2584,9 +2601,14 @@ function createTellusWorld(
     rotationZ: thing.rotationZ,
     scale: thing.scale,
     color: thing.color,
-    modelUrl: thing.modelUrl,
+    modelUrl: thing.generationStatus === "failed" ? undefined : thing.modelUrl,
     pipelineId: thing.modelUrl ? undefined : thing.pipelineId,
-    generationStatus: thing.modelUrl ? "ready" : thing.generationStatus,
+    generationStatus:
+      thing.generationStatus === "failed"
+        ? "failed"
+        : thing.modelUrl
+          ? "ready"
+          : thing.generationStatus,
     // "" = explicit "default" (mirrors presence.avatarId): a mid-rollout server that doesn't know
     // the field yet echoes it back ABSENT, and absent must mean "keep what you have", not "clear".
     animation: thing.animation ?? "",
@@ -2893,6 +2915,16 @@ function createTellusWorld(
     publish();
   };
 
+  function reconcileGeneratedSnapshot(remoteThings: WorldGeneratedThing[]) {
+    const remoteIds = new Set(remoteThings.map((thing) => thing.id));
+    applyRemoteGeneratedThings(remoteThings);
+    for (const thing of [...generated]) {
+      if (!remoteIds.has(thing.id)) {
+        applyRemoteGeneratedDelete(thing.id);
+      }
+    }
+  }
+
   const importGeneratedThings = (things: WorldGeneratedThing[]) => {
     for (const thing of things.filter(isWorldGeneratedThing)) {
       applyRemoteGeneratedThing(thing);
@@ -2996,6 +3028,9 @@ function createTellusWorld(
   }
 
   connectTellusWorldRealtime();
+  if (tellusWorldBackendAvailable) {
+    worldChatPollTimer = window.setInterval(() => void pollWorldChatSnapshot(), 5000);
+  }
   void initP2p();
   if (!tellusWorldBackendAvailable && !recoverGeneratedFromPlacementSnapshot()) {
     recoverGeneratedFromManifest();
@@ -3710,6 +3745,9 @@ function createTellusWorld(
       })
       .catch((error) => {
         thing.generationStatus = "failed";
+        ensureGeneratedVisual(thing);
+        syncTransformControls();
+        publish();
         publishGeneratedThing(thing);
         addLog({
           agentId: "world",
@@ -5286,9 +5324,9 @@ function createTellusWorld(
       const message = sendWorldChat(
         text,
         channel,
-        displayNameForVisitor(visitorId),
         opts.recipientId,
         opts.recipientName,
+        displayNameForVisitor(visitorId),
       );
       return message ? { ok: true, message } : { ok: false, error: "sayChat requires text" };
     },
@@ -5330,7 +5368,7 @@ function createTellusWorld(
           const channel = a.channel === "nearby" ? "nearby" : a.channel === "dm" ? "dm" : "world";
           const recipientId = typeof a.recipientId === "string" ? a.recipientId : undefined;
           const recipientName = typeof a.recipientName === "string" ? a.recipientName : undefined;
-          const message = sendWorldChat(text, channel, displayNameForVisitor(visitorId), recipientId, recipientName);
+          const message = sendWorldChat(text, channel, recipientId, recipientName, displayNameForVisitor(visitorId));
           return message ? { ok: true, message } : { ok: false, error: "sayChat requires text" };
         }
         case "sculptTerrain": {
@@ -5545,6 +5583,9 @@ function createTellusWorld(
     destroy: () => {
       destroyed = true;
       window.clearInterval(textureRetryTimer);
+      if (worldChatPollTimer !== undefined) {
+        window.clearInterval(worldChatPollTimer);
+      }
       agentViewTarget?.dispose();
       vegetation.dispose();
       chunkRenderer?.dispose();
@@ -5992,12 +6033,13 @@ function App(): React.ReactElement {
     }
   };
   // ── Avatar picker state (catalog selection; "" = deterministic default robot) ──
-  const [avatarPanelOpen, setAvatarPanelOpen] = useState(false);
+  const [assetPanelOpen, setAssetPanelOpen] = useState(false);
+  const [assetPanelTab, setAssetPanelTab] = useState<AssetPanelTab>("procedural");
   const [avatarCatalog, setAvatarCatalog] = useState<readonly AvatarCatalogEntry[]>(() => avatarCatalogSync());
   const [avatarSelection, setAvatarSelection] = useState<string>(() => storedAvatarId());
   useEffect(() => subscribeAvatarCatalog(() => setAvatarCatalog(avatarCatalogSync())), []);
   useEffect(() => {
-    if (!avatarPanelOpen) return;
+    if (!assetPanelOpen || assetPanelTab !== "avatar") return;
     let cancelled = false;
     loadAvatarCatalog()
       .then((catalog) => {
@@ -6007,7 +6049,7 @@ function App(): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [avatarPanelOpen]);
+  }, [assetPanelOpen, assetPanelTab]);
   const onAvatarPick = (entry: AvatarCatalogEntry) => {
     setAvatarSelection(entry.id);
     worldRef.current?.setAvatarSelection(entry.id); // persists + swaps the rig + broadcasts
@@ -7076,6 +7118,7 @@ function App(): React.ReactElement {
   const [assetBrowseTotal, setAssetBrowseTotal] = useState(0);
   const [assetBrowseLoading, setAssetBrowseLoading] = useState(false);
   const [assetBrowseSort, setAssetBrowseSort] = useState<AssetBrowseSort>("newest");
+  const assetCategorySearch = assetPanelTab === "animal" || assetPanelTab === "building" ? assetPanelTab : "";
   const assetBrowseSeq = useRef(0);
 
   const runAssetBrowse = useCallback(
@@ -7098,7 +7141,6 @@ function App(): React.ReactElement {
     [],
   );
 
-  const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   // Selected-object Move mode (mirrors world-side state; resets when the selection changes).
   const [moveModeActive, setMoveModeActive] = useState(false);
   useEffect(() => {
@@ -7106,7 +7148,6 @@ function App(): React.ReactElement {
     worldRef.current?.setMoveMode(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.selectedThingId]);
-  const [assetPanelTab, setAssetPanelTab] = useState<AssetPanelTab>("search");
   // ── Clean up dead references: world things whose model is definitively gone ──
   // Dead = generationStatus "failed" (the old strip-on-error bug), a procedural:// URL that no longer
   // parses, or a model URL the store answers 404/410 for. Network errors and 5xx are treated as ALIVE
@@ -7178,22 +7219,22 @@ function App(): React.ReactElement {
     }
   }, [cleanupBusy]);
 
-  // Debounced live search whenever the Assets panel's Search tab is showing.
+  // Category tabs browse the shared asset library without adding more visible controls.
   useEffect(() => {
-    if (!assetPanelOpen || assetPanelTab !== "search") return;
+    if (!assetPanelOpen || !assetCategorySearch) return;
     const id = window.setTimeout(
-      () => void runAssetBrowse(assetSearch, 1, false, assetBrowseSort),
-      assetSearch ? 350 : 0,
+      () => void runAssetBrowse(assetCategorySearch, 1, false, "newest"),
+      0,
     );
     return () => window.clearTimeout(id);
-  }, [assetPanelOpen, assetPanelTab, assetSearch, assetBrowseSort, runAssetBrowse]);
+  }, [assetPanelOpen, assetCategorySearch, runAssetBrowse]);
   const [openToolMenus, setOpenToolMenus] = useState<ToolMenu[]>([]);
   const [createPromptOpen, setCreatePromptOpen] = useState(false);
   const [createPromptFocused, setCreatePromptFocused] = useState(false);
   const [worldMenuOpen, setWorldMenuOpen] = useState(false);
   const [worldChatOpen, setWorldChatOpen] = useState(false);
   const [worldMapOpen, setWorldMapOpen] = useState(true);
-  const [mapActorList, setMapActorList] = useState<"players" | "agents" | null>(null);
+  const [mapActorList, setMapActorList] = useState<"items" | "players" | "agents" | null>(null);
   const [mapMode, setMapMode] = useState<"terrain" | "biomes">("biomes");
   const worldMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
@@ -7752,17 +7793,26 @@ function App(): React.ReactElement {
   };
 
   const focusCreatePrompt = () => {
-    setCreatePromptOpen((open) => {
-      if (open) return false;
-      window.requestAnimationFrame(() => promptRef.current?.focus());
-      return true;
-    });
+    setCreatePromptOpen((open) => !open);
+    window.requestAnimationFrame(() => promptRef.current?.focus());
   };
 
   const isToolOpen = (menu: ToolMenu): boolean => openToolMenus.includes(menu);
 
   const toggleAssetDrawer = () => {
-    setAssetPanelOpen((open) => !open);
+    setAssetPanelOpen((open) => {
+      if (!open) setAssetPanelTab((current) => current === "avatar" ? "procedural" : current);
+      return !open;
+    });
+  };
+
+  const openAssetDrawerTab = (tab: AssetPanelTab) => {
+    if (assetPanelOpen && assetPanelTab === tab) {
+      setAssetPanelOpen(false);
+      return;
+    }
+    setAssetPanelOpen(true);
+    setAssetPanelTab(tab);
   };
 
   const closeToolPanel = (menu: ToolMenu) => {
@@ -7783,8 +7833,8 @@ function App(): React.ReactElement {
       return;
     }
     if (snapshot.generated.length === 0) {
-      setAssetPanelOpen(true);
-      setAssetPanelTab("world-assets");
+      setWorldMapOpen(true);
+      setMapActorList("items");
       return;
     }
     if (!snapshot.selectedThingId) {
@@ -8466,7 +8516,7 @@ function App(): React.ReactElement {
           </button>
           <button
             type="button"
-            className={assetPanelOpen ? "toolbelt-button active" : "toolbelt-button"}
+            className={assetPanelOpen && assetPanelTab !== "avatar" ? "toolbelt-button active" : "toolbelt-button"}
             title="Assets"
             onClick={toggleAssetDrawer}
           >
@@ -8556,9 +8606,9 @@ function App(): React.ReactElement {
           </button>
           <button
             type="button"
-            className={avatarPanelOpen ? "toolbelt-button active" : "toolbelt-button"}
+            className={assetPanelOpen && assetPanelTab === "avatar" ? "toolbelt-button active" : "toolbelt-button"}
             title="Avatar"
-            onClick={() => setAvatarPanelOpen((open) => !open)}
+            onClick={() => openAssetDrawerTab("avatar")}
           >
             <PersonStanding size={18} />
             <span>Avatar</span>
@@ -8569,7 +8619,7 @@ function App(): React.ReactElement {
             just right-of-center; each is height-capped with internal scroll. The login dialog is
             a true modal (fullscreen dimmed overlay, z-index 70) ABOVE all of them by design. The
             open avatar picker temporarily covers the agent-PiP corner (close it to see the PiP). */}
-        {avatarPanelOpen && (
+        {false && (
           <aside
             className="avatar-panel"
             aria-label="Avatar picker"
@@ -9599,10 +9649,17 @@ function App(): React.ReactElement {
                   ))}
                 </select>
                 <div className="world-info-stats">
-                  <div>
+                  <button
+                    type="button"
+                    className={mapActorList === "items" ? "active" : ""}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMapActorList((current) => current === "items" ? null : "items");
+                    }}
+                  >
                     <span className="world-info-label">Items</span>
                     <span className="world-info-value">{snapshot.generated.length}</span>
-                  </div>
+                  </button>
                   <button
                     type="button"
                     className={mapActorList === "players" ? "active" : ""}
@@ -9629,10 +9686,55 @@ function App(): React.ReactElement {
               </section>
               {mapActorList && (
                 <section className="world-map-actor-list" aria-label={`${mapActorList} in world`}>
-                  {(mapActorList === "players" ? playerList : remoteAgents).length === 0 && (
+                  {mapActorList === "items" && (
+                    <>
+                      <div className="world-map-actor-row utility">
+                        <span>{snapshot.generated.length} items</span>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void cleanupDeadReferences();
+                          }}
+                          disabled={cleanupBusy}
+                          title="Remove world objects whose models are no longer available"
+                        >
+                          Clean
+                        </button>
+                      </div>
+                      {cleanupNote && <p>{cleanupNote}</p>}
+                      {snapshot.generated.length === 0 && <p>No items visible.</p>}
+                      {snapshot.generated.map((thing) => (
+                        <div key={thing.id} className="world-map-actor-row">
+                          <span title={thing.prompt}>
+                            {thing.prompt.slice(0, 28)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              worldRef.current?.goToGenerated(thing.id);
+                            }}
+                          >
+                            Go to
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              worldRef.current?.selectGenerated(thing.id);
+                            }}
+                          >
+                            Select
+                          </button>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  {mapActorList !== "items" && (mapActorList === "players" ? playerList : remoteAgents).length === 0 && (
                     <p>No {mapActorList} visible.</p>
                   )}
-                  {(mapActorList === "players" ? playerList : remoteAgents).map((visitor) => {
+                  {mapActorList !== "items" && (mapActorList === "players" ? playerList : remoteAgents).map((visitor) => {
                     const name = actorName(visitor);
                     return (
                       <div key={visitor.visitorId} className="world-map-actor-row">
@@ -10038,35 +10140,39 @@ function App(): React.ReactElement {
             <nav className="tool-panel-tabs asset-tabs" aria-label="Asset tabs">
               <button
                 type="button"
-                className={assetPanelTab === "search" ? "active" : ""}
-                onClick={() => setAssetPanelTab("search")}
+                className={assetPanelTab === "avatar" ? "active" : ""}
+                title="People"
+                aria-label="People assets"
+                onClick={() => setAssetPanelTab("avatar")}
               >
-                <Search size={15} />
-                <span>Search</span>
-              </button>
-              <button
-                type="button"
-                className={assetPanelTab === "world-assets" ? "active" : ""}
-                onClick={() => setAssetPanelTab("world-assets")}
-              >
-                <Layers size={15} />
-                <span>World</span>
-              </button>
-              <button
-                type="button"
-                className={assetPanelTab === "inventory" ? "active" : ""}
-                onClick={() => setAssetPanelTab("inventory")}
-              >
-                <Backpack size={15} />
-                <span>Mine</span>
+                <PersonStanding size={17} />
               </button>
               <button
                 type="button"
                 className={assetPanelTab === "procedural" ? "active" : ""}
+                title="Plants"
+                aria-label="Plant assets"
                 onClick={() => setAssetPanelTab("procedural")}
               >
-                <Mountain size={15} />
-                <span>Nature</span>
+                <Sprout size={17} />
+              </button>
+              <button
+                type="button"
+                className={assetPanelTab === "animal" ? "active" : ""}
+                title="Animals"
+                aria-label="Animal assets"
+                onClick={() => setAssetPanelTab("animal")}
+              >
+                <PawPrint size={17} />
+              </button>
+              <button
+                type="button"
+                className={assetPanelTab === "building" ? "active" : ""}
+                title="Buildings"
+                aria-label="Building assets"
+                onClick={() => setAssetPanelTab("building")}
+              >
+                <Building2 size={17} />
               </button>
             </nav>
             {assetPanelTab === "procedural" && (
@@ -10123,9 +10229,57 @@ function App(): React.ReactElement {
                 </button>
               </div>
             )}
-            {assetPanelTab === "search" && (
+            {assetPanelTab === "avatar" && (
+              <div className="inventory-list asset-list asset-avatar-tab">
+                <div className="asset-tab-note">
+                  <strong>Avatar</strong>
+                  <span>everyone sees your pick</span>
+                </div>
+                <div className="asset-avatar-grid">
+                  {avatarCatalog.map((entry) => (
+                    <AvatarTile
+                      key={entry.id}
+                      entry={entry}
+                      selected={avatarSelection === entry.id}
+                      onSelect={onAvatarPick}
+                    />
+                  ))}
+                </div>
+                <div className="asset-avatar-scale">
+                  <div>
+                    <span>
+                      Size{" "}
+                      <span data-testid="avatar-scale-label">
+                        {avatarScaleLabel(avatarScale)}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onAvatarScale(1)}
+                      disabled={avatarScale === 1}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                  <input
+                    type="range"
+                    aria-label="Avatar size"
+                    data-testid="avatar-scale-slider"
+                    min={0}
+                    max={AVATAR_SCALE_SLIDER_STEPS}
+                    step={1}
+                    value={avatarScaleToSlider(avatarScale)}
+                    onChange={(event) =>
+                      onAvatarScale(avatarSliderToScale(Number(event.target.value)))
+                    }
+                  />
+                  <small>0.1x - 8x · visual only</small>
+                </div>
+              </div>
+            )}
+            {(assetPanelTab === "animal" || assetPanelTab === "building") && (
               <div className="inventory-list asset-list">
-                <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0 6px" }}>
+                <div style={{ display: "none", alignItems: "center", gap: 6, padding: "2px 0 6px" }}>
                   <Search size={14} style={{ opacity: 0.6, flex: "none" }} />
                   <input
                     type="text"
@@ -10144,7 +10298,7 @@ function App(): React.ReactElement {
                     }}
                   />
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 4, paddingBottom: 6 }}>
+                <div style={{ display: "none", alignItems: "center", gap: 4, paddingBottom: 6 }}>
                   {(
                     [
                       ["newest", "Newest"],
@@ -10188,25 +10342,25 @@ function App(): React.ReactElement {
                 )}
                 {assetBrowse.length === 0 && !assetBrowseLoading && (
                   <span className="inventory-empty">
-                    {assetSearch ? `Nothing matched “${assetSearch}”.` : "No library assets loaded yet."}
+                    No {assetPanelTab} assets loaded yet.
                   </span>
                 )}
                 {assetBrowseLoading && (
-                  <span className="inventory-empty">Searching…</span>
+                  <span className="inventory-empty">Loading...</span>
                 )}
                 {assetBrowseHasNext && !assetBrowseLoading && (
                   <button
                     type="button"
                     className="inventory-item"
                     style={{ justifyContent: "center", fontWeight: 600 }}
-                    onClick={() => void runAssetBrowse(assetSearch, assetBrowsePage + 1, true, assetBrowseSort)}
+                    onClick={() => void runAssetBrowse(assetPanelTab, assetBrowsePage + 1, true, "newest")}
                   >
                     Load more
                   </button>
                 )}
               </div>
             )}
-            {assetPanelTab === "world-assets" && (
+            {false && (
               <div className="inventory-list asset-list">
                 <div style={{ display: "flex", alignItems: "center", gap: 6, paddingBottom: 6 }}>
                   <button
@@ -10269,7 +10423,7 @@ function App(): React.ReactElement {
                 )}
               </div>
             )}
-            {assetPanelTab === "inventory" && (
+            {false && (
               <div className="inventory-list asset-list">
                 {inventory.length > 0 ? (
                   inventory.map((thing) => (
