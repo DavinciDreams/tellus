@@ -602,6 +602,20 @@ textarea::placeholder {
   box-shadow: 0 0 10px rgb(255 79 216 / 82%);
 }
 
+.map-marker.portal {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgb(34 24 4 / 70%);
+  border-radius: 2px;
+  background:
+    radial-gradient(circle at 50% 50%, #fff9b0 0 20%, transparent 21%),
+    conic-gradient(from 20deg, #fff276, #f0b72d, #ffe96b, #b87c10, #fff276);
+  box-shadow:
+    0 0 0 2px rgb(255 244 144 / 52%),
+    0 0 13px rgb(255 215 65 / 86%);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
 .map-marker.asset {
   width: 7px;
   height: 7px;

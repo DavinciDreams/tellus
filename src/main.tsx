@@ -1169,19 +1169,52 @@ function createTellusWorld(
   let insidePortalId: string | null = null;
   const makePortalMarker = (interior: boolean): THREE.Object3D => {
     const g = new THREE.Group();
-    const color = interior ? 0xffcf6a : 0x6ad0ff;
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(1.5, 0.16, 10, 28),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 }),
+    const color = interior ? 0xffc84f : 0xffdc3d;
+    const bright = interior ? 0xfff0a6 : 0xffff8a;
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+    });
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color: bright,
+      transparent: true,
+      opacity: 0.24,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const base = new THREE.Mesh(
+      new THREE.TorusGeometry(1.6, 0.12, 10, 36),
+      ringMaterial,
     );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.1;
+    base.rotation.x = Math.PI / 2;
+    base.position.y = 0.12;
+    const swirl = new THREE.Group();
+    swirl.userData.portalSpin = interior ? -0.9 : 1.1;
+    for (let i = 0; i < 3; i++) {
+      const arc = new THREE.Mesh(
+        new THREE.TorusGeometry(0.7 + i * 0.34, 0.045, 8, 36, Math.PI * 1.35),
+        i === 1 ? glowMaterial : ringMaterial,
+      );
+      arc.rotation.x = Math.PI / 2;
+      arc.rotation.z = i * 2.1;
+      arc.position.y = 0.34 + i * 0.26;
+      swirl.add(arc);
+    }
     const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.18, 0.18, 6, 8, 1, true),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: THREE.DoubleSide }),
+      new THREE.CylinderGeometry(0.2, 0.2, 5.8, 10, 1, true),
+      glowMaterial,
     );
-    pillar.position.y = 3;
-    g.add(ring, pillar);
+    pillar.position.y = 3.1;
+    const halo = new THREE.Mesh(
+      new THREE.TorusGeometry(1.25, 0.055, 8, 32),
+      glowMaterial,
+    );
+    halo.rotation.x = Math.PI / 2;
+    halo.position.y = 1.35;
+    halo.userData.portalBob = 1;
+    g.add(base, swirl, halo, pillar);
     return g;
   };
   const portalGroundY = (p: WorldPortal): number => {
@@ -1200,15 +1233,6 @@ function createTellusWorld(
   const syncPortalMarkers = () => {
     const seen = new Set<string>();
     for (const p of worldPortals) {
-      if (p.anchorThingId) {
-        const anchoredMarker = portalMarkers.get(p.id);
-        if (anchoredMarker) {
-          portalMarkerGroup.remove(anchoredMarker);
-          disposeObject(anchoredMarker);
-          portalMarkers.delete(p.id);
-        }
-        continue;
-      }
       seen.add(p.id);
       let marker = portalMarkers.get(p.id);
       if (!marker) {
@@ -1228,6 +1252,13 @@ function createTellusWorld(
   };
   // Called each frame: auto-enter when the player stands in a portal's trigger volume.
   const updatePortals = (now: number) => {
+    for (const marker of portalMarkers.values()) {
+      marker.rotation.y = now * 0.00025;
+      const swirl = marker.children.find((child) => Number(child.userData.portalSpin));
+      if (swirl) swirl.rotation.y = now * 0.001 * Number(swirl.userData.portalSpin);
+      const halo = marker.children.find((child) => Number(child.userData.portalBob));
+      if (halo) halo.position.y = 1.35 + Math.sin(now * 0.002) * 0.16;
+    }
     if (worldPortals.length === 0) return;
     let nearId: string | null = null;
     for (const p of worldPortals) {
@@ -10209,6 +10240,20 @@ function App(): React.ReactElement {
                   />
                 ) : null;
               })}
+              {(snapshot.portals ?? []).map((portal) => (
+                <button
+                  type="button"
+                  key={portal.id}
+                  className="map-marker portal"
+                  style={mapPointStyle(portal.position)}
+                  title={portal.label || `Portal to ${portal.target.worldId}`}
+                  aria-label={portal.label || `Portal to ${portal.target.worldId}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    worldRef.current?.warpTo(portal.position.x, portal.position.z);
+                  }}
+                />
+              ))}
               {snapshot.generated.map((thing) => (
                 <button
                   type="button"
