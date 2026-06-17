@@ -1216,6 +1216,8 @@ function createTellusWorld(
       const parsed = (await response.json()) as unknown;
       const chatMessages = worldChatFromWorldPatch(parsed);
       if (chatMessages) mergeWorldChatMessages(chatMessages);
+      const remoteThings = generatedFromWorldPatch(parsed);
+      if (remoteThings) reconcileGeneratedSnapshot(remoteThings);
     } catch {
       // Best-effort freshness fallback; the websocket remains the primary realtime path.
     }
@@ -2664,6 +2666,16 @@ function createTellusWorld(
     saveGeneratedPlacementSnapshot();
     publish();
   };
+
+  function reconcileGeneratedSnapshot(remoteThings: WorldGeneratedThing[]) {
+    const remoteIds = new Set(remoteThings.map((thing) => thing.id));
+    applyRemoteGeneratedThings(remoteThings);
+    for (const thing of [...generated]) {
+      if (!remoteIds.has(thing.id)) {
+        applyRemoteGeneratedDelete(thing.id);
+      }
+    }
+  }
 
   const importGeneratedThings = (things: WorldGeneratedThing[]) => {
     for (const thing of things.filter(isWorldGeneratedThing)) {
