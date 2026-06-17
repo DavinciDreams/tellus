@@ -2529,9 +2529,7 @@ function createTellusWorld(
     // (sampleHeight returns null until the owning chunk streams in), so once the sculpted chunk
     // loads the asset would sit BELOW the surface. Re-sample the live ground height here so the
     // model's feet rest flush on the sculpted terrain. Falls through to the stored y otherwise.
-    const liveGround = isChunked
-      ? groundHeightAt(thing.position.x, thing.position.z)
-      : null;
+    const liveGround = isChunked ? footprintGroundY(thing) : null;
     const placeAt =
       liveGround !== null && Number.isFinite(liveGround)
         ? { ...thing.position, y: liveGround }
@@ -3195,10 +3193,36 @@ function createTellusWorld(
     publish();
   };
 
+  // Highest terrain height under a thing's footprint. With the wider terrain height variability,
+  // grounding to the single CENTRE sample can leave a multi-tile object partly buried under higher
+  // neighbouring terrain ("under the land even after the surface button") — sampling a ring at the
+  // footprint radius and taking the MAX rests the object ON the surface instead of inside it. Returns
+  // null only when no sample resolves (async terrain not loaded yet).
+  const footprintGroundY = (thing: GeneratedThing): number | null => {
+    let best = groundHeightAt(thing.position.x, thing.position.z);
+    const fp = thingFootprint(thing);
+    const r = Math.min(fp?.radius ?? 0, 6);
+    if (r >= 0.25) {
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const h = groundHeightAt(
+          thing.position.x + Math.cos(a) * r,
+          thing.position.z + Math.sin(a) * r,
+        );
+        if (h !== null && Number.isFinite(h) && (best === null || h > best)) best = h;
+      }
+    }
+    return best;
+  };
+
   const groundGenerated = (id: string) => {
     const thing = thingById(id);
     if (!thing) return;
-    thing.position = groundedPosition(thing.position.x, thing.position.z, thing.position);
+    const groundY = footprintGroundY(thing);
+    thing.position =
+      groundY !== null && Number.isFinite(groundY)
+        ? { ...thing.position, y: groundY }
+        : groundedPosition(thing.position.x, thing.position.z, thing.position);
     if (sailingThingId === id) {
       visitorPosition = { ...thing.position };
     }
@@ -4725,6 +4749,17 @@ function createTellusWorld(
           if (isFreeMovingVehicle(thing) || isIntentionallyOffsetFromGround(thing)) continue;
           updateThingMeshPosition(thing);
         }
+      }
+    }
+    // Anti-burial: if the live ground has risen above the player — terrain/chunks streamed in after a
+    // teleport, or an EvoFlow raster lifted the surface — snap the avatar up so they never stand inside
+    // the land (the symptom that used to need a manual jump). Only ever pushes UP; downward transitions
+    // (ledges, falls) stay owned by the movement update. Skipped while flying, mid-jump/fall, or riding.
+    if (!flying && !playerAirborne && !sailingThingId) {
+      const grounded = groundedPosition(visitorPosition.x, visitorPosition.z, visitorPosition);
+      if (grounded.y > visitorPosition.y + 0.05) {
+        visitorPosition = grounded;
+        sendPresenceUpdate();
       }
     }
     // Keep the minimap view-cone live while turning in place (~10fps, only on a real yaw change).
