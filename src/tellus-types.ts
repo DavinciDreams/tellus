@@ -437,6 +437,7 @@ declare global {
     tellusAgent?: {
       getState: (radius?: number) => unknown;
       getNearby: (radius?: number) => unknown;
+      getActors?: (radius?: number) => unknown;
       getChat: (opts?: { radius?: number; channel?: WorldChatChannel; recipientId?: string }) => unknown;
       sayChat: (text: string, opts?: { channel?: WorldChatChannel; recipientId?: string; recipientName?: string }) => unknown;
       listAnimations?: (opts?: { category?: string; limit?: number }) => unknown;

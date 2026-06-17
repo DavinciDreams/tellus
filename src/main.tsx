@@ -178,6 +178,35 @@ const ASSET_REUSE_STOPWORDS = new Set([
   "very",
 ]);
 
+const actorKindForVisitorId = (visitorId: string): "agent" | "player" | "world" => {
+  if (visitorId === "world") return "world";
+  return visitorId.startsWith("agent:") ? "agent" : "player";
+};
+
+const titleCaseToken = (token: string): string =>
+  token ? `${token.slice(0, 1).toUpperCase()}${token.slice(1).toLowerCase()}` : "";
+
+const friendlyAgentNameFromId = (visitorId: string): string => {
+  const raw = visitorId.replace(/^agent:/, "").replace(/^user-/, "");
+  const words = raw
+    .split(/[-_\s]+/)
+    .filter((part) => /^[a-z][a-z0-9]*$/i.test(part) && !/^[0-9a-f]{6,}$/i.test(part))
+    .slice(0, 3);
+  if (words.length > 0) return words.map(titleCaseToken).join(" ");
+  const suffix = raw.match(/[0-9a-f]{6,}/i)?.[0]?.slice(0, 6) || raw.slice(-6) || visitorId.slice(-6);
+  return `Agent ${suffix}`;
+};
+
+const friendlyVisitorName = (visitorId: string, explicitName?: string, selfVisitorId?: string): string => {
+  const name = explicitName?.trim();
+  if (name) return name;
+  if (visitorId === "local-player") return "You";
+  if (selfVisitorId && visitorId === selfVisitorId && !visitorId.startsWith("agent:")) return "You";
+  if (visitorId === "world") return "World";
+  if (visitorId.startsWith("agent:")) return friendlyAgentNameFromId(visitorId);
+  return `Player ${visitorId.slice(0, 6) || "nearby"}`;
+};
+
 const assetReuseTerms = (text: string): string[] =>
   text
     .toLowerCase()
@@ -1488,30 +1517,29 @@ function createTellusWorld(
   };
 
   const displayNameForVisitor = (id: string): string => {
-    if (id === visitorId) {
-      return window.__hyadesIdentity?.visitorId?.startsWith("agent:") ? "Agent" : "You";
-    }
-    if (id === "world") return "World";
-    if (id.startsWith("agent:")) return "Agent";
-    return remoteVisitors.get(id)?.name?.trim() || "Visitor";
+    return friendlyVisitorName(id, remoteVisitors.get(id)?.name, visitorId);
+  };
+
+  const enrichedWorldChatMessage = (message: WorldChatMessage): WorldChatMessage => {
+    const recipientId = message.recipientId?.trim() || undefined;
+    return {
+      ...message,
+      senderName: message.senderName?.trim() || displayNameForVisitor(message.visitorId),
+      recipientId,
+      recipientName: message.recipientName?.trim() || (recipientId ? displayNameForVisitor(recipientId) : undefined),
+      position: message.position ? { ...message.position } : undefined,
+    };
   };
 
   const addWorldChatMessage = (message: WorldChatMessage): WorldChatMessage | null => {
     const text = message.text.trim().slice(0, 800);
     if (!text || seenWorldChatIds.has(message.id)) return null;
+    const normalizedChannel =
+      message.channel === "nearby" ? "nearby" : message.channel === "dm" ? "dm" : "world";
     const normalized: WorldChatMessage = {
-      ...message,
+      ...enrichedWorldChatMessage(message),
       text,
-      senderName: message.senderName?.trim() || displayNameForVisitor(message.visitorId),
-      channel:
-        message.channel === "nearby"
-          ? "nearby"
-          : message.channel === "dm"
-            ? "dm"
-            : "world",
-      recipientId: message.recipientId?.trim() || undefined,
-      recipientName: message.recipientName?.trim() || undefined,
-      position: message.position ? { ...message.position } : undefined,
+      channel: normalizedChannel,
     };
     worldChat.push(normalized);
     seenWorldChatIds.add(normalized.id);
@@ -1549,14 +1577,15 @@ function createTellusWorld(
     const normalizedChannel =
       channel === "nearby" ? "nearby" : channel === "dm" ? "dm" : "world";
     if (normalizedChannel === "dm" && !recipientId?.trim()) return null;
+    const normalizedRecipientId = normalizedChannel === "dm" ? recipientId?.trim() : undefined;
     const message: WorldChatMessage = {
       id: makeId("chat"),
       visitorId,
       senderName: senderName?.trim() || displayNameForVisitor(visitorId),
       text: trimmed,
       channel: normalizedChannel,
-      recipientId: normalizedChannel === "dm" ? recipientId?.trim() : undefined,
-      recipientName: normalizedChannel === "dm" ? recipientName?.trim() : undefined,
+      recipientId: normalizedRecipientId,
+      recipientName: normalizedRecipientId ? recipientName?.trim() || displayNameForVisitor(normalizedRecipientId) : undefined,
       position: { ...visitorPosition },
       createdAt: new Date().toISOString(),
     };
@@ -5557,6 +5586,24 @@ function createTellusWorld(
     sendPresenceUpdate(true); // broadcast the new pick right away (not on the 300ms cadence)
     return true;
   };
+  const nearbyActors = (radius = 36) =>
+    Array.from(remoteVisitors.values())
+      .map((presence) => {
+        const position = presence.position ? { ...presence.position } : undefined;
+        const distance = position ? distance2D(visitorPosition, position) : Number.POSITIVE_INFINITY;
+        return {
+          visitorId: presence.visitorId,
+          name: displayNameForVisitor(presence.visitorId),
+          kind: actorKindForVisitorId(presence.visitorId),
+          distance,
+          direction: position ? compassDirection(visitorPosition, position) : undefined,
+          position,
+          ownerUserId: presence.ownerUserId,
+          lastSeenAt: presence.lastSeenAt,
+        };
+      })
+      .filter((actor) => actor.distance <= radius)
+      .sort((a, b) => a.distance - b.distance);
   const tellusAgent = {
     getNearby(radius = 30) {
       return generated
@@ -5572,6 +5619,16 @@ function createTellusWorld(
         .filter((o) => o.distance <= radius)
         .sort((a, b) => a.distance - b.distance)
         .slice(0, 12);
+    },
+    getActors(radius = 80) {
+      return nearbyActors(radius).map((actor) => ({
+        visitorId: actor.visitorId,
+        name: actor.name,
+        kind: actor.kind,
+        distance: actor.distance,
+        direction: actor.direction,
+        position: actor.position,
+      }));
     },
     getState(radius = 30) {
       const groundHeight = terrainHeight(visitorPosition.x, visitorPosition.z);
@@ -5604,6 +5661,14 @@ function createTellusWorld(
         distanceToSummit: Math.hypot(visitorPosition.x, visitorPosition.z),
         distanceToShore: Math.max(0, WORLD_RADIUS - Math.hypot(visitorPosition.x, visitorPosition.z)),
         nearby: tellusAgent.getNearby(radius),
+        actors: nearbyActors(radius),
+        dmTargets: nearbyActors(Math.max(radius, 80)).map((actor) => ({
+          visitorId: actor.visitorId,
+          name: actor.name,
+          kind: actor.kind,
+          distance: actor.distance,
+          direction: actor.direction,
+        })),
         chat: nearbyWorldChat(radius),
         nearbyChat: nearbyWorldChat(radius, "nearby"),
         verbs: ["moveSelf", "findReusableAssets", "placeReusableAsset", "generate", "sayChat", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "playAnimation", "listAnimations", "listAvatars", "setAvatar", "setAvatarScale"],
@@ -5646,13 +5711,14 @@ function createTellusWorld(
         opts.channel === "nearby" || opts.channel === "world" || opts.channel === "dm" ? opts.channel : undefined,
       );
       const recipientId = typeof opts.recipientId === "string" ? opts.recipientId.trim() : "";
-      return recipientId
+      const filtered = recipientId
         ? messages.filter(
             (message) =>
               message.channel === "dm" &&
               (message.recipientId === recipientId || message.visitorId === recipientId),
           )
         : messages;
+      return filtered.map(enrichedWorldChatMessage);
     },
     sayChat(text: string, opts: { channel?: WorldChatChannel; recipientId?: string; recipientName?: string } = {}) {
       const channel =
@@ -6387,6 +6453,7 @@ function App(): React.ReactElement {
     name: string;
     kind: "player" | "agent";
   } | null>(null);
+  const [portalTargetWorldId, setPortalTargetWorldId] = useState("");
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
   const [showFps, setShowFps] = useState(false);
   const [fps, setFps] = useState(0);
@@ -8210,14 +8277,14 @@ function App(): React.ReactElement {
     ...remotePlayers,
   ];
   const actorName = (visitor: { visitorId: string; name?: string }): string => {
-    const name = visitor.name?.trim();
-    if (name) return name;
-    if (visitor.visitorId === "local-player") return "You";
-    if (visitor.visitorId.startsWith("agent:")) {
-      return visitor.visitorId.slice("agent:".length) || "Agent";
-    }
-    return `Player ${visitor.visitorId.slice(0, 6)}`;
+    return friendlyVisitorName(visitor.visitorId, visitor.name, snapshot.visitorId);
   };
+  const currentWorldId = activeWorldId ?? runtimeConfig.worldId;
+  const portalTargetOptions = worlds.filter((worldId) => worldId && worldId !== currentWorldId);
+  useEffect(() => {
+    if (portalTargetWorldId && portalTargetOptions.includes(portalTargetWorldId)) return;
+    setPortalTargetWorldId(portalTargetOptions[0] ?? "");
+  }, [portalTargetOptions.join("\n"), portalTargetWorldId]);
   const chatTargets = [...remoteAgents, ...remotePlayers].map((visitor) => ({
     visitorId: visitor.visitorId,
     name: actorName(visitor),
@@ -8590,14 +8657,47 @@ function App(): React.ReactElement {
               <button
                 type="button"
                 title="Create a portal at your position to another world"
+                disabled={!portalTargetWorldId}
                 onClick={() => {
-                  const target = window.prompt("Target world id (e.g. main, aurora-test, chunked-12-cone):", "");
-                  if (target) worldRef.current?.createPortalHere(target, window.prompt("Portal label?", target) || target);
+                  const target = portalTargetWorldId.trim();
+                  if (target) worldRef.current?.createPortalHere(target, `${currentWorldId} to ${target} portal`);
                 }}
-                style={{ ...portalBtn, borderColor: "rgba(106,208,255,0.5)" }}
+                style={{
+                  ...portalBtn,
+                  borderColor: "rgba(106,208,255,0.5)",
+                  opacity: portalTargetWorldId ? 1 : 0.55,
+                  cursor: portalTargetWorldId ? "pointer" : "default",
+                }}
               >
                 ＋ Portal here
               </button>
+              <select
+                value={portalTargetWorldId}
+                aria-label="Portal destination world"
+                title="Portal destination world"
+                disabled={portalTargetOptions.length === 0}
+                onChange={(event) => setPortalTargetWorldId(event.target.value)}
+                style={{
+                  width: "100%",
+                  marginTop: 4,
+                  background: "rgba(0,0,0,0.45)",
+                  color: "inherit",
+                  border: "1px solid rgba(106,208,255,0.35)",
+                  borderRadius: 8,
+                  padding: "4px 6px",
+                  font: "inherit",
+                }}
+              >
+                {portalTargetOptions.length === 0 ? (
+                  <option value="">No other worlds</option>
+                ) : (
+                  portalTargetOptions.map((worldId) => (
+                    <option key={worldId} value={worldId}>
+                      {currentWorldId} to {worldId}
+                    </option>
+                  ))
+                )}
+              </select>
             </aside>
           );
         })()}
@@ -10060,8 +10160,9 @@ function App(): React.ReactElement {
                   }}
                 />
               )}
-              {snapshot.remoteVisitors.map((visitor) =>
-                visitor.position ? (
+              {snapshot.remoteVisitors.map((visitor) => {
+                const name = actorName(visitor);
+                return visitor.position ? (
                   <button
                     type="button"
                     key={visitor.visitorId}
@@ -10070,16 +10171,16 @@ function App(): React.ReactElement {
                       visitor.visitorId.startsWith("agent:") ? "agent" : "remote-player",
                     ].join(" ")}
                     style={mapPointStyle(visitor.position)}
-                    title={visitor.visitorId.startsWith("agent:") ? "Agent" : "Remote player"}
-                    aria-label={`Go to ${visitor.visitorId.startsWith("agent:") ? "agent" : "remote player"}`}
+                    title={name}
+                    aria-label={`Go to ${name}`}
                     onClick={(event) => {
                       event.stopPropagation();
                       const pos = visitor.position;
                       if (pos) worldRef.current?.warpTo(pos.x, pos.z);
                     }}
                   />
-                ) : null,
-              )}
+                ) : null;
+              })}
               {snapshot.generated.map((thing) => (
                 <button
                   type="button"
