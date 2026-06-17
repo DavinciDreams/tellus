@@ -4,7 +4,9 @@ export type TerrainPaintKind =
   | "snow"
   | "beach"
   | "dirt"
-  | "flowers";
+  | "flowers"
+  | "stone"
+  | "brick";
 export type TerrainEditMode = "raise" | "lower" | "flatten" | TerrainPaintKind;
 
 export interface Vec3 {

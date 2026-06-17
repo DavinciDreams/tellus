@@ -612,6 +612,8 @@ const BIOME_MAP_RGB: Record<string, [number, number, number]> = {
   desert: [214, 186, 116],
   snow: [232, 238, 244],
   dirt: [130, 100, 70],
+  stone: [142, 144, 136],
+  brick: [150, 74, 58],
   water: [44, 100, 152],
   alien: [160, 88, 182],
 };
@@ -2115,6 +2117,27 @@ function createTellusWorld(
     });
   };
 
+  const paintAirbrushKeepsCell = (
+    xIndex: number,
+    zIndex: number,
+    falloff: number,
+    paintCode: number,
+    center: Vec3,
+  ): boolean => {
+    if (falloff >= 0.58) return true;
+    if (falloff <= 0.06) return false;
+    const seed =
+      Math.sin(
+        xIndex * 12.9898 +
+          zIndex * 78.233 +
+          paintCode * 37.719 +
+          Math.round(center.x * 2) * 0.217 +
+          Math.round(center.z * 2) * 0.311,
+      ) * 43758.5453;
+    const noise = seed - Math.floor(seed);
+    return noise < falloff * 0.92;
+  };
+
   const sculptTerrainAt = (
     mode: TerrainEditMode,
     center: Vec3,
@@ -2134,12 +2157,15 @@ function createTellusWorld(
           const point = distantIslandGridWorldPoint(distantIsland, xIndex, zIndex);
           if (point.localRadius > 1) continue;
           const distance = Math.hypot(point.x - center.x, point.z - center.z);
-          if (distance > TERRAIN_SCULPT_RADIUS) continue;
+          const brushRadius = paintCode ? TERRAIN_SCULPT_RADIUS * 0.68 : TERRAIN_SCULPT_RADIUS;
+          if (distance > brushRadius) continue;
           const falloff =
-            (1 + Math.cos((distance / TERRAIN_SCULPT_RADIUS) * Math.PI)) * 0.5;
+            (1 + Math.cos((distance / brushRadius) * Math.PI)) * 0.5;
           const index = distantTerrainGridIndex(xIndex, zIndex);
           if (paintCode) {
-            if (falloff > 0.18) distantIsland.paint[index] = paintCode;
+            if (paintAirbrushKeepsCell(xIndex, zIndex, falloff, paintCode, center)) {
+              distantIsland.paint[index] = paintCode;
+            }
           } else if (mode === "flatten") {
             const currentHeight =
               SEA_LEVEL +
@@ -2167,7 +2193,7 @@ function createTellusWorld(
       const targetHeight = terrainHeight(center.x, center.z);
       // The central brush radius scales with the world so it covers the same grid cells as the
       // classic brush — keeps the math identical to the server's classic-space sculpt port.
-      const brushRadius = TERRAIN_SCULPT_RADIUS * WORLD_SCALE;
+      const brushRadius = TERRAIN_SCULPT_RADIUS * WORLD_SCALE * (paintCode ? 0.68 : 1);
       for (let zIndex = 0; zIndex <= TERRAIN_SEGMENTS; zIndex++) {
         const z = (zIndex / TERRAIN_SEGMENTS - 0.5) * WORLD_RADIUS * 2;
         for (let xIndex = 0; xIndex <= TERRAIN_SEGMENTS; xIndex++) {
@@ -2179,7 +2205,9 @@ function createTellusWorld(
             (1 + Math.cos((distance / brushRadius) * Math.PI)) * 0.5;
           const index = terrainGridIndex(xIndex, zIndex);
           if (paintCode) {
-            if (falloff > 0.18) terrainPaint[index] = paintCode;
+            if (paintAirbrushKeepsCell(xIndex, zIndex, falloff, paintCode, center)) {
+              terrainPaint[index] = paintCode;
+            }
           } else if (mode === "flatten") {
             const currentHeight = baseTerrainHeight(x, z) + terrainSculptOffsets[index];
             terrainSculptOffsets[index] +=
@@ -11200,6 +11228,22 @@ function App(): React.ReactElement {
             >
               <span className="terrain-swatch-preview" />
               <span>Flowers</span>
+            </button>
+            <button
+              type="button"
+              className="terrain-swatch stone"
+              onClick={() => worldRef.current?.sculptTerrain("stone")}
+            >
+              <span className="terrain-swatch-preview" />
+              <span>Stone</span>
+            </button>
+            <button
+              type="button"
+              className="terrain-swatch brick"
+              onClick={() => worldRef.current?.sculptTerrain("brick")}
+            >
+              <span className="terrain-swatch-preview" />
+              <span>Brick</span>
             </button>
           </div>
         </section>

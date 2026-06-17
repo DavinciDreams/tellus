@@ -150,6 +150,8 @@ export const terrainColors: Record<TerrainKind, THREE.Color> = {
   beach: new THREE.Color(0xf6dcbd),
   dirt: new THREE.Color(0x8a7241),
   flowers: new THREE.Color(0x6daa35),
+  stone: new THREE.Color(0x8c8d86),
+  brick: new THREE.Color(0x9b4e3d),
   water: new THREE.Color(0x256f92),
 };
 
@@ -160,6 +162,8 @@ export const terrainPaintKinds = [
   "rock",
   "snow",
   "flowers",
+  "stone",
+  "brick",
 ] as const satisfies readonly TerrainPaintKind[];
 
 export const waterMountTerms = [

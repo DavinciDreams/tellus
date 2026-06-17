@@ -127,6 +127,8 @@ const GRASS_BY_PAINT: Record<string, { accept: number; tint: number; tall: numbe
   beach: { accept: 0.1, tint: 0xb9c46a, tall: 0.55 },
   rock: { accept: 0.05, tint: 0x7d9a55, tall: 0.6 },
   snow: { accept: 0.04, tint: 0xa9c9a0, tall: 0.5 },
+  stone: { accept: 0.015, tint: 0x76866d, tall: 0.35 },
+  brick: { accept: 0.01, tint: 0x8a7a55, tall: 0.3 },
 };
 
 const FLOWER_PALETTE = [0xffffff, 0xffd7e8, 0xffe9a8, 0xc9b8ff, 0xffb0a0, 0x9fd8ff];
