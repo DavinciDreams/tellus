@@ -44,7 +44,6 @@ import {
   distantIslandWorldPoint,
   distantTerrainPaintAt,
   isFreeMovingVehicle,
-  isIntentionallyOffsetFromGround,
   pondWaterLevel,
   terrainHeight,
   terrainKind,
@@ -1297,11 +1296,7 @@ export function createGeneratedMesh(thing: GeneratedThing): THREE.Object3D {
     group.add(seed);
   }
 
-  if (
-    isFreeMovingVehicle(thing) ||
-    isIntentionallyOffsetFromGround(thing) ||
-    Math.hypot(thing.position.x, thing.position.z) > WORLD_RADIUS
-  ) {
+  if (isFreeMovingVehicle(thing)) {
     group.position.set(thing.position.x, thing.position.y, thing.position.z);
   } else {
     placeObjectAboveGround(group, thing.position, 0.025);
@@ -1312,11 +1307,7 @@ export function createGeneratedMesh(thing: GeneratedThing): THREE.Object3D {
   if (size.y > 0) {
     const scale = clamp(targetHeight / size.y, 0.45, 3.6);
     group.scale.multiplyScalar(scale);
-    if (
-      isFreeMovingVehicle(thing) ||
-      isIntentionallyOffsetFromGround(thing) ||
-      Math.hypot(thing.position.x, thing.position.z) > WORLD_RADIUS
-    ) {
+    if (isFreeMovingVehicle(thing)) {
       group.position.set(thing.position.x, thing.position.y, thing.position.z);
     } else {
       placeObjectAboveGround(group, thing.position, 0.025);
@@ -1377,7 +1368,7 @@ export function shouldShowGenerationSwirl(thing: GeneratedThing): boolean {
   if (thing.generationStatus === "queued" || thing.generationStatus === "generating") {
     return true;
   }
-  return Boolean(thing.modelUrl && thing.generationStatus === "ready");
+  return false;
 }
 
 export function applyThingRotation(object: THREE.Object3D, thing: GeneratedThing): void {

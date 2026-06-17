@@ -120,7 +120,7 @@ import {
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood } from "./tellus-types";
-import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, CENTRAL_WALK_RADIUS, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, DEFAULT_DAY_NIGHT_CYCLE_MS, DEFAULT_DAY_NIGHT_START, MIN_DAY_NIGHT_CYCLE_MS, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
+import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, DEFAULT_DAY_NIGHT_CYCLE_MS, DEFAULT_DAY_NIGHT_START, MIN_DAY_NIGHT_CYCLE_MS, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, boundedNumber, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig } from "./tellus-runtime-config";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, toAssetId } from "./tellus-urls-identity";
@@ -139,6 +139,141 @@ import "./styles.css";
 // Attach X-Tellus-Session to every Hyades API call (agent endpoints, world meta PATCH, state, pay)
 // before ANY fetch fires — the /live WebSocket keeps the soft ?userId= identity instead.
 installSessionFetch();
+
+type AssetReuseCandidate = AssetLibraryModel & {
+  reuseScore?: number;
+  reuseReason?: string;
+};
+
+type AssetSurfaceContext =
+  | "person"
+  | "fauna"
+  | "flora"
+  | "interior"
+  | "exterior"
+  | "surface"
+  | "furniture"
+  | "environment";
+
+const ASSET_REUSE_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "the",
+  "with",
+  "for",
+  "from",
+  "into",
+  "make",
+  "create",
+  "generate",
+  "little",
+  "small",
+  "large",
+  "big",
+  "nice",
+  "cool",
+  "some",
+  "very",
+]);
+
+const assetReuseTerms = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/[\s-]+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 2 && !ASSET_REUSE_STOPWORDS.has(term));
+
+const assetSurfaceContextTerms: Record<AssetSurfaceContext, readonly string[]> = {
+  person: ["person", "people", "avatar", "human", "character", "vrm", "auton"],
+  fauna: ["fauna", "animal", "creature", "pet", "bird", "fox", "wolf", "horse", "deer"],
+  flora: ["flora", "plant", "flower", "tree", "botany", "garden", "grass", "moss"],
+  interior: ["interior", "inside", "indoor", "room", "library", "house", "wall", "floor"],
+  exterior: ["exterior", "outside", "outdoor", "garden", "park", "bridge", "bench", "path"],
+  surface: ["surface", "shelf", "table", "counter", "floor", "platform", "pedestal"],
+  furniture: ["furniture", "chair", "bench", "table", "shelf", "cabinet", "sofa", "desk"],
+  environment: ["environment", "building", "bridge", "path", "rock", "lantern", "decor"],
+};
+
+const inferAssetSurfaceContexts = (text: string): AssetSurfaceContext[] => {
+  const terms = new Set(assetReuseTerms(text));
+  const contexts: AssetSurfaceContext[] = [];
+  for (const [context, matches] of Object.entries(assetSurfaceContextTerms) as Array<
+    [AssetSurfaceContext, readonly string[]]
+  >) {
+    if (matches.some((term) => terms.has(term))) contexts.push(context);
+  }
+  return contexts;
+};
+
+const assetSurfaceContextText = (model: AssetLibraryModel): string =>
+  [
+    model.name,
+    model.description ?? "",
+    model.file_format ?? "",
+    ...(model.tags ?? []),
+  ].join(" ");
+
+const scoreReusableAsset = (
+  prompt: string,
+  model: AssetLibraryModel,
+  kind?: GeneratedKind,
+  preferredContexts: readonly AssetSurfaceContext[] = [],
+): AssetReuseCandidate | null => {
+  const promptTerms = new Set(assetReuseTerms(prompt));
+  if (promptTerms.size === 0) return null;
+  const modelText = assetSurfaceContextText(model);
+  const modelTerms = new Set(assetReuseTerms(modelText));
+  let overlap = 0;
+  for (const term of promptTerms) {
+    if (modelTerms.has(term)) overlap++;
+  }
+  const kindBoost =
+    kind &&
+    (model.name.toLowerCase().includes(kind) ||
+      model.tags?.some((tag) => tag.toLowerCase().includes(kind)))
+      ? 0.25
+      : 0;
+  const promptContexts = inferAssetSurfaceContexts(prompt);
+  const modelContexts = inferAssetSurfaceContexts(modelText);
+  const allPreferredContexts = new Set([...promptContexts, ...preferredContexts]);
+  const contextMatches = modelContexts.filter((context) => allPreferredContexts.has(context));
+  const contextBoost = contextMatches.length > 0 ? Math.min(0.35, contextMatches.length * 0.16) : 0;
+  const score = overlap / Math.max(2, promptTerms.size) + kindBoost + contextBoost;
+  if (score < 0.34) return null;
+  return {
+    ...model,
+    reuseScore: score,
+    reuseReason:
+      contextMatches.length > 0
+        ? contextMatches.join(", ")
+        : overlap > 0
+          ? `${overlap} matching term${overlap === 1 ? "" : "s"}`
+          : "kind match",
+  };
+};
+
+const rankReusableAssets = (
+  prompt: string,
+  models: readonly AssetLibraryModel[],
+  kind?: GeneratedKind,
+  limit = 5,
+  preferredContexts: readonly AssetSurfaceContext[] = [],
+): AssetReuseCandidate[] => {
+  const seen = new Set<string>();
+  return models
+    .map((model) => scoreReusableAsset(prompt, model, kind, preferredContexts))
+    .filter((model): model is AssetReuseCandidate => model !== null)
+    .filter((model) => {
+      const key = model.modelUrl ?? model.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => (b.reuseScore ?? 0) - (a.reuseScore ?? 0))
+    .slice(0, limit);
+};
 
 // Per-user embodied-agent status shape returned by the Hyades world agent endpoints (camelCase).
 interface AgentStatus {
@@ -1003,9 +1138,31 @@ function createTellusWorld(
     g.add(ring, pillar);
     return g;
   };
+  const portalGroundY = (p: WorldPortal): number => {
+    let best = groundHeightAt(p.position.x, p.position.z);
+    const r = Math.min(Math.max(0.5, p.radius), 6);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const h = groundHeightAt(
+        p.position.x + Math.cos(a) * r,
+        p.position.z + Math.sin(a) * r,
+      );
+      if (h !== null && Number.isFinite(h) && (best === null || h > best)) best = h;
+    }
+    return best ?? (Number.isFinite(p.position.y) ? p.position.y : SEA_LEVEL);
+  };
   const syncPortalMarkers = () => {
     const seen = new Set<string>();
     for (const p of worldPortals) {
+      if (p.anchorThingId) {
+        const anchoredMarker = portalMarkers.get(p.id);
+        if (anchoredMarker) {
+          portalMarkerGroup.remove(anchoredMarker);
+          disposeObject(anchoredMarker);
+          portalMarkers.delete(p.id);
+        }
+        continue;
+      }
       seen.add(p.id);
       let marker = portalMarkers.get(p.id);
       if (!marker) {
@@ -1013,7 +1170,7 @@ function createTellusWorld(
         portalMarkers.set(p.id, marker);
         portalMarkerGroup.add(marker);
       }
-      const y = (groundHeightAt(p.position.x, p.position.z) ?? 0) + 0.05;
+      const y = portalGroundY(p) + 0.05;
       marker.position.set(p.position.x, y, p.position.z);
     }
     for (const [id, marker] of portalMarkers) {
@@ -1023,10 +1180,9 @@ function createTellusWorld(
       portalMarkers.delete(id);
     }
   };
-  // Called each frame: spin the rings, and auto-enter when the player stands in a portal's trigger volume.
+  // Called each frame: auto-enter when the player stands in a portal's trigger volume.
   const updatePortals = (now: number) => {
-    if (portalMarkers.size === 0) return;
-    portalMarkerGroup.rotation.y += 0.01;
+    if (worldPortals.length === 0) return;
     let nearId: string | null = null;
     for (const p of worldPortals) {
       const d = Math.hypot(visitorPosition.x - p.position.x, visitorPosition.z - p.position.z);
@@ -2506,12 +2662,7 @@ function createTellusWorld(
     const mesh = generatedMeshes.get(thing.id);
     if (!mesh) return;
     applyThingRotation(mesh, thing);
-    if (
-      mesh.userData.generatingSwirl ||
-      isFreeMovingVehicle(thing) ||
-      isIntentionallyOffsetFromGround(thing) ||
-      Math.hypot(thing.position.x, thing.position.z) > WORLD_RADIUS
-    ) {
+    if (mesh.userData.generatingSwirl || isFreeMovingVehicle(thing)) {
       mesh.position.set(thing.position.x, thing.position.y, thing.position.z);
       if (mesh.userData.generatingSwirl) {
         mesh.userData.baseY = mesh.position.y;
@@ -2524,7 +2675,10 @@ function createTellusWorld(
     // (sampleHeight returns null until the owning chunk streams in), so once the sculpted chunk
     // loads the asset would sit BELOW the surface. Re-sample the live ground height here so the
     // model's feet rest flush on the sculpted terrain. Falls through to the stored y otherwise.
-    const liveGround = isChunked ? footprintGroundY(thing) : null;
+    const hasManualHeightOffset = isIntentionallyOffsetFromGround(thing);
+    const liveGround = isChunked && !hasManualHeightOffset
+      ? footprintGroundY(thing)
+      : null;
     const placeAt =
       liveGround !== null && Number.isFinite(liveGround)
         ? { ...thing.position, y: liveGround }
@@ -2725,44 +2879,96 @@ function createTellusWorld(
     });
   };
 
+  const MAX_WORLD_MODEL_LOADS = 2;
+  let activeWorldModelLoads = 0;
+  const worldModelLoadQueue: string[] = [];
+  const queuedWorldModelLoads = new Set<string>();
+  let worldModelLoadPumpScheduled = false;
+
+  const sortWorldModelLoadQueue = () => {
+    worldModelLoadQueue.sort((a, b) => {
+      if (selectedThingId === a) return -1;
+      if (selectedThingId === b) return 1;
+      const thingA = thingById(a);
+      const thingB = thingById(b);
+      const distanceA = thingA ? distance2D(visitorPosition, thingA.position) : Number.POSITIVE_INFINITY;
+      const distanceB = thingB ? distance2D(visitorPosition, thingB.position) : Number.POSITIVE_INFINITY;
+      return distanceA - distanceB;
+    });
+  };
+
+  const scheduleWorldModelLoadPump = () => {
+    if (worldModelLoadPumpScheduled || destroyed) return;
+    worldModelLoadPumpScheduled = true;
+    window.setTimeout(() => {
+      worldModelLoadPumpScheduled = false;
+      pumpWorldModelLoadQueue();
+    }, 0);
+  };
+
+  const pumpWorldModelLoadQueue = () => {
+    if (destroyed) return;
+    while (activeWorldModelLoads < MAX_WORLD_MODEL_LOADS && worldModelLoadQueue.length > 0) {
+      sortWorldModelLoadQueue();
+      const id = worldModelLoadQueue.shift();
+      if (!id) return;
+      queuedWorldModelLoads.delete(id);
+      const thing = thingById(id);
+      if (!thing?.modelUrl || thing.generationStatus !== "ready") continue;
+      const modelUrl = thing.modelUrl;
+      const currentMesh = generatedMeshes.get(thing.id);
+      if (currentMesh?.userData.loadedModelUrl === modelUrl) continue;
+      activeWorldModelLoads++;
+      void loadGeneratedModel(modelUrl, thing, useWebGPU)
+        .then((model) => {
+          const current = thingById(id);
+          if (destroyed || !current || current.modelUrl !== modelUrl) {
+            disposeObject(model);
+            return;
+          }
+          const oldMesh = generatedMeshes.get(id);
+          if (oldMesh) {
+            uninstanceThing(id); // free any instance slot the old mesh held before we swap it out
+            stopGeneratedAnimation(id);
+            scene.remove(oldMesh);
+            disposeObject(oldMesh);
+          }
+          model.userData.loadedModelUrl = modelUrl;
+          generatedMeshes.set(id, model);
+          startGeneratedAnimation(id, model);
+          scene.add(model);
+          syncTransformControls();
+          reevaluateInstanceGroup(modelUrl);
+          publish();
+        })
+        .catch((error) => {
+          const current = thingById(id);
+          console.warn("Remote generated model load failed", error);
+          if (!current || current.modelUrl !== modelUrl) return;
+          current.modelUrl = undefined;
+          current.generationStatus = "failed";
+          current.pipelineId = undefined;
+          ensureGeneratedVisual(current);
+          publishGeneratedThing(current);
+          publish();
+        })
+        .finally(() => {
+          activeWorldModelLoads--;
+          pumpWorldModelLoadQueue();
+        });
+    }
+  };
+
   const loadRemoteGeneratedModel = (thing: GeneratedThing) => {
     if (!thing.modelUrl || thing.generationStatus !== "ready") return;
     const currentMesh = generatedMeshes.get(thing.id);
     if (currentMesh?.userData.loadedModelUrl === thing.modelUrl) {
       return;
     }
-    void loadGeneratedModel(thing.modelUrl, thing, useWebGPU)
-      .then((model) => {
-        if (destroyed || !thingById(thing.id)) {
-          disposeObject(model);
-          return;
-        }
-        const oldMesh = generatedMeshes.get(thing.id);
-        if (oldMesh) {
-          uninstanceThing(thing.id); // free any instance slot the old mesh held before we swap it out
-          stopGeneratedAnimation(thing.id);
-          scene.remove(oldMesh);
-          disposeObject(oldMesh);
-        }
-        model.userData.loadedModelUrl = thing.modelUrl;
-        generatedMeshes.set(thing.id, model);
-        startGeneratedAnimation(thing.id, model);
-        scene.add(model);
-        syncTransformControls();
-        reevaluateInstanceGroup(thing.modelUrl);
-        publish();
-      })
-      .catch((error) => {
-        console.warn("Remote generated model load failed", error);
-        if (thing.modelUrl) {
-          thing.modelUrl = undefined;
-          thing.generationStatus = "failed";
-          thing.pipelineId = undefined;
-          ensureGeneratedVisual(thing);
-          publishGeneratedThing(thing);
-          publish();
-        }
-      });
+    if (queuedWorldModelLoads.has(thing.id)) return;
+    queuedWorldModelLoads.add(thing.id);
+    worldModelLoadQueue.push(thing.id);
+    scheduleWorldModelLoadPump();
   };
 
   const ensureGeneratedVisual = (thing: GeneratedThing) => {
@@ -3083,6 +3289,11 @@ function createTellusWorld(
   const moveGenerated = (id: string, dx: number, dz: number) => {
     const thing = thingById(id);
     if (!thing) return;
+    const oldGroundY = groundHeightAt(thing.position.x, thing.position.z);
+    const manualHeightOffset =
+      oldGroundY !== null && Number.isFinite(oldGroundY)
+        ? Math.max(0, thing.position.y - oldGroundY)
+        : 0;
     const position =
       isVehicleThing(thing) || sailingThingId === id
         ? movedVehiclePosition(
@@ -3096,9 +3307,15 @@ function createTellusWorld(
             thing.position.z + dz,
             thing.position,
           );
+    if (!isVehicleThing(thing) && sailingThingId !== id && manualHeightOffset > 0) {
+      const newGroundY = groundHeightAt(position.x, position.z);
+      if (newGroundY !== null && Number.isFinite(newGroundY)) {
+        position.y = newGroundY + manualHeightOffset;
+      }
+    }
     thing.position = position;
     if (sailingThingId === id) {
-      visitorPosition = { ...position };
+      visitorPosition = riderPositionForThing(thing);
     }
     updateThingMeshPosition(thing);
     publishGeneratedThing(thing);
@@ -3188,18 +3405,13 @@ function createTellusWorld(
   const liftGenerated = (id: string, amount: number) => {
     const thing = thingById(id);
     if (!thing) return;
-    const groundY = groundHeightAt(thing.position.x, thing.position.z);
-    const baseY =
-      groundY ??
-      (Math.hypot(thing.position.x, thing.position.z) > WORLD_RADIUS
-        ? SEA_LEVEL + 0.14
-        : thing.position.y);
+    const baseY = footprintGroundY(thing) ?? thing.position.y;
     thing.position = {
       ...thing.position,
-      y: clamp(thing.position.y + amount, baseY - 30, baseY + 30),
+      y: clamp(thing.position.y + amount, baseY, baseY + 30),
     };
     if (sailingThingId === id) {
-      visitorPosition = { ...thing.position };
+      visitorPosition = riderPositionForThing(thing);
     }
     updateThingMeshPosition(thing);
     publishGeneratedThing(thing);
@@ -3231,13 +3443,14 @@ function createTellusWorld(
   const groundGenerated = (id: string) => {
     const thing = thingById(id);
     if (!thing) return;
+    const grounded = groundedPosition(thing.position.x, thing.position.z, thing.position);
     const groundY = footprintGroundY(thing);
     thing.position =
       groundY !== null && Number.isFinite(groundY)
-        ? { ...thing.position, y: groundY }
-        : groundedPosition(thing.position.x, thing.position.z, thing.position);
+        ? { ...grounded, y: groundY }
+        : grounded;
     if (sailingThingId === id) {
-      visitorPosition = { ...thing.position };
+      visitorPosition = riderPositionForThing(thing);
     }
     updateThingMeshPosition(thing);
     publishGeneratedThing(thing);
@@ -3307,7 +3520,7 @@ function createTellusWorld(
       thing.position,
     );
     if (sailingThingId === id) {
-      visitorPosition = { ...thing.position };
+      visitorPosition = riderPositionForThing(thing);
     }
     updateThingMeshPosition(thing);
     publishGeneratedThing(thing);
@@ -3329,8 +3542,8 @@ function createTellusWorld(
     }
     const boarded = thingById(id);
     if (boarded) {
-      visitorPosition = { ...boarded.position };
       updateThingMeshPosition(boarded);
+      visitorPosition = riderPositionForThing(boarded);
       publishGeneratedThing(boarded);
     }
     addLog({
@@ -3411,6 +3624,37 @@ function createTellusWorld(
       origin.x + Math.cos(angle) * radius,
       origin.z + Math.sin(angle) * radius,
     );
+  };
+
+  const reusableAssetsForPrompt = async (
+    prompt: string,
+    limit = 5,
+    preferredContexts: readonly AssetSurfaceContext[] = [],
+  ): Promise<AssetReuseCandidate[]> => {
+    const trimmed = prompt.trim();
+    if (trimmed.length < 3) return [];
+    const kind = inferGeneratedKind(trimmed, "visitor");
+    const localModels: AssetLibraryModel[] = generated
+      .filter((thing) => thing.modelUrl && thing.generationStatus === "ready")
+      .map((thing) => ({
+        id: `world:${thing.id}`,
+        name: thing.prompt,
+        description: thing.prompt,
+        modelUrl: thing.modelUrl,
+        source: "generated" as const,
+        hasThumbnail: false,
+      }));
+    const localMatches = rankReusableAssets(trimmed, localModels, kind, limit, preferredContexts);
+    let storeMatches: AssetReuseCandidate[] = [];
+    if (runtimeConfig.worldApiBase && localMatches.length < limit) {
+      const browsed = await browseAssetLibrary(trimmed, 1, "downloads", 12).catch(() => ({
+        models: [],
+        hasNext: false,
+        total: 0,
+      }));
+      storeMatches = rankReusableAssets(trimmed, browsed.models, kind, limit, preferredContexts);
+    }
+    return rankReusableAssets(trimmed, [...localMatches, ...storeMatches], kind, limit, preferredContexts);
   };
 
   const generate = (request: GenerateRequest): GeneratedThing => {
@@ -3679,9 +3923,17 @@ function createTellusWorld(
     return thing;
   };
 
-  const addLibraryAsset = (model: AssetLibraryModel): GeneratedThing => {
+  const addLibraryAsset = (
+    model: AssetLibraryModel,
+    opts: {
+      creatorId?: AgentId | "visitor";
+      ownerUserId?: string;
+      location?: GenerateRequest["location"];
+    } = {},
+  ): GeneratedThing => {
     const prompt = model.description?.trim() || model.name;
-    const kind = inferGeneratedKind(prompt, "visitor");
+    const creatorId = opts.creatorId ?? "visitor";
+    const kind = inferGeneratedKind(prompt, creatorId);
     // Prefer the game-optimized (meshopt-compressed) variant — typically ~80% smaller, same visual
     // quality. The store's game-optimized endpoint safely serves the original GLB when no optimized
     // build exists, so there's no 404 risk and no client-side fallback needed. (MeshoptDecoder is
@@ -3691,19 +3943,20 @@ function createTellusWorld(
       tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(model.id)}/game-optimized`);
     const position = chooseLocation({
       prompt,
-      creatorId: "visitor",
-      location: {
-        x: visitorPosition.x + Math.sin(yaw) * 4,
-        y: 0,
-        z: visitorPosition.z + Math.cos(yaw) * 4,
-      },
+      creatorId,
+      location:
+        opts.location ?? {
+          x: visitorPosition.x + Math.sin(yaw) * 4,
+          y: 0,
+          z: visitorPosition.z + Math.cos(yaw) * 4,
+        },
     });
     const thing: GeneratedThing = {
       id: makeId(kind),
       kind,
       prompt: model.name,
-      creatorId: "visitor",
-      ownerUserId: userId,
+      creatorId,
+      ownerUserId: opts.ownerUserId ?? (creatorId === "visitor" ? userId : undefined),
       position,
       rotationY: 0,
       scale: 1,
@@ -3720,8 +3973,8 @@ function createTellusWorld(
     reevaluateInstancingForSelection(previousSelectedId, selectedThingId);
     syncTransformControls();
     addLog({
-      agentId: "visitor",
-      agentName: "Visitor",
+      agentId: creatorId,
+      agentName: displayNameForVisitor(String(creatorId)),
       tool: "generate",
       text: `added ${model.source === "generated" ? "generated" : "library"} asset: ${model.name}`,
     });
@@ -3906,6 +4159,24 @@ function createTellusWorld(
     if (footprintCache.size > 600) footprintCache.clear();
     return fp;
   };
+  const riderPositionForThing = (thing: GeneratedThing): Vec3 => {
+    const mesh = generatedMeshes.get(thing.id);
+    if (mesh) {
+      const box = measureModelBounds(mesh);
+      if (!box.isEmpty() && Number.isFinite(box.max.y)) {
+        return {
+          x: thing.position.x,
+          y: Math.max(thing.position.y, box.max.y) + 0.08,
+          z: thing.position.z,
+        };
+      }
+    }
+    return {
+      x: thing.position.x,
+      y: thing.position.y + Math.max(0.4, assetTargetHeight(thing)) + 0.08,
+      z: thing.position.z,
+    };
+  };
   const currentObstacles = (): ObstacleCircle[] => {
     const nowMs = performance.now();
     if (nowMs - obstacleCacheAt > 500) {
@@ -4004,15 +4275,11 @@ function createTellusWorld(
           boat.position,
         );
       }
-      visitorPosition = { ...boat.position };
-      const mesh = generatedMeshes.get(boat.id);
-      if (mesh) {
-        mesh.position.set(boat.position.x, boat.position.y, boat.position.z);
-        if (movement.lengthSq() > 0.001) {
-          boat.rotationY = Math.atan2(movement.x, movement.z);
-          mesh.rotation.y = boat.rotationY;
-        }
+      if (movement.lengthSq() > 0.001) {
+        boat.rotationY = Math.atan2(movement.x, movement.z);
       }
+      updateThingMeshPosition(boat);
+      visitorPosition = riderPositionForThing(boat);
       publishGeneratedThing(boat);
       sendPresenceUpdate();
       publish();
@@ -5018,13 +5285,14 @@ function createTellusWorld(
     raycaster.setFromCamera(pointerNdc, camera);
     const ray = raycaster.ray;
     const maxT = 260 * WORLD_SCALE;
+    const sampleGround = (x: number, z: number) => groundHeightAt(x, z) ?? SEA_LEVEL;
     let prevT = 0;
-    let prevAbove = ray.origin.y - terrainHeight(ray.origin.x, ray.origin.z) > 0;
+    let prevAbove = ray.origin.y - sampleGround(ray.origin.x, ray.origin.z) > 0;
     for (let t = 2; t <= maxT; t += 2) {
       const x = ray.origin.x + ray.direction.x * t;
       const z = ray.origin.z + ray.direction.z * t;
       const y = ray.origin.y + ray.direction.y * t;
-      const ground = Math.hypot(x, z) <= CENTRAL_WALK_RADIUS ? terrainHeight(x, z) : SEA_LEVEL;
+      const ground = sampleGround(x, z);
       const above = y - ground > 0;
       if (prevAbove && !above) {
         let lo = prevT;
@@ -5034,7 +5302,7 @@ function createTellusWorld(
           const mx = ray.origin.x + ray.direction.x * mid;
           const mz = ray.origin.z + ray.direction.z * mid;
           const my = ray.origin.y + ray.direction.y * mid;
-          const mg = Math.hypot(mx, mz) <= CENTRAL_WALK_RADIUS ? terrainHeight(mx, mz) : SEA_LEVEL;
+          const mg = sampleGround(mx, mz);
           if (my - mg > 0) lo = mid;
           else hi = mid;
         }
@@ -5210,6 +5478,17 @@ function createTellusWorld(
     return directions[index];
   };
   const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+  const assetContextFromUnknown = (value: unknown): AssetSurfaceContext[] => {
+    const raw = Array.isArray(value)
+      ? value
+      : typeof value === "string"
+        ? value.split(/[,/ ]+/)
+        : [];
+    const allowed = new Set(Object.keys(assetSurfaceContextTerms));
+    return raw
+      .map((entry) => (typeof entry === "string" ? entry.trim().toLowerCase() : ""))
+      .filter((entry): entry is AssetSurfaceContext => allowed.has(entry));
+  };
   const nearToLocation = (near: unknown): GenerateRequest["location"] =>
     near === "mountain" ? "near-mountain" : near === "pond" ? "near-pond" : near === "agent" ? "near-agent" : { ...visitorPosition };
   const vrmaCategoryIds: readonly VrmaCategoryId[] = ["core", "gesture", "dance", "action", "sport", "locomotion", "pose", "other"];
@@ -5270,7 +5549,7 @@ function createTellusWorld(
         nearby: tellusAgent.getNearby(radius),
         chat: nearbyWorldChat(radius),
         nearbyChat: nearbyWorldChat(radius, "nearby"),
-        verbs: ["moveSelf", "generate", "sayChat", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "playAnimation", "listAnimations", "listAvatars", "setAvatar", "setAvatarScale"],
+        verbs: ["moveSelf", "findReusableAssets", "placeReusableAsset", "generate", "sayChat", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "playAnimation", "listAnimations", "listAvatars", "setAvatar", "setAvatarScale"],
         // A small default vocabulary for embodied agents. The full VRMA feed is available by category
         // through listAnimations so agents don't have to reason over hundreds of near-duplicate clips.
         animations: recommendedEmoteClipNamesSync(),
@@ -5330,7 +5609,7 @@ function createTellusWorld(
       );
       return message ? { ok: true, message } : { ok: false, error: "sayChat requires text" };
     },
-    sendAction(verb: string, args: Record<string, unknown> = {}) {
+    async sendAction(verb: string, args: Record<string, unknown> = {}) {
       const a = args ?? {};
       switch (verb) {
         case "moveSelf": {
@@ -5351,8 +5630,96 @@ function createTellusWorld(
             reached: moved.reached,
           };
         }
+        case "findReusableAssets": {
+          const prompt = typeof a.prompt === "string" ? a.prompt.trim() : "";
+          if (!prompt) return { ok: false, error: "findReusableAssets requires a prompt" };
+          const preferredContexts = assetContextFromUnknown(a.contexts ?? a.context);
+          const suggestions = await reusableAssetsForPrompt(prompt, clamp(num(a.limit, 5), 1, 8), preferredContexts);
+          return {
+            ok: true,
+            prompt,
+            contexts: preferredContexts,
+            suggestions: suggestions.map((model) => ({
+              id: model.id,
+              name: model.name,
+              source: model.source ?? "asset-library",
+              modelUrl: model.modelUrl,
+              score: model.reuseScore,
+              reason: model.reuseReason,
+            })),
+          };
+        }
+        case "placeReusableAsset": {
+          const assetId = typeof a.assetId === "string" ? a.assetId : typeof a.id === "string" ? a.id : "";
+          const prompt = typeof a.prompt === "string" ? a.prompt.trim() : "";
+          if (!assetId && !prompt) {
+            return { ok: false, error: "placeReusableAsset requires an assetId or prompt" };
+          }
+          const worldThing =
+            assetId.startsWith("world:")
+              ? thingById(assetId.slice("world:".length))
+              : undefined;
+          const directModel =
+            worldThing?.modelUrl
+              ? {
+                  id: assetId,
+                  name: worldThing.prompt,
+                  description: worldThing.prompt,
+                  modelUrl: worldThing.modelUrl,
+                  source: "generated" as const,
+                }
+              : assetId && !assetId.startsWith("world:")
+                ? {
+                    id: assetId,
+                    name: prompt || assetId,
+                    description: prompt || assetId,
+                    source: "asset-library" as const,
+                    hasThumbnail: true,
+                    hasGameOptimized: true,
+                  }
+                : undefined;
+          const suggestions = !directModel && assetId
+            ? await reusableAssetsForPrompt(prompt || assetId, 8, assetContextFromUnknown(a.contexts ?? a.context))
+            : !directModel
+              ? await reusableAssetsForPrompt(prompt, 1, assetContextFromUnknown(a.contexts ?? a.context))
+              : [];
+          const model =
+            directModel ??
+            suggestions.find((candidate) => candidate.id === assetId) ??
+            suggestions.find((candidate) => candidate.modelUrl === assetId) ??
+            suggestions[0];
+          if (!model) return { ok: false, error: "No reusable asset matched" };
+          const thing = addLibraryAsset(model, {
+            creatorId: visitorId as GenerateRequest["creatorId"],
+            location: nearToLocation(a.near),
+          });
+          return { ok: true, id: thing.id, reused: model.id, name: model.name };
+        }
         case "generate": {
           if (typeof a.prompt !== "string" || !a.prompt.trim()) return { ok: false, error: "generate requires a prompt" };
+          const forceNew = a.force === true || a.generateNew === true || a.variant === true;
+          if (!forceNew) {
+            const suggestions = await reusableAssetsForPrompt(
+              a.prompt.trim(),
+              4,
+              assetContextFromUnknown(a.contexts ?? a.context),
+            );
+            if (suggestions.length > 0) {
+              return {
+                ok: false,
+                action: "reuse_suggestions",
+                message: "Similar assets already exist. Use placeReusableAsset with an id, or call generate again with generateNew:true or variant:true.",
+                suggestions: suggestions.map((model) => ({
+                  id: model.id,
+                  name: model.name,
+                  source: model.source ?? "asset-library",
+                  modelUrl: model.modelUrl,
+                  score: model.reuseScore,
+                  reason: model.reuseReason,
+                })),
+              };
+            }
+          }
           const thing = generate({
             prompt: a.prompt.trim(),
             location: nearToLocation(a.near),
@@ -5464,20 +5831,26 @@ function createTellusWorld(
   const createPortalHere = (targetWorldId: string, label?: string) => {
     const target = targetWorldId.trim();
     if (!target) return;
+    const x = Math.round(visitorPosition.x);
+    const z = Math.round(visitorPosition.z);
+    const y = groundHeightAt(x, z) ?? visitorPosition.y ?? SEA_LEVEL;
     sendPortalUpsert({
       id: makeId("portal"),
       label: (label || target).slice(0, 48),
-      position: { x: Math.round(visitorPosition.x), y: 0, z: Math.round(visitorPosition.z) },
+      position: { x, y, z },
       radius: 2.2,
       target: { kind: "world", worldId: target, spawn: { x: 0, y: 0, z: 0 } },
     });
   };
   const createDoorHere = (label?: string) => {
     const interiorId = `interior-${runtimeConfig.worldId}-${makeId("room").slice(0, 12)}`;
+    const x = Math.round(visitorPosition.x);
+    const z = Math.round(visitorPosition.z);
+    const y = groundHeightAt(x, z) ?? visitorPosition.y ?? SEA_LEVEL;
     sendPortalUpsert({
       id: makeId("door"),
       label: (label || "Door").slice(0, 48),
-      position: { x: Math.round(visitorPosition.x), y: 0, z: Math.round(visitorPosition.z) },
+      position: { x, y, z },
       radius: 2.2,
       target: { kind: "interior", worldId: interiorId, spawn: { x: 0, y: 0, z: 2 } },
     });
@@ -7120,6 +7493,9 @@ function App(): React.ReactElement {
   const [assetBrowseSort, setAssetBrowseSort] = useState<AssetBrowseSort>("newest");
   const assetCategorySearch = assetPanelTab === "animal" || assetPanelTab === "building" ? assetPanelTab : "";
   const assetBrowseSeq = useRef(0);
+  const [assetReuseSuggestions, setAssetReuseSuggestions] = useState<AssetReuseCandidate[]>([]);
+  const [assetReuseLoading, setAssetReuseLoading] = useState(false);
+  const [createPromptOpen, setCreatePromptOpen] = useState(false);
 
   const runAssetBrowse = useCallback(
     async (query: string, page: number, append: boolean, sort: AssetBrowseSort) => {
@@ -7141,8 +7517,53 @@ function App(): React.ReactElement {
     [],
   );
 
+  useEffect(() => {
+    const query = prompt.trim();
+    if (query.length < 4 || !createPromptOpen) {
+      setAssetReuseSuggestions([]);
+      setAssetReuseLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const kind = inferGeneratedKind(query, "visitor");
+      const preferredContexts = inferAssetSurfaceContexts(query);
+      const worldModels: AssetLibraryModel[] = snapshot.generated
+        .filter((thing) => thing.modelUrl && thing.generationStatus === "ready")
+        .map((thing) => ({
+          id: `world:${thing.id}`,
+          name: thing.prompt,
+          description: thing.prompt,
+          modelUrl: thing.modelUrl,
+          source: "generated" as const,
+          hasThumbnail: false,
+        }));
+      const local = rankReusableAssets(query, [...worldModels, ...assetLibrary], kind, 4, preferredContexts);
+      setAssetReuseSuggestions(local);
+      setAssetReuseLoading(true);
+      void browseAssetLibrary(query, 1, "downloads", 8)
+        .then((result) => {
+          if (cancelled) return;
+          setAssetReuseSuggestions(
+            rankReusableAssets(query, [...local, ...result.models], kind, 4, preferredContexts),
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setAssetReuseSuggestions(local);
+        })
+        .finally(() => {
+          if (!cancelled) setAssetReuseLoading(false);
+        });
+    }, 320);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [assetLibrary, createPromptOpen, prompt, snapshot.generated]);
+
   // Selected-object Move mode (mirrors world-side state; resets when the selection changes).
   const [moveModeActive, setMoveModeActive] = useState(false);
+  const [selectedNudgeStep, setSelectedNudgeStep] = useState(0.25);
   useEffect(() => {
     setMoveModeActive(false);
     worldRef.current?.setMoveMode(null);
@@ -7229,7 +7650,6 @@ function App(): React.ReactElement {
     return () => window.clearTimeout(id);
   }, [assetPanelOpen, assetCategorySearch, runAssetBrowse]);
   const [openToolMenus, setOpenToolMenus] = useState<ToolMenu[]>([]);
-  const [createPromptOpen, setCreatePromptOpen] = useState(false);
   const [createPromptFocused, setCreatePromptFocused] = useState(false);
   const [worldMenuOpen, setWorldMenuOpen] = useState(false);
   const [worldChatOpen, setWorldChatOpen] = useState(false);
@@ -9958,6 +10378,21 @@ function App(): React.ReactElement {
                 </select>
               )}
             </div>
+            <div className="selected-step-control" aria-label="Nudge step">
+              {[0.25, 1, 2].map((step) => (
+                <button
+                  key={step}
+                  type="button"
+                  className={step === selectedNudgeStep ? "active" : undefined}
+                  title={`Move and height step: ${step}`}
+                  aria-label={`Use ${step} step`}
+                  aria-pressed={step === selectedNudgeStep}
+                  onClick={() => setSelectedNudgeStep(step)}
+                >
+                  {step}
+                </button>
+              ))}
+            </div>
             <div className="selected-nudge-pad" aria-label="Position controls">
               <button
                 type="button"
@@ -9965,7 +10400,11 @@ function App(): React.ReactElement {
                 title="Move forward"
                 aria-label="Move asset forward"
                 onClick={() =>
-                  worldRef.current?.moveGenerated(activeSelectedThing.id, 0, -2)
+                  worldRef.current?.moveGenerated(
+                    activeSelectedThing.id,
+                    0,
+                    -selectedNudgeStep,
+                  )
                 }
               >
                 <ArrowUp size={16} />
@@ -9976,7 +10415,11 @@ function App(): React.ReactElement {
                 title="Move left"
                 aria-label="Move asset left"
                 onClick={() =>
-                  worldRef.current?.moveGenerated(activeSelectedThing.id, -2, 0)
+                  worldRef.current?.moveGenerated(
+                    activeSelectedThing.id,
+                    -selectedNudgeStep,
+                    0,
+                  )
                 }
               >
                 <ArrowLeft size={16} />
@@ -9987,7 +10430,11 @@ function App(): React.ReactElement {
                 title="Move right"
                 aria-label="Move asset right"
                 onClick={() =>
-                  worldRef.current?.moveGenerated(activeSelectedThing.id, 2, 0)
+                  worldRef.current?.moveGenerated(
+                    activeSelectedThing.id,
+                    selectedNudgeStep,
+                    0,
+                  )
                 }
               >
                 <ArrowRight size={16} />
@@ -9998,7 +10445,11 @@ function App(): React.ReactElement {
                 title="Move backward"
                 aria-label="Move asset backward"
                 onClick={() =>
-                  worldRef.current?.moveGenerated(activeSelectedThing.id, 0, 2)
+                  worldRef.current?.moveGenerated(
+                    activeSelectedThing.id,
+                    0,
+                    selectedNudgeStep,
+                  )
                 }
               >
                 <ArrowDown size={16} />
@@ -10035,7 +10486,7 @@ function App(): React.ReactElement {
                 title="Raise asset"
                 aria-label="Raise asset"
                 onClick={() =>
-                  worldRef.current?.liftGenerated(activeSelectedThing.id, 1)
+                  worldRef.current?.liftGenerated(activeSelectedThing.id, selectedNudgeStep)
                 }
               >
                 <ArrowUp size={17} />
@@ -10046,7 +10497,7 @@ function App(): React.ReactElement {
                 title="Lower asset"
                 aria-label="Lower asset"
                 onClick={() =>
-                  worldRef.current?.liftGenerated(activeSelectedThing.id, -1)
+                  worldRef.current?.liftGenerated(activeSelectedThing.id, -selectedNudgeStep)
                 }
               >
                 <ArrowDown size={17} />
@@ -10097,6 +10548,37 @@ function App(): React.ReactElement {
             onBlur={() => setCreatePromptFocused(false)}
             onChange={(event) => setPrompt(event.target.value)}
           />
+          {(assetReuseSuggestions.length > 0 || assetReuseLoading) && (
+            <div className="prompt-reuse-strip" aria-label="Reusable asset suggestions">
+              <span>{assetReuseLoading ? "Checking existing assets..." : "Already made"}</span>
+              <div>
+                {assetReuseSuggestions.slice(0, 3).map((model) => (
+                  <button
+                    key={model.id}
+                    type="button"
+                    title={`${model.name}${model.reuseReason ? ` - ${model.reuseReason}` : ""}`}
+                    onClick={() => {
+                      worldRef.current?.addLibraryAsset(model);
+                      setPrompt("");
+                      setCreatePromptOpen(false);
+                    }}
+                  >
+                    {model.hasThumbnail && !model.id.startsWith("world:") ? (
+                      <img
+                        src={tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(model.id)}/thumbnail`)}
+                        alt=""
+                        loading="lazy"
+                      />
+                    ) : (
+                      <Box size={15} />
+                    )}
+                    <span>{model.name}</span>
+                    <small>Place</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="prompt-actions">
             <button
               type="button"

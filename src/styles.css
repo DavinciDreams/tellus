@@ -1316,6 +1316,67 @@ textarea::placeholder {
   border-color: var(--hud-border);
 }
 
+.prompt-reuse-strip {
+  display: grid;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.prompt-reuse-strip > span {
+  color: var(--hud-gold-bright);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.prompt-reuse-strip > div {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.prompt-reuse-strip button {
+  display: grid;
+  grid-template-columns: 28px minmax(78px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 170px;
+  max-width: 220px;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(18 42 22 / 82%);
+  color: var(--hud-text);
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.prompt-reuse-strip button:hover {
+  border-color: var(--hud-border);
+  background: rgb(41 72 31 / 90%);
+}
+
+.prompt-reuse-strip img,
+.prompt-reuse-strip svg {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: rgb(4 10 5 / 56%);
+}
+
+.prompt-reuse-strip button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-reuse-strip button small {
+  color: var(--hud-gold-bright);
+  font-size: 10px;
+  font-weight: 900;
+}
+
 .selected-transform-label span {
   overflow: hidden;
   min-width: 0;
@@ -1376,6 +1437,30 @@ textarea::placeholder {
   grid-template-rows: repeat(2, 34px);
   gap: 5px;
   align-items: center;
+}
+
+.selected-step-control {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.selected-step-control button {
+  min-width: 34px;
+  height: 28px;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(18 42 22 / 78%);
+  color: var(--hud-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.selected-step-control button.active,
+.selected-step-control button:hover {
+  border-color: var(--hud-border);
+  background: rgb(75 107 38 / 88%);
 }
 
 .selected-nudge-pad {
@@ -3681,6 +3766,10 @@ textarea::placeholder {
   flex: none;
   align-items: center;
   gap: 3px;
+}
+
+.selected-step-control {
+  flex: none;
 }
 
 .selected-nudge-pad .nudge-up,
