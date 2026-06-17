@@ -6013,15 +6013,17 @@ function createTellusWorld(
   const createPortalHere = (targetWorldId: string, label?: string) => {
     const target = targetWorldId.trim();
     if (!target) return;
-    const x = Math.round(visitorPosition.x);
-    const z = Math.round(visitorPosition.z);
-    const y = groundHeightAt(x, z) ?? visitorPosition.y ?? SEA_LEVEL;
+    const anchor = selectedThingId ? thingById(selectedThingId) : undefined;
+    const x = Math.round(anchor?.position.x ?? visitorPosition.x);
+    const z = Math.round(anchor?.position.z ?? visitorPosition.z);
+    const y = anchor?.position.y ?? groundHeightAt(x, z) ?? visitorPosition.y ?? SEA_LEVEL;
     sendPortalUpsert({
       id: makeId("portal"),
       label: (label || target).slice(0, 48),
       position: { x, y, z },
       radius: 2.2,
       target: { kind: "world", worldId: target, spawn: { x: 0, y: 0, z: 0 } },
+      ...(anchor ? { anchorThingId: anchor.id } : {}),
     });
   };
   const createDoorHere = (label?: string) => {
@@ -8716,7 +8718,7 @@ function App(): React.ReactElement {
               </button>
               <button
                 type="button"
-                title="Create a portal at your position to another world"
+                title={activeSelectedThing ? "Create a portal anchored to the selected asset" : "Create a portal at your position to another world"}
                 disabled={!portalTargetWorldId}
                 onClick={() => {
                   const target = portalTargetWorldId.trim();
