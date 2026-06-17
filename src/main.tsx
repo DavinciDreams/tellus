@@ -7678,6 +7678,7 @@ function App(): React.ReactElement {
   const [assetBrowseLoading, setAssetBrowseLoading] = useState(false);
   const [assetBrowseSort, setAssetBrowseSort] = useState<AssetBrowseSort>("newest");
   const assetCategorySearch = assetPanelTab === "animal" || assetPanelTab === "building" ? assetPanelTab : "";
+  const assetBrowseQuery = assetSearch.trim() || assetCategorySearch;
   const assetBrowseSeq = useRef(0);
   const [assetReuseSuggestions, setAssetReuseSuggestions] = useState<AssetReuseCandidate[]>([]);
   const [assetReuseLoading, setAssetReuseLoading] = useState(false);
@@ -7826,15 +7827,15 @@ function App(): React.ReactElement {
     }
   }, [cleanupBusy]);
 
-  // Category tabs browse the shared asset library without adding more visible controls.
+  // Category tabs browse the shared asset library; a typed query replaces the category seed.
   useEffect(() => {
     if (!assetPanelOpen || !assetCategorySearch) return;
     const id = window.setTimeout(
-      () => void runAssetBrowse(assetCategorySearch, 1, false, "newest"),
-      0,
+      () => void runAssetBrowse(assetBrowseQuery, 1, false, assetBrowseSort),
+      assetSearch.trim() ? 260 : 0,
     );
     return () => window.clearTimeout(id);
-  }, [assetPanelOpen, assetCategorySearch, runAssetBrowse]);
+  }, [assetBrowseQuery, assetBrowseSort, assetCategorySearch, assetPanelOpen, assetSearch, runAssetBrowse]);
   const [openToolMenus, setOpenToolMenus] = useState<ToolMenu[]>([]);
   const [createPromptFocused, setCreatePromptFocused] = useState(false);
   const [worldMenuOpen, setWorldMenuOpen] = useState(false);
@@ -10995,26 +10996,17 @@ function App(): React.ReactElement {
             )}
             {(assetPanelTab === "animal" || assetPanelTab === "building") && (
               <div className="inventory-list asset-list">
-                <div style={{ display: "none", alignItems: "center", gap: 6, padding: "2px 0 6px" }}>
-                  <Search size={14} style={{ opacity: 0.6, flex: "none" }} />
+                <label className="asset-search-field">
+                  <Search size={14} aria-hidden="true" />
                   <input
                     type="text"
                     value={assetSearch}
                     onChange={(e) => setAssetSearch(e.target.value)}
-                    placeholder="Search the asset store…"
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      fontSize: 12,
-                      padding: "6px 8px",
-                      borderRadius: 6,
-                      border: "1px solid rgba(255,255,255,0.18)",
-                      background: "rgba(0,0,0,0.3)",
-                      color: "#eef2ea",
-                    }}
+                    placeholder={`Search ${assetPanelTab} assets...`}
+                    aria-label="Search assets"
                   />
-                </div>
-                <div style={{ display: "none", alignItems: "center", gap: 4, paddingBottom: 6 }}>
+                </label>
+                <div className="asset-browse-controls" aria-label="Asset sort">
                   {(
                     [
                       ["newest", "Newest"],
@@ -11026,21 +11018,14 @@ function App(): React.ReactElement {
                       key={key}
                       type="button"
                       onClick={() => setAssetBrowseSort(key)}
-                      style={{
-                        fontSize: 10,
-                        padding: "3px 9px",
-                        borderRadius: 999,
-                        border: "1px solid rgba(255,255,255,0.16)",
-                        background: assetBrowseSort === key ? "rgba(111,174,70,0.3)" : "rgba(255,255,255,0.05)",
-                        color: "#e7eee2",
-                        cursor: "pointer",
-                      }}
+                      className={assetBrowseSort === key ? "active" : ""}
+                      aria-pressed={assetBrowseSort === key}
                     >
                       {label}
                     </button>
                   ))}
                   {assetBrowseTotal > 0 && (
-                    <span style={{ fontSize: 10, opacity: 0.55, marginLeft: "auto" }}>
+                    <span>
                       {assetBrowse.length}/{assetBrowseTotal}
                     </span>
                   )}
@@ -11069,7 +11054,7 @@ function App(): React.ReactElement {
                     type="button"
                     className="inventory-item"
                     style={{ justifyContent: "center", fontWeight: 600 }}
-                    onClick={() => void runAssetBrowse(assetPanelTab, assetBrowsePage + 1, true, "newest")}
+                    onClick={() => void runAssetBrowse(assetBrowseQuery, assetBrowsePage + 1, true, assetBrowseSort)}
                   >
                     Load more
                   </button>

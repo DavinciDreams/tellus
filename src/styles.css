@@ -2094,6 +2094,66 @@ textarea::placeholder {
   max-height: min(420px, 44dvh);
 }
 
+.asset-search-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(0 0 0 / 28%);
+  color: var(--hud-muted);
+  padding: 6px 8px;
+}
+
+.asset-search-field svg {
+  flex: none;
+  opacity: 0.72;
+}
+
+.asset-search-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--hud-text);
+  font: 700 12px/1.2 system-ui, sans-serif;
+}
+
+.asset-search-field input::placeholder {
+  color: var(--hud-muted);
+  opacity: 0.8;
+}
+
+.asset-browse-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.asset-browse-controls button {
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 5%);
+  color: var(--hud-text);
+  cursor: pointer;
+  font: 800 10px/1 system-ui, sans-serif;
+  padding: 5px 9px;
+}
+
+.asset-browse-controls button.active {
+  border-color: rgb(225 189 85 / 52%);
+  background: rgb(111 174 70 / 30%);
+  color: var(--hud-gold-bright);
+}
+
+.asset-browse-controls > span {
+  margin-left: auto;
+  color: var(--hud-muted);
+  font-size: 10px;
+}
+
 /* Asset-store browse results: responsive square tiles that scale to the drawer width (was a fixed 3-col
    grid with no height cap → oversized tiles that overflowed the subwindow). Tiles stay ~72–96px and the
    grid scrolls within the drawer instead of growing unbounded. */
