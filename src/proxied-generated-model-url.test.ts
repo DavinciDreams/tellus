@@ -31,6 +31,13 @@ describe("proxiedGeneratedModelUrl", () => {
     expect(proxiedGeneratedModelUrl(url)).toBe(url);
   });
 
+  it("rewrites stale world-api /api/view URLs through the asset proxy", () => {
+    runtimeConfig.worldApiBase = "https://hyades.gnostr.cloud";
+    expect(proxiedGeneratedModelUrl("https://hyades.gnostr.cloud/api/view/asset-1")).toBe(
+      "https://hyades.gnostr.cloud/api/assets/model/asset-1/game-optimized",
+    );
+  });
+
   it("leaves procedural://, data:, and local /generated-assets URLs unchanged", () => {
     expect(proxiedGeneratedModelUrl("procedural://mirror")).toBe("procedural://mirror");
     expect(proxiedGeneratedModelUrl("data:model/gltf-binary;base64,AAAA")).toBe(

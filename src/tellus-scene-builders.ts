@@ -1348,9 +1348,6 @@ export function shouldShowGenerationSwirl(thing: GeneratedThing): boolean {
   if (thing.generationStatus === "queued" || thing.generationStatus === "generating") {
     return true;
   }
-  if (thing.generationStatus === "failed" && !thing.modelUrl) {
-    return true;
-  }
   return Boolean(thing.modelUrl && thing.generationStatus === "ready");
 }
 

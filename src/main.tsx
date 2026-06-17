@@ -1173,9 +1173,9 @@ function createTellusWorld(
   const sendWorldChat = (
     text: string,
     channel: WorldChatChannel = "world",
-    senderName?: string,
     recipientId?: string,
     recipientName?: string,
+    senderName?: string,
   ): WorldChatMessage | null => {
     const trimmed = text.trim().slice(0, 800);
     if (!trimmed) return null;
@@ -1205,6 +1205,20 @@ function createTellusWorld(
       }).catch(() => undefined);
     }
     return message;
+  };
+
+  let worldChatPollTimer: number | undefined;
+  const pollWorldChatSnapshot = async () => {
+    if (!tellusWorldBackendAvailable || destroyed) return;
+    try {
+      const response = await fetch(tellusWorldHttpUrl("state"), { cache: "no-store" });
+      if (!response.ok) return;
+      const parsed = (await response.json()) as unknown;
+      const chatMessages = worldChatFromWorldPatch(parsed);
+      if (chatMessages) mergeWorldChatMessages(chatMessages);
+    } catch {
+      // Best-effort freshness fallback; the websocket remains the primary realtime path.
+    }
   };
 
   const announceWorldChat = (text: string, position?: Vec3) => {
@@ -2754,6 +2768,9 @@ function createTellusWorld(
   }
 
   connectTellusWorldRealtime();
+  if (tellusWorldBackendAvailable) {
+    worldChatPollTimer = window.setInterval(() => void pollWorldChatSnapshot(), 5000);
+  }
   void initP2p();
   if (!tellusWorldBackendAvailable && !recoverGeneratedFromPlacementSnapshot()) {
     recoverGeneratedFromManifest();
@@ -5002,9 +5019,9 @@ function createTellusWorld(
       const message = sendWorldChat(
         text,
         channel,
-        displayNameForVisitor(visitorId),
         opts.recipientId,
         opts.recipientName,
+        displayNameForVisitor(visitorId),
       );
       return message ? { ok: true, message } : { ok: false, error: "sayChat requires text" };
     },
@@ -5046,7 +5063,7 @@ function createTellusWorld(
           const channel = a.channel === "nearby" ? "nearby" : a.channel === "dm" ? "dm" : "world";
           const recipientId = typeof a.recipientId === "string" ? a.recipientId : undefined;
           const recipientName = typeof a.recipientName === "string" ? a.recipientName : undefined;
-          const message = sendWorldChat(text, channel, displayNameForVisitor(visitorId), recipientId, recipientName);
+          const message = sendWorldChat(text, channel, recipientId, recipientName, displayNameForVisitor(visitorId));
           return message ? { ok: true, message } : { ok: false, error: "sayChat requires text" };
         }
         case "sculptTerrain": {
@@ -5209,6 +5226,9 @@ function createTellusWorld(
     destroy: () => {
       destroyed = true;
       window.clearInterval(textureRetryTimer);
+      if (worldChatPollTimer !== undefined) {
+        window.clearInterval(worldChatPollTimer);
+      }
       agentViewTarget?.dispose();
       vegetation.dispose();
       chunkRenderer?.dispose();
