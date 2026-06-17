@@ -8,7 +8,36 @@ import {
   worldChatFromWorldPatch,
   biomeCellsFromSnapshot,
   biomeCellsFromWorldPatch,
+  dedupePresenceForDisplay,
 } from "./world-protocol";
+
+describe("dedupePresenceForDisplay", () => {
+  const p = (visitorId: string, ownerUserId?: string, lastSeenAt = "2026-01-01T00:00:00Z") =>
+    ({ visitorId, ownerUserId, lastSeenAt, connectedAt: lastSeenAt }) as never;
+
+  it("collapses one account's many connections to its newest, and hides the viewer's own", () => {
+    const roster = [
+      p("a1", "alice", "2026-01-01T00:00:01Z"),
+      p("a2", "alice", "2026-01-01T00:00:09Z"), // newest alice
+      p("a3", "alice", "2026-01-01T00:00:05Z"),
+      p("me1", "me", "2026-01-01T00:00:02Z"),
+      p("me2", "me", "2026-01-01T00:00:08Z"), // both mine → dropped
+    ];
+    const out = dedupePresenceForDisplay(roster, "me");
+    expect(out.map((r) => r.visitorId)).toEqual(["a2"]); // one alice (newest), zero of mine
+  });
+
+  it("never collapses agents or anonymous (no ownerUserId) entries", () => {
+    const roster = [
+      p("agent:bob", "owner1"),
+      p("agent:cara", "owner1"), // distinct agents share an owner — both kept
+      p("anon1"),
+      p("anon2"), // no owner — both kept
+    ];
+    const out = dedupePresenceForDisplay(roster, "me");
+    expect(out.map((r) => r.visitorId).sort()).toEqual(["agent:bob", "agent:cara", "anon1", "anon2"]);
+  });
+});
 
 describe("biome cell extraction", () => {
   const cells = [

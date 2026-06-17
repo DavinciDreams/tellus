@@ -108,6 +108,7 @@ import {
   portalEnteredFromWorldPatch,
   biomeCellsFromWorldPatch,
   biomeCellsFromSnapshot,
+  dedupePresenceForDisplay,
   type WorldBiomeCell,
   isTellusTerrainState,
   isWorldGeneratedThing,
@@ -1637,7 +1638,10 @@ function createTellusWorld(
     publish();
   };
 
-  const applyRemotePresence = (presence: WorldPresence[]) => {
+  const applyRemotePresence = (presenceRaw: WorldPresence[]) => {
+    // One logged-in account = one player: collapse a human's several live connections (stale tabs /
+    // reconnects, each a distinct visitorId under the same ownerUserId) and drop my own other connections.
+    const presence = dedupePresenceForDisplay(presenceRaw, userId?.trim() || null);
     const activeRemoteIds = new Set<string>();
     for (const remote of presence) {
       if (remote.visitorId === visitorId || !remote.position) continue;

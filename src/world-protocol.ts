@@ -34,6 +34,9 @@ export interface WorldPresence {
    * server may strip the field — receivers keep their last-known value on absent (the same
    * convention as avatarId/animation). */
   avatarScale?: number;
+  /** The logged-in account that owns this connection (absent for anonymous sessions). Used to collapse
+   * a single human's multiple live connections (stale tabs / reconnects) into one displayed player. */
+  ownerUserId?: string;
   connectedAt: string;
   lastSeenAt: string;
 }
@@ -451,6 +454,32 @@ export function biomeCellsFromWorldPatch(parsed: unknown): WorldBiomeCell[] | nu
 export function biomeCellsFromSnapshot(parsed: unknown): WorldBiomeCell[] | null {
   if (!isRecord(parsed) || parsed.type !== "world.snapshot" || !Array.isArray(parsed.biomeCells)) return null;
   return parsed.biomeCells.filter(isWorldBiomeCell);
+}
+
+/**
+ * Collapse a presence roster to one entry per human so a single account never shows as several "players".
+ * A logged-in human commonly holds multiple live connections (stale background tabs, or a reconnect that
+ * opened a fresh socket) — each carries the same ownerUserId but a distinct visitorId. Keep only the
+ * most-recently-seen slot per owner, and DROP the viewer's own other connections entirely (they're
+ * rendered locally, never as a remote). Agents (agent:* — own lifecycle) and anonymous entries (no
+ * ownerUserId) are never collapsed.
+ */
+export function dedupePresenceForDisplay(
+  presence: WorldPresence[],
+  myOwnerUserId: string | null,
+): WorldPresence[] {
+  const isAgent = (v: string) => v.startsWith("agent:");
+  const newestByOwner = new Map<string, WorldPresence>();
+  for (const r of presence) {
+    if (isAgent(r.visitorId) || !r.ownerUserId) continue;
+    const cur = newestByOwner.get(r.ownerUserId);
+    if (!cur || (r.lastSeenAt ?? "") > (cur.lastSeenAt ?? "")) newestByOwner.set(r.ownerUserId, r);
+  }
+  return presence.filter((r) => {
+    if (isAgent(r.visitorId) || !r.ownerUserId) return true; // agents + anonymous: keep every slot
+    if (myOwnerUserId && r.ownerUserId === myOwnerUserId) return false; // my own other tabs/sockets
+    return newestByOwner.get(r.ownerUserId)?.visitorId === r.visitorId; // one slot per other account
+  });
 }
 
 /** A world.portal.entered patch — the signal to switch the client to the target world. */
