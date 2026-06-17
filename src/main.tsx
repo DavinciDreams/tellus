@@ -129,6 +129,7 @@ import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, gener
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial } from "./tellus-terrain-material";
 import { largeWorldTerrainKind } from "./tellus-large-world-terrain";
+import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
 import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
@@ -977,6 +978,20 @@ function createTellusWorld(
     },
     worldRadius: OCEAN_RADIUS - 6,
   });
+  let rapierPhysics: TellusRapierPhysics | null = null;
+  void import("./tellus-rapier-physics")
+    .then((module) => module.createTellusRapierPhysics())
+    .then((physics) => {
+      if (destroyed) {
+        physics.dispose();
+        return;
+      }
+      rapierPhysics = physics;
+      publish();
+    })
+    .catch((error) => {
+      console.warn("Tellus Rapier physics unavailable", error);
+    });
   let chunkRenderer: ChunkRenderer | null = null;
   let lastActiveChunkCount = -1; // re-ground placed assets when the active chunk set changes
   const terrain = new THREE.Mesh(
@@ -4144,6 +4159,7 @@ function createTellusWorld(
   };
   let obstacleCache: ObstacleCircle[] = [];
   let obstacleCacheAt = 0;
+  let rapierSolidsCacheAt = 0;
   const footprintCache = new Map<string, { radius: number; height: number }>();
   const thingFootprint = (thing: GeneratedThing): { radius: number; height: number } | null => {
     const mesh = generatedMeshes.get(thing.id);
@@ -4176,6 +4192,33 @@ function createTellusWorld(
       y: thing.position.y + Math.max(0.4, assetTargetHeight(thing)) + 0.08,
       z: thing.position.z,
     };
+  };
+  const solidForThing = (thing: GeneratedThing): RapierSolid | null => {
+    if (thing.id === sailingThingId || ambientPhysics.has(thing.id)) return null;
+    if (thing.id === draggingThingId) return null;
+    const fp = thingFootprint(thing);
+    if (!fp || fp.height < 1.4 || fp.radius < 0.55) return null;
+    if (thing.position.y > visitorPosition.y + 2.2) return null;
+    return {
+      id: thing.id,
+      x: thing.position.x,
+      y: thing.position.y,
+      z: thing.position.z,
+      radius: clamp(fp.radius * 0.72, 0.45, 4.2),
+      height: clamp(fp.height, 0.8, 18),
+    };
+  };
+  const syncRapierSolids = (force = false) => {
+    if (!rapierPhysics) return;
+    const nowMs = performance.now();
+    if (!force && nowMs - rapierSolidsCacheAt < 500) return;
+    rapierSolidsCacheAt = nowMs;
+    const solids: RapierSolid[] = [];
+    for (const thing of generated) {
+      const solid = solidForThing(thing);
+      if (solid) solids.push(solid);
+    }
+    rapierPhysics.syncSolids(solids);
   };
   const currentObstacles = (): ObstacleCircle[] => {
     const nowMs = performance.now();
@@ -4297,13 +4340,27 @@ function createTellusWorld(
       sendPresenceUpdate();
       return;
     }
-    // obstacle pushout, then ground/air vertical dynamics
-    const pushed = resolveObstacles(
-      visitorPosition.x + movement.x,
-      visitorPosition.z + movement.z,
-      0.5,
-      currentObstacles(),
-    );
+    // Obstacle resolution, then ground/air vertical dynamics. Rapier owns generated-object solids when
+    // ready; tree colliders stay on the lightweight vegetation pushout path for now.
+    const desiredX = visitorPosition.x + movement.x;
+    const desiredZ = visitorPosition.z + movement.z;
+    let pushed = { x: desiredX, z: desiredZ };
+    if (rapierPhysics) {
+      syncRapierSolids();
+      const moved = rapierPhysics.movePlayer(visitorPosition, {
+        x: desiredX,
+        y: visitorPosition.y,
+        z: desiredZ,
+      });
+      pushed = resolveObstacles(
+        moved.position.x,
+        moved.position.z,
+        0.5,
+        vegetation.getTreeColliders(),
+      );
+    } else {
+      pushed = resolveObstacles(desiredX, desiredZ, 0.5, currentObstacles());
+    }
     const grounded = groundedPosition(pushed.x, pushed.z, visitorPosition);
     if (playerAirborne) {
       playerVy -= 24 * delta;
@@ -5952,6 +6009,7 @@ function createTellusWorld(
     getAmbientStats: () => ({
       vegetation: vegetation.stats(),
       physicsBodies: ambientPhysics.activeCount(),
+      rapierSolids: rapierPhysics?.stats().solids ?? 0,
     }),
     destroy: () => {
       destroyed = true;
@@ -5965,6 +6023,8 @@ function createTellusWorld(
       onTerrainTemplateLoaded(null);
       setChunkedHeightProvider(null);
       ambientPhysics.dispose();
+      rapierPhysics?.dispose();
+      rapierPhysics = null;
       // Best-effort "bye" so peers tear down promptly; then own the RTC teardown.
       sendRtcSignal(null, "bye", "{}");
       for (const remoteId of remoteVisitorMeshes.keys()) {

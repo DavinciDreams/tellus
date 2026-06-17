@@ -331,6 +331,7 @@ export interface TellusWorldApi {
   getAmbientStats(): {
     vegetation: { tier: number; chunks: number; grassIndices: number; trees: number };
     physicsBodies: number;
+    rapierSolids: number;
   };
   destroy(): void;
 }
