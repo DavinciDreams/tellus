@@ -5,18 +5,18 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Backpack,
   Bot,
   Box,
+  Building2,
   CircleHelp,
   Eye,
   Globe2,
-  Layers,
   Map as MapIcon,
   MessageCircle,
   Mic,
   Minus,
   Mountain,
+  PawPrint,
   PersonStanding,
   Plus,
   RotateCcw,
@@ -24,6 +24,7 @@ import {
   Search,
   Send,
   Ship,
+  Sprout,
   Trash2,
   Video,
   Waves,
@@ -5684,7 +5685,7 @@ function App(): React.ReactElement {
   };
   // ── Avatar picker state (catalog selection; "" = deterministic default robot) ──
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
-  const [assetPanelTab, setAssetPanelTab] = useState<AssetPanelTab>("search");
+  const [assetPanelTab, setAssetPanelTab] = useState<AssetPanelTab>("procedural");
   const [avatarCatalog, setAvatarCatalog] = useState<readonly AvatarCatalogEntry[]>(() => avatarCatalogSync());
   const [avatarSelection, setAvatarSelection] = useState<string>(() => storedAvatarId());
   useEffect(() => subscribeAvatarCatalog(() => setAvatarCatalog(avatarCatalogSync())), []);
@@ -6755,6 +6756,7 @@ function App(): React.ReactElement {
   const [assetBrowseTotal, setAssetBrowseTotal] = useState(0);
   const [assetBrowseLoading, setAssetBrowseLoading] = useState(false);
   const [assetBrowseSort, setAssetBrowseSort] = useState<AssetBrowseSort>("newest");
+  const assetCategorySearch = assetPanelTab === "animal" || assetPanelTab === "building" ? assetPanelTab : "";
   const assetBrowseSeq = useRef(0);
 
   const runAssetBrowse = useCallback(
@@ -6855,22 +6857,22 @@ function App(): React.ReactElement {
     }
   }, [cleanupBusy]);
 
-  // Debounced live search whenever the Assets panel's Search tab is showing.
+  // Category tabs browse the shared asset library without adding more visible controls.
   useEffect(() => {
-    if (!assetPanelOpen || assetPanelTab !== "search") return;
+    if (!assetPanelOpen || !assetCategorySearch) return;
     const id = window.setTimeout(
-      () => void runAssetBrowse(assetSearch, 1, false, assetBrowseSort),
-      assetSearch ? 350 : 0,
+      () => void runAssetBrowse(assetCategorySearch, 1, false, "newest"),
+      0,
     );
     return () => window.clearTimeout(id);
-  }, [assetPanelOpen, assetPanelTab, assetSearch, assetBrowseSort, runAssetBrowse]);
+  }, [assetPanelOpen, assetCategorySearch, runAssetBrowse]);
   const [openToolMenus, setOpenToolMenus] = useState<ToolMenu[]>([]);
+  const [createPromptOpen, setCreatePromptOpen] = useState(false);
   const [createPromptFocused, setCreatePromptFocused] = useState(false);
-  const createPromptOpen = assetPanelOpen && assetPanelTab === "create";
   const [worldMenuOpen, setWorldMenuOpen] = useState(false);
   const [worldChatOpen, setWorldChatOpen] = useState(false);
   const [worldMapOpen, setWorldMapOpen] = useState(true);
-  const [mapActorList, setMapActorList] = useState<"players" | "agents" | null>(null);
+  const [mapActorList, setMapActorList] = useState<"items" | "players" | "agents" | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const { listening, supported, start } = useSpeechInput((text) =>
     setPrompt(text),
@@ -7291,15 +7293,11 @@ function App(): React.ReactElement {
   const submitPrompt = () => {
     worldRef.current?.submitVisitorPrompt(prompt);
     setPrompt("");
+    setCreatePromptOpen(false);
   };
 
   const focusCreatePrompt = () => {
-    if (assetPanelOpen && assetPanelTab === "create") {
-      setAssetPanelOpen(false);
-      return;
-    }
-    setAssetPanelOpen(true);
-    setAssetPanelTab("create");
+    setCreatePromptOpen((open) => !open);
     window.requestAnimationFrame(() => promptRef.current?.focus());
   };
 
@@ -7307,7 +7305,7 @@ function App(): React.ReactElement {
 
   const toggleAssetDrawer = () => {
     setAssetPanelOpen((open) => {
-      if (!open) setAssetPanelTab((current) => (current === "avatar" || current === "create" ? "search" : current));
+      if (!open) setAssetPanelTab((current) => current === "avatar" ? "procedural" : current);
       return !open;
     });
   };
@@ -7339,8 +7337,8 @@ function App(): React.ReactElement {
       return;
     }
     if (snapshot.generated.length === 0) {
-      setAssetPanelOpen(true);
-      setAssetPanelTab("world-assets");
+      setWorldMapOpen(true);
+      setMapActorList("items");
       return;
     }
     if (!snapshot.selectedThingId) {
@@ -9073,10 +9071,17 @@ function App(): React.ReactElement {
                   ))}
                 </select>
                 <div className="world-info-stats">
-                  <div>
+                  <button
+                    type="button"
+                    className={mapActorList === "items" ? "active" : ""}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMapActorList((current) => current === "items" ? null : "items");
+                    }}
+                  >
                     <span className="world-info-label">Items</span>
                     <span className="world-info-value">{snapshot.generated.length}</span>
-                  </div>
+                  </button>
                   <button
                     type="button"
                     className={mapActorList === "players" ? "active" : ""}
@@ -9103,10 +9108,55 @@ function App(): React.ReactElement {
               </section>
               {mapActorList && (
                 <section className="world-map-actor-list" aria-label={`${mapActorList} in world`}>
-                  {(mapActorList === "players" ? playerList : remoteAgents).length === 0 && (
+                  {mapActorList === "items" && (
+                    <>
+                      <div className="world-map-actor-row utility">
+                        <span>{snapshot.generated.length} items</span>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void cleanupDeadReferences();
+                          }}
+                          disabled={cleanupBusy}
+                          title="Remove world objects whose models are no longer available"
+                        >
+                          Clean
+                        </button>
+                      </div>
+                      {cleanupNote && <p>{cleanupNote}</p>}
+                      {snapshot.generated.length === 0 && <p>No items visible.</p>}
+                      {snapshot.generated.map((thing) => (
+                        <div key={thing.id} className="world-map-actor-row">
+                          <span title={thing.prompt}>
+                            {thing.prompt.slice(0, 28)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              worldRef.current?.goToGenerated(thing.id);
+                            }}
+                          >
+                            Go to
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              worldRef.current?.selectGenerated(thing.id);
+                            }}
+                          >
+                            Select
+                          </button>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  {mapActorList !== "items" && (mapActorList === "players" ? playerList : remoteAgents).length === 0 && (
                     <p>No {mapActorList} visible.</p>
                   )}
-                  {(mapActorList === "players" ? playerList : remoteAgents).map((visitor) => {
+                  {mapActorList !== "items" && (mapActorList === "players" ? playerList : remoteAgents).map((visitor) => {
                     const name = actorName(visitor);
                     return (
                       <div key={visitor.visitorId} className="world-map-actor-row">
@@ -9450,7 +9500,7 @@ function App(): React.ReactElement {
             </div>
           </div>
         )}
-        {false && (
+        {createPromptOpen && (
         <section
           className={
             createPromptFocused
@@ -9512,88 +9562,41 @@ function App(): React.ReactElement {
             <nav className="tool-panel-tabs asset-tabs" aria-label="Asset tabs">
               <button
                 type="button"
-                className={assetPanelTab === "create" ? "active" : ""}
-                onClick={() => setAssetPanelTab("create")}
+                className={assetPanelTab === "avatar" ? "active" : ""}
+                title="People"
+                aria-label="People assets"
+                onClick={() => setAssetPanelTab("avatar")}
               >
-                <Send size={15} />
-                <span>Create</span>
-              </button>
-              <button
-                type="button"
-                className={assetPanelTab === "search" ? "active" : ""}
-                onClick={() => setAssetPanelTab("search")}
-              >
-                <Search size={15} />
-                <span>Search</span>
-              </button>
-              <button
-                type="button"
-                className={assetPanelTab === "world-assets" ? "active" : ""}
-                onClick={() => setAssetPanelTab("world-assets")}
-              >
-                <Layers size={15} />
-                <span>World</span>
-              </button>
-              <button
-                type="button"
-                className={assetPanelTab === "inventory" ? "active" : ""}
-                onClick={() => setAssetPanelTab("inventory")}
-              >
-                <Backpack size={15} />
-                <span>Mine</span>
+                <PersonStanding size={17} />
               </button>
               <button
                 type="button"
                 className={assetPanelTab === "procedural" ? "active" : ""}
+                title="Plants"
+                aria-label="Plant assets"
                 onClick={() => setAssetPanelTab("procedural")}
               >
-                <Mountain size={15} />
-                <span>Nature</span>
+                <Sprout size={17} />
               </button>
               <button
                 type="button"
-                className={assetPanelTab === "avatar" ? "active" : ""}
-                onClick={() => setAssetPanelTab("avatar")}
+                className={assetPanelTab === "animal" ? "active" : ""}
+                title="Animals"
+                aria-label="Animal assets"
+                onClick={() => setAssetPanelTab("animal")}
               >
-                <PersonStanding size={15} />
-                <span>Avatar</span>
+                <PawPrint size={17} />
+              </button>
+              <button
+                type="button"
+                className={assetPanelTab === "building" ? "active" : ""}
+                title="Buildings"
+                aria-label="Building assets"
+                onClick={() => setAssetPanelTab("building")}
+              >
+                <Building2 size={17} />
               </button>
             </nav>
-            {assetPanelTab === "create" && (
-              <div className="inventory-list asset-list asset-create-tab">
-                <label htmlFor="tellus-prompt">Create</label>
-                <textarea
-                  id="tellus-prompt"
-                  ref={promptRef}
-                  value={prompt}
-                  rows={4}
-                  placeholder="make a crooked apple tree with golden moss..."
-                  onFocus={() => setCreatePromptFocused(true)}
-                  onBlur={() => setCreatePromptFocused(false)}
-                  onChange={(event) => setPrompt(event.target.value)}
-                />
-                <div className="prompt-actions">
-                  <button
-                    type="button"
-                    className="secondary-button prompt-icon-button"
-                    title={listening ? "Listening" : "Describe by voice"}
-                    aria-label={listening ? "Listening" : "Describe what to create by voice"}
-                    disabled={!supported || listening}
-                    onClick={start}
-                  >
-                    <Mic size={16} />
-                  </button>
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={submitPrompt}
-                  >
-                    <Send size={16} />
-                    <span>Create</span>
-                  </button>
-                </div>
-              </div>
-            )}
             {assetPanelTab === "procedural" && (
               <div className="inventory-list asset-list">
                 <span className="inventory-empty" style={{ paddingBottom: 4 }}>
@@ -9696,9 +9699,9 @@ function App(): React.ReactElement {
                 </div>
               </div>
             )}
-            {assetPanelTab === "search" && (
+            {(assetPanelTab === "animal" || assetPanelTab === "building") && (
               <div className="inventory-list asset-list">
-                <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0 6px" }}>
+                <div style={{ display: "none", alignItems: "center", gap: 6, padding: "2px 0 6px" }}>
                   <Search size={14} style={{ opacity: 0.6, flex: "none" }} />
                   <input
                     type="text"
@@ -9717,7 +9720,7 @@ function App(): React.ReactElement {
                     }}
                   />
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 4, paddingBottom: 6 }}>
+                <div style={{ display: "none", alignItems: "center", gap: 4, paddingBottom: 6 }}>
                   {(
                     [
                       ["newest", "Newest"],
@@ -9761,25 +9764,25 @@ function App(): React.ReactElement {
                 )}
                 {assetBrowse.length === 0 && !assetBrowseLoading && (
                   <span className="inventory-empty">
-                    {assetSearch ? `Nothing matched “${assetSearch}”.` : "No library assets loaded yet."}
+                    No {assetPanelTab} assets loaded yet.
                   </span>
                 )}
                 {assetBrowseLoading && (
-                  <span className="inventory-empty">Searching…</span>
+                  <span className="inventory-empty">Loading...</span>
                 )}
                 {assetBrowseHasNext && !assetBrowseLoading && (
                   <button
                     type="button"
                     className="inventory-item"
                     style={{ justifyContent: "center", fontWeight: 600 }}
-                    onClick={() => void runAssetBrowse(assetSearch, assetBrowsePage + 1, true, assetBrowseSort)}
+                    onClick={() => void runAssetBrowse(assetPanelTab, assetBrowsePage + 1, true, "newest")}
                   >
                     Load more
                   </button>
                 )}
               </div>
             )}
-            {assetPanelTab === "world-assets" && (
+            {false && (
               <div className="inventory-list asset-list">
                 <div style={{ display: "flex", alignItems: "center", gap: 6, paddingBottom: 6 }}>
                   <button
@@ -9842,7 +9845,7 @@ function App(): React.ReactElement {
                 )}
               </div>
             )}
-            {assetPanelTab === "inventory" && (
+            {false && (
               <div className="inventory-list asset-list">
                 {inventory.length > 0 ? (
                   inventory.map((thing) => (
