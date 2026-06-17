@@ -2359,9 +2359,14 @@ function createTellusWorld(
     rotationZ: thing.rotationZ,
     scale: thing.scale,
     color: thing.color,
-    modelUrl: thing.modelUrl,
+    modelUrl: thing.generationStatus === "failed" ? undefined : thing.modelUrl,
     pipelineId: thing.modelUrl ? undefined : thing.pipelineId,
-    generationStatus: thing.modelUrl ? "ready" : thing.generationStatus,
+    generationStatus:
+      thing.generationStatus === "failed"
+        ? "failed"
+        : thing.modelUrl
+          ? "ready"
+          : thing.generationStatus,
     // "" = explicit "default" (mirrors presence.avatarId): a mid-rollout server that doesn't know
     // the field yet echoes it back ABSENT, and absent must mean "keep what you have", not "clear".
     animation: thing.animation ?? "",
@@ -3472,6 +3477,9 @@ function createTellusWorld(
       })
       .catch((error) => {
         thing.generationStatus = "failed";
+        ensureGeneratedVisual(thing);
+        syncTransformControls();
+        publish();
         publishGeneratedThing(thing);
         addLog({
           agentId: "world",
