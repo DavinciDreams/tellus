@@ -7216,6 +7216,7 @@ function App(): React.ReactElement {
   const [worldChatOpen, setWorldChatOpen] = useState(false);
   const [worldMapOpen, setWorldMapOpen] = useState(true);
   const [mapActorList, setMapActorList] = useState<"players" | "agents" | null>(null);
+  const worldMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const { listening, supported, start } = useSpeechInput((text) =>
     setPrompt(text),
@@ -7544,6 +7545,103 @@ function App(): React.ReactElement {
     left: `${clamp(mapFracX(position.x) * 100, 0, 100)}%`,
     top: `${clamp(mapFracZ(position.z) * 100, 0, 100)}%`,
   });
+  // Paint a real top-down terrain + biome raster onto the minimap backdrop (was a static decorative disc
+  // that reflected nothing — wrong for chunked worlds especially). Samples live ground relief through the
+  // SAME mapFracToWorld transform the markers use, so terrain and markers register exactly; overlays the
+  // live biome grid from the snapshot. Cheap (128² samples), throttled to when the map is open + the world
+  // actually changed. Chunked-aware via mapExtent; unexplored chunked area reads as flat sea, which is honest.
+  const mapBiomeKey = (snapshot.biomeCells ?? []).reduce(
+    (a, c) => (a * 31 + (c.biome?.charCodeAt(0) ?? 0) + (c.becoming ? 7 : 0)) | 0,
+    snapshot.biomeCells?.length ?? 0,
+  );
+  // Repaint as the player crosses into a new ~48-unit cell so freshly-streamed chunk relief shows up.
+  const mapPlayerCell = snapshot.visitorPosition
+    ? `${Math.round(snapshot.visitorPosition.x / 48)}:${Math.round(snapshot.visitorPosition.z / 48)}`
+    : "";
+  useEffect(() => {
+    if (!worldMapOpen) return;
+    const canvas = worldMapCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    try {
+      const N = 128;
+      canvas.width = N;
+      canvas.height = N;
+      const img = ctx.createImageData(N, N);
+      const data = img.data;
+      // Biome grid (live world state) — index by cell; grid side adapts to the cells present.
+      const cells = snapshot.biomeCells ?? [];
+      const byCell = new Map(cells.map((c) => [`${c.cx}:${c.cz}`, c]));
+      let gridN = 1;
+      for (const c of cells) gridN = Math.max(gridN, c.cx + 1, c.cz + 1);
+      const hexToRgb = (hex: string): [number, number, number] => {
+        const h = hex.replace("#", "");
+        const v = parseInt(h.length === 3 ? h.replace(/(.)/g, "$1$1") : h, 16);
+        return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+      };
+      const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+      for (let j = 0; j < N; j++) {
+        for (let i = 0; i < N; i++) {
+          const fx = (i + 0.5) / N;
+          const fz = (j + 0.5) / N;
+          const w = mapFracToWorld(fx, fz);
+          const h = groundHeightAt(w.x, w.z);
+          const hh = h !== null && Number.isFinite(h) ? h : SEA_LEVEL;
+          let r: number, g: number, b: number;
+          if (hh <= SEA_LEVEL) {
+            const depth = clamp((SEA_LEVEL - hh) / 12, 0, 1);
+            r = lerp(58, 16, depth);
+            g = lerp(108, 38, depth);
+            b = lerp(138, 70, depth);
+          } else {
+            const t = clamp((hh - SEA_LEVEL) / 16, 0, 1);
+            if (t < 0.5) {
+              const u = t * 2;
+              r = lerp(86, 112, u);
+              g = lerp(132, 98, u);
+              b = lerp(68, 76, u);
+            } else {
+              const u = (t - 0.5) * 2;
+              r = lerp(112, 226, u);
+              g = lerp(98, 228, u);
+              b = lerp(76, 236, u);
+            }
+            // cheap east hillshade for relief legibility
+            const he = groundHeightAt(w.x + 2, w.z);
+            if (he !== null && Number.isFinite(he)) {
+              const shade = clamp((hh - he) * 0.12 + 1, 0.78, 1.18);
+              r *= shade;
+              g *= shade;
+              b *= shade;
+            }
+            // live biome overlay on land
+            if (cells.length) {
+              const cx = Math.min(gridN - 1, Math.floor(fx * gridN));
+              const cz = Math.min(gridN - 1, Math.floor(fz * gridN));
+              const cell = byCell.get(`${cx}:${cz}`);
+              const biome = cell?.biome;
+              if (biome && biome !== "meadow" && biome !== "water") {
+                const [br, bg, bb] = hexToRgb(BIOME_COLORS[biome] ?? BIOME_COLORS.meadow);
+                r = lerp(r, br, 0.5);
+                g = lerp(g, bg, 0.5);
+                b = lerp(b, bb, 0.5);
+              }
+            }
+          }
+          const idx = (j * N + i) * 4;
+          data[idx] = clamp(r, 0, 255);
+          data[idx + 1] = clamp(g, 0, 255);
+          data[idx + 2] = clamp(b, 0, 255);
+          data[idx + 3] = 255;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+    } catch {
+      /* best-effort backdrop; markers still render over it */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worldMapOpen, activeWorldId, mapExtentX, mapExtentZ, mapBiomeKey, mapPlayerCell]);
   const handleWorldMapClick = (event: React.MouseEvent<HTMLElement>) => {
     // Ignore clicks on the overlaid info panel / status badge — only the map plane warps.
     const target = event.target as HTMLElement;
@@ -9359,7 +9457,7 @@ function App(): React.ReactElement {
               style={{ cursor: "crosshair" }}
               onClick={handleWorldMapClick}
             >
-              <div className="world-map-disc" />
+              <canvas className="world-map-terrain" ref={worldMapCanvasRef} aria-hidden="true" />
               {snapshot.visitorPosition && snapshot.visitorYaw !== undefined && (() => {
                 // View cone: from the player marker, along the facing yaw, reaching the view distance —
                 // shows which way you're looking and how far you can see. forward = (sin yaw, cos yaw) in
