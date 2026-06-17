@@ -1514,7 +1514,87 @@ textarea::placeholder {
 }
 
 .asset-tabs {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.asset-create-tab {
+  gap: 10px;
+}
+
+.asset-create-tab label {
+  color: var(--hud-gold-bright);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.asset-create-tab textarea {
+  min-height: 118px;
+  max-height: 220px;
+  resize: vertical;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(0 0 0 / 24%);
+  color: var(--hud-text);
+  padding: 10px;
+  font: 600 13px/1.35 system-ui, sans-serif;
+}
+
+.asset-tab-note {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--hud-gold-bright);
+}
+
+.asset-tab-note span {
+  color: var(--hud-muted);
+  font-size: 11px;
+}
+
+.asset-avatar-grid {
+  display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.asset-avatar-scale {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--hud-border-soft);
+  padding-top: 10px;
+}
+
+.asset-avatar-scale > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--hud-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.asset-avatar-scale [data-testid="avatar-scale-label"] {
+  color: var(--hud-muted);
+  font-weight: 600;
+}
+
+.asset-avatar-scale button {
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(255 255 255 / 6%);
+  color: var(--hud-text);
+  cursor: pointer;
+  padding: 3px 9px;
+}
+
+.asset-avatar-scale button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.asset-avatar-scale small {
+  color: var(--hud-muted);
+  font-size: 10px;
 }
 
 .settings-card {

@@ -5683,12 +5683,13 @@ function App(): React.ReactElement {
     }
   };
   // ── Avatar picker state (catalog selection; "" = deterministic default robot) ──
-  const [avatarPanelOpen, setAvatarPanelOpen] = useState(false);
+  const [assetPanelOpen, setAssetPanelOpen] = useState(false);
+  const [assetPanelTab, setAssetPanelTab] = useState<AssetPanelTab>("search");
   const [avatarCatalog, setAvatarCatalog] = useState<readonly AvatarCatalogEntry[]>(() => avatarCatalogSync());
   const [avatarSelection, setAvatarSelection] = useState<string>(() => storedAvatarId());
   useEffect(() => subscribeAvatarCatalog(() => setAvatarCatalog(avatarCatalogSync())), []);
   useEffect(() => {
-    if (!avatarPanelOpen) return;
+    if (!assetPanelOpen || assetPanelTab !== "avatar") return;
     let cancelled = false;
     loadAvatarCatalog()
       .then((catalog) => {
@@ -5698,7 +5699,7 @@ function App(): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [avatarPanelOpen]);
+  }, [assetPanelOpen, assetPanelTab]);
   const onAvatarPick = (entry: AvatarCatalogEntry) => {
     setAvatarSelection(entry.id);
     worldRef.current?.setAvatarSelection(entry.id); // persists + swaps the rig + broadcasts
@@ -6776,7 +6777,6 @@ function App(): React.ReactElement {
     [],
   );
 
-  const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   // Selected-object Move mode (mirrors world-side state; resets when the selection changes).
   const [moveModeActive, setMoveModeActive] = useState(false);
   useEffect(() => {
@@ -6784,7 +6784,6 @@ function App(): React.ReactElement {
     worldRef.current?.setMoveMode(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.selectedThingId]);
-  const [assetPanelTab, setAssetPanelTab] = useState<AssetPanelTab>("search");
   // ── Clean up dead references: world things whose model is definitively gone ──
   // Dead = generationStatus "failed" (the old strip-on-error bug), a procedural:// URL that no longer
   // parses, or a model URL the store answers 404/410 for. Network errors and 5xx are treated as ALIVE
@@ -6866,8 +6865,8 @@ function App(): React.ReactElement {
     return () => window.clearTimeout(id);
   }, [assetPanelOpen, assetPanelTab, assetSearch, assetBrowseSort, runAssetBrowse]);
   const [openToolMenus, setOpenToolMenus] = useState<ToolMenu[]>([]);
-  const [createPromptOpen, setCreatePromptOpen] = useState(false);
   const [createPromptFocused, setCreatePromptFocused] = useState(false);
+  const createPromptOpen = assetPanelOpen && assetPanelTab === "create";
   const [worldMenuOpen, setWorldMenuOpen] = useState(false);
   const [worldChatOpen, setWorldChatOpen] = useState(false);
   const [worldMapOpen, setWorldMapOpen] = useState(true);
@@ -7292,21 +7291,34 @@ function App(): React.ReactElement {
   const submitPrompt = () => {
     worldRef.current?.submitVisitorPrompt(prompt);
     setPrompt("");
-    setCreatePromptOpen(false);
   };
 
   const focusCreatePrompt = () => {
-    setCreatePromptOpen((open) => {
-      if (open) return false;
-      window.requestAnimationFrame(() => promptRef.current?.focus());
-      return true;
-    });
+    if (assetPanelOpen && assetPanelTab === "create") {
+      setAssetPanelOpen(false);
+      return;
+    }
+    setAssetPanelOpen(true);
+    setAssetPanelTab("create");
+    window.requestAnimationFrame(() => promptRef.current?.focus());
   };
 
   const isToolOpen = (menu: ToolMenu): boolean => openToolMenus.includes(menu);
 
   const toggleAssetDrawer = () => {
-    setAssetPanelOpen((open) => !open);
+    setAssetPanelOpen((open) => {
+      if (!open) setAssetPanelTab((current) => (current === "avatar" || current === "create" ? "search" : current));
+      return !open;
+    });
+  };
+
+  const openAssetDrawerTab = (tab: AssetPanelTab) => {
+    if (assetPanelOpen && assetPanelTab === tab) {
+      setAssetPanelOpen(false);
+      return;
+    }
+    setAssetPanelOpen(true);
+    setAssetPanelTab(tab);
   };
 
   const closeToolPanel = (menu: ToolMenu) => {
@@ -7950,7 +7962,7 @@ function App(): React.ReactElement {
           </button>
           <button
             type="button"
-            className={assetPanelOpen ? "toolbelt-button active" : "toolbelt-button"}
+            className={assetPanelOpen && assetPanelTab !== "avatar" ? "toolbelt-button active" : "toolbelt-button"}
             title="Assets"
             onClick={toggleAssetDrawer}
           >
@@ -8040,9 +8052,9 @@ function App(): React.ReactElement {
           </button>
           <button
             type="button"
-            className={avatarPanelOpen ? "toolbelt-button active" : "toolbelt-button"}
+            className={assetPanelOpen && assetPanelTab === "avatar" ? "toolbelt-button active" : "toolbelt-button"}
             title="Avatar"
-            onClick={() => setAvatarPanelOpen((open) => !open)}
+            onClick={() => openAssetDrawerTab("avatar")}
           >
             <PersonStanding size={18} />
             <span>Avatar</span>
@@ -8053,7 +8065,7 @@ function App(): React.ReactElement {
             just right-of-center; each is height-capped with internal scroll. The login dialog is
             a true modal (fullscreen dimmed overlay, z-index 70) ABOVE all of them by design. The
             open avatar picker temporarily covers the agent-PiP corner (close it to see the PiP). */}
-        {avatarPanelOpen && (
+        {false && (
           <aside
             className="avatar-panel"
             aria-label="Avatar picker"
@@ -9438,7 +9450,7 @@ function App(): React.ReactElement {
             </div>
           </div>
         )}
-        {createPromptOpen && (
+        {false && (
         <section
           className={
             createPromptFocused
@@ -9500,6 +9512,14 @@ function App(): React.ReactElement {
             <nav className="tool-panel-tabs asset-tabs" aria-label="Asset tabs">
               <button
                 type="button"
+                className={assetPanelTab === "create" ? "active" : ""}
+                onClick={() => setAssetPanelTab("create")}
+              >
+                <Send size={15} />
+                <span>Create</span>
+              </button>
+              <button
+                type="button"
                 className={assetPanelTab === "search" ? "active" : ""}
                 onClick={() => setAssetPanelTab("search")}
               >
@@ -9530,7 +9550,50 @@ function App(): React.ReactElement {
                 <Mountain size={15} />
                 <span>Nature</span>
               </button>
+              <button
+                type="button"
+                className={assetPanelTab === "avatar" ? "active" : ""}
+                onClick={() => setAssetPanelTab("avatar")}
+              >
+                <PersonStanding size={15} />
+                <span>Avatar</span>
+              </button>
             </nav>
+            {assetPanelTab === "create" && (
+              <div className="inventory-list asset-list asset-create-tab">
+                <label htmlFor="tellus-prompt">Create</label>
+                <textarea
+                  id="tellus-prompt"
+                  ref={promptRef}
+                  value={prompt}
+                  rows={4}
+                  placeholder="make a crooked apple tree with golden moss..."
+                  onFocus={() => setCreatePromptFocused(true)}
+                  onBlur={() => setCreatePromptFocused(false)}
+                  onChange={(event) => setPrompt(event.target.value)}
+                />
+                <div className="prompt-actions">
+                  <button
+                    type="button"
+                    className="secondary-button prompt-icon-button"
+                    title={listening ? "Listening" : "Describe by voice"}
+                    aria-label={listening ? "Listening" : "Describe what to create by voice"}
+                    disabled={!supported || listening}
+                    onClick={start}
+                  >
+                    <Mic size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={submitPrompt}
+                  >
+                    <Send size={16} />
+                    <span>Create</span>
+                  </button>
+                </div>
+              </div>
+            )}
             {assetPanelTab === "procedural" && (
               <div className="inventory-list asset-list">
                 <span className="inventory-empty" style={{ paddingBottom: 4 }}>
@@ -9583,6 +9646,54 @@ function App(): React.ReactElement {
                     </small>
                   </span>
                 </button>
+              </div>
+            )}
+            {assetPanelTab === "avatar" && (
+              <div className="inventory-list asset-list asset-avatar-tab">
+                <div className="asset-tab-note">
+                  <strong>Avatar</strong>
+                  <span>everyone sees your pick</span>
+                </div>
+                <div className="asset-avatar-grid">
+                  {avatarCatalog.map((entry) => (
+                    <AvatarTile
+                      key={entry.id}
+                      entry={entry}
+                      selected={avatarSelection === entry.id}
+                      onSelect={onAvatarPick}
+                    />
+                  ))}
+                </div>
+                <div className="asset-avatar-scale">
+                  <div>
+                    <span>
+                      Size{" "}
+                      <span data-testid="avatar-scale-label">
+                        {avatarScaleLabel(avatarScale)}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onAvatarScale(1)}
+                      disabled={avatarScale === 1}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                  <input
+                    type="range"
+                    aria-label="Avatar size"
+                    data-testid="avatar-scale-slider"
+                    min={0}
+                    max={AVATAR_SCALE_SLIDER_STEPS}
+                    step={1}
+                    value={avatarScaleToSlider(avatarScale)}
+                    onChange={(event) =>
+                      onAvatarScale(avatarSliderToScale(Number(event.target.value)))
+                    }
+                  />
+                  <small>0.1x - 8x · visual only</small>
+                </div>
               </div>
             )}
             {assetPanelTab === "search" && (
