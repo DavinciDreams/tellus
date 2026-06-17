@@ -443,6 +443,16 @@ export function biomeCellsFromWorldPatch(parsed: unknown): WorldBiomeCell[] | nu
   return parsed.biomeCells.filter(isWorldBiomeCell);
 }
 
+/**
+ * Full biome set from the authoritative initial world.snapshot. Diff patches only carry CHANGED cells, so
+ * without seeding from the snapshot the client shows no biomes until the next tick fires (up to 10 min).
+ * Returns the cells for a snapshot carrying a biomeCells array, else null (reset the local grid on switch).
+ */
+export function biomeCellsFromSnapshot(parsed: unknown): WorldBiomeCell[] | null {
+  if (!isRecord(parsed) || parsed.type !== "world.snapshot" || !Array.isArray(parsed.biomeCells)) return null;
+  return parsed.biomeCells.filter(isWorldBiomeCell);
+}
+
 /** A world.portal.entered patch — the signal to switch the client to the target world. */
 export function portalEnteredFromWorldPatch(parsed: unknown): PortalEntered | null {
   if (!isRecord(parsed) || parsed.type !== "world.portal.entered") return null;

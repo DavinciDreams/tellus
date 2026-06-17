@@ -107,6 +107,7 @@ import {
   portalDeletedFromWorldPatch,
   portalEnteredFromWorldPatch,
   biomeCellsFromWorldPatch,
+  biomeCellsFromSnapshot,
   type WorldBiomeCell,
   isTellusTerrainState,
   isWorldGeneratedThing,
@@ -1833,6 +1834,12 @@ function createTellusWorld(
         // Phase 4: a tiles world carries a tileSetUrl → mount the 3D tileset as the render substrate.
         const tileUrl = (parsed as { tileSetUrl?: unknown }).tileSetUrl;
         if (typeof tileUrl === "string" && tileUrl) mountTileset(tileUrl);
+        // Biomes: the snapshot carries the FULL biome set (seed/converged). Reset the local grid from it
+        // (authoritative — clears stale biomes on a world switch) so the map/HUD show biomes immediately
+        // instead of waiting up to 10 min for the next diff tick. Live world.biome.patch then merges deltas.
+        worldBiomeCells.clear();
+        const snapshotBiomes = biomeCellsFromSnapshot(parsed);
+        if (snapshotBiomes) for (const c of snapshotBiomes) worldBiomeCells.set(`${c.cx}:${c.cz}`, c);
         syncPortalMarkers();
         publish();
       } else {

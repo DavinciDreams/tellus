@@ -6,7 +6,29 @@ import {
   isWorldAction,
   isWorldGeneratedThing,
   worldChatFromWorldPatch,
+  biomeCellsFromSnapshot,
+  biomeCellsFromWorldPatch,
 } from "./world-protocol";
+
+describe("biome cell extraction", () => {
+  const cells = [
+    { cx: 4, cz: 4, biome: "desert" },
+    { cx: 19, cz: 19, biome: "forest" },
+    { cx: 0, cz: 0, biome: "bogus", junk: true },
+  ];
+  it("seeds the full set from the authoritative world.snapshot", () => {
+    const got = biomeCellsFromSnapshot({ type: "world.snapshot", biomeCells: cells });
+    expect(got).toHaveLength(3);
+    expect(got?.[0]).toMatchObject({ cx: 4, cz: 4, biome: "desert" });
+  });
+  it("ignores non-snapshot frames and missing fields", () => {
+    expect(biomeCellsFromSnapshot({ type: "world.biome.patch", biomeCells: cells })).toBeNull();
+    expect(biomeCellsFromSnapshot({ type: "world.snapshot" })).toBeNull();
+    // the diff extractor must NOT consume a snapshot (else it would merge instead of reset)
+    expect(biomeCellsFromWorldPatch({ type: "world.snapshot", biomeCells: cells })).toBeNull();
+    expect(biomeCellsFromWorldPatch({ type: "world.biome.patch", biomeCells: cells })).toHaveLength(3);
+  });
+});
 
 const terrainState = {
   version: 2,
