@@ -433,19 +433,12 @@ function skyboxLabel(url: string): string {
   return SKYBOX_OPTIONS.find((option) => option.url === normalized)?.label ?? "Custom Sky";
 }
 
-// TELLUS INFINITY: a compact biome minimap (24×24 cells = the server BiomeGrid). Cells default to meadow;
-// the diff-merged worldBiomeCells color the evolved regions. A cell mid-transition (becoming) gets a ring.
-const BIOME_COLORS: Record<string, string> = {
-  meadow: "#5f9e6a",
-  forest: "#264d2e",
-  desert: "#cdb277",
-  snow: "#e8eef2",
-  dirt: "#8a6a44",
-  water: "#3a6ea5",
-  alien: "#a45cc0",
-};
+// TELLUS INFINITY biomes: the server BiomeGrid is a fixed 24×24 grid mapped across the WHOLE world
+// extent (BiomeCellAt: x/side*24). The minimap uses this same fixed size so its biome cells register
+// geographically with the server (deriving it from the cells present would distort a partial grid).
+const BIOME_GRID = 24;
 
-// Bold, legible biome base colours for the minimap raster (RGB tuples, higher contrast than the HUD swatches).
+// Bold, legible biome colours for the minimap raster (RGB tuples).
 const BIOME_MAP_RGB: Record<string, [number, number, number]> = {
   meadow: [124, 168, 86],
   forest: [40, 102, 54],
@@ -455,43 +448,6 @@ const BIOME_MAP_RGB: Record<string, [number, number, number]> = {
   water: [44, 100, 152],
   alien: [160, 88, 182],
 };
-function BiomeMap({ cells }: { cells: WorldBiomeCell[] }) {
-  const N = 24;
-  const byCell = new Map(cells.map((c) => [`${c.cx}:${c.cz}`, c]));
-  return (
-    <aside
-      aria-label="Biome map"
-      style={{
-        position: "fixed",
-        left: 12,
-        bottom: 12,
-        zIndex: 20,
-        background: "rgba(0,0,0,0.55)",
-        color: "#dfe7d8",
-        borderRadius: 10,
-        padding: "8px 10px",
-        font: "600 11px/1.2 ui-sans-serif, system-ui",
-      }}
-    >
-      <div style={{ opacity: 0.7, marginBottom: 4 }}>Biomes (live)</div>
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${N}, 5px)`, gridAutoRows: "5px", gap: 0 }}>
-        {Array.from({ length: N * N }, (_, i) => {
-          const cx = i % N;
-          const cz = Math.floor(i / N);
-          const c = byCell.get(`${cx}:${cz}`);
-          const color = BIOME_COLORS[c?.biome ?? "meadow"] ?? BIOME_COLORS.meadow;
-          return (
-            <div
-              key={i}
-              title={c ? `${c.biome}${c.becoming ? ` → ${c.becoming}` : ""}` : "meadow"}
-              style={{ width: 5, height: 5, background: color, boxShadow: c?.becoming ? "inset 0 0 0 1px rgba(255,255,255,0.6)" : undefined }}
-            />
-          );
-        })}
-      </div>
-    </aside>
-  );
-}
 
 function AgentToolChipPill({ chip }: { chip: AgentToolChip }) {
   const label = chip.summary ? `${chip.name} · ${chip.summary}` : chip.name;
@@ -7234,6 +7190,7 @@ function App(): React.ReactElement {
   const [worldChatOpen, setWorldChatOpen] = useState(false);
   const [worldMapOpen, setWorldMapOpen] = useState(true);
   const [mapActorList, setMapActorList] = useState<"players" | "agents" | null>(null);
+  const [mapMode, setMapMode] = useState<"terrain" | "biomes">("biomes");
   const worldMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const { listening, supported, start } = useSpeechInput((text) =>
@@ -7588,12 +7545,12 @@ function App(): React.ReactElement {
       canvas.height = N;
       const img = ctx.createImageData(N, N);
       const data = img.data;
-      // Biome grid (live world state) — index by cell; grid side adapts to the cells present.
+      // Biome grid (live world state). The server BiomeGrid is a fixed 24² mapped across the whole world.
       const cells = snapshot.biomeCells ?? [];
       const byCell = new Map(cells.map((c) => [`${c.cx}:${c.cz}`, c]));
-      let gridN = 1;
-      for (const c of cells) gridN = Math.max(gridN, c.cx + 1, c.cz + 1);
       const biomeWorld = cells.length > 0;
+      // Non-biome worlds only have a terrain view; biome worlds honour the user's toggle.
+      const mode = biomeWorld ? mapMode : "terrain";
       const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
       for (let j = 0; j < N; j++) {
         for (let i = 0; i < N; i++) {
@@ -7604,18 +7561,40 @@ function App(): React.ReactElement {
           const hasH = h !== null && Number.isFinite(h);
           const hh = hasH ? (h as number) : SEA_LEVEL;
           let r: number, g: number, b: number;
-          if (biomeWorld) {
-            // The biome grid spans the WHOLE world (24² mapped to the full extent), so paint biomes as the
-            // base everywhere — a large chunked map fills with real world state instead of 98% flat sea.
-            const cx = Math.min(gridN - 1, Math.max(0, Math.floor(fx * gridN)));
-            const cz = Math.min(gridN - 1, Math.max(0, Math.floor(fz * gridN)));
+          if (mode === "biomes") {
+            // Crisp full-world biome overview — the 24² grid mapped across the FULL extent (fixed grid size
+            // so cells register geographically), bold colours, no relief muddying. This is the whole world.
+            const cx = Math.min(BIOME_GRID - 1, Math.max(0, Math.floor(fx * BIOME_GRID)));
+            const cz = Math.min(BIOME_GRID - 1, Math.max(0, Math.floor(fz * BIOME_GRID)));
+            const cell = byCell.get(`${cx}:${cz}`);
+            const base = BIOME_MAP_RGB[cell?.biome ?? "meadow"] ?? BIOME_MAP_RGB.meadow;
+            r = base[0];
+            g = base[1];
+            b = base[2];
+            // a faint relief texture where chunks are loaded — keep the biome colours legible
+            const he = groundHeightAt(w.x + 3, w.z);
+            if (hasH && he !== null && Number.isFinite(he)) {
+              const shade = clamp((hh - he) * 0.06 + 1, 0.9, 1.1);
+              r *= shade;
+              g *= shade;
+              b *= shade;
+            }
+            // cells mid-transition (becoming) glow brighter so you can see evolution fronts
+            if (cell?.becoming) {
+              r = lerp(r, 255, 0.2);
+              g = lerp(g, 255, 0.2);
+              b = lerp(b, 255, 0.2);
+            }
+          } else if (biomeWorld) {
+            // Terrain view on a biome world: biome base + strong relief; flat/unstreamed samples dim +
+            // desaturate so the loaded neighbourhood pops out of the unexplored fog.
+            const cx = Math.min(BIOME_GRID - 1, Math.max(0, Math.floor(fx * BIOME_GRID)));
+            const cz = Math.min(BIOME_GRID - 1, Math.max(0, Math.floor(fz * BIOME_GRID)));
             const biome = byCell.get(`${cx}:${cz}`)?.biome ?? "meadow";
             const base = BIOME_MAP_RGB[biome] ?? BIOME_MAP_RGB.meadow;
             r = base[0];
             g = base[1];
             b = base[2];
-            // Relief shading where the chunk is actually loaded (real terrain has micro-slope); flat samples
-            // are unexplored/unstreamed — dim + desaturate so loaded land clearly pops out of the fog.
             const he = groundHeightAt(w.x + 3, w.z) ?? hh;
             const hn = groundHeightAt(w.x, w.z + 3) ?? hh;
             const slope = hh - he + (hh - hn);
@@ -7672,7 +7651,7 @@ function App(): React.ReactElement {
       /* best-effort backdrop; markers still render over it */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [worldMapOpen, activeWorldId, mapExtentX, mapExtentZ, mapBiomeKey, mapPlayerCell]);
+  }, [worldMapOpen, activeWorldId, mapExtentX, mapExtentZ, mapBiomeKey, mapPlayerCell, mapMode]);
   const handleWorldMapClick = (event: React.MouseEvent<HTMLElement>) => {
     // Ignore clicks on the overlaid info panel / status badge — only the map plane warps.
     const target = event.target as HTMLElement;
@@ -8028,7 +8007,6 @@ function App(): React.ReactElement {
             </div>
           </div>
         </div>
-        {snapshot.biomeCells && snapshot.biomeCells.length > 0 && <BiomeMap cells={snapshot.biomeCells} />}
         {(() => {
           const portalBtn = {
             display: "block",
@@ -9489,6 +9467,24 @@ function App(): React.ReactElement {
               onClick={handleWorldMapClick}
             >
               <canvas className="world-map-terrain" ref={worldMapCanvasRef} aria-hidden="true" />
+              {snapshot.biomeCells && snapshot.biomeCells.length > 0 && (
+                <div className="world-map-mode" role="group" aria-label="Map mode">
+                  {(["terrain", "biomes"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={mapMode === m ? "active" : ""}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setMapMode(m);
+                      }}
+                      title={m === "biomes" ? "Whole-world biome overview (live)" : "Local terrain relief"}
+                    >
+                      {m === "biomes" ? "Biomes" : "Terrain"}
+                    </button>
+                  ))}
+                </div>
+              )}
               {snapshot.visitorPosition && snapshot.visitorYaw !== undefined && (() => {
                 // View cone: from the player marker, along the facing yaw, reaching the view distance —
                 // shows which way you're looking and how far you can see. forward = (sin yaw, cos yaw) in
