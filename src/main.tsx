@@ -1165,12 +1165,14 @@ function createTellusWorld(
   portalMarkerGroup.name = "tellus-portal-markers";
   scene.add(portalMarkerGroup);
   const portalMarkers = new Map<string, THREE.Object3D>();
+  const pendingPortalIds = new Set<string>();
   let lastPortalEnterAt = 0;
   let insidePortalId: string | null = null;
-  const makePortalMarker = (interior: boolean): THREE.Object3D => {
+  const makePortalMarker = (interior: boolean, pending = false): THREE.Object3D => {
     const g = new THREE.Group();
-    const color = interior ? 0xffc84f : 0xffdc3d;
-    const bright = interior ? 0xfff0a6 : 0xffff8a;
+    const color = pending ? 0x9b7cff : interior ? 0xffc84f : 0xffdc3d;
+    const bright = pending ? 0xd8c6ff : interior ? 0xfff0a6 : 0xffff8a;
+    g.userData.portalMarkerKey = `${interior ? "interior" : "world"}:${pending ? "pending" : "ready"}`;
     const ringMaterial = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
@@ -1191,7 +1193,7 @@ function createTellusWorld(
     base.rotation.x = Math.PI / 2;
     base.position.y = 0.12;
     const swirl = new THREE.Group();
-    swirl.userData.portalSpin = interior ? -0.9 : 1.1;
+    swirl.userData.portalSpin = pending ? 1.6 : interior ? -0.9 : 1.1;
     for (let i = 0; i < 3; i++) {
       const arc = new THREE.Mesh(
         new THREE.TorusGeometry(0.7 + i * 0.34, 0.045, 8, 36, Math.PI * 1.35),
@@ -1214,6 +1216,17 @@ function createTellusWorld(
     halo.rotation.x = Math.PI / 2;
     halo.position.y = 1.35;
     halo.userData.portalBob = 1;
+    if (pending) {
+      const topHalo = new THREE.Mesh(
+        new THREE.TorusGeometry(0.82, 0.035, 8, 28),
+        glowMaterial,
+      );
+      topHalo.rotation.x = Math.PI / 2;
+      topHalo.position.y = 2.05;
+      topHalo.userData.portalBob = -1;
+      topHalo.userData.portalSpin = -1.9;
+      g.add(topHalo);
+    }
     g.add(base, swirl, halo, pillar);
     return g;
   };
@@ -1234,9 +1247,17 @@ function createTellusWorld(
     const seen = new Set<string>();
     for (const p of worldPortals) {
       seen.add(p.id);
+      const pending = pendingPortalIds.has(p.id);
+      const markerKey = `${p.target.kind === "interior" ? "interior" : "world"}:${pending ? "pending" : "ready"}`;
       let marker = portalMarkers.get(p.id);
+      if (marker && marker.userData.portalMarkerKey !== markerKey) {
+        portalMarkerGroup.remove(marker);
+        disposeObject(marker);
+        portalMarkers.delete(p.id);
+        marker = undefined;
+      }
       if (!marker) {
-        marker = makePortalMarker(p.target.kind === "interior");
+        marker = makePortalMarker(p.target.kind === "interior", pending);
         portalMarkers.set(p.id, marker);
         portalMarkerGroup.add(marker);
       }
@@ -1254,14 +1275,17 @@ function createTellusWorld(
   const updatePortals = (now: number) => {
     for (const marker of portalMarkers.values()) {
       marker.rotation.y = now * 0.00025;
-      const swirl = marker.children.find((child) => Number(child.userData.portalSpin));
-      if (swirl) swirl.rotation.y = now * 0.001 * Number(swirl.userData.portalSpin);
-      const halo = marker.children.find((child) => Number(child.userData.portalBob));
-      if (halo) halo.position.y = 1.35 + Math.sin(now * 0.002) * 0.16;
+      for (const child of marker.children) {
+        const spin = Number(child.userData.portalSpin);
+        if (spin) child.rotation.y = now * 0.001 * spin;
+        const bob = Number(child.userData.portalBob);
+        if (bob) child.position.y = (bob > 0 ? 1.35 : 2.05) + Math.sin(now * 0.002) * 0.16 * bob;
+      }
     }
     if (worldPortals.length === 0) return;
     let nearId: string | null = null;
     for (const p of worldPortals) {
+      if (pendingPortalIds.has(p.id)) continue;
       const d = Math.hypot(visitorPosition.x - p.position.x, visitorPosition.z - p.position.z);
       if (d <= Math.max(1.2, p.radius)) {
         nearId = p.id;
@@ -2056,7 +2080,18 @@ function createTellusWorld(
         const portalUpsert = portalsFromWorldPatch(parsed);
         if (portalUpsert) {
           const byId = new Map(worldPortals.map((p) => [p.id, p]));
-          for (const p of portalUpsert) byId.set(p.id, p);
+          for (const p of portalUpsert) {
+            const wasPending = pendingPortalIds.delete(p.id);
+            byId.set(p.id, p);
+            if (wasPending) {
+              addLog({
+                agentId: "world",
+                agentName: "Tellus",
+                tool: "interact",
+                text: `Portal ready: ${p.label || p.target.worldId}`,
+              });
+            }
+          }
           worldPortals = Array.from(byId.values());
           syncPortalMarkers();
           publish();
@@ -2064,8 +2099,29 @@ function createTellusWorld(
       }
       const portalDeleted = portalDeletedFromWorldPatch(parsed);
       if (portalDeleted) {
+        pendingPortalIds.delete(portalDeleted);
         worldPortals = worldPortals.filter((p) => p.id !== portalDeleted);
         syncPortalMarkers();
+        publish();
+      }
+      if (
+        isRecord(parsed) &&
+        parsed.type === "action.rejected" &&
+        typeof parsed.actionType === "string" &&
+        typeof parsed.reason === "string"
+      ) {
+        if (parsed.actionType === "portal.upsert") {
+          const rejectedPendingIds = new Set(pendingPortalIds);
+          pendingPortalIds.clear();
+          worldPortals = worldPortals.filter((p) => !rejectedPendingIds.has(p.id));
+          syncPortalMarkers();
+        }
+        addLog({
+          agentId: "world",
+          agentName: "Tellus",
+          tool: "interact",
+          text: `${parsed.actionType} rejected: ${parsed.reason}`,
+        });
         publish();
       }
       const entered = portalEnteredFromWorldPatch(parsed);
@@ -5989,6 +6045,11 @@ function createTellusWorld(
   const enterPortal = (portalId: string) => {
     const id = portalId.trim();
     if (!id) return;
+    if (pendingPortalIds.has(id)) {
+      addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: "Portal is still forming..." });
+      publish();
+      return;
+    }
     const frame = { type: "portal.enter", visitorId, portalId: id };
     if (worldSocket?.readyState === WebSocket.OPEN) {
       worldSocket.send(JSON.stringify(frame));
@@ -6004,11 +6065,35 @@ function createTellusWorld(
   // TELLUS INFINITY: create a portal at the player's feet (the server owner-gates + stamps it). A world portal
   // links to another world; a door opens a fresh interior room (procedural — no asset needed). The server
   // rejects if you don't own this world; the rejection surfaces as an action.rejected log line.
-  const sendPortalUpsert = (portal: Record<string, unknown>) => {
+  const sendPortalUpsert = (portal: WorldPortal) => {
     const frame = { type: "portal.upsert", visitorId, portal };
+    pendingPortalIds.add(portal.id);
+    const byId = new Map(worldPortals.map((p) => [p.id, p]));
+    byId.set(portal.id, portal);
+    worldPortals = Array.from(byId.values());
+    syncPortalMarkers();
+    addLog({
+      agentId: "world",
+      agentName: "Tellus",
+      tool: "interact",
+      text: `Creating portal ${portal.label || portal.target.worldId}...`,
+    });
+    publish();
     if (worldSocket?.readyState === WebSocket.OPEN) worldSocket.send(JSON.stringify(frame));
     else if (tellusWorldBackendAvailable)
-      void fetch(tellusWorldHttpUrl("action"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(frame) }).catch(() => undefined);
+      void fetch(tellusWorldHttpUrl("action"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(frame) })
+        .catch((error) => {
+          pendingPortalIds.delete(portal.id);
+          worldPortals = worldPortals.filter((p) => p.id !== portal.id);
+          syncPortalMarkers();
+          addLog({
+            agentId: "world",
+            agentName: "Tellus",
+            tool: "interact",
+            text: `Portal request failed: ${extractErrorMessage(error)}`,
+          });
+          publish();
+        });
   };
   const createPortalHere = (targetWorldId: string, label?: string) => {
     const target = targetWorldId.trim();
@@ -6019,6 +6104,7 @@ function createTellusWorld(
     const y = anchor?.position.y ?? groundHeightAt(x, z) ?? visitorPosition.y ?? SEA_LEVEL;
     sendPortalUpsert({
       id: makeId("portal"),
+      worldId: runtimeConfig.worldId,
       label: (label || target).slice(0, 48),
       position: { x, y, z },
       radius: 2.2,
@@ -6033,6 +6119,7 @@ function createTellusWorld(
     const y = groundHeightAt(x, z) ?? visitorPosition.y ?? SEA_LEVEL;
     sendPortalUpsert({
       id: makeId("door"),
+      worldId: runtimeConfig.worldId,
       label: (label || "Door").slice(0, 48),
       position: { x, y, z },
       radius: 2.2,
@@ -8347,6 +8434,13 @@ function App(): React.ReactElement {
     if (portalTargetWorldId && portalTargetOptions.includes(portalTargetWorldId)) return;
     setPortalTargetWorldId(portalTargetOptions[0] ?? "");
   }, [portalTargetOptions.join("\n"), portalTargetWorldId]);
+  const portalPanelNotice = useMemo(() => {
+    for (let i = snapshot.logs.length - 1; i >= 0; i--) {
+      const text = snapshot.logs[i]?.text ?? "";
+      if (/portal|door|rejected/i.test(text)) return text;
+    }
+    return "";
+  }, [snapshot.logs]);
   const chatTargets = [...remoteAgents, ...remotePlayers].map((visitor) => ({
     visitorId: visitor.visitorId,
     name: actorName(visitor),
@@ -8760,6 +8854,11 @@ function App(): React.ReactElement {
                   ))
                 )}
               </select>
+              {portalPanelNotice && (
+                <div className="portal-panel-notice" role="status" aria-live="polite">
+                  {portalPanelNotice}
+                </div>
+              )}
             </aside>
           );
         })()}

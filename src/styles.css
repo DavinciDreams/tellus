@@ -634,6 +634,17 @@ textarea::placeholder {
   animation: map-pulse 1.2s ease-in-out infinite;
 }
 
+.portal-panel-notice {
+  margin-top: 6px;
+  border: 1px solid rgb(155 124 255 / 34%);
+  border-radius: 8px;
+  background: rgb(42 28 84 / 42%);
+  color: #efe8ff;
+  font-size: 11px;
+  line-height: 1.25;
+  padding: 5px 7px;
+}
+
 .world-map-status {
   position: absolute;
   right: 4px;
