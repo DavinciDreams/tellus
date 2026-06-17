@@ -443,6 +443,17 @@ const BIOME_COLORS: Record<string, string> = {
   water: "#3a6ea5",
   alien: "#a45cc0",
 };
+
+// Bold, legible biome base colours for the minimap raster (RGB tuples, higher contrast than the HUD swatches).
+const BIOME_MAP_RGB: Record<string, [number, number, number]> = {
+  meadow: [124, 168, 86],
+  forest: [40, 102, 54],
+  desert: [214, 186, 116],
+  snow: [232, 238, 244],
+  dirt: [130, 100, 70],
+  water: [44, 100, 152],
+  alien: [160, 88, 182],
+};
 function BiomeMap({ cells }: { cells: WorldBiomeCell[] }) {
   const N = 24;
   const byCell = new Map(cells.map((c) => [`${c.cx}:${c.cz}`, c]));
@@ -7575,11 +7586,7 @@ function App(): React.ReactElement {
       const byCell = new Map(cells.map((c) => [`${c.cx}:${c.cz}`, c]));
       let gridN = 1;
       for (const c of cells) gridN = Math.max(gridN, c.cx + 1, c.cz + 1);
-      const hexToRgb = (hex: string): [number, number, number] => {
-        const h = hex.replace("#", "");
-        const v = parseInt(h.length === 3 ? h.replace(/(.)/g, "$1$1") : h, 16);
-        return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
-      };
+      const biomeWorld = cells.length > 0;
       const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
       for (let j = 0; j < N; j++) {
         for (let i = 0; i < N; i++) {
@@ -7587,9 +7594,40 @@ function App(): React.ReactElement {
           const fz = (j + 0.5) / N;
           const w = mapFracToWorld(fx, fz);
           const h = groundHeightAt(w.x, w.z);
-          const hh = h !== null && Number.isFinite(h) ? h : SEA_LEVEL;
+          const hasH = h !== null && Number.isFinite(h);
+          const hh = hasH ? (h as number) : SEA_LEVEL;
           let r: number, g: number, b: number;
-          if (hh <= SEA_LEVEL) {
+          if (biomeWorld) {
+            // The biome grid spans the WHOLE world (24² mapped to the full extent), so paint biomes as the
+            // base everywhere — a large chunked map fills with real world state instead of 98% flat sea.
+            const cx = Math.min(gridN - 1, Math.max(0, Math.floor(fx * gridN)));
+            const cz = Math.min(gridN - 1, Math.max(0, Math.floor(fz * gridN)));
+            const biome = byCell.get(`${cx}:${cz}`)?.biome ?? "meadow";
+            const base = BIOME_MAP_RGB[biome] ?? BIOME_MAP_RGB.meadow;
+            r = base[0];
+            g = base[1];
+            b = base[2];
+            // Relief shading where the chunk is actually loaded (real terrain has micro-slope); flat samples
+            // are unexplored/unstreamed — dim + desaturate so loaded land clearly pops out of the fog.
+            const he = groundHeightAt(w.x + 3, w.z) ?? hh;
+            const hn = groundHeightAt(w.x, w.z + 3) ?? hh;
+            const slope = hh - he + (hh - hn);
+            if (Math.abs(slope) > 1e-4 || hh > SEA_LEVEL + 0.5) {
+              const shade = clamp(slope * 0.16 + 1, 0.7, 1.34);
+              r *= shade;
+              g *= shade;
+              b *= shade;
+              const lift = clamp((hh - SEA_LEVEL) / 18, 0, 1);
+              r = lerp(r, 232, lift * 0.32);
+              g = lerp(g, 232, lift * 0.32);
+              b = lerp(b, 238, lift * 0.32);
+            } else {
+              const avg = (r + g + b) / 3;
+              r = lerp(avg, r, 0.55) * 0.7;
+              g = lerp(avg, g, 0.55) * 0.7;
+              b = lerp(avg, b, 0.7) * 0.7;
+            }
+          } else if (hh <= SEA_LEVEL) {
             const depth = clamp((SEA_LEVEL - hh) / 12, 0, 1);
             r = lerp(58, 16, depth);
             g = lerp(108, 38, depth);
@@ -7607,26 +7645,12 @@ function App(): React.ReactElement {
               g = lerp(98, 228, u);
               b = lerp(76, 236, u);
             }
-            // cheap east hillshade for relief legibility
             const he = groundHeightAt(w.x + 2, w.z);
             if (he !== null && Number.isFinite(he)) {
               const shade = clamp((hh - he) * 0.12 + 1, 0.78, 1.18);
               r *= shade;
               g *= shade;
               b *= shade;
-            }
-            // live biome overlay on land
-            if (cells.length) {
-              const cx = Math.min(gridN - 1, Math.floor(fx * gridN));
-              const cz = Math.min(gridN - 1, Math.floor(fz * gridN));
-              const cell = byCell.get(`${cx}:${cz}`);
-              const biome = cell?.biome;
-              if (biome && biome !== "meadow" && biome !== "water") {
-                const [br, bg, bb] = hexToRgb(BIOME_COLORS[biome] ?? BIOME_COLORS.meadow);
-                r = lerp(r, br, 0.5);
-                g = lerp(g, bg, 0.5);
-                b = lerp(b, bb, 0.5);
-              }
             }
           }
           const idx = (j * N + i) * 4;
@@ -9471,9 +9495,13 @@ function App(): React.ReactElement {
                 const reach = (snapshot.viewDistance ?? 120) * 1.8;
                 const r = clamp((reach / Math.max(mapExtentX, mapExtentZ)) * 100, 8, 280);
                 const half = (78 / 2) * (Math.PI / 180); // ~78° cone (≈ the camera's horizontal FOV)
-                const e1x = px + r * Math.sin(yawV - half);
+                // The map box is aspect-ratio 1.05 and the SVG stretches a square viewBox over it
+                // (preserveAspectRatio none), which skews any heading horizontally. Divide the x-component
+                // by the box aspect so the rendered wedge points along the TRUE facing direction.
+                const MAP_ASPECT = 1.05;
+                const e1x = px + (r * Math.sin(yawV - half)) / MAP_ASPECT;
                 const e1z = pz + r * Math.cos(yawV - half);
-                const e2x = px + r * Math.sin(yawV + half);
+                const e2x = px + (r * Math.sin(yawV + half)) / MAP_ASPECT;
                 const e2z = pz + r * Math.cos(yawV + half);
                 return (
                   <svg className="world-map-cone" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
