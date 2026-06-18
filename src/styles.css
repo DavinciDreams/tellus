@@ -645,6 +645,38 @@ textarea::placeholder {
   padding: 5px 7px;
 }
 
+.portal-panel-row {
+  display: grid;
+  gap: 4px;
+  margin: 3px 0 6px;
+}
+
+.portal-panel-row-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px;
+}
+
+.portal-panel-row-actions select,
+.portal-panel-row-actions button {
+  min-width: 0;
+  border: 1px solid rgb(106 208 255 / 28%);
+  border-radius: 7px;
+  background: rgb(0 0 0 / 34%);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 6px;
+}
+
+.portal-panel-row-actions button {
+  cursor: pointer;
+}
+
+.portal-panel-row-actions button:hover {
+  border-color: rgb(255 207 106 / 54%);
+}
+
 .world-map-status {
   position: absolute;
   right: 4px;

@@ -154,6 +154,16 @@ export type WorldAction =
       id: string;
     }
   | {
+      type: "portal.upsert";
+      visitorId: string;
+      portal: WorldPortal;
+    }
+  | {
+      type: "portal.delete";
+      visitorId: string;
+      portalId: string;
+    }
+  | {
       type: "world.chat";
       visitorId: string;
       message: WorldChatMessage;
@@ -536,6 +546,12 @@ export function isWorldAction(value: unknown): value is WorldAction {
   }
   if (value.type === "generated.delete") {
     return typeof value.id === "string";
+  }
+  if (value.type === "portal.upsert") {
+    return isWorldPortal(value.portal);
+  }
+  if (value.type === "portal.delete") {
+    return typeof value.portalId === "string";
   }
   if (value.type === "world.chat") {
     return isWorldChatMessage(value.message);

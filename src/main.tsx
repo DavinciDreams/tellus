@@ -141,6 +141,8 @@ import "./styles.css";
 // before ANY fetch fires — the /live WebSocket keeps the soft ?userId= identity instead.
 installSessionFetch();
 
+const PORTAL_ARRIVAL_EXIT_OFFSET = 4.5;
+
 type AssetReuseCandidate = AssetLibraryModel & {
   reuseScore?: number;
   reuseReason?: string;
@@ -1166,6 +1168,7 @@ function createTellusWorld(
   scene.add(portalMarkerGroup);
   const portalMarkers = new Map<string, THREE.Object3D>();
   const pendingPortalIds = new Set<string>();
+  const pendingDeletedPortals = new Map<string, WorldPortal>();
   let lastPortalEnterAt = 0;
   let insidePortalId: string | null = null;
   const makePortalMarker = (interior: boolean, pending = false): THREE.Object3D => {
@@ -1192,6 +1195,19 @@ function createTellusWorld(
     );
     base.rotation.x = Math.PI / 2;
     base.position.y = 0.12;
+    const triggerRing = new THREE.Mesh(
+      new THREE.TorusGeometry(1, 0.035, 8, 48),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: pending ? 0.36 : 0.28,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    triggerRing.rotation.x = Math.PI / 2;
+    triggerRing.position.y = 0.08;
+    triggerRing.userData.portalTriggerRing = true;
     const swirl = new THREE.Group();
     swirl.userData.portalSpin = pending ? 1.6 : interior ? -0.9 : 1.1;
     for (let i = 0; i < 3; i++) {
@@ -1227,21 +1243,28 @@ function createTellusWorld(
       topHalo.userData.portalSpin = -1.9;
       g.add(topHalo);
     }
-    g.add(base, swirl, halo, pillar);
+    g.add(triggerRing, base, swirl, halo, pillar);
     return g;
   };
+  const portalAnchorPosition = (p: WorldPortal): Vec3 => {
+    const anchor = p.anchorThingId
+      ? generated.find((thing) => thing.id === p.anchorThingId)
+      : undefined;
+    return anchor?.position ?? p.position;
+  };
   const portalGroundY = (p: WorldPortal): number => {
-    let best = groundHeightAt(p.position.x, p.position.z);
+    const position = portalAnchorPosition(p);
+    let best = groundHeightAt(position.x, position.z);
     const r = Math.min(Math.max(0.5, p.radius), 6);
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
       const h = groundHeightAt(
-        p.position.x + Math.cos(a) * r,
-        p.position.z + Math.sin(a) * r,
+        position.x + Math.cos(a) * r,
+        position.z + Math.sin(a) * r,
       );
       if (h !== null && Number.isFinite(h) && (best === null || h > best)) best = h;
     }
-    return best ?? (Number.isFinite(p.position.y) ? p.position.y : SEA_LEVEL);
+    return best ?? (Number.isFinite(position.y) ? position.y : SEA_LEVEL);
   };
   const syncPortalMarkers = () => {
     const seen = new Set<string>();
@@ -1261,8 +1284,14 @@ function createTellusWorld(
         portalMarkers.set(p.id, marker);
         portalMarkerGroup.add(marker);
       }
+      const position = portalAnchorPosition(p);
       const y = portalGroundY(p) + 0.05;
-      marker.position.set(p.position.x, y, p.position.z);
+      marker.position.set(position.x, y, position.z);
+      const triggerRing = marker.children.find((child) => child.userData.portalTriggerRing);
+      if (triggerRing) {
+        const r = Math.max(1.2, p.radius);
+        triggerRing.scale.set(r, 1, r);
+      }
     }
     for (const [id, marker] of portalMarkers) {
       if (seen.has(id)) continue;
@@ -1286,7 +1315,8 @@ function createTellusWorld(
     let nearId: string | null = null;
     for (const p of worldPortals) {
       if (pendingPortalIds.has(p.id)) continue;
-      const d = Math.hypot(visitorPosition.x - p.position.x, visitorPosition.z - p.position.z);
+      const position = portalAnchorPosition(p);
+      const d = Math.hypot(visitorPosition.x - position.x, visitorPosition.z - position.z);
       if (d <= Math.max(1.2, p.radius)) {
         nearId = p.id;
         break;
@@ -2100,6 +2130,7 @@ function createTellusWorld(
       const portalDeleted = portalDeletedFromWorldPatch(parsed);
       if (portalDeleted) {
         pendingPortalIds.delete(portalDeleted);
+        pendingDeletedPortals.delete(portalDeleted);
         worldPortals = worldPortals.filter((p) => p.id !== portalDeleted);
         syncPortalMarkers();
         publish();
@@ -2114,6 +2145,15 @@ function createTellusWorld(
           const rejectedPendingIds = new Set(pendingPortalIds);
           pendingPortalIds.clear();
           worldPortals = worldPortals.filter((p) => !rejectedPendingIds.has(p.id));
+          syncPortalMarkers();
+        }
+        if (parsed.actionType === "portal.delete") {
+          for (const portal of pendingDeletedPortals.values()) {
+            const byId = new Map(worldPortals.map((p) => [p.id, p]));
+            byId.set(portal.id, portal);
+            worldPortals = Array.from(byId.values());
+          }
+          pendingDeletedPortals.clear();
           syncPortalMarkers();
         }
         addLog({
@@ -3445,6 +3485,20 @@ function createTellusWorld(
     publish();
   };
 
+  const syncAnchoredPortalsForThing = (thing: GeneratedThing) => {
+    const anchored = worldPortals.filter((portal) => portal.anchorThingId === thing.id);
+    if (anchored.length === 0) return;
+    for (const portal of anchored) {
+      sendPortalUpsert(
+        {
+          ...portal,
+          position: { ...thing.position },
+        },
+        { pending: false },
+      );
+    }
+  };
+
   const moveGenerated = (id: string, dx: number, dz: number) => {
     const thing = thingById(id);
     if (!thing) return;
@@ -3478,6 +3532,7 @@ function createTellusWorld(
     }
     updateThingMeshPosition(thing);
     publishGeneratedThing(thing);
+    syncAnchoredPortalsForThing(thing);
     publish();
   };
 
@@ -3574,6 +3629,7 @@ function createTellusWorld(
     }
     updateThingMeshPosition(thing);
     publishGeneratedThing(thing);
+    syncAnchoredPortalsForThing(thing);
     publish();
   };
 
@@ -3613,6 +3669,7 @@ function createTellusWorld(
     }
     updateThingMeshPosition(thing);
     publishGeneratedThing(thing);
+    syncAnchoredPortalsForThing(thing);
     publish();
   };
 
@@ -3620,6 +3677,19 @@ function createTellusWorld(
     const index = generated.findIndex((thing) => thing.id === id);
     if (index < 0) return;
     const previousSelectedId = selectedThingId;
+    const anchoredPortals = worldPortals.filter((portal) => portal.anchorThingId === id);
+    if (anchoredPortals.length > 0) {
+      const names = anchoredPortals
+        .slice(0, 4)
+        .map((portal) => portal.label || portal.target.worldId)
+        .join(", ");
+      const ok = window.confirm(
+        `This asset anchors ${anchoredPortals.length} portal${anchoredPortals.length === 1 ? "" : "s"}.\n` +
+          `Delete the asset and its portal${anchoredPortals.length === 1 ? "" : "s"}?\n${names}`,
+      );
+      if (!ok) return;
+      for (const portal of anchoredPortals) sendPortalDelete(portal.id);
+    }
     const [thing] = generated.splice(index, 1);
     const deletedModelUrl = thing?.modelUrl;
     pendingGenerationControllers.get(id)?.abort();
@@ -3683,6 +3753,7 @@ function createTellusWorld(
     }
     updateThingMeshPosition(thing);
     publishGeneratedThing(thing);
+    syncAnchoredPortalsForThing(thing);
     publish();
   };
 
@@ -6065,26 +6136,36 @@ function createTellusWorld(
   // TELLUS INFINITY: create a portal at the player's feet (the server owner-gates + stamps it). A world portal
   // links to another world; a door opens a fresh interior room (procedural — no asset needed). The server
   // rejects if you don't own this world; the rejection surfaces as an action.rejected log line.
-  const sendPortalUpsert = (portal: WorldPortal) => {
+  const sendPortalUpsert = (
+    portal: WorldPortal,
+    options: { pending?: boolean; logText?: string } = {},
+  ) => {
+    const pending = options.pending ?? true;
     const frame = { type: "portal.upsert", visitorId, portal };
-    pendingPortalIds.add(portal.id);
+    if (pending) pendingPortalIds.add(portal.id);
+    else pendingPortalIds.delete(portal.id);
     const byId = new Map(worldPortals.map((p) => [p.id, p]));
     byId.set(portal.id, portal);
     worldPortals = Array.from(byId.values());
     syncPortalMarkers();
-    addLog({
-      agentId: "world",
-      agentName: "Tellus",
-      tool: "interact",
-      text: `Creating portal ${portal.label || portal.target.worldId}...`,
-    });
+    const text = options.logText ?? (pending ? `Creating portal ${portal.label || portal.target.worldId}...` : "");
+    if (text) {
+      addLog({
+        agentId: "world",
+        agentName: "Tellus",
+        tool: "interact",
+        text,
+      });
+    }
     publish();
     if (worldSocket?.readyState === WebSocket.OPEN) worldSocket.send(JSON.stringify(frame));
     else if (tellusWorldBackendAvailable)
       void fetch(tellusWorldHttpUrl("action"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(frame) })
         .catch((error) => {
-          pendingPortalIds.delete(portal.id);
-          worldPortals = worldPortals.filter((p) => p.id !== portal.id);
+          if (pending) {
+            pendingPortalIds.delete(portal.id);
+            worldPortals = worldPortals.filter((p) => p.id !== portal.id);
+          }
           syncPortalMarkers();
           addLog({
             agentId: "world",
@@ -6094,6 +6175,58 @@ function createTellusWorld(
           });
           publish();
         });
+  };
+  const sendPortalDelete = (portalId: string) => {
+    const id = portalId.trim();
+    if (!id) return;
+    const existing = worldPortals.find((p) => p.id === id);
+    if (!existing) return;
+    pendingPortalIds.delete(id);
+    pendingDeletedPortals.set(id, existing);
+    worldPortals = worldPortals.filter((p) => p.id !== id);
+    syncPortalMarkers();
+    addLog({
+      agentId: "world",
+      agentName: "Tellus",
+      tool: "interact",
+      text: `Deleting portal ${existing.label || existing.target.worldId}...`,
+    });
+    publish();
+    const frame = { type: "portal.delete", visitorId, portalId: id };
+    const restore = (error: unknown) => {
+      pendingDeletedPortals.delete(id);
+      worldPortals = [...worldPortals, existing];
+      syncPortalMarkers();
+      addLog({
+        agentId: "world",
+        agentName: "Tellus",
+        tool: "interact",
+        text: `Portal delete failed: ${extractErrorMessage(String(error))}`,
+      });
+      publish();
+    };
+    if (worldSocket?.readyState === WebSocket.OPEN) worldSocket.send(JSON.stringify(frame));
+    else if (tellusWorldBackendAvailable)
+      void fetch(tellusWorldHttpUrl("action"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(frame),
+      }).catch(restore);
+  };
+  const updatePortalTarget = (portalId: string, targetWorldId: string) => {
+    const portal = worldPortals.find((p) => p.id === portalId);
+    const target = targetWorldId.trim();
+    if (!portal || !target || portal.target.worldId === target) return;
+    sendPortalUpsert({
+      ...portal,
+      label: `${runtimeConfig.worldId} to ${target} portal`.slice(0, 48),
+      target: {
+        ...portal.target,
+        kind: "world",
+        worldId: target,
+        spawn: portal.target.spawn ?? { x: 0, y: 0, z: 0 },
+      },
+    });
   };
   const createPortalHere = (targetWorldId: string, label?: string) => {
     const target = targetWorldId.trim();
@@ -6130,6 +6263,8 @@ function createTellusWorld(
   return {
     enterPortal,
     createPortalHere,
+    updatePortalTarget,
+    deletePortal: sendPortalDelete,
     createDoorHere,
     generate,
     addLibraryAsset,
@@ -7502,6 +7637,15 @@ function App(): React.ReactElement {
     setActiveWorldId(id);
     void refreshWorldList(id);
   };
+  const portalArrivalPosition = (x: number, z: number) => {
+    const len = Math.hypot(x, z);
+    const dx = len > 0.001 ? x / len : 1;
+    const dz = len > 0.001 ? z / len : 0;
+    return {
+      x: x + dx * PORTAL_ARRIVAL_EXIT_OFFSET,
+      z: z + dz * PORTAL_ARRIVAL_EXIT_OFFSET,
+    };
+  };
   // TELLUS INFINITY: when the scene reports a world.portal.entered, switch to the target world and warp to the
   // portal's spawn once the new scene is up (best-effort delayed warp — the world reloads async on the id change).
   useEffect(() => {
@@ -7510,7 +7654,8 @@ function App(): React.ReactElement {
     switchWorld(ps.toWorldId);
     if (ps.spawn) {
       const { x, z } = ps.spawn;
-      const t = window.setTimeout(() => worldRef.current?.warpTo(x, z), 1400);
+      const arrival = portalArrivalPosition(x, z);
+      const t = window.setTimeout(() => worldRef.current?.warpTo(arrival.x, arrival.z), 1400);
       return () => window.clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -8796,11 +8941,44 @@ function App(): React.ReactElement {
               }}
             >
               <div style={{ opacity: 0.7, marginBottom: 4 }}>Portals</div>
-              {(snapshot.portals ?? []).map((p) => (
-                <button key={p.id} type="button" title={`Enter ${p.label || p.target.worldId} (${p.target.kind})`} onClick={() => worldRef.current?.enterPortal(p.id)} style={portalBtn}>
-                  ⮕ {p.label || p.target.worldId} <small style={{ opacity: 0.6 }}>{p.target.kind}</small>
-                </button>
-              ))}
+              {(snapshot.portals ?? []).map((p) => {
+                const targetChoices = portalTargetOptions.includes(p.target.worldId)
+                  ? portalTargetOptions
+                  : [p.target.worldId, ...portalTargetOptions].filter(Boolean);
+                return (
+                  <article key={p.id} className="portal-panel-row">
+                    <button type="button" title={`Enter ${p.label || p.target.worldId} (${p.target.kind})`} onClick={() => worldRef.current?.enterPortal(p.id)} style={portalBtn}>
+                      {"->"} {p.label || p.target.worldId} <small style={{ opacity: 0.6 }}>{p.target.kind}</small>
+                    </button>
+                    <div className="portal-panel-row-actions">
+                      <select
+                        value={p.target.worldId}
+                        aria-label={`Destination for ${p.label || p.id}`}
+                        title="Change portal destination"
+                        disabled={targetChoices.length === 0}
+                        onChange={(event) => worldRef.current?.updatePortalTarget(p.id, event.target.value)}
+                      >
+                        {targetChoices.map((worldId) => (
+                          <option key={worldId} value={worldId}>
+                            {worldId}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        title="Delete portal"
+                        aria-label={`Delete ${p.label || p.id}`}
+                        onClick={() => {
+                          const ok = window.confirm(`Delete portal ${p.label || p.target.worldId}?`);
+                          if (ok) worldRef.current?.deletePortal(p.id);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
               {/* Create at your feet (owner-only — the server rejects otherwise; the rejection shows in the log). */}
               <button
                 type="button"
@@ -10342,20 +10520,26 @@ function App(): React.ReactElement {
                   />
                 ) : null;
               })}
-              {(snapshot.portals ?? []).map((portal) => (
-                <button
-                  type="button"
-                  key={portal.id}
-                  className="map-marker portal"
-                  style={mapPointStyle(portal.position)}
-                  title={portal.label || `Portal to ${portal.target.worldId}`}
-                  aria-label={portal.label || `Portal to ${portal.target.worldId}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    worldRef.current?.warpTo(portal.position.x, portal.position.z);
-                  }}
-                />
-              ))}
+              {(snapshot.portals ?? []).map((portal) => {
+                const anchoredThing = portal.anchorThingId
+                  ? snapshot.generated.find((thing) => thing.id === portal.anchorThingId)
+                  : undefined;
+                const position = anchoredThing?.position ?? portal.position;
+                return (
+                  <button
+                    type="button"
+                    key={portal.id}
+                    className="map-marker portal"
+                    style={mapPointStyle(position)}
+                    title={portal.label || `Portal to ${portal.target.worldId}`}
+                    aria-label={portal.label || `Portal to ${portal.target.worldId}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      worldRef.current?.warpTo(position.x, position.z);
+                    }}
+                  />
+                );
+              })}
               {snapshot.generated.map((thing) => (
                 <button
                   type="button"

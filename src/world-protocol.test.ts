@@ -200,6 +200,21 @@ describe("world protocol validators", () => {
     expect(isWorldAction({ type: "world.chat", visitorId: "visitor-1", message: dm })).toBe(true);
   });
 
+  it("accepts portal upsert and delete actions", () => {
+    const portal = {
+      id: "portal-1",
+      worldId: "main",
+      label: "main to aurora portal",
+      position: { x: 1, y: 2, z: 3 },
+      radius: 2.2,
+      target: { kind: "world", worldId: "aurora", spawn: { x: 0, y: 0, z: 0 } },
+      anchorThingId: "gate-1",
+    };
+    expect(isWorldAction({ type: "portal.upsert", visitorId: "visitor-1", portal })).toBe(true);
+    expect(isWorldAction({ type: "portal.delete", visitorId: "visitor-1", portalId: "portal-1" })).toBe(true);
+    expect(isWorldAction({ type: "portal.delete", visitorId: "visitor-1", portalId: 12 })).toBe(false);
+  });
+
   it("rejects malformed world chat messages", () => {
     const base = {
       id: "chat-1",
