@@ -46,10 +46,11 @@
     "typescript": "^5.9.3",
     "vite": "^8.0.12",
     "vitest": "4.1.0",
-    "wrangler": "^4.98.0"
+    "wrangler": "^4.103.0"
   },
   "overrides": {
     "esbuild": "^0.28.1",
+    "hono": "4.12.26",
     "ws": "^8.21.0"
   }
 }
