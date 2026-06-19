@@ -22,7 +22,6 @@ import {
   type VRMAnimation,
 } from "@pixiv/three-vrm-animation";
 import { runtimeConfig } from "./tellus-runtime-config";
-import { tellusAssetLibraryUrl } from "./tellus-urls-identity";
 
 // ── Asset-store ids (the ONLY thing to touch when new avatars/clips land) ──────────────────────
 // All are plain GETs on the header-free /api/assets proxy (no session header on purpose).
@@ -191,7 +190,7 @@ export function classicAvatarRequested(): boolean {
 }
 
 export function assetDownloadUrl(id: string): string {
-  return tellusAssetLibraryUrl(`/api/assets/download/${encodeURIComponent(id)}`);
+  return `${runtimeConfig.worldApiBase}/api/assets/download/${encodeURIComponent(id)}`;
 }
 
 /** Stable FNV-1a hash → each visitorId (players AND agent:* ids) always gets the same robot. */
@@ -314,6 +313,7 @@ export interface VrmaCatalogEntry {
   source?: string;
 }
 
+// name (lowercased) → entry. Seeded from the built-in clips so the rig works before /api/vrma exists.
 export type VrmaCategoryId = "core" | "gesture" | "dance" | "action" | "sport" | "locomotion" | "pose" | "other";
 
 export interface VrmaCategorySummary {
@@ -364,7 +364,6 @@ function vrmaCategoryForName(name: string): VrmaCategoryId {
   return "other";
 }
 
-// name (lowercased) → entry. Seeded from the built-in clips so the rig works before /api/vrma exists.
 const builtinVrmaCatalog = (): Map<string, VrmaCatalogEntry> => {
   const map = new Map<string, VrmaCatalogEntry>();
   for (const [name, id] of Object.entries(CLIP_IDS)) {
@@ -384,7 +383,7 @@ function vrmaFeedUrl(): string | null {
   // proxy, which prefixes store paths with /api/assets (same convention as assetDownloadUrl's
   // /api/assets/download/{id}). Live shape (3d.flobots.xyz/api/vrma):
   //   { animations: [ { id, name, download_url: "/api/download/{id}", source, ... } ] }
-  return tellusAssetLibraryUrl("/api/assets/vrma");
+  return `${runtimeConfig.worldApiBase}/api/assets/vrma`;
 }
 
 /** Fetch + cache the VRMA catalogue. Always resolves (never rejects): the built-in clips are the
@@ -479,6 +478,9 @@ export function emoteClipNamesSync(): string[] {
   return Array.from(builtinVrmaCatalog().values(), (e) => e.name);
 }
 
+// ── The shared rig state machine (idle ⇄ walk, + airborne hold) ────────────────────────────────
+// Subclasses provide the actions (VRMA-retargeted clips for VRM robots; embedded GLB clips for the
+// animals) and any per-frame extra work via afterMixerUpdate (VRM spring bones).
 function vrmaEntriesSync(): VrmaCatalogEntry[] {
   if (vrmaCatalogEntriesSnapshot) return vrmaCatalogEntriesSnapshot.slice();
   void loadVrmaCatalog();
@@ -510,7 +512,7 @@ export function recommendedEmoteClipNamesSync(limit = 14): string[] {
 
 export function emoteClipNamesByCategorySync(category: VrmaCategoryId, limit = 50): string[] {
   return vrmaEntriesSync()
-    .filter((entry) => category === "other" ? vrmaCategoryForName(entry.name) === "other" : vrmaCategoryForName(entry.name) === category)
+    .filter((entry) => vrmaCategoryForName(entry.name) === category)
     .slice(0, limit)
     .map((entry) => entry.name);
 }
@@ -531,9 +533,6 @@ export function vrmaCategorySummarySync(): VrmaCategorySummary[] {
     .filter((summary) => summary.count > 0);
 }
 
-// ── The shared rig state machine (idle ⇄ walk, + airborne hold) ────────────────────────────────
-// Subclasses provide the actions (VRMA-retargeted clips for VRM robots; embedded GLB clips for the
-// animals) and any per-frame extra work via afterMixerUpdate (VRM spring bones).
 export abstract class LocomotionAvatarRig implements AvatarRig {
   root: THREE.Group;
   mixer: THREE.AnimationMixer;
