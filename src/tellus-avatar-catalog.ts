@@ -282,6 +282,11 @@ function dedupeModels(models: readonly AssetBrowseModel[]): AssetBrowseModel[] {
 }
 
 export function loadAvatarCatalog(): Promise<readonly AvatarCatalogEntry[]> {
+  if (!runtimeConfig.worldApiBase) {
+    avatarCatalogSnapshot = AVATAR_CATALOG;
+    publishAvatarCatalog();
+    return Promise.resolve(avatarCatalogSnapshot);
+  }
   if (avatarCatalogPromise) return avatarCatalogPromise;
   avatarCatalogPromise = (async () => {
     try {

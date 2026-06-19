@@ -87,7 +87,6 @@ import {
 import {
   attachAvatarRig,
   avatarCatalogSync,
-  avatarThumbnailUrl,
   loadAvatarCatalog,
   setStoredAvatarId,
   setStoredAvatarScale,
@@ -120,8 +119,8 @@ import {
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood } from "./tellus-types";
-import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, DEFAULT_DAY_NIGHT_CYCLE_MS, DEFAULT_DAY_NIGHT_START, MIN_DAY_NIGHT_CYCLE_MS, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
-import { readJsonResponse, boundedNumber, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
+import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
+import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig } from "./tellus-runtime-config";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, toAssetId } from "./tellus-urls-identity";
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
@@ -135,6 +134,29 @@ import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
 import { buildAgentMapLocation, resolveAgentMoveTarget } from "./tellus-agent-location";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseWorldTemplateId, templateForWorldId } from "./tellus-world-templates";
+import {
+  ASSET_SURFACE_CONTEXTS,
+  inferAssetSurfaceContexts,
+  rankReusableAssets,
+  type AssetReuseCandidate,
+  type AssetSurfaceContext,
+} from "./tellus-asset-reuse";
+import { actorKindForVisitorId, friendlyVisitorName } from "./tellus-visitor-names";
+import {
+  DAY_NIGHT_MODE_OPTIONS,
+  LIGHTING_MOOD_OPTIONS,
+  LIGHTING_MOOD_PROFILES,
+  SKYBOX_OPTIONS,
+  WORLD_TEMPLATE_OPTIONS,
+  liveDayNightPhase,
+  normalizeDayNightCycleMs,
+  normalizeSkyboxUrl,
+  parseDayNightMode,
+  parseLightingMood,
+  skyboxLabel,
+  worldTemplateLabel,
+} from "./tellus-world-options";
+import { AssetTile, AvatarTile } from "./tellus-picker-tiles";
 import "./styles.css";
 
 // Attach X-Tellus-Session to every Hyades API call (agent endpoints, world meta PATCH, state, pay)
@@ -142,170 +164,6 @@ import "./styles.css";
 installSessionFetch();
 
 const PORTAL_ARRIVAL_EXIT_OFFSET = 4.5;
-
-type AssetReuseCandidate = AssetLibraryModel & {
-  reuseScore?: number;
-  reuseReason?: string;
-};
-
-type AssetSurfaceContext =
-  | "person"
-  | "fauna"
-  | "flora"
-  | "interior"
-  | "exterior"
-  | "surface"
-  | "furniture"
-  | "environment";
-
-const ASSET_REUSE_STOPWORDS = new Set([
-  "a",
-  "an",
-  "and",
-  "the",
-  "with",
-  "for",
-  "from",
-  "into",
-  "make",
-  "create",
-  "generate",
-  "little",
-  "small",
-  "large",
-  "big",
-  "nice",
-  "cool",
-  "some",
-  "very",
-]);
-
-const actorKindForVisitorId = (visitorId: string): "agent" | "player" | "world" => {
-  if (visitorId === "world") return "world";
-  return visitorId.startsWith("agent:") ? "agent" : "player";
-};
-
-const titleCaseToken = (token: string): string =>
-  token ? `${token.slice(0, 1).toUpperCase()}${token.slice(1).toLowerCase()}` : "";
-
-const friendlyAgentNameFromId = (visitorId: string): string => {
-  const raw = visitorId.replace(/^agent:/, "").replace(/^user-/, "");
-  const words = raw
-    .split(/[-_\s]+/)
-    .filter((part) => /^[a-z][a-z0-9]*$/i.test(part) && !/^[0-9a-f]{6,}$/i.test(part))
-    .slice(0, 3);
-  if (words.length > 0) return words.map(titleCaseToken).join(" ");
-  const suffix = raw.match(/[0-9a-f]{6,}/i)?.[0]?.slice(0, 6) || raw.slice(-6) || visitorId.slice(-6);
-  return `Agent ${suffix}`;
-};
-
-const friendlyVisitorName = (visitorId: string, explicitName?: string, selfVisitorId?: string): string => {
-  const name = explicitName?.trim();
-  if (name) return name;
-  if (visitorId === "local-player") return "You";
-  if (selfVisitorId && visitorId === selfVisitorId && !visitorId.startsWith("agent:")) return "You";
-  if (visitorId === "world") return "World";
-  if (visitorId.startsWith("agent:")) return friendlyAgentNameFromId(visitorId);
-  return `Player ${visitorId.slice(0, 6) || "nearby"}`;
-};
-
-const assetReuseTerms = (text: string): string[] =>
-  text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, " ")
-    .split(/[\s-]+/)
-    .map((term) => term.trim())
-    .filter((term) => term.length > 2 && !ASSET_REUSE_STOPWORDS.has(term));
-
-const assetSurfaceContextTerms: Record<AssetSurfaceContext, readonly string[]> = {
-  person: ["person", "people", "avatar", "human", "character", "vrm", "auton"],
-  fauna: ["fauna", "animal", "creature", "pet", "bird", "fox", "wolf", "horse", "deer"],
-  flora: ["flora", "plant", "flower", "tree", "botany", "garden", "grass", "moss"],
-  interior: ["interior", "inside", "indoor", "room", "library", "house", "wall", "floor"],
-  exterior: ["exterior", "outside", "outdoor", "garden", "park", "bridge", "bench", "path"],
-  surface: ["surface", "shelf", "table", "counter", "floor", "platform", "pedestal"],
-  furniture: ["furniture", "chair", "bench", "table", "shelf", "cabinet", "sofa", "desk"],
-  environment: ["environment", "building", "bridge", "path", "rock", "lantern", "decor"],
-};
-
-const inferAssetSurfaceContexts = (text: string): AssetSurfaceContext[] => {
-  const terms = new Set(assetReuseTerms(text));
-  const contexts: AssetSurfaceContext[] = [];
-  for (const [context, matches] of Object.entries(assetSurfaceContextTerms) as Array<
-    [AssetSurfaceContext, readonly string[]]
-  >) {
-    if (matches.some((term) => terms.has(term))) contexts.push(context);
-  }
-  return contexts;
-};
-
-const assetSurfaceContextText = (model: AssetLibraryModel): string =>
-  [
-    model.name,
-    model.description ?? "",
-    model.file_format ?? "",
-    ...(model.tags ?? []),
-  ].join(" ");
-
-const scoreReusableAsset = (
-  prompt: string,
-  model: AssetLibraryModel,
-  kind?: GeneratedKind,
-  preferredContexts: readonly AssetSurfaceContext[] = [],
-): AssetReuseCandidate | null => {
-  const promptTerms = new Set(assetReuseTerms(prompt));
-  if (promptTerms.size === 0) return null;
-  const modelText = assetSurfaceContextText(model);
-  const modelTerms = new Set(assetReuseTerms(modelText));
-  let overlap = 0;
-  for (const term of promptTerms) {
-    if (modelTerms.has(term)) overlap++;
-  }
-  const kindBoost =
-    kind &&
-    (model.name.toLowerCase().includes(kind) ||
-      model.tags?.some((tag) => tag.toLowerCase().includes(kind)))
-      ? 0.25
-      : 0;
-  const promptContexts = inferAssetSurfaceContexts(prompt);
-  const modelContexts = inferAssetSurfaceContexts(modelText);
-  const allPreferredContexts = new Set([...promptContexts, ...preferredContexts]);
-  const contextMatches = modelContexts.filter((context) => allPreferredContexts.has(context));
-  const contextBoost = contextMatches.length > 0 ? Math.min(0.35, contextMatches.length * 0.16) : 0;
-  const score = overlap / Math.max(2, promptTerms.size) + kindBoost + contextBoost;
-  if (score < 0.34) return null;
-  return {
-    ...model,
-    reuseScore: score,
-    reuseReason:
-      contextMatches.length > 0
-        ? contextMatches.join(", ")
-        : overlap > 0
-          ? `${overlap} matching term${overlap === 1 ? "" : "s"}`
-          : "kind match",
-  };
-};
-
-const rankReusableAssets = (
-  prompt: string,
-  models: readonly AssetLibraryModel[],
-  kind?: GeneratedKind,
-  limit = 5,
-  preferredContexts: readonly AssetSurfaceContext[] = [],
-): AssetReuseCandidate[] => {
-  const seen = new Set<string>();
-  return models
-    .map((model) => scoreReusableAsset(prompt, model, kind, preferredContexts))
-    .filter((model): model is AssetReuseCandidate => model !== null)
-    .filter((model) => {
-      const key = model.modelUrl ?? model.id;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => (b.reuseScore ?? 0) - (a.reuseScore ?? 0))
-    .slice(0, limit);
-};
 
 // Per-user embodied-agent status shape returned by the Hyades world agent endpoints (camelCase).
 interface AgentStatus {
@@ -383,224 +241,6 @@ const agentChipStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
   overflow: "hidden",
 };
-
-const WORLD_TEMPLATE_OPTIONS: Array<{ id: WorldTemplateId; label: string }> = [
-  { id: "tellus", label: "Tellus" },
-  { id: "wide-island", label: "Wide Island" },
-  { id: "lowlands", label: "Lowlands" },
-  { id: "ridge", label: "Ridge" },
-  { id: "evoflow-coral-canyon", label: "Evoflow Coral Canyon" },
-  { id: "evoflow-coral-canyon-child", label: "Evoflow Canyon Child" },
-  { id: "evoflow-spires", label: "Evoflow Spires" },
-  { id: "evoflow-glass-ridge", label: "Evoflow Glass Ridge" },
-  { id: "evoflow-lichen-basin", label: "Evoflow Lichen Basin" },
-  { id: "evoflow-copper-terraces", label: "Evoflow Copper Terraces" },
-  { id: "evoflow-basalt-teeth", label: "Evoflow Basalt Teeth" },
-  { id: "evoflow-coral-fold", label: "Evoflow Coral Fold" },
-];
-
-const SKYBOX_OPTIONS: Array<{ url: string; label: string }> = [
-  { url: "/skybox/free_-_skybox_in_the_cloud/scene.gltf", label: "Cloud Dome" },
-  { url: "/skybox/free_-_skybox_basic_sky.glb", label: "Basic Sky" },
-  { url: "/skybox/skybox_skydays_3.glb", label: "Sky Days" },
-  { url: "/skybox/tellus-starry-night/scene.gltf", label: "Starry Night" },
-  { url: "/skybox/tellus-blue-clouds/scene.gltf", label: "Blue Clouds" },
-  { url: "/skybox/tellus-storm-ocean/scene.gltf", label: "Storm Ocean" },
-  { url: "/skybox/tellus-desert-sunset/scene.gltf", label: "Desert Sunset" },
-  { url: "/skybox/tellus-alien-rings/scene.gltf", label: "Alien Rings" },
-  { url: "/skybox/tellus-aurora-sky/scene.gltf", label: "Aurora Sky" },
-];
-
-const DAY_NIGHT_MODE_OPTIONS: Array<{ id: DayNightMode; label: string }> = [
-  { id: "cycle", label: "Cycle" },
-  { id: "day", label: "Day Only" },
-  { id: "night", label: "Night Only" },
-  { id: "golden", label: "Golden Hour" },
-  { id: "pause", label: "Pause" },
-];
-
-const LIGHTING_MOOD_OPTIONS: Array<{ id: LightingMood; label: string }> = [
-  { id: "natural", label: "Natural" },
-  { id: "bright-build", label: "Bright Build" },
-  { id: "soft-warm", label: "Soft Warm" },
-  { id: "cool-dream", label: "Cool Dream" },
-  { id: "moonlit", label: "Moonlit" },
-  { id: "dramatic-sunset", label: "Dramatic Sunset" },
-];
-
-const DAY_NIGHT_MODES = DAY_NIGHT_MODE_OPTIONS.map((option) => option.id);
-const LIGHTING_MOODS = LIGHTING_MOOD_OPTIONS.map((option) => option.id);
-const MAX_DAY_NIGHT_CYCLE_MS = 60 * 60 * 1000;
-
-type LightingMoodProfile = {
-  sun: number;
-  moon: number;
-  hemi: number;
-  env: number;
-  fogNear: number;
-  fogFar: number;
-  opacity: number;
-  backgroundTint?: THREE.Color;
-  backgroundTintStrength?: number;
-  skyTint?: THREE.Color;
-  skyTintStrength?: number;
-  sunTint?: THREE.Color;
-  sunTintStrength?: number;
-  hemiSkyTint?: THREE.Color;
-  hemiGroundTint?: THREE.Color;
-  hemiTintStrength?: number;
-  oceanTint?: THREE.Color;
-  oceanTintStrength?: number;
-};
-
-const LIGHTING_MOOD_PROFILES: Record<LightingMood, LightingMoodProfile> = {
-  natural: { sun: 1, moon: 1, hemi: 1, env: 1, fogNear: 1, fogFar: 1, opacity: 1 },
-  "bright-build": {
-    sun: 1.16,
-    moon: 0.92,
-    hemi: 1.22,
-    env: 1.18,
-    fogNear: 1.08,
-    fogFar: 1.18,
-    opacity: 0.9,
-    backgroundTint: new THREE.Color(0xe8f4ff),
-    backgroundTintStrength: 0.1,
-    skyTint: new THREE.Color(0xf5fbff),
-    skyTintStrength: 0.16,
-    hemiSkyTint: new THREE.Color(0xdcecff),
-    hemiGroundTint: new THREE.Color(0x6f8353),
-    hemiTintStrength: 0.16,
-    oceanTint: new THREE.Color(0x8ad4ff),
-    oceanTintStrength: 0.08,
-  },
-  "soft-warm": {
-    sun: 1.02,
-    moon: 0.82,
-    hemi: 1.05,
-    env: 1.02,
-    fogNear: 0.96,
-    fogFar: 1.04,
-    opacity: 1,
-    backgroundTint: new THREE.Color(0xffe2c2),
-    backgroundTintStrength: 0.16,
-    skyTint: new THREE.Color(0xffd4aa),
-    skyTintStrength: 0.2,
-    sunTint: new THREE.Color(0xffc08a),
-    sunTintStrength: 0.22,
-    hemiSkyTint: new THREE.Color(0xffd7b1),
-    hemiGroundTint: new THREE.Color(0x7c6f45),
-    hemiTintStrength: 0.18,
-    oceanTint: new THREE.Color(0xffc792),
-    oceanTintStrength: 0.1,
-  },
-  "cool-dream": {
-    sun: 0.9,
-    moon: 1.28,
-    hemi: 1.1,
-    env: 1.06,
-    fogNear: 0.9,
-    fogFar: 1.08,
-    opacity: 1,
-    backgroundTint: new THREE.Color(0x9ed3ff),
-    backgroundTintStrength: 0.18,
-    skyTint: new THREE.Color(0xaec7ff),
-    skyTintStrength: 0.24,
-    sunTint: new THREE.Color(0xdce8ff),
-    sunTintStrength: 0.14,
-    hemiSkyTint: new THREE.Color(0x9dbdff),
-    hemiGroundTint: new THREE.Color(0x4c6372),
-    hemiTintStrength: 0.2,
-    oceanTint: new THREE.Color(0x84c9ff),
-    oceanTintStrength: 0.12,
-  },
-  moonlit: {
-    sun: 0.72,
-    moon: 1.65,
-    hemi: 0.82,
-    env: 0.86,
-    fogNear: 0.82,
-    fogFar: 0.96,
-    opacity: 1.08,
-    backgroundTint: new THREE.Color(0x172241),
-    backgroundTintStrength: 0.28,
-    skyTint: new THREE.Color(0x8fa8ff),
-    skyTintStrength: 0.25,
-    sunTint: new THREE.Color(0xcad7ff),
-    sunTintStrength: 0.18,
-    hemiSkyTint: new THREE.Color(0x7894ff),
-    hemiGroundTint: new THREE.Color(0x28344a),
-    hemiTintStrength: 0.28,
-    oceanTint: new THREE.Color(0x405d95),
-    oceanTintStrength: 0.2,
-  },
-  "dramatic-sunset": {
-    sun: 1.12,
-    moon: 0.9,
-    hemi: 0.96,
-    env: 0.95,
-    fogNear: 0.88,
-    fogFar: 1,
-    opacity: 1,
-    backgroundTint: new THREE.Color(0xff9c5f),
-    backgroundTintStrength: 0.3,
-    skyTint: new THREE.Color(0xff7f6f),
-    skyTintStrength: 0.34,
-    sunTint: new THREE.Color(0xff8f4f),
-    sunTintStrength: 0.32,
-    hemiSkyTint: new THREE.Color(0xffb17a),
-    hemiGroundTint: new THREE.Color(0x6e4f63),
-    hemiTintStrength: 0.24,
-    oceanTint: new THREE.Color(0xff8758),
-    oceanTintStrength: 0.18,
-  },
-};
-
-const LEGACY_BASIC_SKY_URL = "/skybox/free_-_skybox_basic_sky/scene.gltf";
-const BASIC_SKY_URL = "/skybox/free_-_skybox_basic_sky.glb";
-
-function normalizeSkyboxUrl(url: string): string {
-  const trimmed = url.trim();
-  return trimmed === LEGACY_BASIC_SKY_URL ? BASIC_SKY_URL : trimmed;
-}
-
-function parseDayNightMode(value: unknown, fallback: DayNightMode = "cycle"): DayNightMode {
-  return typeof value === "string" && DAY_NIGHT_MODES.includes(value as DayNightMode)
-    ? (value as DayNightMode)
-    : fallback;
-}
-
-function parseLightingMood(value: unknown, fallback: LightingMood = "natural"): LightingMood {
-  return typeof value === "string" && LIGHTING_MOODS.includes(value as LightingMood)
-    ? (value as LightingMood)
-    : fallback;
-}
-
-function normalizeDayNightCycleMs(value: unknown, fallback = DEFAULT_DAY_NIGHT_CYCLE_MS): number {
-  return boundedNumber(value as string | number | undefined, fallback, MIN_DAY_NIGHT_CYCLE_MS, MAX_DAY_NIGHT_CYCLE_MS);
-}
-
-function liveDayNightPhase(ignorePause = false): number {
-  if (!ignorePause && runtimeConfig.dayNightMode === "pause") {
-    return ((runtimeConfig.dayNightStart % 1) + 1) % 1;
-  }
-  return (
-    (runtimeConfig.dayNightStart + Date.now() / runtimeConfig.dayNightCycleMs) %
-    1 +
-    1
-  ) % 1;
-}
-
-function worldTemplateLabel(template: WorldTemplateId): string {
-  return (
-    WORLD_TEMPLATE_OPTIONS.find((option) => option.id === template)?.label ??
-    template
-  );
-}
-
-function skyboxLabel(url: string): string {
-  const normalized = normalizeSkyboxUrl(url);
-  return SKYBOX_OPTIONS.find((option) => option.url === normalized)?.label ?? "Custom Sky";
-}
 
 // TELLUS INFINITY biomes: the server BiomeGrid is a fixed 24×24 grid mapped across the WHOLE world
 // extent (BiomeCellAt: x/side*24). The minimap uses this same fixed size so its biome cells register
@@ -5818,7 +5458,7 @@ function createTellusWorld(
       : typeof value === "string"
         ? value.split(/[,/ ]+/)
         : [];
-    const allowed = new Set(Object.keys(assetSurfaceContextTerms));
+    const allowed = new Set<string>(ASSET_SURFACE_CONTEXTS);
     return raw
       .map((entry) => (typeof entry === "string" ? entry.trim().toLowerCase() : ""))
       .filter((entry): entry is AssetSurfaceContext => allowed.has(entry));
@@ -6595,197 +6235,6 @@ const avatarScaleLabel = (scale: number): string =>
 
 // One avatar-picker grid tile: store thumbnail when it loads, else a colored-initial fallback
 // ("classic" has no store thumbnail and always renders the initial tile). Click = select.
-function AvatarTile({
-  entry,
-  selected,
-  onSelect,
-}: {
-  entry: AvatarCatalogEntry;
-  selected: boolean;
-  onSelect: (entry: AvatarCatalogEntry) => void;
-}): React.ReactElement {
-  const [thumbFailed, setThumbFailed] = useState(false);
-  const thumbUrl = avatarThumbnailUrl(entry);
-  // Deterministic tile hue per label so the initials fallback stays distinctive.
-  let hue = 0;
-  for (let i = 0; i < entry.label.length; i++) hue = (hue * 31 + entry.label.charCodeAt(i)) % 360;
-  return (
-    <button
-      type="button"
-      title={entry.label}
-      aria-pressed={selected}
-      onClick={() => onSelect(entry)}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "stretch",
-        gap: 4,
-        padding: 4,
-        borderRadius: 8,
-        border: selected ? "1px solid #6fae46" : "1px solid rgba(255,255,255,0.14)",
-        background: selected ? "rgba(111,174,70,0.22)" : "rgba(255,255,255,0.05)",
-        color: "#dfe7d8",
-        cursor: "pointer",
-        minWidth: 0,
-      }}
-    >
-      {thumbUrl && !thumbFailed ? (
-        <img
-          src={thumbUrl}
-          alt={entry.label}
-          onError={() => setThumbFailed(true)}
-          style={{
-            width: "100%",
-            aspectRatio: "1 / 1",
-            display: "block",
-            objectFit: "cover",
-            borderRadius: 6,
-            background: "rgba(0,0,0,0.35)",
-          }}
-        />
-      ) : (
-        <span
-          aria-hidden
-          style={{
-            width: "100%",
-            aspectRatio: "1 / 1",
-            borderRadius: 6,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 22,
-            fontWeight: 700,
-            color: "#0c1016",
-            background: `hsl(${hue} 45% 62%)`,
-          }}
-        >
-          {entry.label.slice(0, 1).toUpperCase()}
-        </span>
-      )}
-      <span
-        style={{
-          fontSize: 10,
-          lineHeight: 1.2,
-          textAlign: "center",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {entry.label}
-      </span>
-    </button>
-  );
-}
-
-// One asset-store search-result tile — same square-thumbnail grid look as AvatarTile, driven by a
-// browse-card AssetLibraryModel. Store thumbnail when available, else a deterministic colored-initial
-// fallback. Click = drop the asset into the world.
-function AssetTile({
-  model,
-  onSelect,
-}: {
-  model: AssetLibraryModel;
-  onSelect: (model: AssetLibraryModel) => void;
-}): React.ReactElement {
-  const [thumbFailed, setThumbFailed] = useState(false);
-  const thumbUrl =
-    model.hasThumbnail && !thumbFailed
-      ? tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(model.id)}/thumbnail`)
-      : null;
-  // Deterministic tile hue per name so the initials fallback stays distinctive (matches AvatarTile).
-  let hue = 0;
-  for (let i = 0; i < model.name.length; i++) hue = (hue * 31 + model.name.charCodeAt(i)) % 360;
-  const format = (model.file_format ?? "model").toUpperCase();
-  const title =
-    model.name +
-    (model.hasGameOptimized ? " · game-optimized" : "") +
-    (typeof model.download_count === "number" && model.download_count > 0
-      ? ` · ${model.download_count} downloads`
-      : "");
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={() => onSelect(model)}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "stretch",
-        gap: 4,
-        padding: 4,
-        borderRadius: 8,
-        border: "1px solid rgba(255,255,255,0.14)",
-        background: "rgba(255,255,255,0.05)",
-        color: "#dfe7d8",
-        cursor: "pointer",
-      }}
-    >
-      {thumbUrl ? (
-        <img
-          src={thumbUrl}
-          alt={model.name}
-          loading="lazy"
-          onError={() => setThumbFailed(true)}
-          style={{
-            width: "100%",
-            aspectRatio: "1 / 1",
-            objectFit: "cover",
-            borderRadius: 6,
-            background: "rgba(0,0,0,0.35)",
-          }}
-        />
-      ) : (
-        <span
-          aria-hidden
-          style={{
-            width: "100%",
-            aspectRatio: "1 / 1",
-            borderRadius: 6,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 22,
-            fontWeight: 700,
-            color: "#0c1016",
-            background: `hsl(${hue} 45% 62%)`,
-          }}
-        >
-          {model.name.slice(0, 1).toUpperCase()}
-        </span>
-      )}
-      <span
-        style={{
-          fontSize: 10,
-          lineHeight: 1.2,
-          textAlign: "center",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {model.name}
-      </span>
-      <span
-        style={{
-          fontSize: 9,
-          lineHeight: 1,
-          textAlign: "center",
-          opacity: 0.5,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {format}
-        {typeof model.download_count === "number" && model.download_count > 0
-          ? ` · ${model.download_count}↓`
-          : ""}
-      </span>
-    </button>
-  );
-}
-
 function App(): React.ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const worldRef = useRef<TellusWorldApi | null>(null);
@@ -6897,11 +6346,12 @@ function App(): React.ReactElement {
   // ── Avatar picker state (catalog selection; "" = deterministic default robot) ──
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [assetPanelTab, setAssetPanelTab] = useState<AssetPanelTab>("building");
+  const [runtimeConfigLoaded, setRuntimeConfigLoaded] = useState(false);
   const [avatarCatalog, setAvatarCatalog] = useState<readonly AvatarCatalogEntry[]>(() => avatarCatalogSync());
   const [avatarSelection, setAvatarSelection] = useState<string>(() => storedAvatarId());
   useEffect(() => subscribeAvatarCatalog(() => setAvatarCatalog(avatarCatalogSync())), []);
   useEffect(() => {
-    if (!assetPanelOpen || assetPanelTab !== "avatar") return;
+    if (!runtimeConfigLoaded || !assetPanelOpen || assetPanelTab !== "avatar") return;
     let cancelled = false;
     loadAvatarCatalog()
       .then((catalog) => {
@@ -6911,7 +6361,7 @@ function App(): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [assetPanelOpen, assetPanelTab]);
+  }, [runtimeConfigLoaded, assetPanelOpen, assetPanelTab]);
   const onAvatarPick = (entry: AvatarCatalogEntry) => {
     setAvatarSelection(entry.id);
     worldRef.current?.setAvatarSelection(entry.id); // persists + swaps the rig + broadcasts
@@ -8606,13 +8056,13 @@ function App(): React.ReactElement {
   // Category tabs (flora/fauna/building) browse the shared asset library by store category; a typed
   // query overrides the category. The avatar tab has no browse.
   useEffect(() => {
-    if (!assetPanelOpen || (!assetCategory && !assetBrowseQuery)) return;
+    if (!runtimeConfigLoaded || !assetPanelOpen || (!assetCategory && !assetBrowseQuery)) return;
     const id = window.setTimeout(
       () => void runAssetBrowse(assetBrowseQuery, 1, false, assetBrowseSort, assetCategory),
       assetSearch.trim() ? 260 : 0,
     );
     return () => window.clearTimeout(id);
-  }, [assetBrowseQuery, assetBrowseSort, assetCategory, assetPanelOpen, assetSearch, runAssetBrowse]);
+  }, [runtimeConfigLoaded, assetBrowseQuery, assetBrowseSort, assetCategory, assetPanelOpen, assetSearch, runAssetBrowse]);
   const [openToolMenus, setOpenToolMenus] = useState<ToolMenu[]>([]);
   const [createPromptFocused, setCreatePromptFocused] = useState(false);
   const [worldMenuOpen, setWorldMenuOpen] = useState(false);
@@ -8778,6 +8228,8 @@ function App(): React.ReactElement {
     let cancelled = false;
     void loadRuntimeConfig()
       .then(async () => {
+        if (cancelled) return;
+        setRuntimeConfigLoaded(true);
         const models = await loadAssetLibraryModels().catch(() => []);
         if (cancelled) return;
         setAssetLibrary(models);
@@ -8835,7 +8287,10 @@ function App(): React.ReactElement {
       })
       .catch((error) => {
         console.warn("Tellus startup state failed to load", error);
-        if (!cancelled) setActiveWorldId(runtimeConfig.worldId);
+        if (!cancelled) {
+          setRuntimeConfigLoaded(true);
+          setActiveWorldId(runtimeConfig.worldId);
+        }
       });
     return () => {
       cancelled = true;
