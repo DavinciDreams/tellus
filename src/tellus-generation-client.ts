@@ -88,10 +88,14 @@ export async function browseAssetLibrary(
   page: number,
   sort: AssetBrowseSort = "newest",
   perPage = 24,
+  category = "",
 ): Promise<AssetBrowseResult> {
   if (!runtimeConfig.worldApiBase) return { models: [], hasNext: false, total: 0 };
   const params = new URLSearchParams({ page: String(page), per_page: String(perPage), sort });
+  // A typed search overrides the category seed; otherwise filter by the store's real asset_category
+  // (flora / fauna / building / environment / material) for precise, on-topic results.
   if (search.trim()) params.set("search", search.trim());
+  else if (category.trim()) params.set("category", category.trim());
   const response = await fetch(tellusAssetLibraryUrl(`/api/assets/models/browse?${params.toString()}`), {
     cache: "no-store",
   });

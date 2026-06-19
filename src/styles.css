@@ -13,6 +13,15 @@
   --hud-muted: #c5c58d;
   --hud-shadow: 0 18px 54px rgb(0 0 0 / 42%);
   --hud-inset: inset 0 0 0 1px rgb(255 244 185 / 7%);
+  /* Z-index scale — replaces scattered magic numbers (20/27/30/34/35/50/56/70/80).
+     Keep all HUD layering on these tokens so stacking stays reasonable to reason about. */
+  --z-canvas-ui: 4;
+  --z-rail: 20;
+  --z-panel: 30;
+  --z-panel-raised: 35;
+  --z-toolbar: 50;
+  --z-overlay: 70;
+  --z-modal: 80;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -128,13 +137,14 @@ textarea::placeholder {
   position: absolute;
   right: 50%;
   bottom: 28px;
-  z-index: 28;
+  z-index: var(--z-rail);
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto;
   align-items: center;
   gap: 6px;
   width: min(620px, calc(100% - 500px));
-  border-color: var(--hud-border);
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 10px;
   background: rgb(12 35 24 / 88%);
   backdrop-filter: blur(14px);
   box-shadow: var(--hud-shadow), var(--hud-inset);
@@ -187,12 +197,28 @@ textarea::placeholder {
   position: absolute;
   top: 18px;
   right: 20px;
-  z-index: 27;
-  display: grid;
-  justify-items: end;
+  z-index: var(--z-rail);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
-  width: min(230px, calc(100vw - 40px));
+  width: min(232px, calc(100vw - 40px));
+  /* content-height (map + portals), NOT full-height — so the rail doesn't reserve the lower-right
+     column and collide with the asset drawer. Portals scroll inside the card if very long. */
+  max-height: calc(100dvh - 36px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  pointer-events: none; /* gaps pass clicks through; children re-enable */
+}
+
+.world-right-hud > * {
   pointer-events: auto;
+}
+
+/* keep the minimap itself from being squashed when portals share the rail */
+.world-right-hud > .world-map {
+  flex: 0 0 auto;
 }
 
 .world-menu-panel {
@@ -205,13 +231,14 @@ textarea::placeholder {
   align-items: flex-start;
   flex-wrap: wrap;
   gap: 8px;
-  width: min(760px, calc(100vw - 40px));
+  width: min(620px, calc(100vw - 40px));
   max-height: min(72dvh, calc(100dvh - 40px));
   overflow: auto;
-  border: 1px solid var(--hud-border);
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 10px;
   background: var(--hud-bg-strong);
   box-shadow: var(--hud-shadow), var(--hud-inset);
-  padding: 8px;
+  padding: 10px;
   pointer-events: auto;
 }
 
@@ -318,8 +345,8 @@ textarea::placeholder {
 .world-mini-chat {
   position: absolute;
   left: 20px;
-  bottom: 88px;
-  z-index: 27;
+  bottom: 10px; /* flush to the bottom edge; the centered toolbar floats above (higher z-index) */
+  z-index: var(--z-rail);
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
   gap: 7px;
@@ -327,7 +354,7 @@ textarea::placeholder {
   min-width: 220px;
   max-width: min(640px, calc(100vw - 40px));
   min-height: 240px;
-  max-height: min(72dvh, calc(100dvh - 110px));
+  max-height: min(78dvh, calc(100dvh - 84px));
   border: 1px solid var(--hud-border);
   background: rgb(12 38 33 / 88%);
   box-shadow: var(--hud-shadow), var(--hud-inset);
@@ -358,7 +385,7 @@ textarea::placeholder {
 
 .mini-chat-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
 }
 
@@ -519,6 +546,184 @@ textarea::placeholder {
   padding: 0;
 }
 
+/* ============================================================================
+   Shared HUD panel primitives — foldable cards + the stacked right rail.
+   Introduced to de-crowd the right side: minimap / portals / asset drawer
+   now live in ONE flex column so they reflow instead of overlapping, and
+   each can collapse to just its title bar.
+   ============================================================================ */
+
+/* Right rail: a single anchored column. Children stack top→bottom and scroll
+   as a group, so opening one panel can never cover another. */
+.hud-right-rail {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  bottom: 18px;
+  z-index: var(--z-rail);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: min(248px, calc(100vw - 40px));
+  max-height: calc(100dvh - 36px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  pointer-events: none; /* let clicks through the gaps; cards re-enable below */
+}
+
+.hud-right-rail > * {
+  pointer-events: auto;
+  flex: 0 0 auto;
+}
+
+/* A foldable card. Collapsed = header only; expanded = header + body. */
+.hud-card {
+  border: 1px solid var(--hud-border-soft);
+  background: var(--hud-bg);
+  box-shadow: var(--hud-shadow), var(--hud-inset);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.hud-card.is-collapsed {
+  background: rgb(12 38 33 / 78%);
+}
+
+.hud-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 9px;
+  border: none;
+  background: rgb(0 0 0 / 18%);
+  color: var(--hud-gold-bright);
+  font: 800 10px/1.2 inherit;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+}
+
+.hud-card-header:hover {
+  background: rgb(255 244 185 / 8%);
+}
+
+.hud-card-header .hud-card-caret {
+  width: 12px;
+  flex: 0 0 auto;
+  opacity: 0.75;
+  font-size: 9px;
+}
+
+.hud-card-header .hud-card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud-card-header .hud-card-badge {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.7;
+  text-transform: none;
+}
+
+.hud-card-header .hud-card-close {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.hud-card-header .hud-card-close:hover {
+  opacity: 1;
+}
+
+.hud-card-body {
+  padding: 8px 9px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The minimap card body should not add its own scroll/padding around the map. */
+.hud-card.hud-card--map .hud-card-body {
+  padding: 6px;
+  overflow: visible;
+}
+
+/* ----- Agent chat tab (lives inside .world-mini-chat) ------------------- */
+/* The chat panel is a fixed 6-row grid; as the agent tab's single child the .agent-tab must
+   span from its row to the end so the dialog feed gets the flexible (1fr) height, not a stray
+   auto row. grid-row 3/-1 = everything after header(1) + tabs(2). */
+.world-mini-chat > .agent-tab {
+  grid-row: 3 / -1;
+  min-height: 0;
+}
+
+.agent-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.agent-tab-statusrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.agent-tab-fold {
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(0 0 0 / 22%);
+  color: var(--hud-muted);
+  border-radius: 7px;
+  padding: 5px 8px;
+  font: 700 10px/1.2 inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-tab-fold:hover {
+  border-color: var(--hud-border);
+  color: var(--hud-gold-bright);
+}
+
+.agent-tab-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 24%);
+}
+
 .world-map-terrain {
   position: absolute;
   inset: 0;
@@ -632,6 +837,44 @@ textarea::placeholder {
 .map-marker.asset.pending {
   background: #f0c84b;
   animation: map-pulse 1.2s ease-in-out infinite;
+}
+
+/* P2P video panel — now on the shared .hud-card chrome (green/gold), positioned bottom-center-left.
+   Was an inline-styled dark-glass aside that didn't match the app. */
+.p2p-panel {
+  position: absolute;
+  bottom: 92px;
+  left: 50%;
+  transform: translateX(-104%); /* just left of center */
+  width: 280px;
+  max-height: min(560px, calc(100dvh - 120px));
+  overflow-y: auto;
+  z-index: var(--z-panel);
+  padding: 12px 14px;
+  gap: 10px;
+  font: 500 13px/1.4 ui-sans-serif, system-ui;
+  pointer-events: auto;
+}
+
+.p2p-panel select {
+  background-color: rgb(8 18 20);
+  color: var(--hud-text);
+}
+
+@media (max-width: 720px) {
+  .p2p-panel {
+    left: 20px;
+    transform: none;
+  }
+}
+
+/* Portals card now docks INSIDE the right rail, directly under the minimap (.world-right-hud).
+   It's a flow child — full width of the rail, foldable (.hud-card chrome), hides with the map. */
+.world-right-hud .portal-panel {
+  width: 100%;
+  max-height: min(40dvh, calc(100dvh - 360px));
+  color: var(--hud-text);
+  font: 600 12px/1.3 ui-sans-serif, system-ui;
 }
 
 .portal-panel-notice {
@@ -1631,7 +1874,7 @@ textarea::placeholder {
 .asset-tool-panel {
   top: 258px;
   right: 20px;
-  bottom: 18px;
+  bottom: 10px; /* flush to the bottom edge (toolbar floats over the centered gap) */
   left: auto;
   width: min(330px, calc(100vw - 40px));
   max-height: none;
@@ -2133,8 +2376,11 @@ textarea::placeholder {
   text-align: left;
 }
 
+/* The drawer (.tool-panel) already owns the vertical scroll; the asset list must NOT create a
+   second nested scroll region (that caused the awkward double scrollbar). Let it flow naturally. */
 .asset-list {
-  max-height: min(420px, 44dvh);
+  max-height: none;
+  overflow: visible;
 }
 
 .asset-search-field {
@@ -2204,8 +2450,8 @@ textarea::placeholder {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
   gap: 8px;
-  max-height: min(360px, 40dvh);
-  overflow-y: auto;
+  /* No own scroll — the drawer (.tool-panel) owns the single vertical scroll. Removing the nested
+     max-height/overflow kills the double scrollbar on the animal/building/flora tabs. */
   padding-right: 2px;
 }
 .asset-browse-grid > button {
@@ -2323,22 +2569,26 @@ textarea::placeholder {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* Compact paint palette — small swatch tiles, 4 across, tiny caption underneath. Roughly half the
+   old footprint. The color block is the focus; the label is a small caption (still visible, not
+   hover-only, so the palette stays readable). */
 .terrain-material-swatches {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
 }
 
 .terrain-swatch {
   display: grid;
-  gap: 6px;
+  gap: 3px;
   min-width: 0;
   border: 1px solid var(--hud-border-soft);
+  border-radius: 6px;
   background: rgb(0 0 0 / 18%);
   color: var(--hud-text);
   cursor: pointer;
-  padding: 6px;
-  text-align: left;
+  padding: 3px;
+  text-align: center;
 }
 
 .terrain-swatch:hover {
@@ -2348,9 +2598,11 @@ textarea::placeholder {
 
 .terrain-swatch-preview {
   display: block;
-  height: 34px;
+  aspect-ratio: 1;
+  height: auto;
+  border-radius: 4px;
   border: 1px solid rgb(255 244 185 / 18%);
-  box-shadow: inset 0 0 18px rgb(0 0 0 / 18%);
+  box-shadow: inset 0 0 12px rgb(0 0 0 / 18%);
 }
 
 .terrain-swatch span:last-child {
@@ -2358,8 +2610,49 @@ textarea::placeholder {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--hud-gold-bright);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+/* Scatter (procedural nature) — moved here from the Assets drawer. Compact emoji tiles, 4 across. */
+.terrain-scatter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.terrain-scatter-tile {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  min-width: 0;
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 6px;
+  background: rgb(0 0 0 / 18%);
+  color: var(--hud-text);
+  cursor: pointer;
+  padding: 5px 2px;
+}
+
+.terrain-scatter-tile:hover {
+  border-color: var(--hud-border);
+  background: var(--hud-bg-soft);
+}
+
+.terrain-scatter-emoji {
+  font-size: 17px;
+  line-height: 1;
+}
+
+.terrain-scatter-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  color: var(--hud-gold-bright);
+  font-size: 8px;
+  font-weight: 700;
 }
 
 .terrain-swatch.meadow .terrain-swatch-preview {
@@ -3434,8 +3727,9 @@ textarea::placeholder {
   max-height: min(640px, calc(100dvh - 196px));
 }
 
+/* Compact terrain palette — a small painter's panel, not a big drawer. */
 .terrain-card {
-  width: 238px;
+  width: 184px;
   max-width: calc(100vw - 40px);
   padding: 8px;
 }
@@ -3445,26 +3739,23 @@ textarea::placeholder {
 }
 
 .terrain-card .terrain-actions {
-  gap: 6px;
+  gap: 5px;
 }
 
 .terrain-card .terrain-hold,
 .terrain-card .terrain-actions.compact button:not(.terrain-hold) {
-  min-height: 30px;
+  min-height: 28px;
 }
 
 .terrain-card .terrain-material-swatches {
-  gap: 6px;
+  gap: 5px;
 }
 
 .terrain-card .terrain-swatch {
-  min-height: 56px;
-  padding: 6px;
+  padding: 3px;
 }
 
-.terrain-card .terrain-swatch-preview {
-  height: 26px;
-}
+/* let the shared .terrain-swatch-preview aspect-ratio square drive size (no fixed height override) */
 
 .ai-card {
   width: min(340px, calc(100vw - 40px));

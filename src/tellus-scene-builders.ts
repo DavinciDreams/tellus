@@ -815,6 +815,21 @@ export function assetTargetHeight(thing: GeneratedThing): number {
   // A mirror is a fixed ~2.5m standing pane — keep it human-scale regardless of the generic-object
   // heuristic below (its modelUrl is procedural://mirror; the prompt is "Mirror").
   if (lower === "mirror") return clamp(2.5 * variation, 1.2, 12);
+  // Procedural-nature scatter (from the Terrain panel) — the generic-object fallback made grass,
+  // ferns and mushrooms all ~1.35m (tree-ish), so a grass tuft stood as tall as a birch. Give each
+  // small plant a realistic ground height keyed on its label. Trees still fall through to the
+  // kind === "tree" branch below (4.2m).
+  const PROC_PLANT_HEIGHTS: Record<string, number> = {
+    "grass tuft": 0.32,
+    fern: 0.55,
+    reeds: 1.1,
+    bush: 0.85,
+    mushroom: 0.28,
+    flower: 0.45,
+  };
+  if (PROC_PLANT_HEIGHTS[lower] !== undefined) {
+    return clamp(PROC_PLANT_HEIGHTS[lower] * variation, 0.12, 24);
+  }
   const mode = vehicleMode(thing);
   if (mode === "air") return clamp(4.8 * variation, 1.6, 54);
   if (mode === "water") return clamp(1.45 * variation, 0.45, 18);

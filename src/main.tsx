@@ -9,7 +9,6 @@ import {
   Box,
   Building2,
   CircleHelp,
-  Eye,
   Globe2,
   Map as MapIcon,
   MessageCircle,
@@ -28,6 +27,7 @@ import {
   Trash2,
   Video,
   Waves,
+  X,
 } from "lucide-react";
 import * as THREE from "three";
 import { TilesRenderer } from "3d-tiles-renderer";
@@ -634,6 +634,29 @@ function AgentToolChipPill({ chip }: { chip: AgentToolChip }) {
 // (2r+1)² loaded chunks. Persisted here, read by both the world closure (on init) and the React HUD.
 const CHUNK_LOAD_RADIUS_STORAGE_KEY = "tellus.chunkLoadRadius";
 
+// Turn a Hyades portal `action.rejected` reason into clear player-facing guidance. The server reasons
+// come straight from the world grain (ApplyPortalUpsert/Delete/Enter): ownership, feature flag, target
+// validity, allowlist, cap. NOT a chunked-world thing — portals are terrain-provider independent.
+function portalRejectionMessage(reason: string): string {
+  const r = reason.toLowerCase();
+  if (r.includes("not the world owner"))
+    return "Can't place a portal here — only this world's owner can. Try a world you own (or an open/unowned one).";
+  if (r.includes("portals disabled"))
+    return "Portals are turned off on this server right now (Features.Portals). Ask an admin to enable them.";
+  if (r.includes("private target"))
+    return "That destination world is private — you can't route a portal into a world you don't own.";
+  if (r.includes("target world unavailable") || r.includes("interior unavailable"))
+    return "The portal's destination world couldn't be reached. Try again or pick another target.";
+  if (r.includes("portal cap"))
+    return "This world has hit its portal limit (64). Delete a portal before adding another.";
+  if (r.includes("allowlist") || r.includes("sceneurl"))
+    return "That portal's scene URL isn't on the allowed-hosts list, so the server rejected it.";
+  if (r.includes("bad target kind") || r.includes("invalid portal") || r.includes("no target"))
+    return "That portal is missing a valid destination. Pick a target world and try again.";
+  if (r.includes("unknown portal")) return "That portal no longer exists.";
+  return `Portal action rejected: ${reason}`;
+}
+
 function createTellusWorld(
   container: HTMLElement,
   onSnapshot: (snapshot: TellusSnapshot) => void,
@@ -1168,6 +1191,8 @@ function createTellusWorld(
   scene.add(portalMarkerGroup);
   const portalMarkers = new Map<string, THREE.Object3D>();
   const pendingPortalIds = new Set<string>();
+  const pendingPortalStartedAt = new Map<string, number>();
+  const pendingPortalWarnedIds = new Set<string>();
   const pendingDeletedPortals = new Map<string, WorldPortal>();
   let lastPortalEnterAt = 0;
   let insidePortalId: string | null = null;
@@ -1252,6 +1277,30 @@ function createTellusWorld(
       : undefined;
     return anchor?.position ?? p.position;
   };
+  const markPortalReady = (p: WorldPortal) => {
+    const wasPending = pendingPortalIds.delete(p.id);
+    pendingPortalStartedAt.delete(p.id);
+    pendingPortalWarnedIds.delete(p.id);
+    if (wasPending) {
+      addLog({
+        agentId: "world",
+        agentName: "Tellus",
+        tool: "interact",
+        text: `Portal ready: ${p.label || p.target.worldId}`,
+      });
+    }
+  };
+  const mergePortalSnapshot = (snapshotPortals: WorldPortal[]) => {
+    const byId = new Map<string, WorldPortal>();
+    for (const p of snapshotPortals) {
+      markPortalReady(p);
+      byId.set(p.id, p);
+    }
+    for (const p of worldPortals) {
+      if (pendingPortalIds.has(p.id) && !byId.has(p.id)) byId.set(p.id, p);
+    }
+    worldPortals = Array.from(byId.values());
+  };
   const portalGroundY = (p: WorldPortal): number => {
     const position = portalAnchorPosition(p);
     let best = groundHeightAt(position.x, position.z);
@@ -1328,6 +1377,19 @@ function createTellusWorld(
       enterPortal(nearId);
     } else if (!nearId) {
       insidePortalId = null;
+    }
+    for (const id of pendingPortalIds) {
+      const started = pendingPortalStartedAt.get(id);
+      if (!started || pendingPortalWarnedIds.has(id) || now - started < 8000) continue;
+      pendingPortalWarnedIds.add(id);
+      const portal = worldPortals.find((p) => p.id === id);
+      addLog({
+        agentId: "world",
+        agentName: "Tellus",
+        tool: "interact",
+        text: `Still waiting for portal confirmation: ${portal?.label || id}`,
+      });
+      publish();
     }
   };
 
@@ -2091,7 +2153,8 @@ function createTellusWorld(
       // TELLUS INFINITY portals: snapshot is authoritative (resets the set, even to empty, on a world switch);
       // portal.updated patches one; the world.portal.entered frame is React's signal to switch worlds.
       if ((parsed as { type?: string } | null)?.type === "world.snapshot") {
-        worldPortals = portalsFromWorldPatch(parsed) ?? [];
+        const snapshotPortals = portalsFromWorldPatch(parsed);
+        if (snapshotPortals) mergePortalSnapshot(snapshotPortals);
         // Phase 3: an interior snapshot carries a sceneUrl → render the GLB room instead of terrain.
         const sceneUrl = (parsed as { sceneUrl?: unknown }).sceneUrl;
         if (typeof sceneUrl === "string" && sceneUrl) applyInterior(sceneUrl);
@@ -2111,16 +2174,8 @@ function createTellusWorld(
         if (portalUpsert) {
           const byId = new Map(worldPortals.map((p) => [p.id, p]));
           for (const p of portalUpsert) {
-            const wasPending = pendingPortalIds.delete(p.id);
+            markPortalReady(p);
             byId.set(p.id, p);
-            if (wasPending) {
-              addLog({
-                agentId: "world",
-                agentName: "Tellus",
-                tool: "interact",
-                text: `Portal ready: ${p.label || p.target.worldId}`,
-              });
-            }
           }
           worldPortals = Array.from(byId.values());
           syncPortalMarkers();
@@ -2130,6 +2185,8 @@ function createTellusWorld(
       const portalDeleted = portalDeletedFromWorldPatch(parsed);
       if (portalDeleted) {
         pendingPortalIds.delete(portalDeleted);
+        pendingPortalStartedAt.delete(portalDeleted);
+        pendingPortalWarnedIds.delete(portalDeleted);
         pendingDeletedPortals.delete(portalDeleted);
         worldPortals = worldPortals.filter((p) => p.id !== portalDeleted);
         syncPortalMarkers();
@@ -2141,13 +2198,15 @@ function createTellusWorld(
         typeof parsed.actionType === "string" &&
         typeof parsed.reason === "string"
       ) {
-        if (parsed.actionType === "portal.upsert") {
+        if (parsed.actionType === "world.portal.upsert" || parsed.actionType === "portal.upsert") {
           const rejectedPendingIds = new Set(pendingPortalIds);
           pendingPortalIds.clear();
+          pendingPortalStartedAt.clear();
+          pendingPortalWarnedIds.clear();
           worldPortals = worldPortals.filter((p) => !rejectedPendingIds.has(p.id));
           syncPortalMarkers();
         }
-        if (parsed.actionType === "portal.delete") {
+        if (parsed.actionType === "world.portal.delete" || parsed.actionType === "portal.delete") {
           for (const portal of pendingDeletedPortals.values()) {
             const byId = new Map(worldPortals.map((p) => [p.id, p]));
             byId.set(portal.id, portal);
@@ -2156,11 +2215,14 @@ function createTellusWorld(
           pendingDeletedPortals.clear();
           syncPortalMarkers();
         }
+        const isPortalAction = /portal/i.test(parsed.actionType);
         addLog({
           agentId: "world",
           agentName: "Tellus",
           tool: "interact",
-          text: `${parsed.actionType} rejected: ${parsed.reason}`,
+          text: isPortalAction
+            ? portalRejectionMessage(parsed.reason)
+            : `${parsed.actionType} rejected: ${parsed.reason}`,
         });
         publish();
       }
@@ -6121,6 +6183,8 @@ function createTellusWorld(
       publish();
       return;
     }
+    // Hyades world grain switches on the BARE action name (TellusWorldGrain.cs case "portal.enter").
+    // Only the server→client switch patch is "world.portal.entered". Do NOT prefix outbound actions.
     const frame = { type: "portal.enter", visitorId, portalId: id };
     if (worldSocket?.readyState === WebSocket.OPEN) {
       worldSocket.send(JSON.stringify(frame));
@@ -6141,9 +6205,17 @@ function createTellusWorld(
     options: { pending?: boolean; logText?: string } = {},
   ) => {
     const pending = options.pending ?? true;
+    // Bare name — server grain case is "portal.upsert" (see portal.enter note above).
     const frame = { type: "portal.upsert", visitorId, portal };
-    if (pending) pendingPortalIds.add(portal.id);
-    else pendingPortalIds.delete(portal.id);
+    if (pending) {
+      pendingPortalIds.add(portal.id);
+      pendingPortalStartedAt.set(portal.id, performance.now());
+      pendingPortalWarnedIds.delete(portal.id);
+    } else {
+      pendingPortalIds.delete(portal.id);
+      pendingPortalStartedAt.delete(portal.id);
+      pendingPortalWarnedIds.delete(portal.id);
+    }
     const byId = new Map(worldPortals.map((p) => [p.id, p]));
     byId.set(portal.id, portal);
     worldPortals = Array.from(byId.values());
@@ -6164,6 +6236,8 @@ function createTellusWorld(
         .catch((error) => {
           if (pending) {
             pendingPortalIds.delete(portal.id);
+            pendingPortalStartedAt.delete(portal.id);
+            pendingPortalWarnedIds.delete(portal.id);
             worldPortals = worldPortals.filter((p) => p.id !== portal.id);
           }
           syncPortalMarkers();
@@ -6182,6 +6256,8 @@ function createTellusWorld(
     const existing = worldPortals.find((p) => p.id === id);
     if (!existing) return;
     pendingPortalIds.delete(id);
+    pendingPortalStartedAt.delete(id);
+    pendingPortalWarnedIds.delete(id);
     pendingDeletedPortals.set(id, existing);
     worldPortals = worldPortals.filter((p) => p.id !== id);
     syncPortalMarkers();
@@ -6192,6 +6268,7 @@ function createTellusWorld(
       text: `Deleting portal ${existing.label || existing.target.worldId}...`,
     });
     publish();
+    // Bare name — server grain case is "portal.delete" (see portal.enter note above).
     const frame = { type: "portal.delete", visitorId, portalId: id };
     const restore = (error: unknown) => {
       pendingDeletedPortals.delete(id);
@@ -6731,6 +6808,12 @@ function App(): React.ReactElement {
   const isAdmin = (account?.role ?? "").toLowerCase() === "admin";
   const [worldChatInput, setWorldChatInput] = useState("");
   const [worldChatChannel, setWorldChatChannel] = useState<WorldChatChannel>("world");
+  // Whether the world-chat panel is open. Declared here (early) because the Agent tab now lives
+  // inside it and agentPanelOpen is derived from it below.
+  const [worldChatOpen, setWorldChatOpen] = useState(false);
+  // Active chat-panel tab. The three real channels mirror worldChatChannel; "agent" is a UI-only
+  // tab that folds the embodied-agent chat into the same panel (no center-screen floating aside).
+  const [chatTab, setChatTab] = useState<WorldChatChannel | "agent">("world");
   const [worldChatDmTarget, setWorldChatDmTarget] = useState<{
     visitorId: string;
     name: string;
@@ -6783,11 +6866,7 @@ function App(): React.ReactElement {
     window.addEventListener("tellus:camera-mode", onMode);
     return () => window.removeEventListener("tellus:camera-mode", onMode);
   }, []);
-  const toggleCameraMode = () => {
-    const next = cameraMode === "first" ? "third" : "first";
-    setCameraModeState(next);
-    worldRef.current?.setCameraMode(next);
-  };
+  // (camera 1st/3rd toggle is handled by the 'V' hotkey in the world layer — no React button anymore)
   // ── Chunk-load radius (chunked-world draw distance; only shown for chunked worlds) ──
   // r rings → (2r+1)² loaded chunks. UI range 1–8 (subset of the renderer's 1–12). Persisted in
   // localStorage; the world closure applies the saved value to the renderer on init.
@@ -6817,7 +6896,7 @@ function App(): React.ReactElement {
   };
   // ── Avatar picker state (catalog selection; "" = deterministic default robot) ──
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
-  const [assetPanelTab, setAssetPanelTab] = useState<AssetPanelTab>("procedural");
+  const [assetPanelTab, setAssetPanelTab] = useState<AssetPanelTab>("building");
   const [avatarCatalog, setAvatarCatalog] = useState<readonly AvatarCatalogEntry[]>(() => avatarCatalogSync());
   const [avatarSelection, setAvatarSelection] = useState<string>(() => storedAvatarId());
   useEffect(() => subscribeAvatarCatalog(() => setAvatarCatalog(avatarCatalogSync())), []);
@@ -6845,7 +6924,11 @@ function App(): React.ReactElement {
     worldRef.current?.setAvatarScale(next); // persists + rescales live + broadcasts
   };
   // ── "Your Agent" panel state (per-user embodied agent on Hyades; self-contained, pure fetch) ──
-  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  // The agent UI now lives as a tab inside the world-chat panel (no floating center aside), so
+  // "panel open" is derived: the chat panel is open AND the Agent tab is the active one.
+  const agentPanelOpen = worldChatOpen && chatTab === "agent";
+  // Collapsible persona/memories/controls strip inside the Agent tab (default folded — chat-first).
+  const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [agentPersonaDraft, setAgentPersonaDraft] = useState("");
   const [agentBusy, setAgentBusy] = useState(false);
@@ -6879,10 +6962,12 @@ function App(): React.ReactElement {
     typeof navigator !== "undefined" &&
     Boolean(navigator.mediaDevices?.getUserMedia);
 
+  // Themed to the app's gold/green HUD palette (shared by P2P + the agent tab so they match the
+  // rest of the app instead of the old off-theme dark-glass/white-border look).
   const p2pSelectStyle: React.CSSProperties = {
-    background: "rgba(0,0,0,0.4)",
-    color: "#dfe7d8",
-    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgb(0 0 0 / 40%)",
+    color: "var(--hud-text)",
+    border: "1px solid var(--hud-border-soft)",
     borderRadius: 6,
     padding: "4px 6px",
     fontSize: 12,
@@ -6891,11 +6976,9 @@ function App(): React.ReactElement {
     flex: 1,
     padding: "5px 0",
     borderRadius: 6,
-    border: active
-      ? "1px solid #6fae46"
-      : "1px solid rgba(255,255,255,0.18)",
-    background: active ? "rgba(111,174,70,0.25)" : "rgba(255,255,255,0.06)",
-    color: "#dfe7d8",
+    border: active ? "1px solid var(--hud-border)" : "1px solid var(--hud-border-soft)",
+    background: active ? "rgb(222 188 86 / 18%)" : "rgb(0 0 0 / 22%)",
+    color: active ? "var(--hud-gold-bright)" : "var(--hud-text)",
     fontSize: 12,
     cursor: "pointer",
   });
@@ -7182,6 +7265,13 @@ function App(): React.ReactElement {
     };
   }, [agentPanelOpen, agentViewportOn, fetchAgentStatus, fetchAgentTranscript, mergeAgentTranscript]);
 
+  // The expanded-chat overlay (⤢) only makes sense while the Agent tab is visible. If the chat panel
+  // closes or switches tabs, drop the overlay too — otherwise it survives as an orphaned fullscreen
+  // modal over the world with the backing panel gone.
+  useEffect(() => {
+    if (!agentPanelOpen && chatExpanded) setChatExpanded(false);
+  }, [agentPanelOpen, chatExpanded]);
+
   // Render-time projection of the thread: prose + tool chips, with long chip runs collapsed.
   const agentFeed = useMemo(() => buildAgentFeed(agentChat), [agentChat]);
   const toggleChipGroup = useCallback((key: string) => {
@@ -7242,6 +7332,448 @@ function App(): React.ReactElement {
         <b style={{ opacity: 0.7, fontWeight: 600 }}>{item.who === "you" ? "You: " : ""}</b>
         {item.text}
       </span>
+    );
+  };
+
+  // The "Agent" tab body inside the world-chat panel. Chat-first: the dialog feed + input are always
+  // visible; the agent's controls (start/stop, personality, memories, tokens, viewport, reset) live
+  // behind a single foldable "Settings" strip so the panel stays small and non-blocking. This replaces
+  // the old floating center-screen agent aside — same handlers, same fetch wiring, just relocated.
+  const renderAgentTab = () => {
+    const optedIn = agentStatus?.optedIn ?? false;
+    const running =
+      optedIn &&
+      ((agentStatus?.ownerPresent ?? false) || (agentStatus?.offlinePersistence ?? false)) &&
+      (agentStatus?.enabled ?? false);
+    const thinking = optedIn && (agentStatus?.processing ?? false);
+    const willWake = optedIn && !(agentStatus?.enabled ?? false) && (agentStatus?.ownerPresent ?? false);
+    const statusLabel = !optedIn
+      ? "Stopped"
+      : thinking
+        ? "Thinking…"
+        : running
+          ? "Running"
+          : willWake
+            ? "Sleeping (will wake)"
+            : "Sleeping";
+    const dot = !optedIn ? "#7a8597" : thinking ? "#9ec8ff" : running ? "#6fae46" : "#d8a64a";
+    return (
+      <div className="agent-tab">
+        {/* Status + settings fold toggle */}
+        <div className="agent-tab-statusrow">
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, opacity: 0.9 }}>
+            <span
+              style={{ width: 8, height: 8, borderRadius: "50%", background: dot, boxShadow: `0 0 6px ${dot}` }}
+            />
+            {statusLabel}
+            {agentStatus?.offlinePersistence && (
+              <span
+                style={{
+                  marginLeft: 2,
+                  padding: "1px 6px",
+                  borderRadius: 999,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                  color: "#0c1016",
+                  background: "linear-gradient(90deg,#f4d06f,#e9a23a)",
+                }}
+              >
+                Premium
+              </span>
+            )}
+          </span>
+          <button
+            type="button"
+            className="agent-tab-fold"
+            aria-expanded={agentSettingsOpen}
+            onClick={() => setAgentSettingsOpen((open) => !open)}
+            title="Agent settings: start/stop, personality, memories, viewport"
+          >
+            {agentSettingsOpen ? "▾" : "⚙"} Settings
+          </button>
+        </div>
+
+        {agentSettingsOpen && (
+          <div className="agent-tab-settings">
+            <span style={{ fontSize: 10, opacity: 0.6 }} title="Each world has its own agent — its memories live in that world.">
+              in “{agentStatus?.worldId || activeWorldId || runtimeConfig.worldId}”
+            </span>
+            {!agentStatus?.offlinePersistence && <PremiumUpsellChip />}
+            <button
+              type="button"
+              disabled={agentBusy}
+              onClick={onAgentStartStop}
+              style={{
+                ...p2pBtnStyle(optedIn),
+                flex: "none",
+                width: "100%",
+                padding: "7px 0",
+                opacity: agentBusy ? 0.6 : 1,
+                cursor: agentBusy ? "default" : "pointer",
+              }}
+            >
+              {agentBusy ? "…" : optedIn ? "Stop" : "Start my agent"}
+            </button>
+
+            {/* Personality & memories (folds within the settings strip) */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <button
+                type="button"
+                onClick={() =>
+                  setMemoriesOpen((open) => {
+                    if (!open) void loadMemoriesLog();
+                    return !open;
+                  })
+                }
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "#dfe7d8",
+                  fontSize: 11,
+                  opacity: 0.85,
+                  textAlign: "left",
+                  padding: 0,
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                {memoriesOpen ? "▾" : "▸"} Personality &amp; memories
+                {agentStatus?.memories?.length ? ` (${agentStatus.memories.length})` : ""}
+              </button>
+              {!memoriesOpen ? (
+                <>
+                  <pre
+                    style={{
+                      margin: 0,
+                      maxHeight: 64,
+                      overflowY: "auto",
+                      background: "rgba(0,0,0,0.32)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 6,
+                      padding: "6px 8px",
+                      fontSize: 11,
+                      fontFamily: "inherit",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      opacity: 0.85,
+                    }}
+                  >
+                    {agentStatus?.selfSection?.trim() || "No personality set — click Edit to describe your agent."}
+                  </pre>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAgentPersonaDraft(agentStatus?.selfSection ?? "");
+                      setMemoriesOpen(true);
+                      setMemoriesEditing(true);
+                    }}
+                    style={{ ...p2pBtnStyle(false), alignSelf: "flex-start" }}
+                  >
+                    Edit personality
+                  </button>
+                </>
+              ) : memoriesEditing ? (
+                <>
+                  <textarea
+                    value={agentPersonaDraft}
+                    onChange={(e) => setAgentPersonaDraft(e.target.value)}
+                    placeholder="Describe how your agent should behave, what it should remember…"
+                    rows={6}
+                    style={{
+                      background: "rgba(0,0,0,0.4)",
+                      color: "#dfe7d8",
+                      border: "1px solid rgba(255,255,255,0.16)",
+                      borderRadius: 6,
+                      padding: "6px 8px",
+                      fontSize: 12,
+                      resize: "vertical",
+                      fontFamily: "inherit",
+                    }}
+                  />
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button
+                      type="button"
+                      disabled={agentBusy}
+                      onClick={() => void onAgentSavePersona()}
+                      style={{ ...p2pBtnStyle(true), opacity: agentBusy ? 0.6 : 1, cursor: agentBusy ? "default" : "pointer" }}
+                    >
+                      {agentBusy ? "…" : "Save"}
+                    </button>
+                    <button type="button" onClick={() => setMemoriesEditing(false)} style={p2pBtnStyle(false)}>
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={agentBusy}
+                      title="Save this text as your default persona — your agent in any NEW world starts with it."
+                      onClick={() => void onAgentSaveDefaultPersona()}
+                      style={{ ...p2pBtnStyle(false), opacity: agentBusy ? 0.6 : 1 }}
+                    >
+                      Set as default
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <pre
+                    style={{
+                      margin: 0,
+                      maxHeight: 150,
+                      overflowY: "auto",
+                      background: "rgba(0,0,0,0.32)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 6,
+                      padding: "6px 8px",
+                      fontSize: 11,
+                      fontFamily: "inherit",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {agentStatus?.selfSection?.trim() || "No memories yet."}
+                  </pre>
+                  {agentStatus?.memories && agentStatus.memories.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <span style={{ fontSize: 10, opacity: 0.6, fontWeight: 600 }}>
+                        Remembers ({agentStatus.memories.length})
+                      </span>
+                      <div
+                        style={{
+                          maxHeight: 120,
+                          overflowY: "auto",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 5,
+                          padding: "6px 8px",
+                          background: "rgba(0,0,0,0.25)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: 6,
+                        }}
+                      >
+                        {agentStatus.memories.map((note, index) => (
+                          <span
+                            key={`${note.at ?? ""}-${index}`}
+                            style={{ fontSize: 11, opacity: 0.8, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                          >
+                            {note.at ? (
+                              <span style={{ opacity: 0.5, fontSize: 9 }}>
+                                {new Date(note.at).toLocaleString()} ·{" "}
+                              </span>
+                            ) : null}
+                            {note.text ?? ""}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAgentPersonaDraft(agentStatus?.selfSection ?? "");
+                        setMemoriesEditing(true);
+                      }}
+                      style={p2pBtnStyle(false)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMemoriesHistoryOpen((open) => {
+                          if (!open) void loadMemoriesLog();
+                          return !open;
+                        })
+                      }
+                      style={p2pBtnStyle(memoriesHistoryOpen)}
+                    >
+                      History
+                    </button>
+                  </div>
+                  {memoriesHistoryOpen && (
+                    <div
+                      style={{
+                        maxHeight: 110,
+                        overflowY: "auto",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                        padding: "6px 8px",
+                        background: "rgba(0,0,0,0.25)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: 6,
+                      }}
+                    >
+                      {memoriesLog === null ? (
+                        <span style={{ fontSize: 10, opacity: 0.5, fontStyle: "italic" }}>Loading…</span>
+                      ) : memoriesLog.length === 0 ? (
+                        <span style={{ fontSize: 10, opacity: 0.5, fontStyle: "italic" }}>No edits yet.</span>
+                      ) : (
+                        memoriesLog.map((entry, index) => (
+                          <span
+                            key={`${entry.editedAt ?? ""}-${index}`}
+                            style={{ fontSize: 10, opacity: 0.55, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                          >
+                            {entry.editedAt ? `${new Date(entry.editedAt).toLocaleString()} · ` : ""}
+                            {entry.editedBy ? `${entry.editedBy}: ` : ""}
+                            {entry.newValue ?? ""}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div style={{ fontSize: 11, opacity: 0.7 }}>
+              tokens: {agentStatus?.tokensSpentToday ?? 0} / {agentStatus?.dailyTokenBudget ?? 0}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAgentViewportOn((v) => !v)}
+              disabled={!agentStatus?.visitorId}
+              style={{
+                ...p2pBtnStyle(agentViewportOn),
+                flex: "none",
+                width: "100%",
+                opacity: agentStatus?.visitorId ? 1 : 0.5,
+                cursor: agentStatus?.visitorId ? "pointer" : "default",
+              }}
+            >
+              {agentViewportOn ? "Hide viewport" : "Show viewport"}
+            </button>
+
+            {/* Reset thread — subdued, two-step confirm; memories survive. */}
+            {agentResetConfirm ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, opacity: 0.85 }}>
+                <span style={{ flex: 1, minWidth: 0 }}>Reset? The chat history starts over; memories stay.</span>
+                <button
+                  type="button"
+                  disabled={agentBusy}
+                  onClick={() => void onAgentResetThread()}
+                  style={{ ...p2pBtnStyle(true), flex: "none", padding: "3px 10px", fontSize: 10, opacity: agentBusy ? 0.6 : 1 }}
+                >
+                  {agentBusy ? "…" : "Confirm"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAgentResetConfirm(false)}
+                  style={{ ...p2pBtnStyle(false), flex: "none", padding: "3px 10px", fontSize: 10 }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={agentBusy}
+                onClick={() => setAgentResetConfirm(true)}
+                title="Start a fresh conversation thread for a stuck agent — its memories and personality stay."
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  alignSelf: "flex-start",
+                  color: "#dfe7d8",
+                  fontSize: 10,
+                  opacity: agentBusy ? 0.3 : 0.5,
+                  cursor: agentBusy ? "default" : "pointer",
+                  textDecoration: "underline",
+                  textDecorationColor: "rgba(255,255,255,0.25)",
+                }}
+              >
+                Reset thread
+              </button>
+            )}
+          </div>
+        )}
+
+        {agentError && <div style={{ fontSize: 11, color: "#ff9a9a" }}>{agentError}</div>}
+
+        {/* Chat thread — always visible (chat-first). */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 11, opacity: 0.7 }}>Chat</span>
+          <button
+            type="button"
+            onClick={() => setChatExpanded(true)}
+            title="Expand chat"
+            style={{ background: "none", border: "none", color: "#dfe7d8", fontSize: 13, lineHeight: 1, opacity: 0.7, padding: 0, cursor: "pointer" }}
+          >
+            ⤢
+          </button>
+        </div>
+        <div
+          ref={agentTranscriptScrollRef}
+          style={{
+            flex: "1 1 auto",
+            minHeight: 80,
+            maxHeight: 280,
+            overflowY: "auto",
+            background: "rgba(0,0,0,0.32)",
+            border: "1px solid rgba(255,255,255,0.12)",
+            borderRadius: 6,
+            padding: "6px 8px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          {agentChat.length === 0 && !agentStatus?.processing ? (
+            <span style={{ fontSize: 11, opacity: 0.5, fontStyle: "italic" }}>
+              {optedIn ? "Say hello to your agent below." : "Start your agent (Settings), then say hello below."}
+            </span>
+          ) : (
+            agentFeed.map(renderAgentFeedItem)
+          )}
+          {optedIn && agentStatus?.processing && (
+            <span style={{ fontSize: 11, color: "#9ec8ff", fontStyle: "italic", opacity: 0.85 }}>💭 thinking…</span>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          <input
+            type="text"
+            value={agentChatInput}
+            onChange={(e) => setAgentChatInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void onAgentSend();
+              }
+            }}
+            placeholder={optedIn ? "Talk to your agent…" : "Start your agent first (Settings)"}
+            disabled={!optedIn}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 12,
+              padding: "5px 8px",
+              borderRadius: 6,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(0,0,0,0.3)",
+              color: "#eef2ea",
+              opacity: optedIn ? 1 : 0.5,
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void onAgentSend()}
+            disabled={!optedIn || agentChatInput.trim().length === 0}
+            style={{
+              ...p2pBtnStyle(false),
+              flex: "none",
+              padding: "5px 12px",
+              opacity: optedIn && agentChatInput.trim().length > 0 ? 1 : 0.5,
+              cursor: optedIn && agentChatInput.trim().length > 0 ? "pointer" : "default",
+            }}
+          >
+            Send
+          </button>
+        </div>
+      </div>
     );
   };
 
@@ -7911,19 +8443,29 @@ function App(): React.ReactElement {
   const [assetBrowseTotal, setAssetBrowseTotal] = useState(0);
   const [assetBrowseLoading, setAssetBrowseLoading] = useState(false);
   const [assetBrowseSort, setAssetBrowseSort] = useState<AssetBrowseSort>("newest");
-  const assetCategorySearch = assetPanelTab === "animal" || assetPanelTab === "building" ? assetPanelTab : "";
-  const assetBrowseQuery = assetSearch.trim() || assetCategorySearch;
+  // Map each browse tab to the store's REAL asset_category (flora / fauna / building). The store
+  // categorizes animals under "fauna" (not "animal"), so use the precise category filter rather than
+  // a fuzzy free-text search. A user-typed search overrides the category seed.
+  const assetCategory =
+    assetPanelTab === "flora"
+      ? "flora"
+      : assetPanelTab === "animal"
+        ? "fauna"
+        : assetPanelTab === "building"
+          ? "building"
+          : "";
+  const assetBrowseQuery = assetSearch.trim();
   const assetBrowseSeq = useRef(0);
   const [assetReuseSuggestions, setAssetReuseSuggestions] = useState<AssetReuseCandidate[]>([]);
   const [assetReuseLoading, setAssetReuseLoading] = useState(false);
   const [createPromptOpen, setCreatePromptOpen] = useState(false);
 
   const runAssetBrowse = useCallback(
-    async (query: string, page: number, append: boolean, sort: AssetBrowseSort) => {
+    async (query: string, page: number, append: boolean, sort: AssetBrowseSort, category = "") => {
       const seq = ++assetBrowseSeq.current;
       setAssetBrowseLoading(true);
       try {
-        const result = await browseAssetLibrary(query, page, sort);
+        const result = await browseAssetLibrary(query, page, sort, 24, category);
         if (assetBrowseSeq.current !== seq) return; // a newer query superseded this one
         setAssetBrowse((prev) => (append ? [...prev, ...result.models] : result.models));
         setAssetBrowsePage(page);
@@ -8061,20 +8603,22 @@ function App(): React.ReactElement {
     }
   }, [cleanupBusy]);
 
-  // Category tabs browse the shared asset library; a typed query replaces the category seed.
+  // Category tabs (flora/fauna/building) browse the shared asset library by store category; a typed
+  // query overrides the category. The avatar tab has no browse.
   useEffect(() => {
-    if (!assetPanelOpen || !assetCategorySearch) return;
+    if (!assetPanelOpen || (!assetCategory && !assetBrowseQuery)) return;
     const id = window.setTimeout(
-      () => void runAssetBrowse(assetBrowseQuery, 1, false, assetBrowseSort),
+      () => void runAssetBrowse(assetBrowseQuery, 1, false, assetBrowseSort, assetCategory),
       assetSearch.trim() ? 260 : 0,
     );
     return () => window.clearTimeout(id);
-  }, [assetBrowseQuery, assetBrowseSort, assetCategorySearch, assetPanelOpen, assetSearch, runAssetBrowse]);
+  }, [assetBrowseQuery, assetBrowseSort, assetCategory, assetPanelOpen, assetSearch, runAssetBrowse]);
   const [openToolMenus, setOpenToolMenus] = useState<ToolMenu[]>([]);
   const [createPromptFocused, setCreatePromptFocused] = useState(false);
   const [worldMenuOpen, setWorldMenuOpen] = useState(false);
-  const [worldChatOpen, setWorldChatOpen] = useState(false);
   const [worldMapOpen, setWorldMapOpen] = useState(true);
+  // Portals card: foldable + dismissable (was always-on with no close — the worst right-side offender).
+  const [portalsPanelOpen, setPortalsPanelOpen] = useState(true);
   const [mapActorList, setMapActorList] = useState<"items" | "players" | "agents" | null>(null);
   const [mapMode, setMapMode] = useState<"terrain" | "biomes">("biomes");
   const worldMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -8649,7 +9193,7 @@ function App(): React.ReactElement {
 
   const toggleAssetDrawer = () => {
     setAssetPanelOpen((open) => {
-      if (!open) setAssetPanelTab((current) => current === "avatar" ? "procedural" : current);
+      if (!open) setAssetPanelTab((current) => current === "avatar" ? "building" : current);
       return !open;
     });
   };
@@ -8734,31 +9278,40 @@ function App(): React.ReactElement {
           <aside className="world-mini-chat" aria-label="World chat">
             <header>
               <span>
-                {worldChatChannel === "dm"
-                  ? worldChatDmTarget
-                    ? `DM - ${worldChatDmTarget.name}`
-                    : "DMs"
-                  : worldChatChannel === "nearby"
-                    ? "Nearby Chat"
-                    : "World Chat"}
+                {chatTab === "agent"
+                  ? "Your Agent"
+                  : worldChatChannel === "dm"
+                    ? worldChatDmTarget
+                      ? `DM - ${worldChatDmTarget.name}`
+                      : "DMs"
+                    : worldChatChannel === "nearby"
+                      ? "Nearby Chat"
+                      : "World Chat"}
               </span>
               <button type="button" className="panel-mini-button" onClick={() => setWorldChatOpen(false)}>
                 Close
               </button>
             </header>
             <nav className="mini-chat-tabs" aria-label="Chat channels">
-              {(["world", "nearby", "dm"] as const).map((channel) => (
+              {(["world", "nearby", "dm", "agent"] as const).map((tab) => (
                 <button
-                  key={channel}
+                  key={tab}
                   type="button"
-                  className={worldChatChannel === channel ? "active" : ""}
-                  onClick={() => setWorldChatChannel(channel)}
+                  className={chatTab === tab ? "active" : ""}
+                  onClick={() => {
+                    setChatTab(tab);
+                    // The three real channels also drive the wire-protocol channel used for sending.
+                    if (tab !== "agent") setWorldChatChannel(tab);
+                  }}
                 >
-                  {channel === "dm" ? "DMs" : channel[0].toUpperCase() + channel.slice(1)}
+                  {tab === "dm" ? "DMs" : tab[0].toUpperCase() + tab.slice(1)}
                 </button>
               ))}
             </nav>
-            {worldChatChannel === "dm" && (
+            {chatTab === "agent" && renderAgentTab()}
+            {chatTab !== "agent" && (
+              <>
+                {worldChatChannel === "dm" && (
               <div className="mini-chat-dm-targets" aria-label="DM recipients">
                 {chatTargets.length === 0 ? (
                   <span>No players or agents visible.</span>
@@ -8866,6 +9419,8 @@ function App(): React.ReactElement {
                 Send
               </button>
             </div>
+              </>
+            )}
           </aside>
         )}
         <div className="world-top-bar">
@@ -8909,137 +9464,6 @@ function App(): React.ReactElement {
             </div>
           </div>
         </div>
-        {(() => {
-          const portalBtn = {
-            display: "block",
-            width: "100%",
-            textAlign: "left" as const,
-            margin: "2px 0",
-            background: "rgba(255,255,255,0.08)",
-            color: "inherit",
-            border: "1px solid rgba(255,255,255,0.16)",
-            borderRadius: 8,
-            padding: "4px 8px",
-            cursor: "pointer",
-            font: "inherit",
-          };
-          return (
-            <aside
-              className="portal-panel"
-              aria-label="Portals"
-              style={{
-                position: "fixed",
-                right: 12,
-                bottom: 128,
-                zIndex: 20,
-                background: "rgba(0,0,0,0.55)",
-                color: "#dfe7d8",
-                borderRadius: 10,
-                padding: "8px 10px",
-                maxWidth: 230,
-                font: "600 12px/1.3 ui-sans-serif, system-ui",
-              }}
-            >
-              <div style={{ opacity: 0.7, marginBottom: 4 }}>Portals</div>
-              {(snapshot.portals ?? []).map((p) => {
-                const targetChoices = portalTargetOptions.includes(p.target.worldId)
-                  ? portalTargetOptions
-                  : [p.target.worldId, ...portalTargetOptions].filter(Boolean);
-                return (
-                  <article key={p.id} className="portal-panel-row">
-                    <button type="button" title={`Enter ${p.label || p.target.worldId} (${p.target.kind})`} onClick={() => worldRef.current?.enterPortal(p.id)} style={portalBtn}>
-                      {"->"} {p.label || p.target.worldId} <small style={{ opacity: 0.6 }}>{p.target.kind}</small>
-                    </button>
-                    <div className="portal-panel-row-actions">
-                      <select
-                        value={p.target.worldId}
-                        aria-label={`Destination for ${p.label || p.id}`}
-                        title="Change portal destination"
-                        disabled={targetChoices.length === 0}
-                        onChange={(event) => worldRef.current?.updatePortalTarget(p.id, event.target.value)}
-                      >
-                        {targetChoices.map((worldId) => (
-                          <option key={worldId} value={worldId}>
-                            {worldId}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        title="Delete portal"
-                        aria-label={`Delete ${p.label || p.id}`}
-                        onClick={() => {
-                          const ok = window.confirm(`Delete portal ${p.label || p.target.worldId}?`);
-                          if (ok) worldRef.current?.deletePortal(p.id);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-              {/* Create at your feet (owner-only — the server rejects otherwise; the rejection shows in the log). */}
-              <button
-                type="button"
-                title="Open a door to a fresh interior room at your position"
-                onClick={() => worldRef.current?.createDoorHere(window.prompt("Door label?", "Door") || "Door")}
-                style={{ ...portalBtn, marginTop: 6, borderColor: "rgba(255,207,106,0.5)" }}
-              >
-                ＋ Door here
-              </button>
-              <button
-                type="button"
-                title={activeSelectedThing ? "Create a portal anchored to the selected asset" : "Create a portal at your position to another world"}
-                disabled={!portalTargetWorldId}
-                onClick={() => {
-                  const target = portalTargetWorldId.trim();
-                  if (target) worldRef.current?.createPortalHere(target, `${currentWorldId} to ${target} portal`);
-                }}
-                style={{
-                  ...portalBtn,
-                  borderColor: "rgba(106,208,255,0.5)",
-                  opacity: portalTargetWorldId ? 1 : 0.55,
-                  cursor: portalTargetWorldId ? "pointer" : "default",
-                }}
-              >
-                ＋ Portal here
-              </button>
-              <select
-                value={portalTargetWorldId}
-                aria-label="Portal destination world"
-                title="Portal destination world"
-                disabled={portalTargetOptions.length === 0}
-                onChange={(event) => setPortalTargetWorldId(event.target.value)}
-                style={{
-                  width: "100%",
-                  marginTop: 4,
-                  background: "rgba(0,0,0,0.45)",
-                  color: "inherit",
-                  border: "1px solid rgba(106,208,255,0.35)",
-                  borderRadius: 8,
-                  padding: "4px 6px",
-                  font: "inherit",
-                }}
-              >
-                {portalTargetOptions.length === 0 ? (
-                  <option value="">No other worlds</option>
-                ) : (
-                  portalTargetOptions.map((worldId) => (
-                    <option key={worldId} value={worldId}>
-                      {currentWorldId} to {worldId}
-                    </option>
-                  ))
-                )}
-              </select>
-              {portalPanelNotice && (
-                <div className="portal-panel-notice" role="status" aria-live="polite">
-                  {portalPanelNotice}
-                </div>
-              )}
-            </aside>
-          );
-        })()}
         {worldMenuOpen && (
         <aside className="world-menu-panel" aria-label="World menu">
           <div className="top-left-cluster" style={{ position: "relative" }}>
@@ -9469,19 +9893,7 @@ function App(): React.ReactElement {
             <MapIcon size={18} />
             <span>Map</span>
           </button>
-          <button
-            type="button"
-            className={cameraMode === "first" ? "toolbelt-button active" : "toolbelt-button"}
-            title={
-              cameraMode === "first"
-                ? "Switch to 3rd person view (V)"
-                : "Switch to 1st person view (V)"
-            }
-            onClick={toggleCameraMode}
-          >
-            <Eye size={18} />
-            <span>View</span>
-          </button>
+          {/* View (1st/3rd person) lives on the 'V' hotkey — no toolbar button (it opened no menu). */}
           <button
             type="button"
             className={isToolOpen("terrain") ? "toolbelt-button active" : "toolbelt-button"}
@@ -9518,7 +9930,10 @@ function App(): React.ReactElement {
             type="button"
             className={agentPanelOpen ? "toolbelt-button active" : "toolbelt-button"}
             title="Your Agent"
-            onClick={() => setAgentPanelOpen((open) => !open)}
+            onClick={() => {
+              setChatTab("agent");
+              setWorldChatOpen((open) => (chatTab === "agent" ? !open : true));
+            }}
           >
             <Bot size={18} />
             <span>Agent</span>
@@ -9636,28 +10051,8 @@ function App(): React.ReactElement {
         )}
         {p2pPanelOpen && p2pSupported && (
           <aside
-            className="p2p-panel"
+            className="p2p-panel hud-card"
             aria-label="P2P video"
-            style={{
-              position: "absolute",
-              bottom: 92,
-              left: "50%",
-              transform: "translateX(-104%)", // sit just LEFT of center (won't overlap the agent panel)
-              width: 280,
-              maxHeight: "min(560px, calc(100dvh - 120px))",
-              overflowY: "auto",
-              padding: "12px 14px",
-              borderRadius: 12,
-              background: "rgba(12,16,22,0.92)",
-              border: "1px solid rgba(255,255,255,0.14)",
-              color: "#dfe7d8",
-              font: "500 13px/1.4 system-ui, sans-serif",
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-              zIndex: 30,
-              pointerEvents: "auto",
-            }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <strong style={{ fontSize: 13 }}>P2P Video</strong>
@@ -9808,519 +10203,27 @@ function App(): React.ReactElement {
             </span>
           </div>
         )}
-        {agentPanelOpen && (
-          <aside
-            className="agent-panel"
-            aria-label="Your agent"
-            style={{
-              position: "absolute",
-              bottom: 92,
-              left: "50%",
-              transform: "translateX(4%)", // sit just RIGHT of center (won't overlap the P2P panel)
-              width: 300,
-              maxHeight: "min(560px, calc(100dvh - 120px))",
-              overflowY: "auto",
-              padding: "12px 14px",
-              borderRadius: 12,
-              background: "rgba(12,16,22,0.92)",
-              border: "1px solid rgba(255,255,255,0.14)",
-              color: "#dfe7d8",
-              font: "500 13px/1.4 system-ui, sans-serif",
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-              zIndex: 30,
-              pointerEvents: "auto",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <strong style={{ fontSize: 13 }}>
-                Your Agent{" "}
-                <span style={{ fontSize: 10, opacity: 0.6, fontWeight: 500 }} title="Each world has its own agent — its memories live in that world. Use 'Set as default' in Personality to carry a persona into new worlds.">
-                  in “{agentStatus?.worldId || activeWorldId || runtimeConfig.worldId}”
-                </span>
-              </strong>
-              {(() => {
-                const optedIn = agentStatus?.optedIn ?? false;
-                const running =
-                  optedIn &&
-                  ((agentStatus?.ownerPresent ?? false) || (agentStatus?.offlinePersistence ?? false)) &&
-                  (agentStatus?.enabled ?? false);
-                const thinking = optedIn && (agentStatus?.processing ?? false);
-                // optedIn but momentarily disabled while you're here: the server self-heals
-                // (resume-on-heartbeat), so surface that it WILL wake rather than a flat "Sleeping".
-                const willWake =
-                  optedIn && !(agentStatus?.enabled ?? false) && (agentStatus?.ownerPresent ?? false);
-                const label = !optedIn
-                  ? "Stopped"
-                  : thinking
-                    ? "Thinking…"
-                    : running
-                      ? "Running"
-                      : willWake
-                        ? "Sleeping (will wake)"
-                        : "Sleeping";
-                const dot = !optedIn ? "#7a8597" : thinking ? "#9ec8ff" : running ? "#6fae46" : "#d8a64a";
-                return (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, opacity: 0.9 }}>
-                    <span
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        background: dot,
-                        boxShadow: `0 0 6px ${dot}`,
-                      }}
-                    />
-                    {label}
-                    {agentStatus?.offlinePersistence && (
-                      <span
-                        style={{
-                          marginLeft: 4,
-                          padding: "1px 6px",
-                          borderRadius: 999,
-                          fontSize: 9,
-                          fontWeight: 700,
-                          letterSpacing: 0.4,
-                          textTransform: "uppercase",
-                          color: "#0c1016",
-                          background: "linear-gradient(90deg,#f4d06f,#e9a23a)",
-                        }}
-                      >
-                        Premium
-                      </span>
-                    )}
-                  </span>
-                );
-              })()}
-            </div>
-            {/* Premium upsell: logged in & not premium — Premium = the agent survives you leaving. */}
-            {!agentStatus?.offlinePersistence && <PremiumUpsellChip />}
-            <button
-              type="button"
-              disabled={agentBusy}
-              onClick={onAgentStartStop}
-              style={{
-                ...p2pBtnStyle(agentStatus?.optedIn ?? false),
-                flex: "none",
-                width: "100%",
-                padding: "7px 0",
-                opacity: agentBusy ? 0.6 : 1,
-                cursor: agentBusy ? "default" : "pointer",
-              }}
-            >
-              {agentBusy ? "…" : agentStatus?.optedIn ? "Stop" : "Start my agent"}
-            </button>
-            {/* Escape hatch for a wedged agent: fresh server-side thread, memories stay. Deliberately
-                subdued (text-link styling) with a two-step inline confirm — not an everyday control. */}
-            {agentResetConfirm ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, opacity: 0.85 }}>
-                <span style={{ flex: 1, minWidth: 0 }}>Reset? The chat history starts over; memories stay.</span>
-                <button
-                  type="button"
-                  disabled={agentBusy}
-                  onClick={() => void onAgentResetThread()}
-                  style={{ ...p2pBtnStyle(true), flex: "none", padding: "3px 10px", fontSize: 10, opacity: agentBusy ? 0.6 : 1 }}
-                >
-                  {agentBusy ? "…" : "Confirm"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAgentResetConfirm(false)}
-                  style={{ ...p2pBtnStyle(false), flex: "none", padding: "3px 10px", fontSize: 10 }}
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                disabled={agentBusy}
-                onClick={() => setAgentResetConfirm(true)}
-                title="Start a fresh conversation thread for a stuck agent — its memories and personality stay."
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: 0,
-                  alignSelf: "flex-start",
-                  color: "#dfe7d8",
-                  fontSize: 10,
-                  opacity: agentBusy ? 0.3 : 0.5,
-                  cursor: agentBusy ? "default" : "pointer",
-                  textDecoration: "underline",
-                  textDecorationColor: "rgba(255,255,255,0.25)",
-                }}
-              >
-                Reset thread
-              </button>
-            )}
-            {/* Memories: the agent's persona/self-section — ONE field (the old persona textarea moved
-                here). Live read-only view + Edit (textarea, same POST /agent/persona replace:true save
-                semantics) + a dimmed edit-history list (its own `remember` writes show up too). */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <button
-                type="button"
-                onClick={() =>
-                  setMemoriesOpen((open) => {
-                    if (!open) void loadMemoriesLog(); // pull the agent's notes when the block opens
-                    return !open;
-                  })
-                }
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "#dfe7d8",
-                  fontSize: 11,
-                  opacity: 0.85,
-                  textAlign: "left",
-                  padding: 0,
-                  cursor: "pointer",
-                  fontWeight: 600,
-                }}
-              >
-                {memoriesOpen ? "▾" : "▸"} Personality &amp; memories
-                {agentStatus?.memories?.length ? ` (${agentStatus.memories.length})` : ""}
-              </button>
-              {!memoriesOpen ? (
-                <>
-                  <pre
-                    style={{
-                      margin: 0,
-                      maxHeight: 64,
-                      overflowY: "auto",
-                      background: "rgba(0,0,0,0.32)",
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      borderRadius: 6,
-                      padding: "6px 8px",
-                      fontSize: 11,
-                      fontFamily: "inherit",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                      opacity: 0.85,
-                    }}
-                  >
-                    {agentStatus?.selfSection?.trim() || "No personality set — click Edit to describe your agent."}
-                  </pre>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAgentPersonaDraft(agentStatus?.selfSection ?? "");
-                      setMemoriesOpen(true);
-                      setMemoriesEditing(true);
-                    }}
-                    style={{ ...p2pBtnStyle(false), alignSelf: "flex-start" }}
-                  >
-                    Edit personality
-                  </button>
-                </>
-              ) : memoriesEditing ? (
-                <>
-                  <textarea
-                    value={agentPersonaDraft}
-                    onChange={(e) => setAgentPersonaDraft(e.target.value)}
-                    placeholder="Describe how your agent should behave, what it should remember…"
-                    rows={6}
-                    style={{
-                      background: "rgba(0,0,0,0.4)",
-                      color: "#dfe7d8",
-                      border: "1px solid rgba(255,255,255,0.16)",
-                      borderRadius: 6,
-                      padding: "6px 8px",
-                      fontSize: 12,
-                      resize: "vertical",
-                      fontFamily: "inherit",
-                    }}
-                  />
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <button
-                      type="button"
-                      disabled={agentBusy}
-                      onClick={() => void onAgentSavePersona()}
-                      style={{
-                        ...p2pBtnStyle(true),
-                        opacity: agentBusy ? 0.6 : 1,
-                        cursor: agentBusy ? "default" : "pointer",
-                      }}
-                    >
-                      {agentBusy ? "…" : "Save"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMemoriesEditing(false)}
-                      style={p2pBtnStyle(false)}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      disabled={agentBusy}
-                      title="Save this text as your default persona — your agent in any NEW world starts with it (each world keeps its own copy afterwards)."
-                      onClick={() => void onAgentSaveDefaultPersona()}
-                      style={{ ...p2pBtnStyle(false), opacity: agentBusy ? 0.6 : 1 }}
-                    >
-                      Set as default
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <pre
-                    style={{
-                      margin: 0,
-                      maxHeight: 150,
-                      overflowY: "auto",
-                      background: "rgba(0,0,0,0.32)",
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      borderRadius: 6,
-                      padding: "6px 8px",
-                      fontSize: 11,
-                      fontFamily: "inherit",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {agentStatus?.selfSection?.trim() || "No memories yet."}
-                  </pre>
-                  {agentStatus?.memories && agentStatus.memories.length > 0 && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                      <span style={{ fontSize: 10, opacity: 0.6, fontWeight: 600 }}>
-                        Remembers ({agentStatus.memories.length})
-                      </span>
-                      <div
-                        style={{
-                          maxHeight: 120,
-                          overflowY: "auto",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 5,
-                          padding: "6px 8px",
-                          background: "rgba(0,0,0,0.25)",
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          borderRadius: 6,
-                        }}
-                      >
-                        {agentStatus.memories.map((note, index) => (
-                          <span
-                            key={`${note.at ?? ""}-${index}`}
-                            style={{
-                              fontSize: 11,
-                              opacity: 0.8,
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                            }}
-                          >
-                            {note.at ? (
-                              <span style={{ opacity: 0.5, fontSize: 9 }}>
-                                {new Date(note.at).toLocaleString()} ·{" "}
-                              </span>
-                            ) : null}
-                            {note.text ?? ""}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // Seed the draft from the LIVE value at edit time — one source of truth.
-                        setAgentPersonaDraft(agentStatus?.selfSection ?? "");
-                        setMemoriesEditing(true);
-                      }}
-                      style={p2pBtnStyle(false)}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMemoriesHistoryOpen((open) => {
-                          if (!open) void loadMemoriesLog();
-                          return !open;
-                        });
-                      }}
-                      style={p2pBtnStyle(memoriesHistoryOpen)}
-                    >
-                      History
-                    </button>
-                  </div>
-                  {memoriesHistoryOpen && (
-                    <div
-                      style={{
-                        maxHeight: 110,
-                        overflowY: "auto",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                        padding: "6px 8px",
-                        background: "rgba(0,0,0,0.25)",
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        borderRadius: 6,
-                      }}
-                    >
-                      {memoriesLog === null ? (
-                        <span style={{ fontSize: 10, opacity: 0.5, fontStyle: "italic" }}>Loading…</span>
-                      ) : memoriesLog.length === 0 ? (
-                        <span style={{ fontSize: 10, opacity: 0.5, fontStyle: "italic" }}>No edits yet.</span>
-                      ) : (
-                        memoriesLog.map((entry, index) => (
-                          <span
-                            key={`${entry.editedAt ?? ""}-${index}`}
-                            style={{
-                              fontSize: 10,
-                              opacity: 0.55,
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                            }}
-                          >
-                            {entry.editedAt ? `${new Date(entry.editedAt).toLocaleString()} · ` : ""}
-                            {entry.editedBy ? `${entry.editedBy}: ` : ""}
-                            {entry.newValue ?? ""}
-                          </span>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-            <div style={{ fontSize: 11, opacity: 0.7 }}>
-              tokens: {agentStatus?.tokensSpentToday ?? 0} / {agentStatus?.dailyTokenBudget ?? 0}
-            </div>
-            {agentError && (
-              <div style={{ fontSize: 11, color: "#ff9a9a" }}>{agentError}</div>
-            )}
-            {/* Chat thread: the agent's dialog (assistant = dialog, tool = dimmed) plus the lines you send it. */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 11, opacity: 0.7 }}>Chat</span>
-                <button
-                  type="button"
-                  onClick={() => setChatExpanded(true)}
-                  title="Expand chat"
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "#dfe7d8",
-                    fontSize: 13,
-                    lineHeight: 1,
-                    opacity: 0.7,
-                    padding: 0,
-                    cursor: "pointer",
-                  }}
-                >
-                  ⤢
-                </button>
-              </div>
-              <div
-                ref={agentTranscriptScrollRef}
-                style={{
-                  maxHeight: 140,
-                  overflowY: "auto",
-                  background: "rgba(0,0,0,0.32)",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 6,
-                  padding: "6px 8px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                }}
-              >
-                {agentChat.length === 0 && !agentStatus?.processing ? (
-                  <span style={{ fontSize: 11, opacity: 0.5, fontStyle: "italic" }}>
-                    {agentStatus?.optedIn
-                      ? "Say hello to your agent below."
-                      : "Start your agent, then say hello below."}
-                  </span>
-                ) : (
-                  agentFeed.map(renderAgentFeedItem)
-                )}
-                {agentStatus?.optedIn && agentStatus?.processing && (
-                  <span style={{ fontSize: 11, color: "#9ec8ff", fontStyle: "italic", opacity: 0.85 }}>
-                    💭 thinking…
-                  </span>
-                )}
-              </div>
-              <div style={{ display: "flex", gap: 4 }}>
-                <input
-                  type="text"
-                  value={agentChatInput}
-                  onChange={(e) => setAgentChatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void onAgentSend();
-                    }
-                  }}
-                  placeholder={agentStatus?.optedIn ? "Talk to your agent…" : "Start your agent first"}
-                  disabled={!agentStatus?.optedIn}
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: 12,
-                    padding: "5px 8px",
-                    borderRadius: 6,
-                    border: "1px solid rgba(255,255,255,0.18)",
-                    background: "rgba(0,0,0,0.3)",
-                    color: "#eef2ea",
-                    opacity: agentStatus?.optedIn ? 1 : 0.5,
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => void onAgentSend()}
-                  disabled={!agentStatus?.optedIn || agentChatInput.trim().length === 0}
-                  style={{
-                    ...p2pBtnStyle(false),
-                    flex: "none",
-                    padding: "5px 12px",
-                    opacity:
-                      agentStatus?.optedIn && agentChatInput.trim().length > 0 ? 1 : 0.5,
-                    cursor:
-                      agentStatus?.optedIn && agentChatInput.trim().length > 0
-                        ? "pointer"
-                        : "default",
-                  }}
-                >
-                  Send
-                </button>
-              </div>
-            </div>
-            {/* POV viewport toggle: render a picture-in-picture of the scene from the agent's avatar. */}
-            <button
-              type="button"
-              onClick={() => setAgentViewportOn((v) => !v)}
-              disabled={!agentStatus?.visitorId}
-              style={{
-                ...p2pBtnStyle(agentViewportOn),
-                flex: "none",
-                width: "100%",
-                opacity: agentStatus?.visitorId ? 1 : 0.5,
-                cursor: agentStatus?.visitorId ? "pointer" : "default",
-              }}
-            >
-              {agentViewportOn ? "Hide viewport" : "Show viewport"}
-            </button>
-            <div style={{ fontSize: 10, opacity: 0.6 }}>
-              Your agent acts as you in this world. Premium keeps it active while you're away.
-            </div>
-          </aside>
-        )}
         {chatExpanded && (
           <div
             role="dialog"
+            aria-modal="true"
             aria-label="Agent chat (expanded)"
+            tabIndex={-1}
+            ref={(el) => el?.focus()}
             onClick={() => setChatExpanded(false)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setChatExpanded(false);
+            }}
             style={{
               position: "fixed",
               inset: 0,
-              zIndex: 80,
+              zIndex: 80, // var(--z-modal)
               background: "rgba(0,0,0,0.6)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               padding: 16,
+              outline: "none",
             }}
           >
             <div
@@ -10773,6 +10676,141 @@ function App(): React.ReactElement {
                 </div>
               );
             })()}
+        {(() => {
+          const portalBtn = {
+            display: "block",
+            width: "100%",
+            textAlign: "left" as const,
+            margin: "2px 0",
+            background: "rgba(255,255,255,0.08)",
+            color: "inherit",
+            border: "1px solid rgba(255,255,255,0.16)",
+            borderRadius: 8,
+            padding: "4px 8px",
+            cursor: "pointer",
+            font: "inherit",
+          };
+          return (
+            <aside
+              className={`portal-panel hud-card${portalsPanelOpen ? "" : " is-collapsed"}`}
+              aria-label="Portals"
+            >
+              <button
+                type="button"
+                className="hud-card-header"
+                aria-expanded={portalsPanelOpen}
+                onClick={() => setPortalsPanelOpen((open) => !open)}
+                title={portalsPanelOpen ? "Collapse portals" : "Expand portals"}
+              >
+                <span className="hud-card-caret">{portalsPanelOpen ? "▾" : "▸"}</span>
+                <span className="hud-card-title">Portals</span>
+                {(snapshot.portals?.length ?? 0) > 0 && (
+                  <span className="hud-card-badge">{snapshot.portals?.length}</span>
+                )}
+              </button>
+              {portalsPanelOpen && (
+              <div className="hud-card-body">
+              {(snapshot.portals ?? []).map((p) => {
+                const targetChoices = portalTargetOptions.includes(p.target.worldId)
+                  ? portalTargetOptions
+                  : [p.target.worldId, ...portalTargetOptions].filter(Boolean);
+                return (
+                  <article key={p.id} className="portal-panel-row">
+                    <button type="button" title={`Enter ${p.label || p.target.worldId} (${p.target.kind})`} onClick={() => worldRef.current?.enterPortal(p.id)} style={portalBtn}>
+                      {"->"} {p.label || p.target.worldId} <small style={{ opacity: 0.6 }}>{p.target.kind}</small>
+                    </button>
+                    <div className="portal-panel-row-actions">
+                      <select
+                        value={p.target.worldId}
+                        aria-label={`Destination for ${p.label || p.id}`}
+                        title="Change portal destination"
+                        disabled={targetChoices.length === 0}
+                        onChange={(event) => worldRef.current?.updatePortalTarget(p.id, event.target.value)}
+                      >
+                        {targetChoices.map((worldId) => (
+                          <option key={worldId} value={worldId}>
+                            {worldId}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        title="Delete portal"
+                        aria-label={`Delete ${p.label || p.id}`}
+                        onClick={() => {
+                          const ok = window.confirm(`Delete portal ${p.label || p.target.worldId}?`);
+                          if (ok) worldRef.current?.deletePortal(p.id);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+              {/* Create at your feet (owner-only — the server rejects otherwise; the rejection shows in the log). */}
+              <button
+                type="button"
+                title="Open a door to a fresh interior room at your position"
+                onClick={() => worldRef.current?.createDoorHere(window.prompt("Door label?", "Door") || "Door")}
+                style={{ ...portalBtn, marginTop: 6, borderColor: "rgba(255,207,106,0.5)" }}
+              >
+                ＋ Door here
+              </button>
+              <button
+                type="button"
+                title={activeSelectedThing ? "Create a portal anchored to the selected asset" : "Create a portal at your position to another world"}
+                disabled={!portalTargetWorldId}
+                onClick={() => {
+                  const target = portalTargetWorldId.trim();
+                  if (target) worldRef.current?.createPortalHere(target, `${currentWorldId} to ${target} portal`);
+                }}
+                style={{
+                  ...portalBtn,
+                  borderColor: "rgba(106,208,255,0.5)",
+                  opacity: portalTargetWorldId ? 1 : 0.55,
+                  cursor: portalTargetWorldId ? "pointer" : "default",
+                }}
+              >
+                ＋ Portal here
+              </button>
+              <select
+                value={portalTargetWorldId}
+                aria-label="Portal destination world"
+                title="Portal destination world"
+                disabled={portalTargetOptions.length === 0}
+                onChange={(event) => setPortalTargetWorldId(event.target.value)}
+                style={{
+                  width: "100%",
+                  marginTop: 4,
+                  background: "rgba(0,0,0,0.45)",
+                  color: "inherit",
+                  border: "1px solid rgba(106,208,255,0.35)",
+                  borderRadius: 8,
+                  padding: "4px 6px",
+                  font: "inherit",
+                }}
+              >
+                {portalTargetOptions.length === 0 ? (
+                  <option value="">No other worlds</option>
+                ) : (
+                  portalTargetOptions.map((worldId) => (
+                    <option key={worldId} value={worldId}>
+                      {currentWorldId} to {worldId}
+                    </option>
+                  ))
+                )}
+              </select>
+              {portalPanelNotice && (
+                <div className="portal-panel-notice" role="status" aria-live="polite">
+                  {portalPanelNotice}
+                </div>
+              )}
+              </div>
+              )}
+            </aside>
+          );
+        })()}
           </aside>
         )}
         {snapshot.sailingThingId && (
@@ -11132,11 +11170,11 @@ function App(): React.ReactElement {
               <button
                 type="button"
                 className="icon-button"
-                title="Hide assets"
-                aria-label="Hide assets"
+                title="Close assets"
+                aria-label="Close assets"
                 onClick={() => setAssetPanelOpen(false)}
               >
-                <ArrowLeft size={17} />
+                <X size={16} />
               </button>
             </div>
             <nav className="tool-panel-tabs asset-tabs" aria-label="Asset tabs">
@@ -11151,10 +11189,10 @@ function App(): React.ReactElement {
               </button>
               <button
                 type="button"
-                className={assetPanelTab === "procedural" ? "active" : ""}
-                title="Plants"
-                aria-label="Plant assets"
-                onClick={() => setAssetPanelTab("procedural")}
+                className={assetPanelTab === "flora" ? "active" : ""}
+                title="Flora"
+                aria-label="Flora assets"
+                onClick={() => setAssetPanelTab("flora")}
               >
                 <Sprout size={17} />
               </button>
@@ -11177,60 +11215,6 @@ function App(): React.ReactElement {
                 <Building2 size={17} />
               </button>
             </nav>
-            {assetPanelTab === "procedural" && (
-              <div className="inventory-list asset-list">
-                <span className="inventory-empty" style={{ paddingBottom: 4 }}>
-                  Procedural nature — built instantly, no generation cost. Every placement gets a
-                  fresh random look.
-                </span>
-                {PROCEDURAL_CATALOG.map((arch) => (
-                  <button
-                    key={arch.id}
-                    type="button"
-                    className="inventory-item"
-                    onClick={() => {
-                      const seed = (Math.random() * 0xffffffff) >>> 0;
-                      worldRef.current?.addLibraryAsset({
-                        id: `proc-${arch.id}-${seed.toString(16)}`,
-                        name: arch.label,
-                        description: arch.label,
-                        modelUrl: makeProceduralModelUrl(arch.id, seed),
-                        source: "generated",
-                      });
-                    }}
-                  >
-                    <span style={{ fontSize: 16, width: 16, textAlign: "center" }}>{arch.emoji}</span>
-                    <span>
-                      <strong>{arch.label}</strong>
-                      <small>procedural · tap again for a new variation</small>
-                    </span>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="inventory-item"
-                  onClick={() => {
-                    const seed = (Math.random() * 0xffffffff) >>> 0;
-                    worldRef.current?.addLibraryAsset({
-                      id: `proc-mirror-${seed.toString(16)}`,
-                      name: "Mirror",
-                      description: "Mirror",
-                      modelUrl: makeProceduralModelUrl(MIRROR_ARCHETYPE_ID, seed),
-                      source: "generated",
-                    });
-                  }}
-                >
-                  <span style={{ fontSize: 16, width: 16, textAlign: "center" }}>🪞</span>
-                  <span>
-                    <strong>Mirror</strong>
-                    <small>
-                      reflective standing mirror · up to {MAX_LIVE_MIRRORS} reflect live (extras
-                      render as tinted glass)
-                    </small>
-                  </span>
-                </button>
-              </div>
-            )}
             {assetPanelTab === "avatar" && (
               <div className="inventory-list asset-list asset-avatar-tab">
                 <div className="asset-tab-note">
@@ -11279,7 +11263,7 @@ function App(): React.ReactElement {
                 </div>
               </div>
             )}
-            {(assetPanelTab === "animal" || assetPanelTab === "building") && (
+            {(assetPanelTab === "animal" || assetPanelTab === "building" || assetPanelTab === "flora") && (
               <div className="inventory-list asset-list">
                 <label className="asset-search-field">
                   <Search size={14} aria-hidden="true" />
@@ -11339,7 +11323,7 @@ function App(): React.ReactElement {
                     type="button"
                     className="inventory-item"
                     style={{ justifyContent: "center", fontWeight: 600 }}
-                    onClick={() => void runAssetBrowse(assetBrowseQuery, assetBrowsePage + 1, true, assetBrowseSort)}
+                    onClick={() => void runAssetBrowse(assetBrowseQuery, assetBrowsePage + 1, true, assetBrowseSort, assetCategory)}
                   >
                     Load more
                   </button>
@@ -11459,11 +11443,11 @@ function App(): React.ReactElement {
             <button
               type="button"
               className="icon-button"
-              title="Hide terrain"
-              aria-label="Hide terrain"
+              title="Close terrain"
+              aria-label="Close terrain"
               onClick={() => closeToolPanel("terrain")}
             >
-              <ArrowLeft size={17} />
+              <X size={16} />
             </button>
           </div>
           <div className="terrain-subtitle">Height</div>
@@ -11559,6 +11543,50 @@ function App(): React.ReactElement {
             >
               <span className="terrain-swatch-preview" />
               <span>Brick</span>
+            </button>
+          </div>
+          <div className="terrain-subtitle with-rule">Scatter</div>
+          <div className="terrain-scatter-grid">
+            {PROCEDURAL_CATALOG.map((arch) => (
+              <button
+                key={arch.id}
+                type="button"
+                className="terrain-scatter-tile"
+                title={`${arch.label} — tap again for a new variation`}
+                aria-label={arch.label}
+                onClick={() => {
+                  const seed = (Math.random() * 0xffffffff) >>> 0;
+                  worldRef.current?.addLibraryAsset({
+                    id: `proc-${arch.id}-${seed.toString(16)}`,
+                    name: arch.label,
+                    description: arch.label,
+                    modelUrl: makeProceduralModelUrl(arch.id, seed),
+                    source: "generated",
+                  });
+                }}
+              >
+                <span className="terrain-scatter-emoji" aria-hidden="true">{arch.emoji}</span>
+                <span className="terrain-scatter-label">{arch.label}</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              className="terrain-scatter-tile"
+              title={`Mirror — up to ${MAX_LIVE_MIRRORS} reflect live`}
+              aria-label="Mirror"
+              onClick={() => {
+                const seed = (Math.random() * 0xffffffff) >>> 0;
+                worldRef.current?.addLibraryAsset({
+                  id: `proc-mirror-${seed.toString(16)}`,
+                  name: "Mirror",
+                  description: "Mirror",
+                  modelUrl: makeProceduralModelUrl(MIRROR_ARCHETYPE_ID, seed),
+                  source: "generated",
+                });
+              }}
+            >
+              <span className="terrain-scatter-emoji" aria-hidden="true">🪞</span>
+              <span className="terrain-scatter-label">Mirror</span>
             </button>
           </div>
         </section>

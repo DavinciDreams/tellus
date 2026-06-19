@@ -154,12 +154,12 @@ export type WorldAction =
       id: string;
     }
   | {
-      type: "portal.upsert";
+      type: "world.portal.upsert";
       visitorId: string;
       portal: WorldPortal;
     }
   | {
-      type: "portal.delete";
+      type: "world.portal.delete";
       visitorId: string;
       portalId: string;
     }
@@ -414,7 +414,7 @@ export function portalsFromWorldPatch(parsed: unknown): WorldPortal[] | null {
   if (parsed.type === "world.snapshot" && Array.isArray(parsed.portals)) {
     return parsed.portals.filter(isWorldPortal);
   }
-  if (parsed.type === "portal.updated" && isWorldPortal(parsed.portal)) {
+  if ((parsed.type === "portal.updated" || parsed.type === "world.portal.updated") && isWorldPortal(parsed.portal)) {
     return [parsed.portal];
   }
   return null;
@@ -422,7 +422,7 @@ export function portalsFromWorldPatch(parsed: unknown): WorldPortal[] | null {
 
 /** A portal.deleted patch's id, or null. */
 export function portalDeletedFromWorldPatch(parsed: unknown): string | null {
-  if (!isRecord(parsed) || parsed.type !== "portal.deleted") return null;
+  if (!isRecord(parsed) || (parsed.type !== "portal.deleted" && parsed.type !== "world.portal.deleted")) return null;
   return typeof parsed.portalId === "string" ? parsed.portalId : null;
 }
 
@@ -547,10 +547,10 @@ export function isWorldAction(value: unknown): value is WorldAction {
   if (value.type === "generated.delete") {
     return typeof value.id === "string";
   }
-  if (value.type === "portal.upsert") {
+  if (value.type === "world.portal.upsert" || value.type === "portal.upsert") {
     return isWorldPortal(value.portal);
   }
-  if (value.type === "portal.delete") {
+  if (value.type === "world.portal.delete" || value.type === "portal.delete") {
     return typeof value.portalId === "string";
   }
   if (value.type === "world.chat") {
