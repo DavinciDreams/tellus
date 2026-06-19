@@ -242,6 +242,21 @@ textarea::placeholder {
   pointer-events: auto;
 }
 
+/* Chat-panel-style header for the World menu (title + clean × close), spans the full panel width. */
+.world-menu-head {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 2px;
+  color: var(--hud-gold-bright);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
 .world-menu-panel > .top-left-cluster {
   display: none;
 }

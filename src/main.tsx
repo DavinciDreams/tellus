@@ -9466,6 +9466,18 @@ function App(): React.ReactElement {
         </div>
         {worldMenuOpen && (
         <aside className="world-menu-panel" aria-label="World menu">
+          <div className="world-menu-head">
+            <span>World</span>
+            <button
+              type="button"
+              className="icon-button"
+              title="Close world menu"
+              aria-label="Close world menu"
+              onClick={() => setWorldMenuOpen(false)}
+            >
+              <X size={16} />
+            </button>
+          </div>
           <div className="top-left-cluster" style={{ position: "relative" }}>
             <div
               className="brand-mark"
