@@ -2864,11 +2864,27 @@ function createTellusWorld(
     });
   };
 
-  const MAX_WORLD_MODEL_LOADS = 2;
+  const MAX_WORLD_MODEL_LOADS = 1;
+  const WORLD_MODEL_LOAD_PUMP_DELAY_MS = 120;
   let activeWorldModelLoads = 0;
   const worldModelLoadQueue: string[] = [];
   const queuedWorldModelLoads = new Set<string>();
   let worldModelLoadPumpScheduled = false;
+
+  const isDeadLegacyHyadesContentUrl = (url: string): boolean => {
+    try {
+      const parsed = new URL(url, window.location.href);
+      const worldApiHost = runtimeConfig.worldApiBase
+        ? new URL(runtimeConfig.worldApiBase, window.location.href).hostname
+        : "";
+      return (
+        parsed.hostname === worldApiHost &&
+        /^\/v1\/3d\/content\/[^/]+\/\d+\/?$/i.test(parsed.pathname)
+      );
+    } catch {
+      return false;
+    }
+  };
 
   const sortWorldModelLoadQueue = () => {
     worldModelLoadQueue.sort((a, b) => {
@@ -2888,7 +2904,7 @@ function createTellusWorld(
     window.setTimeout(() => {
       worldModelLoadPumpScheduled = false;
       pumpWorldModelLoadQueue();
-    }, 0);
+    }, WORLD_MODEL_LOAD_PUMP_DELAY_MS);
   };
 
   const pumpWorldModelLoadQueue = () => {
@@ -2901,6 +2917,15 @@ function createTellusWorld(
       const thing = thingById(id);
       if (!thing?.modelUrl || thing.generationStatus !== "ready") continue;
       const modelUrl = thing.modelUrl;
+      if (isDeadLegacyHyadesContentUrl(modelUrl)) {
+        thing.modelUrl = undefined;
+        thing.generationStatus = "failed";
+        thing.pipelineId = undefined;
+        ensureGeneratedVisual(thing);
+        publishGeneratedThing(thing);
+        publish();
+        continue;
+      }
       const currentMesh = generatedMeshes.get(thing.id);
       if (currentMesh?.userData.loadedModelUrl === modelUrl) continue;
       activeWorldModelLoads++;
@@ -2939,7 +2964,7 @@ function createTellusWorld(
         })
         .finally(() => {
           activeWorldModelLoads--;
-          pumpWorldModelLoadQueue();
+          scheduleWorldModelLoadPump();
         });
     }
   };

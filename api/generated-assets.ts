@@ -67,6 +67,14 @@ export async function generatedAssetsHandler(request: Request): Promise<Response
       },
     });
   } catch {
+    if (url.pathname === "/generated-assets/manifest.json") {
+      return new Response(request.method === "HEAD" ? null : "[]", {
+        headers: {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json; charset=utf-8",
+        },
+      });
+    }
     return new Response("Generated asset not found", { status: 404 });
   }
 }
