@@ -3318,6 +3318,24 @@ function createTellusWorld(
     setGeneratedScale(thing, 1);
   };
 
+  const terrainRaycaster = new THREE.Raycaster();
+  const terrainRayOrigin = new THREE.Vector3();
+  const terrainRayDirection = new THREE.Vector3(0, -1, 0);
+  const terrainRayTargets: THREE.Object3D[] = [];
+
+  const renderedTerrainHeightAt = (x: number, z: number): number | null => {
+    terrainRayTargets.length = 0;
+    if (terrain.visible) terrainRayTargets.push(terrain);
+    const chunkTerrain = scene.getObjectByName("tellus-chunk-terrain");
+    if (chunkTerrain) terrainRayTargets.push(chunkTerrain);
+    if (terrainRayTargets.length === 0) return null;
+    terrainRayOrigin.set(x, MAX_ALTITUDE + 220, z);
+    terrainRaycaster.set(terrainRayOrigin, terrainRayDirection);
+    terrainRaycaster.far = MAX_ALTITUDE + 520;
+    const hit = terrainRaycaster.intersectObjects(terrainRayTargets, true)[0];
+    return hit ? hit.point.y : null;
+  };
+
   const liftGenerated = (id: string, amount: number) => {
     const thing = thingById(id);
     if (!thing) return;
@@ -3341,20 +3359,34 @@ function createTellusWorld(
   // footprint radius and taking the MAX rests the object ON the surface instead of inside it. Returns
   // null only when no sample resolves (async terrain not loaded yet).
   const footprintGroundY = (thing: GeneratedThing): number | null => {
-    let best = groundHeightAt(thing.position.x, thing.position.z);
+    let bestRendered: number | null = renderedTerrainHeightAt(thing.position.x, thing.position.z);
+    let bestAnalytic = groundHeightAt(thing.position.x, thing.position.z);
     const fp = thingFootprint(thing);
     const r = Math.min(fp?.radius ?? 0, 6);
     if (r >= 0.25) {
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * Math.PI * 2;
-        const h = groundHeightAt(
-          thing.position.x + Math.cos(a) * r,
-          thing.position.z + Math.sin(a) * r,
-        );
-        if (h !== null && Number.isFinite(h) && (best === null || h > best)) best = h;
+        const x = thing.position.x + Math.cos(a) * r;
+        const z = thing.position.z + Math.sin(a) * r;
+        const rendered = renderedTerrainHeightAt(x, z);
+        if (
+          rendered !== null &&
+          Number.isFinite(rendered) &&
+          (bestRendered === null || rendered > bestRendered)
+        ) {
+          bestRendered = rendered;
+        }
+        const analytic = groundHeightAt(x, z);
+        if (
+          analytic !== null &&
+          Number.isFinite(analytic) &&
+          (bestAnalytic === null || analytic > bestAnalytic)
+        ) {
+          bestAnalytic = analytic;
+        }
       }
     }
-    return best;
+    return bestRendered ?? bestAnalytic;
   };
 
   const groundGenerated = (id: string) => {
