@@ -588,12 +588,19 @@ function createTellusWorld(
   if (fallbackSky.material instanceof THREE.MeshBasicMaterial) {
     skyboxTintMaterials.add(fallbackSky.material);
   }
+  // ~500ms/frame stall is WebGPU-specific on this GPU. Set back to `"gpu" in navigator` after testing.
   const useWebGPU = "gpu" in navigator;
   // Visual terrain density (decoupled from the synced 97² sculpt grid). FIXED vertex budget no
   // matter the world scale — bigger worlds stretch the same ~50K-vertex mesh instead of multiplying
   // it (operator: range over thickness; worlds get larger for less).
   const terrainRenderSegments = useWebGPU ? 224 : 144;
-  const ocean = createOceanSurface(useWebGPU);
+  // PERF/CORRECTNESS: the WebGPU backdrop-water material samples the viewport's own color+depth
+  // texture (viewportSharedTexture/viewportDepthTexture) for refraction WHILE the same render pass
+  // writes that texture — WebGPU forbids this (TextureBinding|RenderAttachment in one sync scope),
+  // which invalidates the frame command buffer every frame → black/agonizingly-slow render. Until the
+  // TSL viewport-backdrop path is restructured (separate copy pass), use the plain non-sampling ocean
+  // on WebGPU too. (Same call as Codex's WebGPU-mirror fallback.) WebGL never had the refractive water.
+  const ocean = createOceanSurface(false);
   const archipelago = createDistantArchipelago(useWebGPU);
   // Ambient procedural vegetation (wind-swayed grass/flowers streamed around the player + island-wide
   // trees/rocks) and the lightweight physics world (thrown things, player jump/obstacles). Both are
@@ -2780,8 +2787,13 @@ function createTellusWorld(
     // the asset would sit BELOW the surface. Re-sample the live rendered ground here so the model's
     // feet rest flush. Display-only — this function must NOT mutate thing.position (lift/lower/ground
     // commands set the authoritative y and call us to repaint; mutating here would fight them).
-    const hasManualHeightOffset = isVisiblyOffsetFromLiveGround(thing);
-    const liveGround = isChunked && !hasManualHeightOffset ? footprintGroundY(thing) : null;
+    // PERF: isVisiblyOffsetFromLiveGround + footprintGroundY each do ~9 terrain RAYCASTS (+ a Box3
+    // bounds traversal). They're ONLY needed to gate the chunked-world live reground below, so compute
+    // them ONLY when isChunked. On classic worlds this whole block was raycasting 9× per asset on every
+    // updateThingMeshPosition (incl. once per asset during the load storm) and being thrown away — the
+    // cause of the multi-second load freeze with many assets. Skip it entirely on classic worlds.
+    const liveGround =
+      isChunked && !isVisiblyOffsetFromLiveGround(thing) ? footprintGroundY(thing) : null;
     const placeAt =
       liveGround !== null && Number.isFinite(liveGround)
         ? { ...thing.position, y: liveGround }
@@ -7682,7 +7694,8 @@ function App(): React.ReactElement {
   // Chunked worlds tile a flat plane into NxN chunk grains (server parses N from the id
   // "chunked-<n>-<name>"). Expose it as a first-class kind+size picker so the operator never
   // has to hand-type the naming convention.
-  const [newWorldChunked, setNewWorldChunked] = useState(false);
+  // Chunked-only: new worlds are always chunked (the classic/non-chunked render path is retired).
+  const [newWorldChunked, setNewWorldChunked] = useState(true);
   const [newWorldChunkSize, setNewWorldChunkSize] = useState(8);
   const [currentWorldTemplate, setCurrentWorldTemplate] = useState<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
@@ -8555,7 +8568,8 @@ function App(): React.ReactElement {
               defaultSkyboxUrlForTemplate(defaultWorldTemplateRef.current),
           );
           setNewWorldPrivate(savedPrivate === "1");
-          setNewWorldChunked(savedChunked === "1");
+          // Chunked-only: ignore any persisted "classic" choice; new worlds are always chunked.
+          setNewWorldChunked(true);
           if (savedChunkSize) {
             const parsed = Math.round(Number(savedChunkSize));
             if (Number.isFinite(parsed)) {
@@ -8568,7 +8582,7 @@ function App(): React.ReactElement {
             defaultSkyboxUrlRef.current || defaultSkyboxUrlForTemplate(defaultWorldTemplateRef.current),
           );
           setNewWorldPrivate(false);
-          setNewWorldChunked(false);
+          setNewWorldChunked(true);
           setNewWorldChunkSize(8);
         }
         const configDefault = runtimeConfig.worldId; // typically "main" — always keep it reachable
@@ -9382,26 +9396,25 @@ function App(): React.ReactElement {
                   })()}
               </div>
             </div>
+            {/* Chunked-only: classic island worlds are retired, so there is no kind to choose.
+                Show a static "Chunked" label instead of a one-option dropdown. */}
             <div style={{ display: "grid", gap: 2 }}>
               <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>Kind</span>
-              <select
+              <span
                 aria-label="New world kind"
-                title="Classic island worlds, or a large flat tiled (chunked) plane"
-                value={newWorldChunked ? "chunked" : "classic"}
-                onChange={(e) => setNewWorldChunked(e.target.value === "chunked")}
+                title="Worlds are large flat tiled (chunked) planes"
                 style={{
-                  background: "rgba(0,0,0,0.5)",
+                  background: "rgba(0,0,0,0.35)",
                   color: "#dfe7d8",
-                  border: "1px solid rgba(255,255,255,0.18)",
+                  border: "1px solid rgba(255,255,255,0.12)",
                   borderRadius: 8,
                   padding: "4px 8px",
                   font: "600 12px/1.2 ui-sans-serif, system-ui",
                   maxWidth: 120,
                 }}
               >
-                <option value="classic">Classic</option>
-                <option value="chunked">Chunked</option>
-              </select>
+                Chunked
+              </span>
             </div>
             {newWorldChunked && (
               <div style={{ display: "grid", gap: 2 }}>

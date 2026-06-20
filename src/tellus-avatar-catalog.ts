@@ -85,6 +85,8 @@ export function catalogEntryById(id: string): AvatarCatalogEntry | undefined {
   }
   if (id.startsWith("glb:")) {
     const storeId = id.slice(4);
+    const vrmEntry = avatarCatalogSnapshot.find((entry) => entry.id === `vrm:${storeId}`);
+    if (vrmEntry) return vrmEntry;
     if (storeId) return { id, label: `GLB ${storeId.slice(0, 8)}`, kind: "glb", storeId, heightHint: 0.55, source: "asset-store" };
   }
   return undefined;
@@ -98,6 +100,11 @@ export function subscribeAvatarCatalog(listener: () => void): () => void {
   if (typeof window === "undefined") return () => undefined;
   window.addEventListener(AVATAR_CATALOG_EVENT, listener);
   return () => window.removeEventListener(AVATAR_CATALOG_EVENT, listener);
+}
+
+export function resetAvatarCatalogForTests(): void {
+  avatarCatalogSnapshot = AVATAR_CATALOG;
+  avatarCatalogPromise = undefined;
 }
 
 /** Store thumbnail for a catalog entry (undefined for "classic" — render an initials tile). */
@@ -188,6 +195,11 @@ interface AssetBrowseModel {
   asset_id?: string;
   name?: string;
   file_format?: string;
+  content_type?: string;
+  mime_type?: string;
+  has_vrm_variant?: boolean;
+  has_optimized_vrm_variant?: boolean;
+  tags?: unknown;
 }
 
 function parseAssetModels(value: unknown): AssetBrowseModel[] {
@@ -253,14 +265,32 @@ function assetId(model: AssetBrowseModel): string {
   return "";
 }
 
-function isVrmModel(model: AssetBrowseModel): boolean {
+function modelLooksVrm(model: AssetBrowseModel): boolean {
   const format = typeof model.file_format === "string" ? model.file_format.toLowerCase() : "";
-  return !format || format === "vrm";
+  const contentType = typeof model.content_type === "string" ? model.content_type.toLowerCase() : "";
+  const mimeType = typeof model.mime_type === "string" ? model.mime_type.toLowerCase() : "";
+  const tags = Array.isArray(model.tags)
+    ? model.tags.filter((tag): tag is string => typeof tag === "string").map((tag) => tag.toLowerCase())
+    : [];
+  return (
+    format === "vrm" ||
+    contentType.includes("vrm") ||
+    mimeType.includes("vrm") ||
+    model.has_vrm_variant === true ||
+    model.has_optimized_vrm_variant === true ||
+    tags.includes("vrm")
+  );
+}
+
+function isDedicatedVrmModel(model: AssetBrowseModel): boolean {
+  const format = typeof model.file_format === "string" ? model.file_format.toLowerCase() : "";
+  // /vrm-models is already a VRM-specific endpoint; older store builds may omit file_format.
+  return !format || modelLooksVrm(model);
 }
 
 function isAnimatedGlbModel(model: AssetBrowseModel): boolean {
   const format = typeof model.file_format === "string" ? model.file_format.toLowerCase() : "";
-  return !format || format === "glb";
+  return !modelLooksVrm(model) && (!format || format === "glb" || format === "gltf");
 }
 
 function inferredGlbHeight(model: AssetBrowseModel): number {
@@ -295,8 +325,11 @@ export function loadAvatarCatalog(): Promise<readonly AvatarCatalogEntry[]> {
         fetchAnimatedAvatarCandidates(),
       ]);
       const existing = new Set(AVATAR_CATALOG.map((entry) => entry.id));
-      const vrms = dedupeModels(vrmModels)
-        .filter(isVrmModel)
+      const vrmCandidates = dedupeModels([
+        ...vrmModels.filter(isDedicatedVrmModel),
+        ...animatedModels.filter(modelLooksVrm),
+      ]);
+      const vrms = vrmCandidates
         .filter((model) => assetId(model))
         .map((model) => ({
           id: `vrm:${assetId(model)}`,

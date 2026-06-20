@@ -48,14 +48,14 @@ describe("mirror procedural asset", () => {
     expect(model!.userData.mirrorReflector).toBeTruthy();
   });
 
-  it("builds a live TSL-reflector mirror on the WebGPU path", () => {
+  it("uses static glass on the WebGPU path while live TSL reflectors are disabled", () => {
     resetLiveMirrors();
     const model = buildProceduralModel("procedural://mirror", true);
     expect(model).not.toBeNull();
-    expect(hasReflector(model!)).toBe(true);
-    expect(hasGlass(model!)).toBe(false);
-    expect(liveMirrorCount()).toBe(1);
-    expect(model!.userData.mirrorReflector).toBeTruthy();
+    expect(hasReflector(model!)).toBe(false);
+    expect(hasGlass(model!)).toBe(true);
+    expect(liveMirrorCount()).toBe(0);
+    expect(model!.userData.mirrorReflector).toBeFalsy();
   });
 
   it("caps live mirrors and renders extras as glass", () => {

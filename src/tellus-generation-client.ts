@@ -47,12 +47,17 @@ export const textureErrorSince = (sinceMs: number): boolean => lastTextureErrorA
 /** Model URLs whose last load had texture failures — consumers retry these (bounded) so a transient
  * KTX2/worker blip during the initial world-load burst doesn't leave models untextured all session. */
 export const textureFailedModelUrls = new Set<string>();
+const noteTextureLoadFailure = (url: unknown): void => {
+  lastTextureErrorAt = Date.now();
+  console.warn("[assets] texture failed to load (will retry on next placement):", String(url).slice(0, 120));
+};
+
+const gltfManager = new THREE.LoadingManager();
+gltfManager.onError = noteTextureLoadFailure;
+
 {
   const ktx2Manager = new THREE.LoadingManager();
-  ktx2Manager.onError = (url) => {
-    lastTextureErrorAt = Date.now();
-    console.warn("[assets] texture failed to load (will retry on next placement):", String(url).slice(0, 120));
-  };
+  ktx2Manager.onError = noteTextureLoadFailure;
   ktx2Loader.manager = ktx2Manager;
 }
 
@@ -67,7 +72,7 @@ export function configureKtx2Support(renderer: unknown): void {
 }
 
 export function createGltfLoader(): GLTFLoader {
-  return new GLTFLoader()
+  return new GLTFLoader(gltfManager)
     .setDRACOLoader(dracoLoader)
     .setKTX2Loader(ktx2Loader)
     .setMeshoptDecoder(MeshoptDecoder);

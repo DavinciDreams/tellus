@@ -73,7 +73,10 @@ export const runtimeConfig: TellusRuntimeConfig = {
   },
   worldApiBase:
     import.meta.env.VITE_TELLUS_WORLD_API_BASE?.replace(/\/+$/, "") ?? "",
-  worldId: import.meta.env.VITE_TELLUS_WORLD_ID ?? "main",
+  // Default landing world is a CHUNKED world (chunked-only path). Legacy classic worlds
+  // (worldId without the "chunked-" prefix) are retired; the non-chunked render path is
+  // being removed. chunked-64-genesis is a live, empty 64x64 chunked world on Hyades.
+  worldId: import.meta.env.VITE_TELLUS_WORLD_ID ?? "chunked-64-genesis",
   skyboxUrl: import.meta.env.VITE_TELLUS_SKYBOX_URL ?? "",
   worldTemplate: parseWorldTemplateId(import.meta.env.VITE_TELLUS_WORLD_TEMPLATE, "tellus"),
   dayNightCycleMs: boundedNumber(

@@ -237,7 +237,10 @@ function buildMirrorModel(rendererIsWebGPU: boolean): THREE.Group {
   // Within the cap, build a LIVE reflecting mirror for this backend; over the cap (or on a build
   // failure) fall back to static tinted glass — one extra full-scene pass per live mirror.
   if (liveReflectors.size < MAX_LIVE_MIRRORS) {
-    const live = rendererIsWebGPU ? buildWebGPUReflectorMirror() : buildWebGLReflectorMirror();
+    // Three r183's WebGPU TSL reflector can bind its half-res texture as both sampled input and
+    // render attachment in one pass, invalidating the frame command buffer. Keep WebGPU stable with
+    // static glass until that path is upgraded; WebGL's Reflector remains live.
+    const live = rendererIsWebGPU ? null : buildWebGLReflectorMirror();
     if (live) return live;
   }
   return buildStaticMirror();

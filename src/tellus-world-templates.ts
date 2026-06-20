@@ -24,7 +24,7 @@ const TEMPLATE_PRESETS: Record<
   { defaultSkyboxUrl: string; landShape: LandShapeConfig }
 > = {
   tellus: {
-    defaultSkyboxUrl: "/skybox/free_-_skybox_in_the_cloud/scene.gltf",
+    defaultSkyboxUrl: "/skybox/free_-_skybox_basic_sky.glb",
     landShape: {
       mountain: { height: 21, radius: 20, exponent: 2.2 },
       shoulder: { x: -16, z: 12, radius: 190, height: 4.2 },
