@@ -1150,6 +1150,7 @@ export function generatedFromWorldPatch(parsed: unknown): WorldGeneratedThing[] 
 }
 
 export let initialWorldGeneratedThings: WorldGeneratedThing[] = [];
+export let initialWorldPresence: WorldPresence[] = [];
 
 export async function loadTellusWorldState(): Promise<boolean> {
   if (!runtimeConfig.worldApiBase) return false;
@@ -1162,12 +1163,14 @@ export async function loadTellusWorldState(): Promise<boolean> {
   // the chunk streamer take over. tellusWorldBackendAvailable=true keeps /live + saves working.
   if (runtimeConfig.worldId.startsWith("chunked-")) {
     initialWorldGeneratedThings = generatedFromWorldPatch(parsed) ?? [];
+    initialWorldPresence = presenceFromWorldPatch(parsed) ?? [];
     return true;
   }
 
   const terrain = terrainFromWorldPatch(parsed);
   if (!terrain) return false;
   initialWorldGeneratedThings = generatedFromWorldPatch(parsed) ?? [];
+  initialWorldPresence = presenceFromWorldPatch(parsed) ?? [];
   applyTellusTerrainState(terrain);
   return true;
 }
@@ -1325,4 +1328,8 @@ export function setTerrainStateDirty(value: boolean): void {
 }
 export function setInitialWorldGeneratedThings(value: WorldGeneratedThing[]): void {
   initialWorldGeneratedThings = value;
+}
+
+export function setInitialWorldPresence(value: WorldPresence[]): void {
+  initialWorldPresence = value;
 }

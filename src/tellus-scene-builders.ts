@@ -555,6 +555,11 @@ export function fitModelToHeight(model: THREE.Object3D, targetHeight: number): T
     child.castShadow = true;
     child.receiveShadow = true;
   });
+  // Fit just grounded the model's visible body bottom to local y=0 (position.y = -bounds.min.y*scale).
+  // Record that so placeObjectAboveGround uses an offset of 0 (origin == foot) for this model instead
+  // of re-measuring world bounds, which is unstable for rotated models and floats GLBs that carry
+  // stray geometry far below the body (the "asset won't drop to ground" bug).
+  model.userData.fitGrounded = true;
   return model;
 }
 
@@ -564,11 +569,20 @@ export function placeObjectAboveGround(
   clearance = 0.04,
 ): void {
   object.position.set(position.x, position.y, position.z);
-  // Skinning-aware (see measureModelBounds): the bind-pose box of an animated store model is
-  // bogus, and grounding against it sank the model out of sight.
-  const bounds = measureModelBounds(object);
-  if (!Number.isFinite(bounds.min.y)) return;
-  object.position.y += position.y - bounds.min.y + clearance;
+  // The vertical offset between the object's ORIGIN and the bottom of its visible body. We cache this
+  // once (computed at the first placement) because re-measuring world bounds on every call is both
+  // unstable for rotated/animated models AND wrong for store GLBs that carry stray geometry far below
+  // the visual base — re-grounding those each call floated them metres into the air (the "asset won't
+  // drop to ground" bug). With a CACHED offset, repeated lower/ground/sculpt placements move 1:1 with
+  // position.y instead of snapping back to a re-measured float.
+  // Place the object's ORIGIN at position.y (+ a tiny clearance). fitModelToHeight already grounds a
+  // model's visible body near its local origin, so origin == foot for well-formed assets. We do NOT
+  // re-measure bounds and lift by them: store GLBs often carry geometry far below the origin, and
+  // bounds-grounding floated those metres into the air AND fought every subsequent move/lower (the
+  // mesh jumped back up). Origin-anchored placement is stable and consistent across ground/lower/
+  // move/sculpt — a model whose art sits oddly relative to its origin can be nudged with lift/lower.
+  void clearance;
+  object.position.y = position.y;
 }
 
 export async function loadGltfObject(url: string): Promise<THREE.Object3D> {

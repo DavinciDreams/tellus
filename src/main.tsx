@@ -123,7 +123,7 @@ import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayer
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig } from "./tellus-runtime-config";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, toAssetId } from "./tellus-urls-identity";
-import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
+import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial } from "./tellus-terrain-material";
@@ -1721,6 +1721,40 @@ function createTellusWorld(
     publish();
   };
 
+  const clearVisitorSpawnPosition = (x: number, z: number): Vec3 => {
+    const occupied = Array.from(remoteVisitors.values())
+      .map((presence) => presence.position)
+      .filter((position): position is Vec3 => Boolean(position));
+    const isClear = (candidate: Vec3): boolean =>
+      occupied.every((position) => distance2D(candidate, position) >= 2.4);
+    let best = groundedPosition(x, z, visitorPosition);
+    if (isClear(best)) return best;
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < 24; i++) {
+      const radius = 2.6 + Math.floor(i / 8) * 1.8;
+      const angle = i * golden;
+      const candidate = groundedPosition(
+        x + Math.cos(angle) * radius,
+        z + Math.sin(angle) * radius,
+        visitorPosition,
+      );
+      if (isClear(candidate)) return candidate;
+      if (
+        occupied.reduce(
+          (nearest, position) => Math.min(nearest, distance2D(candidate, position)),
+          Number.POSITIVE_INFINITY,
+        ) >
+        occupied.reduce(
+          (nearest, position) => Math.min(nearest, distance2D(best, position)),
+          Number.POSITIVE_INFINITY,
+        )
+      ) {
+        best = candidate;
+      }
+    }
+    return best;
+  };
+
   const sendPresenceUpdate = (force = false) => {
     if (!worldSocket || worldSocket.readyState !== WebSocket.OPEN) return;
     const now = performance.now();
@@ -2067,7 +2101,7 @@ function createTellusWorld(
     visitorPosition = groundedPosition(visitorPosition.x, visitorPosition.z, visitorPosition);
     for (const thing of generated) {
       if (!isFreeMovingVehicle(thing) && !isIntentionallyOffsetFromGround(thing)) {
-        thing.position = groundedPosition(thing.position.x, thing.position.z, thing.position);
+        groundThingToRenderedSurface(thing);
         updateThingMeshPosition(thing);
       }
     }
@@ -2657,13 +2691,12 @@ function createTellusWorld(
       return;
     }
     // Chunked worlds: the stored thing.position.y may have been grounded against the flat base
-    // (sampleHeight returns null until the owning chunk streams in), so once the sculpted chunk
-    // loads the asset would sit BELOW the surface. Re-sample the live ground height here so the
-    // model's feet rest flush on the sculpted terrain. Falls through to the stored y otherwise.
+    // (sampleHeight returns null until the owning chunk streams in), so once the sculpted chunk loads
+    // the asset would sit BELOW the surface. Re-sample the live rendered ground here so the model's
+    // feet rest flush. Display-only — this function must NOT mutate thing.position (lift/lower/ground
+    // commands set the authoritative y and call us to repaint; mutating here would fight them).
     const hasManualHeightOffset = isVisiblyOffsetFromLiveGround(thing);
-    const liveGround = isChunked && !hasManualHeightOffset
-      ? footprintGroundY(thing)
-      : null;
+    const liveGround = isChunked && !hasManualHeightOffset ? footprintGroundY(thing) : null;
     const placeAt =
       liveGround !== null && Number.isFinite(liveGround)
         ? { ...thing.position, y: liveGround }
@@ -2675,11 +2708,23 @@ function createTellusWorld(
 
   const updateSelectionIndicator = (_now?: number) => undefined;
 
+  // Ground a thing's stored y to the LIVE RENDERED surface (footprintGroundY = raycast against the
+  // actual mesh), falling back to the analytic groundedPosition only when no ray resolves. After heavy
+  // terraforming the analytic terrainHeight() diverges from the rendered mesh, so grounding the DATA to
+  // the rendered surface is what makes assets actually rest on the visible ground after a sculpt.
+  const groundThingToRenderedSurface = (thing: GeneratedThing) => {
+    const rendered = footprintGroundY(thing);
+    thing.position =
+      rendered !== null && Number.isFinite(rendered)
+        ? { ...thing.position, y: rendered }
+        : groundedPosition(thing.position.x, thing.position.z, thing.position);
+  };
+
   const regroundClassicTerrainActorsAndThings = () => {
     visitorPosition = groundedPosition(visitorPosition.x, visitorPosition.z, visitorPosition);
     for (const thing of generated) {
       if (!isFreeMovingVehicle(thing) && !isIntentionallyOffsetFromGround(thing)) {
-        thing.position = groundedPosition(thing.position.x, thing.position.z, thing.position);
+        groundThingToRenderedSurface(thing);
         updateThingMeshPosition(thing);
       }
     }
@@ -3238,6 +3283,13 @@ function createTellusWorld(
     publish();
   };
 
+  if (tellusWorldBackendAvailable && initialWorldPresence.length > 0) {
+    applyRemotePresence(initialWorldPresence);
+    visitorPosition = clearVisitorSpawnPosition(visitorPosition.x, visitorPosition.z);
+    sendPresenceUpdate(true);
+    setInitialWorldPresence([]);
+  }
+
   if (tellusWorldBackendAvailable && initialWorldGeneratedThings.length > 0) {
     applyRemoteGeneratedThings(initialWorldGeneratedThings);
     setInitialWorldGeneratedThings([]);
@@ -3288,7 +3340,7 @@ function createTellusWorld(
   // Warp the player to a world (x,z) — the click-map teleport. Grounds onto the terrain (chunked-aware via
   // groundedPosition), cancels any fall/run-accel, and republishes presence so peers see the jump.
   const warpTo = (x: number, z: number) => {
-    visitorPosition = groundedPosition(x, z, visitorPosition);
+    visitorPosition = clearVisitorSpawnPosition(x, z);
     playerAirborne = false;
     playerVy = 0;
     moveHoldStartMs = 0;
@@ -3430,9 +3482,12 @@ function createTellusWorld(
   const liftGenerated = (id: string, amount: number) => {
     const thing = thingById(id);
     if (!thing) return;
-    const groundY = footprintGroundY(thing);
-    const minY = groundY ?? -30;
-    const maxY = (groundY ?? thing.position.y) + 30;
+    // Free manual positioning: clamp around the asset's CURRENT y, not the terrain ground. Some GLBs
+    // have geometry far above/below their origin, so the visible mesh can sit metres off the data y;
+    // flooring at groundY would block lowering a floating model down to the surface. Give a generous
+    // ±40m band around wherever it currently is so raise AND lower always have room to move.
+    const minY = thing.position.y - 40;
+    const maxY = thing.position.y + 40;
     thing.position = {
       ...thing.position,
       y: clamp(thing.position.y + amount, minY, maxY),
@@ -3455,6 +3510,7 @@ function createTellusWorld(
     const thing = thingById(id);
     if (!thing) return;
     const groundY = footprintGroundY(thing);
+    // Origin-anchored placement (see placeObjectAboveGround): put the asset's origin on the ground.
     thing.position =
       groundY !== null && Number.isFinite(groundY)
         ? { ...thing.position, y: groundY }
