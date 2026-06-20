@@ -2559,6 +2559,90 @@ function createTellusWorld(
     }
   };
 
+  const terrainRaycaster = new THREE.Raycaster();
+  const terrainRayOrigin = new THREE.Vector3();
+  const terrainRayDirection = new THREE.Vector3(0, -1, 0);
+  const terrainRayTargets: THREE.Object3D[] = [];
+  const footprintCache = new Map<string, { radius: number; height: number }>();
+
+  const thingFootprint = (thing: GeneratedThing): { radius: number; height: number } | null => {
+    const mesh = generatedMeshes.get(thing.id);
+    if (!mesh) return null;
+    const key = `${thing.id}:${thing.scale.toFixed(2)}`;
+    const cached = footprintCache.get(key);
+    if (cached) return cached;
+    const box = measureModelBounds(mesh); // skinning-aware: bind-pose boxes of animated models are bogus
+    if (box.isEmpty()) return null;
+    const size = box.getSize(new THREE.Vector3());
+    const fp = { radius: Math.max(size.x, size.z) / 2, height: size.y };
+    footprintCache.set(key, fp);
+    if (footprintCache.size > 600) footprintCache.clear();
+    return fp;
+  };
+
+  const renderedTerrainHeightAt = (x: number, z: number): number | null => {
+    terrainRayTargets.length = 0;
+    if (terrain.visible) terrainRayTargets.push(terrain);
+    const chunkTerrain = scene.getObjectByName("tellus-chunk-terrain");
+    if (chunkTerrain) terrainRayTargets.push(chunkTerrain);
+    if (terrainRayTargets.length === 0) return null;
+    terrainRayOrigin.set(x, 480, z);
+    terrainRaycaster.set(terrainRayOrigin, terrainRayDirection);
+    terrainRaycaster.far = 780;
+    const hit = terrainRaycaster.intersectObjects(terrainRayTargets, true)[0];
+    return hit ? hit.point.y : null;
+  };
+
+  // Highest terrain height under a thing's footprint. With the wider terrain height variability,
+  // grounding to the single CENTRE sample can leave a multi-tile object partly buried under higher
+  // neighbouring terrain ("under the land even after the surface button") - sampling a ring at the
+  // footprint radius and taking the MAX rests the object ON the surface instead of inside it. Returns
+  // null only when no sample resolves (async terrain not loaded yet).
+  const footprintGroundY = (thing: GeneratedThing): number | null => {
+    let bestRendered: number | null = renderedTerrainHeightAt(thing.position.x, thing.position.z);
+    let bestAnalytic = groundHeightAt(thing.position.x, thing.position.z);
+    const fp = thingFootprint(thing);
+    const r = Math.min(fp?.radius ?? 0, 6);
+    if (r >= 0.25) {
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const x = thing.position.x + Math.cos(a) * r;
+        const z = thing.position.z + Math.sin(a) * r;
+        const rendered = renderedTerrainHeightAt(x, z);
+        if (
+          rendered !== null &&
+          Number.isFinite(rendered) &&
+          (bestRendered === null || rendered > bestRendered)
+        ) {
+          bestRendered = rendered;
+        }
+        const analytic = groundHeightAt(x, z);
+        if (
+          analytic !== null &&
+          Number.isFinite(analytic) &&
+          (bestAnalytic === null || analytic > bestAnalytic)
+        ) {
+          bestAnalytic = analytic;
+        }
+      }
+    }
+    return bestRendered ?? bestAnalytic;
+  };
+
+  const liveGroundOffsetFrom = (thing: GeneratedThing): number | null => {
+    const groundY = footprintGroundY(thing);
+    return groundY !== null && Number.isFinite(groundY)
+      ? thing.position.y - groundY
+      : null;
+  };
+
+  const isVisiblyOffsetFromLiveGround = (thing: GeneratedThing): boolean => {
+    const offset = liveGroundOffsetFrom(thing);
+    return offset !== null
+      ? Math.abs(offset) > 0.35
+      : isIntentionallyOffsetFromGround(thing);
+  };
+
   const updateThingMeshPosition = (thing: GeneratedThing) => {
     const mesh = generatedMeshes.get(thing.id);
     if (!mesh) return;
@@ -3318,38 +3402,6 @@ function createTellusWorld(
     setGeneratedScale(thing, 1);
   };
 
-  const terrainRaycaster = new THREE.Raycaster();
-  const terrainRayOrigin = new THREE.Vector3();
-  const terrainRayDirection = new THREE.Vector3(0, -1, 0);
-  const terrainRayTargets: THREE.Object3D[] = [];
-
-  const renderedTerrainHeightAt = (x: number, z: number): number | null => {
-    terrainRayTargets.length = 0;
-    if (terrain.visible) terrainRayTargets.push(terrain);
-    const chunkTerrain = scene.getObjectByName("tellus-chunk-terrain");
-    if (chunkTerrain) terrainRayTargets.push(chunkTerrain);
-    if (terrainRayTargets.length === 0) return null;
-    terrainRayOrigin.set(x, MAX_ALTITUDE + 220, z);
-    terrainRaycaster.set(terrainRayOrigin, terrainRayDirection);
-    terrainRaycaster.far = MAX_ALTITUDE + 520;
-    const hit = terrainRaycaster.intersectObjects(terrainRayTargets, true)[0];
-    return hit ? hit.point.y : null;
-  };
-
-  const liveGroundOffsetFrom = (thing: GeneratedThing): number | null => {
-    const groundY = footprintGroundY(thing);
-    return groundY !== null && Number.isFinite(groundY)
-      ? thing.position.y - groundY
-      : null;
-  };
-
-  const isVisiblyOffsetFromLiveGround = (thing: GeneratedThing): boolean => {
-    const offset = liveGroundOffsetFrom(thing);
-    return offset !== null
-      ? Math.abs(offset) > 0.35
-      : isIntentionallyOffsetFromGround(thing);
-  };
-
   const liftGenerated = (id: string, amount: number) => {
     const thing = thingById(id);
     if (!thing) return;
@@ -3374,37 +3426,6 @@ function createTellusWorld(
   // neighbouring terrain ("under the land even after the surface button") — sampling a ring at the
   // footprint radius and taking the MAX rests the object ON the surface instead of inside it. Returns
   // null only when no sample resolves (async terrain not loaded yet).
-  const footprintGroundY = (thing: GeneratedThing): number | null => {
-    let bestRendered: number | null = renderedTerrainHeightAt(thing.position.x, thing.position.z);
-    let bestAnalytic = groundHeightAt(thing.position.x, thing.position.z);
-    const fp = thingFootprint(thing);
-    const r = Math.min(fp?.radius ?? 0, 6);
-    if (r >= 0.25) {
-      for (let i = 0; i < 8; i++) {
-        const a = (i / 8) * Math.PI * 2;
-        const x = thing.position.x + Math.cos(a) * r;
-        const z = thing.position.z + Math.sin(a) * r;
-        const rendered = renderedTerrainHeightAt(x, z);
-        if (
-          rendered !== null &&
-          Number.isFinite(rendered) &&
-          (bestRendered === null || rendered > bestRendered)
-        ) {
-          bestRendered = rendered;
-        }
-        const analytic = groundHeightAt(x, z);
-        if (
-          analytic !== null &&
-          Number.isFinite(analytic) &&
-          (bestAnalytic === null || analytic > bestAnalytic)
-        ) {
-          bestAnalytic = analytic;
-        }
-      }
-    }
-    return bestRendered ?? bestAnalytic;
-  };
-
   const groundGenerated = (id: string) => {
     const thing = thingById(id);
     if (!thing) return;
@@ -4127,21 +4148,6 @@ function createTellusWorld(
   let obstacleCache: ObstacleCircle[] = [];
   let obstacleCacheAt = 0;
   let rapierSolidsCacheAt = 0;
-  const footprintCache = new Map<string, { radius: number; height: number }>();
-  const thingFootprint = (thing: GeneratedThing): { radius: number; height: number } | null => {
-    const mesh = generatedMeshes.get(thing.id);
-    if (!mesh) return null;
-    const key = `${thing.id}:${thing.scale.toFixed(2)}`;
-    const cached = footprintCache.get(key);
-    if (cached) return cached;
-    const box = measureModelBounds(mesh); // skinning-aware: bind-pose boxes of animated models are bogus
-    if (box.isEmpty()) return null;
-    const size = box.getSize(new THREE.Vector3());
-    const fp = { radius: Math.max(size.x, size.z) / 2, height: size.y };
-    footprintCache.set(key, fp);
-    if (footprintCache.size > 600) footprintCache.clear();
-    return fp;
-  };
   const riderPositionForThing = (thing: GeneratedThing): Vec3 => {
     const mesh = generatedMeshes.get(thing.id);
     if (mesh) {
