@@ -5217,7 +5217,12 @@ function createTellusWorld(
     }
   };
   const handlePointerDown = (event: PointerEvent) => {
-    if (transformDragging) return;
+    if (transformDragging) {
+      const controlsStillDragging =
+        Boolean((transformControls as (TransformControls & { dragging?: boolean }) | null)?.dragging);
+      if (controlsStillDragging) return;
+      transformDragging = false;
+    }
     // Move mode: every press repositions the target — no picking, no modifier.
     if (moveModeThingId) {
       const thing = thingById(moveModeThingId);
@@ -5399,6 +5404,7 @@ function createTellusWorld(
       return;
     }
     if (transformDragging) {
+      transformDragging = false;
       isDragging = false;
       return;
     }
@@ -5406,6 +5412,12 @@ function createTellusWorld(
       selectGeneratedAtPointer(event);
     }
     isDragging = false;
+  };
+  const handlePointerCancel = () => {
+    transformDragging = false;
+    draggingThingId = null;
+    isDragging = false;
+    container.style.cursor = moveModeThingId ? "move" : "";
   };
   const handleWheel = (event: WheelEvent) => {
     zoom = clamp(zoom + event.deltaY * 0.01, 12, 58);
@@ -5419,6 +5431,8 @@ function createTellusWorld(
   container.addEventListener("pointerdown", handlePointerDown);
   window.addEventListener("pointermove", handlePointerMove);
   window.addEventListener("pointerup", handlePointerUp);
+  window.addEventListener("pointercancel", handlePointerCancel);
+  window.addEventListener("blur", handlePointerCancel);
   container.addEventListener("wheel", handleWheel, { passive: true });
 
   const init = async () => {
@@ -6211,6 +6225,8 @@ function createTellusWorld(
       container.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+      window.removeEventListener("blur", handlePointerCancel);
       container.removeEventListener("wheel", handleWheel);
       worldSocketClosedByDestroy = true;
       if (worldSocketReconnectTimer !== undefined) {
