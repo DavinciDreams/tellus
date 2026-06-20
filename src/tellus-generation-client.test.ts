@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  browseAssetLibrary,
-  generatedAssetManifestEntries,
-} from "./tellus-generation-client";
+import { browseAssetLibrary } from "./tellus-generation-client";
 import { runtimeConfig } from "./tellus-runtime-config";
 
 describe("asset library browsing", () => {
@@ -58,20 +55,5 @@ describe("asset library browsing", () => {
         source: "asset-library",
       }),
     ]);
-  });
-
-  it("caches a missing generated-asset manifest as empty", async () => {
-    runtimeConfig.worldApiBase = "https://hyades.example";
-    const fetchMock = vi.fn(async () => new Response("missing", { status: 404 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(generatedAssetManifestEntries()).resolves.toEqual([]);
-    await expect(generatedAssetManifestEntries()).resolves.toEqual([]);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/generated-assets/manifest.json",
-      { cache: "no-store" },
-    );
   });
 });

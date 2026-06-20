@@ -196,14 +196,7 @@ export async function generatedAssetManifestEntries(): Promise<GeneratedAssetMan
   const response = await fetch(tellusApiUrl("/generated-assets/manifest.json"), {
     cache: "no-store",
   });
-  if (!response.ok) {
-    generatedAssetManifestCache = {
-      loadedAt: now,
-      entries: [],
-      byId: new Map<string, string>(),
-    };
-    return [];
-  }
+  if (!response.ok) return [];
   const parsed = (await response.json()) as unknown;
   const entries = Array.isArray(parsed)
     ? (parsed as GeneratedAssetManifestEntry[]).filter(
