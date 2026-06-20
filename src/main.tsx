@@ -2576,7 +2576,7 @@ function createTellusWorld(
     // (sampleHeight returns null until the owning chunk streams in), so once the sculpted chunk
     // loads the asset would sit BELOW the surface. Re-sample the live ground height here so the
     // model's feet rest flush on the sculpted terrain. Falls through to the stored y otherwise.
-    const hasManualHeightOffset = isIntentionallyOffsetFromGround(thing);
+    const hasManualHeightOffset = isVisiblyOffsetFromLiveGround(thing);
     const liveGround = isChunked && !hasManualHeightOffset
       ? footprintGroundY(thing)
       : null;
@@ -3336,13 +3336,29 @@ function createTellusWorld(
     return hit ? hit.point.y : null;
   };
 
+  const liveGroundOffsetFrom = (thing: GeneratedThing): number | null => {
+    const groundY = footprintGroundY(thing);
+    return groundY !== null && Number.isFinite(groundY)
+      ? thing.position.y - groundY
+      : null;
+  };
+
+  const isVisiblyOffsetFromLiveGround = (thing: GeneratedThing): boolean => {
+    const offset = liveGroundOffsetFrom(thing);
+    return offset !== null
+      ? Math.abs(offset) > 0.35
+      : isIntentionallyOffsetFromGround(thing);
+  };
+
   const liftGenerated = (id: string, amount: number) => {
     const thing = thingById(id);
     if (!thing) return;
-    const baseY = footprintGroundY(thing) ?? thing.position.y;
+    const groundY = footprintGroundY(thing);
+    const minY = groundY ?? -30;
+    const maxY = (groundY ?? thing.position.y) + 30;
     thing.position = {
       ...thing.position,
-      y: clamp(thing.position.y + amount, baseY, baseY + 30),
+      y: clamp(thing.position.y + amount, minY, maxY),
     };
     if (sailingThingId === id) {
       visitorPosition = riderPositionForThing(thing);
@@ -3392,12 +3408,14 @@ function createTellusWorld(
   const groundGenerated = (id: string) => {
     const thing = thingById(id);
     if (!thing) return;
-    const grounded = groundedPosition(thing.position.x, thing.position.z, thing.position);
     const groundY = footprintGroundY(thing);
     thing.position =
       groundY !== null && Number.isFinite(groundY)
-        ? { ...grounded, y: groundY }
-        : grounded;
+        ? { ...thing.position, y: groundY }
+        : groundedPosition(thing.position.x, thing.position.z, {
+            ...thing.position,
+            y: Math.min(thing.position.y, 0),
+          });
     if (sailingThingId === id) {
       visitorPosition = riderPositionForThing(thing);
     }
@@ -5035,7 +5053,7 @@ function createTellusWorld(
       if (activeChunks !== lastActiveChunkCount) {
         lastActiveChunkCount = activeChunks;
         for (const thing of generated) {
-          if (isFreeMovingVehicle(thing) || isIntentionallyOffsetFromGround(thing)) continue;
+          if (isFreeMovingVehicle(thing) || isVisiblyOffsetFromLiveGround(thing)) continue;
           updateThingMeshPosition(thing);
         }
       }
