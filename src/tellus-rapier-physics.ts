@@ -2,9 +2,16 @@ import RAPIER, {
   Collider,
   ColliderDesc,
   KinematicCharacterController,
+  RigidBody,
+  RigidBodyDesc,
   World,
 } from "@dimforge/rapier3d-compat";
+import * as THREE from "three";
 import type { Vec3 } from "./tellus-types";
+
+// Interior solid-surface flag (mirrors COLLIDE_FLAG in tellus-building.ts). A mesh with
+// userData.collide === true is baked into the static interior trimesh; everything else is visual.
+const COLLIDE_FLAG = "collide";
 
 export interface RapierSolid {
   id: string;
@@ -24,7 +31,18 @@ export interface RapierPlayerMove {
 export interface TellusRapierPhysics {
   syncSolids(solids: readonly RapierSolid[]): void;
   movePlayer(fromFeet: Vec3, desiredFeet: Vec3): RapierPlayerMove;
-  stats(): { solids: number; ready: boolean };
+  // Full-3D move: the desired Y (already gravity-integrated by the caller) is passed THROUGH the
+  // kinematic controller so the player walks floors/stairs and is blocked vertically by ceilings.
+  // Used inside interiors where the trimesh statics provide real vertical surfaces.
+  movePlayer3D(fromFeet: Vec3, desiredFeet: Vec3): RapierPlayerMove;
+  // Bake every Mesh in `object` flagged userData.collide === true into a world-space Rapier static
+  // trimesh, attached to one shared fixed body, keyed by `id` (re-adding the same id replaces it).
+  addStaticTrimesh(id: string, object: THREE.Object3D): void;
+  // Remove all interior trimesh statics (call on portal exit / world switch).
+  clearStatics(): void;
+  // True while any interior trimesh static exists (caller steps the world each frame then).
+  hasStatics(): boolean;
+  stats(): { solids: number; ready: boolean; statics: number };
   dispose(): void;
 }
 
@@ -54,7 +72,7 @@ const playerFeet = (center: Vec3): Vec3 => ({
 });
 
 export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> {
-  await RAPIER.init();
+  await (RAPIER.init as (options?: object) => Promise<void>)({});
   const world = new World({ x: 0, y: -22, z: 0 });
   const controller = world.createCharacterController(0.04);
   controller.setSlideEnabled(true);
@@ -71,6 +89,63 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
   const colliders = new Map<string, { key: string; collider: Collider }>();
   let disposed = false;
   let collisionWorldDirty = true;
+
+  // ── Interior static trimeshes ──────────────────────────────────────────────────────────────
+  // All interior solids (floors/walls/stairs/ceiling) live on ONE shared fixed rigid body; each
+  // addStaticTrimesh(id, ...) attaches that id's colliders to it and remembers them so a re-add or
+  // clearStatics can remove exactly those. The body itself is lazily created on first use.
+  let staticBody: RigidBody | null = null;
+  const staticColliders = new Map<string, Collider[]>();
+
+  const ensureStaticBody = (): RigidBody => {
+    if (!staticBody) {
+      staticBody = world.createRigidBody(RigidBodyDesc.fixed());
+    }
+    return staticBody;
+  };
+
+  const removeStaticId = (id: string) => {
+    const list = staticColliders.get(id);
+    if (!list) return;
+    for (const collider of list) world.removeCollider(collider, false);
+    staticColliders.delete(id);
+    collisionWorldDirty = true;
+  };
+
+  // Bake one Mesh's geometry into WORLD-space verts + indices. Returns null when the geometry has no
+  // usable position attribute (the mesh is skipped). Non-indexed geometry gets synthesized indices.
+  const bakeMeshTrimesh = (
+    mesh: THREE.Mesh,
+  ): { vertices: Float32Array; indices: Uint32Array } | null => {
+    const geometry = mesh.geometry;
+    const position = geometry?.getAttribute("position") as
+      | THREE.BufferAttribute
+      | THREE.InterleavedBufferAttribute
+      | undefined;
+    if (!position || position.count < 3) return null;
+    const matrix = mesh.matrixWorld;
+    const vertexCount = position.count;
+    const vertices = new Float32Array(vertexCount * 3);
+    const v = new THREE.Vector3();
+    for (let i = 0; i < vertexCount; i++) {
+      v.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(matrix);
+      vertices[i * 3] = v.x;
+      vertices[i * 3 + 1] = v.y;
+      vertices[i * 3 + 2] = v.z;
+    }
+    let indices: Uint32Array;
+    const indexAttr = geometry.getIndex();
+    if (indexAttr) {
+      indices = new Uint32Array(indexAttr.count);
+      for (let i = 0; i < indexAttr.count; i++) indices[i] = indexAttr.getX(i);
+    } else {
+      // Non-indexed: every 3 consecutive vertices form a triangle.
+      const triCount = Math.floor(vertexCount / 3) * 3;
+      indices = new Uint32Array(triCount);
+      for (let i = 0; i < triCount; i++) indices[i] = i;
+    }
+    return { vertices, indices };
+  };
 
   const removeSolid = (id: string) => {
     const entry = colliders.get(id);
@@ -146,14 +221,89 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
         collisions: controller.numComputedCollisions(),
       };
     },
+    movePlayer3D(fromFeet, desiredFeet) {
+      if (disposed) {
+        return { position: desiredFeet, grounded: false, collisions: 0 };
+      }
+      const from = playerCenter(fromFeet);
+      const desired = playerCenter(desiredFeet);
+      playerCollider.setTranslation(from);
+      // Step every frame in interiors so trimesh statics + autostep/snap-to-ground resolve. (Dirty
+      // also forces a step right after geometry changes; the unconditional step covers the rest.)
+      world.step();
+      collisionWorldDirty = false;
+      // Pass the FULL desired delta — including the caller's gravity-integrated Y — through the
+      // controller so it does vertical floor/stair contact (autostep 0.45/0.35, snapToGround 0.35).
+      controller.computeColliderMovement(playerCollider, {
+        x: desired.x - from.x,
+        y: desired.y - from.y,
+        z: desired.z - from.z,
+      });
+      const movement = controller.computedMovement();
+      const nextCenter = {
+        x: from.x + movement.x,
+        y: from.y + movement.y,
+        z: from.z + movement.z,
+      };
+      playerCollider.setTranslation(nextCenter);
+      return {
+        position: playerFeet(nextCenter),
+        grounded: controller.computedGrounded(),
+        collisions: controller.numComputedCollisions(),
+      };
+    },
+    addStaticTrimesh(id, object) {
+      if (disposed) return;
+      // World matrices must be current before we read positions into world space.
+      object.updateMatrixWorld(true);
+      removeStaticId(id);
+      const body = ensureStaticBody();
+      const created: Collider[] = [];
+      object.traverse((child) => {
+        const mesh = child as THREE.Mesh;
+        if (!mesh.isMesh || mesh.userData?.[COLLIDE_FLAG] !== true) return;
+        const baked = bakeMeshTrimesh(mesh);
+        if (!baked) return;
+        try {
+          const collider = world.createCollider(
+            ColliderDesc.trimesh(baked.vertices, baked.indices).setFriction(0.9),
+            body,
+          );
+          created.push(collider);
+        } catch (error) {
+          // A degenerate mesh (zero-area tris) can throw inside Rapier — skip it, keep the rest.
+          console.warn("Tellus interior trimesh skipped", error);
+        }
+      });
+      if (created.length > 0) {
+        staticColliders.set(id, created);
+        collisionWorldDirty = true;
+      }
+    },
+    clearStatics() {
+      if (disposed) return;
+      for (const id of [...staticColliders.keys()]) removeStaticId(id);
+      if (staticBody) {
+        world.removeRigidBody(staticBody);
+        staticBody = null;
+      }
+      collisionWorldDirty = true;
+    },
+    hasStatics() {
+      return staticColliders.size > 0;
+    },
     stats() {
-      return { solids: colliders.size, ready: !disposed };
+      return { solids: colliders.size, ready: !disposed, statics: staticColliders.size };
     },
     dispose() {
       disposed = true;
       controller.free();
       for (const entry of colliders.values()) world.removeCollider(entry.collider, false);
       colliders.clear();
+      // Interior statics + their shared body are owned by `world`; world.free() releases them, but
+      // drop our references so a post-dispose hasStatics() reports clean.
+      staticColliders.clear();
+      staticBody = null;
       world.removeCollider(playerCollider, false);
       world.free();
     },

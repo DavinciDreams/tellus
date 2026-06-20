@@ -1,0 +1,522 @@
+/**
+ * Octahedral Impostor Library - Type Definitions
+ *
+ * Core types for the octahedral impostor system.
+ * Supports AAA-quality impostor rendering with:
+ * - Per-pixel depth maps for parallax and depth-based blending
+ * - PBR material channels (roughness, metallic, AO)
+ * - Dynamic multi-light support
+ */
+
+import type * as THREE from "three";
+
+/**
+ * Octahedron mapping type
+ * - HEMI (0): Hemisphere mapping - captures top half of sphere (good for ground-based objects)
+ * - FULL (1): Full sphere mapping - captures all angles (good for objects viewed from any direction)
+ */
+export const OctahedronType = {
+  HEMI: 0,
+  FULL: 1,
+} as const;
+
+export type OctahedronTypeValue =
+  (typeof OctahedronType)[keyof typeof OctahedronType];
+
+/**
+ * PBR baking mode - controls which channels are baked
+ */
+export const PBRBakeMode = {
+  /** Basic: albedo only (fastest, smallest) */
+  BASIC: 0,
+  /** Standard: albedo + normals (enables dynamic lighting) */
+  STANDARD: 1,
+  /** Full: albedo + normals + depth (enables parallax, depth blending, shadows) */
+  FULL: 2,
+  /** Complete: all channels including roughness/metallic/AO */
+  COMPLETE: 3,
+} as const;
+
+export type PBRBakeModeValue = (typeof PBRBakeMode)[keyof typeof PBRBakeMode];
+
+/**
+ * Configuration for impostor baking
+ *
+ * Grid Size Convention:
+ * - gridSizeX/Y represents the number of points/cells per axis
+ * - buildOctahedronMesh(gridSize) creates gridSize points per axis
+ * - Atlas has gridSize x gridSize cells
+ * - Shader divides by gridSize
+ *
+ * Example with gridSizeX=31 (default):
+ * - buildOctahedronMesh(31) → 31x31 = 961 points
+ * - Atlas has 31x31 cells
+ * - Each cell occupies 1/31 of atlas width/height
+ */
+/**
+ * Vertical packing ratio for atlas
+ * Controls the ratio of vertical to horizontal cells:
+ * - 0.25: 1/4 as many vertical cells (wide atlas)
+ * - 0.5: 1/2 as many vertical cells
+ * - 1: Square (same horizontal and vertical)
+ * - 2: 2x as many vertical cells
+ * - 4: 4x as many vertical cells (tall atlas)
+ */
+export type VerticalPackingRatio = 0.25 | 0.5 | 1 | 2 | 4;
+
+export interface ImpostorBakeConfig {
+  /** Atlas texture width in pixels */
+  atlasWidth: number;
+  /** Atlas texture height in pixels */
+  atlasHeight: number;
+  /** Number of points/cells per row (default: 31) - more = finer horizontal angle resolution */
+  gridSizeX: number;
+  /** Number of points/cells per column (default: 31) - more = finer vertical angle resolution */
+  gridSizeY: number;
+  /** Octahedron mapping type (HEMI or FULL) */
+  octType: OctahedronTypeValue;
+  /** Optional background color for atlas cells (default: transparent) */
+  backgroundColor?: number;
+  /** Optional background alpha (default: 0) */
+  backgroundAlpha?: number;
+  /** PBR baking mode (default: STANDARD for normal maps) */
+  pbrMode?: PBRBakeModeValue;
+  /** Near plane for depth baking (default: 0.001) */
+  depthNear?: number;
+  /** Far plane for depth baking (default: 10) */
+  depthFar?: number;
+  /** Vertical packing ratio (default: 1 = square).
+   * 0.5 = half as many vertical views, 2 = twice as many vertical views.
+   * Cells are stretched to fill the atlas. */
+  verticalPacking?: VerticalPackingRatio;
+}
+
+/**
+ * Result of impostor baking process
+ * Contains all baked atlas textures and metadata for runtime rendering
+ */
+export interface ImpostorBakeResult {
+  /** The baked atlas texture (color/albedo) - sRGB color space */
+  atlasTexture: THREE.Texture;
+  /** The render target containing the atlas */
+  renderTarget: THREE.RenderTarget;
+  /** Normal atlas texture for dynamic lighting (view-space normals) - linear color space */
+  normalAtlasTexture?: THREE.Texture;
+  /** The render target for normals */
+  normalRenderTarget?: THREE.RenderTarget;
+  /** Depth atlas texture for parallax/depth blending (linear depth 0-1) - linear color space */
+  depthAtlasTexture?: THREE.Texture;
+  /** The render target for depth */
+  depthRenderTarget?: THREE.RenderTarget;
+  /** PBR atlas texture containing packed material properties:
+   * R = Roughness (0=smooth, 1=rough)
+   * G = Metallic (0=dielectric, 1=metal)
+   * B = Ambient Occlusion (0=occluded, 1=unoccluded)
+   * A = Reserved (emission mask or subsurface)
+   */
+  pbrAtlasTexture?: THREE.Texture;
+  /** The render target for PBR channels */
+  pbrRenderTarget?: THREE.RenderTarget;
+  /** Horizontal grid size (columns) used for baking */
+  gridSizeX: number;
+  /** Vertical grid size (rows) used for baking */
+  gridSizeY: number;
+  /** Octahedron type used */
+  octType: OctahedronTypeValue;
+  /** Bounding sphere of the source mesh */
+  boundingSphere: THREE.Sphere;
+  /** Bounding box of the source mesh (for aspect ratio) */
+  boundingBox?: THREE.Box3;
+  /** Octahedron mesh data used for baking (for raycasting alignment) */
+  octMeshData?: OctahedronMeshData;
+  /** Near plane used for depth baking */
+  depthNear?: number;
+  /** Far plane used for depth baking */
+  depthFar?: number;
+  /** PBR baking mode used */
+  pbrMode?: PBRBakeModeValue;
+}
+
+/**
+ * Octahedron mesh data containing both flat and spherical point mappings
+ */
+export interface OctahedronMeshData {
+  /** Wireframe mesh for visualization */
+  wireframeMesh: THREE.Mesh;
+  /** Filled mesh with custom shader */
+  filledMesh: THREE.Mesh;
+  /** Flat plane point positions (UV space) */
+  planePoints: number[];
+  /** Octahedron-mapped point positions (3D directions) */
+  octPoints: number[];
+}
+
+/**
+ * Configuration for the impostor runtime material
+ *
+ * Grid Size Convention:
+ * - gridSizeX/Y must match the values used during baking
+ * - Shader uses gridSize to compute atlas UV coordinates
+ * - flatToCoords divides by gridSize to get cell (col, row)
+ * - atlasUV = (cellIndex + vUv) / gridSize
+ */
+export interface ImpostorMaterialConfig {
+  /** The baked atlas texture (albedo) */
+  atlasTexture: THREE.Texture;
+  /** Normal atlas texture for dynamic lighting (optional) */
+  normalAtlasTexture?: THREE.Texture;
+  /** Depth atlas texture for parallax/depth blending (optional) */
+  depthAtlasTexture?: THREE.Texture;
+  /** PBR atlas texture with packed R=roughness, G=metallic, B=AO (optional) */
+  pbrAtlasTexture?: THREE.Texture;
+  /** Number of cells per row in atlas (must match baking config) */
+  gridSizeX: number;
+  /** Number of cells per column in atlas (must match baking config) */
+  gridSizeY: number;
+  /** Enable transparency (default: true) */
+  transparent?: boolean;
+  /** Enable depth testing (default: true) */
+  depthTest?: boolean;
+  /** Enable depth writing (default: true) */
+  depthWrite?: boolean;
+  /** Material side (default: DoubleSide) */
+  side?: THREE.Side;
+  /** Enable dynamic lighting with normals (default: true if normalAtlasTexture provided) */
+  enableLighting?: boolean;
+  /** Enable depth-based frame blending to reduce ghosting (default: true if depthAtlasTexture provided) */
+  enableDepthBlending?: boolean;
+  /** Enable specular highlights (default: true if enableLighting is true) */
+  enableSpecular?: boolean;
+  /** Near plane for depth reconstruction (must match baking) */
+  depthNear?: number;
+  /** Far plane for depth reconstruction (must match baking) */
+  depthFar?: number;
+  /** Object scale for depth reconstruction */
+  objectScale?: number;
+}
+
+/**
+ * Impostor instance for runtime rendering
+ */
+export interface ImpostorInstance {
+  /** The impostor mesh */
+  mesh: THREE.Mesh;
+  /** The impostor material */
+  material: THREE.ShaderMaterial;
+  /** Update the impostor to face camera */
+  update(camera: THREE.Camera): void;
+  /** Dispose of the impostor resources */
+  dispose(): void;
+}
+
+/**
+ * View direction data for impostor sampling
+ */
+export interface ImpostorViewData {
+  /** Face indices (a, b, c) in the octahedron grid */
+  faceIndices: THREE.Vector3;
+  /** Barycentric weights for interpolation */
+  faceWeights: THREE.Vector3;
+}
+
+/**
+ * Options for creating an OctahedralImpostor
+ */
+export interface OctahedralImpostorOptions {
+  /** Source mesh or group to create impostor from */
+  source: THREE.Mesh | THREE.Group | THREE.Object3D;
+  /** Bake configuration */
+  config: ImpostorBakeConfig;
+  /** Optional: Pre-computed bounding sphere */
+  boundingSphere?: THREE.Sphere;
+}
+
+/**
+ * Debug visualization options
+ */
+export interface DebugVisualizationOptions {
+  /** Show grid overlay on atlas */
+  showAtlasGrid?: boolean;
+  /** Show sample point numbers on atlas */
+  showAtlasNumbers?: boolean;
+  /** Show sample points on atlas */
+  showAtlasSamples?: boolean;
+  /** Show grid overlay on octahedron mesh */
+  showOctahedronGrid?: boolean;
+  /** Show sample point numbers on octahedron */
+  showOctahedronNumbers?: boolean;
+  /** Show sample points on octahedron */
+  showOctahedronSamples?: boolean;
+  /** Show the original source mesh */
+  showSourceMesh?: boolean;
+}
+
+/**
+ * Geometry buffer creation properties
+ */
+export interface GeometryBufferProps {
+  vertices: number[] | Float32Array;
+  indices?: number[] | Uint16Array | null;
+  normals?: number[] | Float32Array | null;
+  texcoord?: number[] | Float32Array | null;
+  joints?: number[] | Float32Array | null;
+  weights?: number[] | Float32Array | null;
+  skinSize?: number;
+}
+
+// ============================================================================
+// LIGHTING TYPES
+// ============================================================================
+
+/**
+ * Directional light configuration for impostor rendering
+ */
+export interface ImpostorDirectionalLight {
+  /** Normalized direction TO the light (world space) */
+  direction: THREE.Vector3;
+  /** Light color (linear RGB, 0-1) */
+  color: THREE.Vector3;
+  /** Light intensity multiplier */
+  intensity: number;
+}
+
+/**
+ * Point light configuration for impostor rendering
+ */
+export interface ImpostorPointLight {
+  /** World position of the light */
+  position: THREE.Vector3;
+  /** Light color (linear RGB, 0-1) */
+  color: THREE.Vector3;
+  /** Light intensity */
+  intensity: number;
+  /** Attenuation distance (light reaches zero at this distance) */
+  distance: number;
+  /** Decay exponent (physically correct = 2) */
+  decay: number;
+}
+
+/**
+ * Complete lighting configuration for impostor rendering
+ * Supports up to 4 directional lights and 4 point lights
+ */
+export interface ImpostorLightingConfig {
+  /** Ambient light color (linear RGB) */
+  ambientColor: THREE.Vector3;
+  /** Ambient light intensity */
+  ambientIntensity: number;
+  /** Directional lights (up to 4) */
+  directionalLights: ImpostorDirectionalLight[];
+  /** Point lights (up to 4) */
+  pointLights: ImpostorPointLight[];
+  /** Environment map intensity for reflections (0 = disabled) */
+  envMapIntensity?: number;
+}
+
+/**
+ * Specular configuration for PBR-like rendering
+ */
+export interface ImpostorSpecularConfig {
+  /** Base reflectivity for dielectrics (default: 0.04 for plastic/non-metals) */
+  f0: number;
+  /** Shininess exponent for Blinn-Phong (default: 32) */
+  shininess: number;
+  /** Specular intensity multiplier */
+  intensity: number;
+}
+
+// ============================================================================
+// ANIMATED IMPOSTOR TYPES
+// ============================================================================
+
+/**
+ * Configuration for animated impostor baking (walk cycles, etc.)
+ *
+ * Animated impostors capture multiple frames of an animation cycle,
+ * storing each frame as a layer in a texture array. This enables
+ * low-overhead animation at distance by simply advancing a frame index.
+ */
+export interface AnimatedBakeConfig {
+  /** Atlas texture size per frame (default: 512) */
+  atlasSize: number;
+  /**
+   * Number of sprites per side in octahedral grid (default: 12 for hemisphere)
+   * @deprecated Use spritesX and spritesY for asymmetric grids (more horizontal than vertical)
+   */
+  spritesPerSide?: number;
+  /** Number of horizontal sprites (columns) - defaults to spritesPerSide or 16 */
+  spritesX?: number;
+  /** Number of vertical sprites (rows) - defaults to spritesX/2 for hemisphere (more horizontal views) */
+  spritesY?: number;
+  /** Target animation FPS (default: 6) - determines frame count */
+  animationFPS: number;
+  /** Animation clip duration in seconds */
+  animationDuration: number;
+  /** Use hemisphere octahedron (true) or full sphere (false) */
+  hemisphere: boolean;
+  /** Background color for atlas cells (default: 0x000000) */
+  backgroundColor?: number;
+  /** Background alpha (default: 0 for transparent) */
+  backgroundAlpha?: number;
+}
+
+/**
+ * Default configuration for animated impostor baking
+ *
+ * Uses minimal asymmetric grid (6x3 = 18 views) for maximum performance:
+ * - 6 horizontal views (enough for yaw rotation around horizon)
+ * - 3 vertical views (eye-level, slight up, slight down)
+ * - 87% fewer views than 12x12, much faster baking and less memory
+ */
+export const DEFAULT_ANIMATED_BAKE_CONFIG: AnimatedBakeConfig = {
+  atlasSize: 512,
+  spritesX: 6, // Horizontal views (enough for yaw rotation)
+  spritesY: 3, // Vertical views (minimal elevation variation)
+  animationFPS: 6,
+  animationDuration: 1.0,
+  hemisphere: true,
+  backgroundColor: 0x000000,
+  backgroundAlpha: 0,
+};
+
+/**
+ * Result of animated impostor baking
+ *
+ * Contains a DataArrayTexture where each layer is one animation frame,
+ * with the full octahedral sprite grid baked into each layer.
+ */
+export interface AnimatedBakeResult {
+  /** Texture array with one layer per animation frame */
+  atlasArray: THREE.DataArrayTexture;
+  /** Number of animation frames baked */
+  frameCount: number;
+  /**
+   * Sprites per side in octahedral grid (for backwards compatibility)
+   * @deprecated Use spritesX and spritesY
+   */
+  spritesPerSide: number;
+  /** Number of horizontal sprites (columns) */
+  spritesX: number;
+  /** Number of vertical sprites (rows) */
+  spritesY: number;
+  /** Animation duration in seconds */
+  animationDuration: number;
+  /** Target FPS for playback */
+  animationFPS: number;
+  /** Bounding sphere of the source mesh */
+  boundingSphere: THREE.Sphere;
+  /** Model identifier for caching */
+  modelId: string;
+  /** Whether hemisphere octahedron was used */
+  hemisphere: boolean;
+}
+
+/**
+ * Configuration for a single mob variant in the global atlas
+ */
+export interface MobVariantConfig {
+  /** Unique identifier for this mob type */
+  modelId: string;
+  /** Number of animation frames for this variant */
+  frameCount: number;
+  /** Base frame index in the merged atlas */
+  baseFrameIndex: number;
+  /** Scale factor relative to base size */
+  scale: number;
+  /** Bounding sphere radius */
+  boundingRadius: number;
+}
+
+/**
+ * Global mob atlas containing all mob variants merged into a single texture array
+ *
+ * This enables single-draw-call rendering of all mob impostors by:
+ * 1. Storing all mob animation frames in one texture array
+ * 2. Using per-instance uniforms to select variant (base index, frame count)
+ * 3. Using GPU instancing for efficient crowd rendering
+ */
+export interface GlobalMobAtlas {
+  /** Merged texture array containing all mob animation frames */
+  atlasArray: THREE.DataArrayTexture;
+  /** Total number of frames across all variants */
+  totalFrames: number;
+  /** Configuration for each mob variant */
+  variants: Map<string, MobVariantConfig>;
+  /**
+   * Sprites per side (same for all variants)
+   * @deprecated Use spritesX and spritesY
+   */
+  spritesPerSide: number;
+  /** Number of horizontal sprites (columns) */
+  spritesX: number;
+  /** Number of vertical sprites (rows) */
+  spritesY: number;
+  /** Whether hemisphere octahedron was used */
+  hemisphere: boolean;
+  /** Animation FPS (same for all variants) */
+  animationFPS: number;
+}
+
+/**
+ * Per-instance data for animated impostor rendering
+ */
+export interface AnimatedImpostorInstanceData {
+  /** World position (xyz) */
+  position: THREE.Vector3;
+  /** Yaw rotation in radians */
+  yaw: number;
+  /** Animation phase offset (0-1, for desynchronization) */
+  animationOffset: number;
+  /** Variant index (which mob type) */
+  variantIndex: number;
+  /** Scale multiplier */
+  scale: number;
+}
+
+/**
+ * Configuration for animated impostor material
+ */
+export interface AnimatedImpostorMaterialConfig {
+  /** Texture array containing animation frames */
+  atlasArray: THREE.DataArrayTexture;
+  /**
+   * Sprites per side in octahedral grid (backwards compatible)
+   * @deprecated Use spritesX and spritesY for asymmetric grids
+   */
+  spritesPerSide: number;
+  /** Number of horizontal sprites (columns) - defaults to spritesPerSide */
+  spritesX?: number;
+  /** Number of vertical sprites (rows) - defaults to spritesPerSide */
+  spritesY?: number;
+  /** Use hemisphere octahedron (alias: useHemiOctahedron) */
+  hemisphere: boolean;
+  /** Number of frames in animation */
+  frameCount: number;
+  /** Enable transparency (default: true) */
+  transparent?: boolean;
+  /** Alpha clamp threshold (default: 0.05) */
+  alphaClamp?: number;
+  /** Billboard scale (default: 1.0) */
+  scale?: number;
+  /** Flip Y axis for atlas sampling */
+  flipY?: boolean;
+}
+
+// ============================================================================
+// DISSOLVE CONFIGURATION
+// ============================================================================
+
+/**
+ * Configuration for distance-based dissolve effect.
+ * When enabled, impostors smoothly fade out at distance using dithered dissolve.
+ */
+export interface DissolveConfig {
+  /** Enable dissolve effect (default: false) */
+  enabled?: boolean;
+  /** Distance where fade begins (fully opaque inside) */
+  fadeStart?: number;
+  /** Distance where fully invisible */
+  fadeEnd?: number;
+  /** Initial player position (default: origin) */
+  playerPos?: THREE.Vector3;
+}

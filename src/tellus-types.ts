@@ -449,6 +449,10 @@ declare global {
       sendAction: (verb: string, args?: Record<string, unknown>) => unknown;
     };
     __tellusSnapshot?: () => TellusSnapshot;
+    // DEV-ONLY interior physics test hooks (no server portal needed). Strip before ship.
+    __tellusEnterInterior?: () => void;
+    __tellusExitInterior?: () => void;
+    __tellusPerf?: () => { fps: number; vegetation: unknown };
     // Diagnostics for the rigged-VRM avatar upgrade (consumed by smoke tests / the console).
     __tellusAvatarDebug?: () => {
       localVisitorId: string;

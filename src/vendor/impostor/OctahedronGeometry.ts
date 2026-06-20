@@ -1,0 +1,497 @@
+/**
+ * Octahedral Impostor Library - Octahedron Geometry Generation
+ *
+ * Core geometry generation for octahedral mapping.
+ * Attribution: Original code by SketchpunkLabs (VoR)
+ * https://codesandbox.io/p/sandbox/prototypes-pygsc7
+ */
+
+import * as THREE from "three/webgpu";
+import type {
+  OctahedronTypeValue,
+  OctahedronMeshData,
+  GeometryBufferProps,
+} from "./types";
+import { OctahedronType } from "./types";
+
+/**
+ * Create a buffer geometry from the given properties
+ */
+function createGeometryBuffer(
+  props: GeometryBufferProps,
+): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+
+  geo.setAttribute(
+    "position",
+    new THREE.BufferAttribute(
+      props.vertices instanceof Float32Array
+        ? props.vertices
+        : new Float32Array(props.vertices),
+      3,
+    ),
+  );
+
+  if (props.indices) {
+    geo.setIndex(
+      new THREE.BufferAttribute(
+        props.indices instanceof Uint16Array
+          ? props.indices
+          : new Uint16Array(props.indices),
+        1,
+      ),
+    );
+  }
+
+  if (props.normals) {
+    geo.setAttribute(
+      "normal",
+      new THREE.BufferAttribute(
+        props.normals instanceof Float32Array
+          ? props.normals
+          : new Float32Array(props.normals),
+        3,
+      ),
+    );
+  }
+
+  if (props.texcoord) {
+    geo.setAttribute(
+      "uv",
+      new THREE.BufferAttribute(
+        props.texcoord instanceof Float32Array
+          ? props.texcoord
+          : new Float32Array(props.texcoord),
+        2,
+      ),
+    );
+  }
+
+  if (props.joints && props.weights) {
+    const skinSize = props.skinSize ?? 4;
+    geo.setAttribute(
+      "skinWeight",
+      new THREE.BufferAttribute(
+        props.weights instanceof Float32Array
+          ? props.weights
+          : new Float32Array(props.weights),
+        skinSize,
+      ),
+    );
+    geo.setAttribute(
+      "skinIndex",
+      new THREE.BufferAttribute(
+        props.joints instanceof Float32Array
+          ? props.joints
+          : new Float32Array(props.joints),
+        skinSize,
+      ),
+    );
+  }
+
+  return geo;
+}
+
+/**
+ * Create grid points in a unit square.
+ *
+ * When useCellCenters is true, points land at cell centers:
+ * - u = (xi + 0.5) / pointCountX
+ * - v = (yi + 0.5) / pointCountY
+ * This aligns view directions with atlas cell centers.
+ */
+function createGridPoints(
+  pointCountX: number,
+  pointCountY: number,
+  width = 1,
+  height = 1,
+  useCenter = true,
+  useCellCenters = false,
+): number[] {
+  const ox = useCenter ? -width * 0.5 : 0;
+  const oz = useCenter ? -height * 0.5 : 0;
+
+  const xStep = useCellCenters
+    ? width / pointCountX
+    : width / (pointCountX - 1);
+  const yStep = useCellCenters
+    ? height / pointCountY
+    : height / (pointCountY - 1);
+  const xStart = useCellCenters ? xStep * 0.5 : 0;
+  const yStart = useCellCenters ? yStep * 0.5 : 0;
+
+  const out: number[] = [];
+  for (let yi = 0; yi < pointCountY; yi++) {
+    const z = yStart + yi * yStep + oz;
+    for (let xi = 0; xi < pointCountX; xi++) {
+      const x = xStart + xi * xStep + ox;
+      out.push(x, 0, z);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Convert points to sphere normals
+ */
+function toSphereNormals(points: number[]): number[] {
+  const result = new Array<number>(points.length);
+
+  for (let i = 0; i < points.length; i += 3) {
+    const x = points[i];
+    const y = points[i + 1];
+    const z = points[i + 2];
+    const magnitude = Math.sqrt(x ** 2 + y ** 2 + z ** 2);
+
+    result[i] = x / magnitude;
+    result[i + 1] = y / magnitude;
+    result[i + 2] = z / magnitude;
+  }
+
+  return result;
+}
+
+/**
+ * Generate indices for the octahedron plane mesh
+ */
+function createOctPlaneIndices(
+  isFull: number,
+  xCells: number,
+  yCells: number,
+): number[] {
+  const out: number[] = [];
+  const xLen = xCells + 1;
+  const xHalf = Math.floor(xCells * 0.5);
+  const yHalf = Math.floor(yCells * 0.5);
+
+  for (let y = 0; y < yCells; y++) {
+    const r0 = xLen * y;
+    const r1 = xLen * (y + 1);
+
+    for (let x = 0; x < xCells; x++) {
+      const a = r0 + x;
+      const b = r1 + x;
+      const c = r1 + x + 1;
+      const d = r0 + x + 1;
+      const alt = (Math.floor(x / xHalf) + Math.floor(y / yHalf)) % 2;
+
+      if (alt === isFull) {
+        out.push(a, b, c, c, d, a); // backward slash
+      } else {
+        out.push(d, a, b, b, c, d); // forward slash
+      }
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Map points to hemisphere octahedron
+ * Reference: Godot Octahedral Impostors
+ */
+function mapToHemisphere(points: number[]): void {
+  const radius = 0.5;
+
+  for (let i = 0; i < points.length; i += 3) {
+    // Convert to UV space (0 to 1)
+    const u = points[i] + 0.5;
+    const v = points[i + 2] + 0.5;
+
+    // UV to hemisphere direction
+    const x = u - v;
+    const z = -1 + u + v;
+    const y = 1 - Math.abs(x) - Math.abs(z);
+
+    // Normalize and apply radius
+    const magnitude = Math.sqrt(x ** 2 + y ** 2 + z ** 2);
+    points[i] = (x / magnitude) * radius;
+    points[i + 1] = (y / magnitude) * radius;
+    points[i + 2] = (z / magnitude) * radius;
+  }
+}
+
+/**
+ * Map points to full sphere octahedron
+ * Reference: Godot Octahedral Impostors
+ */
+function mapToFullSphere(points: number[]): void {
+  const radius = 0.5;
+
+  for (let i = 0; i < points.length; i += 3) {
+    // Convert to -1 to 1 range
+    const u = points[i] * 2.0;
+    const v = points[i + 2] * 2.0;
+
+    // North hemisphere
+    let x = u;
+    let z = v;
+    let y = 1 - Math.abs(x) - Math.abs(z);
+
+    // Fix XZ for south hemisphere
+    if (y < 0) {
+      const ox = x;
+      const oz = z;
+      x = Math.sign(ox) * (1.0 - Math.abs(oz));
+      z = Math.sign(oz) * (1.0 - Math.abs(ox));
+    }
+
+    // Normalize and apply radius
+    const magnitude = Math.sqrt(x ** 2 + y ** 2 + z ** 2);
+    points[i] = (x / magnitude) * radius;
+    points[i + 1] = (y / magnitude) * radius;
+    points[i + 2] = (z / magnitude) * radius;
+  }
+}
+
+/**
+ * Create the debug visualization material
+ * Uses MeshNormalMaterial which is WebGPU/TSL compatible
+ */
+function createDebugMaterial(): THREE.MeshNormalMaterial {
+  return new THREE.MeshNormalMaterial({
+    depthTest: true,
+    transparent: true,
+    opacity: 0.75,
+    side: THREE.FrontSide,
+  });
+}
+
+/**
+ * Build an octahedron mesh with the specified configuration
+ *
+ * @param octType - The octahedron mapping type (HEMI or FULL)
+ * @param gridSizeX - Number of points/cells horizontally (columns)
+ * @param gridSizeY - Number of points/cells vertically (rows) - defaults to gridSizeX for square grid
+ * @param position - Optional position offset [x, y, z]
+ * @returns The octahedron mesh data
+ */
+export function buildOctahedronMesh(
+  octType: OctahedronTypeValue,
+  gridSizeX: number,
+  gridSizeY: number = gridSizeX,
+  position: number[] = [0, 0, 0],
+  useCellCenters = true,
+): OctahedronMeshData {
+  // gridSizeX/Y = number of points/cells per axis
+  const planePoints = createGridPoints(
+    gridSizeX,
+    gridSizeY,
+    1,
+    1,
+    true,
+    useCellCenters,
+  );
+  const indices = createOctPlaneIndices(octType, gridSizeX - 1, gridSizeY - 1);
+
+  // Create octahedron-mapped points
+  const octPoints = planePoints.slice();
+  if (octType === OctahedronType.HEMI) {
+    mapToHemisphere(octPoints);
+  } else {
+    mapToFullSphere(octPoints);
+  }
+
+  const normals = toSphereNormals(octPoints);
+
+  // Create geometry
+  const geometry = createGeometryBuffer({
+    vertices: planePoints,
+    indices,
+    normals,
+  });
+
+  // Create meshes
+  const wireframeMat = new THREE.MeshBasicMaterial();
+  wireframeMat.color = new THREE.Color(0xffffff);
+  wireframeMat.wireframe = true;
+  const wireframeMesh = new THREE.Mesh(geometry, wireframeMat);
+  const filledMesh = new THREE.Mesh(geometry, createDebugMaterial());
+
+  // Apply position
+  wireframeMesh.position.fromArray(position);
+  wireframeMesh.position.y += 0.001;
+  filledMesh.position.fromArray(position);
+  filledMesh.scale.setScalar(0.999);
+
+  return {
+    wireframeMesh,
+    filledMesh,
+    planePoints,
+    octPoints,
+  };
+}
+
+/**
+ * Interpolate geometry between flat plane and octahedron shape
+ *
+ * @param meshData - The octahedron mesh data
+ * @param t - Interpolation factor (0 = flat, 1 = octahedron)
+ */
+export function lerpOctahedronGeometry(
+  meshData: OctahedronMeshData,
+  t: number,
+): void {
+  const geometry = meshData.wireframeMesh.geometry;
+  const positionAttr = geometry.attributes.position;
+  const positions = positionAttr.array as Float32Array;
+  const ti = 1 - t;
+
+  for (let i = 0; i < meshData.planePoints.length; i++) {
+    positions[i] = meshData.planePoints[i] * ti + meshData.octPoints[i] * t;
+  }
+
+  positionAttr.needsUpdate = true;
+}
+
+/**
+ * Get the view direction for a given UV coordinate in the octahedron mapping
+ *
+ * @param u - U coordinate (0-1)
+ * @param v - V coordinate (0-1)
+ * @param octType - The octahedron mapping type
+ * @returns The view direction as a normalized Vector3
+ */
+export function getViewDirection(
+  u: number,
+  v: number,
+  octType: OctahedronTypeValue,
+): THREE.Vector3 {
+  const direction = new THREE.Vector3();
+
+  if (octType === OctahedronType.HEMI) {
+    const x = u - v;
+    const z = -1 + u + v;
+    const y = 1 - Math.abs(x) - Math.abs(z);
+    direction.set(x, y, z).normalize();
+  } else {
+    // Full sphere mapping
+    const mappedU = (u - 0.5) * 2;
+    const mappedV = (v - 0.5) * 2;
+
+    let x = mappedU;
+    let z = mappedV;
+    let y = 1 - Math.abs(x) - Math.abs(z);
+
+    if (y < 0) {
+      const ox = x;
+      const oz = z;
+      x = Math.sign(ox) * (1.0 - Math.abs(oz));
+      z = Math.sign(oz) * (1.0 - Math.abs(ox));
+    }
+
+    direction.set(x, y, z).normalize();
+  }
+
+  return direction;
+}
+
+// Reusable return object for directionToUV to avoid per-call allocation
+const _uvResult = { u: 0, v: 0 };
+
+/**
+ * Convert a direction vector to (u, v) coordinates - INVERSE of getViewDirection.
+ * This is an O(1) operation - NO RAYCASTING NEEDED!
+ *
+ * IMPORTANT: The returned object is reused across calls (zero-allocation).
+ * Callers must consume the values before the next call.
+ *
+ * @param direction - Normalized direction vector
+ * @param octType - The octahedron mapping type
+ * @returns Object with u, v coordinates (0-1) - reused across calls
+ */
+export function directionToUV(
+  direction: THREE.Vector3,
+  octType: OctahedronTypeValue,
+): { u: number; v: number } {
+  // Normalize just in case
+  const len = Math.sqrt(
+    direction.x * direction.x +
+      direction.y * direction.y +
+      direction.z * direction.z,
+  );
+  const nx = direction.x / len;
+  const ny = direction.y / len;
+  const nz = direction.z / len;
+
+  if (octType === OctahedronType.HEMI) {
+    _uvResult.u = Math.max(0, Math.min(1, (1 + nz + nx) / 2));
+    _uvResult.v = Math.max(0, Math.min(1, (1 + nz - nx) / 2));
+  } else {
+    let px = nx;
+    let pz = nz;
+
+    if (ny < 0) {
+      px = Math.sign(nx) * (1.0 - Math.abs(nz));
+      pz = Math.sign(nz) * (1.0 - Math.abs(nx));
+    }
+
+    _uvResult.u = Math.max(0, Math.min(1, px * 0.5 + 0.5));
+    _uvResult.v = Math.max(0, Math.min(1, pz * 0.5 + 0.5));
+  }
+
+  return _uvResult;
+}
+
+// Reusable objects for directionToGridCell to avoid per-frame allocations
+const _gridCellFaceIndices = new THREE.Vector3();
+const _gridCellFaceWeights = new THREE.Vector3();
+const _gridCellResult = {
+  faceIndices: _gridCellFaceIndices,
+  faceWeights: _gridCellFaceWeights,
+};
+
+/**
+ * Get the grid cell and interpolation weights for a direction.
+ * This is the O(1) replacement for raycasting in the update loop!
+ *
+ * IMPORTANT: The returned vectors are reused across calls (zero-allocation).
+ * Callers must consume or copy the values before the next call.
+ *
+ * @param direction - Normalized view direction
+ * @param gridSizeX - Number of grid cells in X
+ * @param gridSizeY - Number of grid cells in Y
+ * @param octType - The octahedron mapping type
+ * @returns Object with face indices and barycentric weights for blending
+ */
+export function directionToGridCell(
+  direction: THREE.Vector3,
+  gridSizeX: number,
+  gridSizeY: number,
+  octType: OctahedronTypeValue,
+): { faceIndices: THREE.Vector3; faceWeights: THREE.Vector3 } {
+  const { u, v } = directionToUV(direction, octType);
+
+  // Convert UV to grid coordinates
+  // Grid cells are centered, so cell centers are at (i + 0.5) / gridSize
+  const fx = u * gridSizeX - 0.5;
+  const fy = v * gridSizeY - 0.5;
+
+  // Get the four surrounding cell indices
+  const x0 = Math.max(0, Math.floor(fx));
+  const y0 = Math.max(0, Math.floor(fy));
+  const x1 = Math.min(gridSizeX - 1, x0 + 1);
+  const y1 = Math.min(gridSizeY - 1, y0 + 1);
+
+  // Bilinear interpolation weights
+  const wx = fx - x0;
+  const wy = fy - y0;
+
+  // Convert to flat indices (matching octPoints layout: row-major)
+  const idx00 = y0 * gridSizeX + x0;
+  const idx10 = y0 * gridSizeX + x1;
+  const idx01 = y1 * gridSizeX + x0;
+
+  // Use barycentric-style weights for 3-cell blend
+  const w0 = (1 - wx) * (1 - wy); // Bottom-left
+  const w1 = wx * (1 - wy); // Bottom-right
+  const w2 = (1 - wx) * wy; // Top-left
+
+  // Normalize weights
+  const sum = w0 + w1 + w2;
+  _gridCellFaceWeights.set(w0 / sum, w1 / sum, w2 / sum);
+  _gridCellFaceIndices.set(idx00, idx10, idx01);
+
+  return _gridCellResult;
+}

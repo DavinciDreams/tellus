@@ -129,6 +129,7 @@ import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, 
 import { createTerrainMaterial } from "./tellus-terrain-material";
 import { largeWorldTerrainKind } from "./tellus-large-world-terrain";
 import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
+import { generateInteriorRoom } from "./tellus-building";
 import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
@@ -738,32 +739,13 @@ function createTellusWorld(
   // are hidden, the player grounds on the room floor (flat y≈0 — interiors have no heightfield).
   let interiorObject: THREE.Object3D | null = null;
   let interiorSceneUrl: string | null = null;
-  // A procedural fallback room so an interior is ALWAYS visible — even before/without a GLB asset: a floor +
-  // four walls + a ceiling, warmly lit. A real sceneUrl GLB (when it loads) is added INSIDE it.
-  const buildProceduralRoom = (): THREE.Object3D => {
-    const room = new THREE.Group();
-    room.name = "tellus-interior-room";
-    const W = 16, H = 5;
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x6b5a44, roughness: 0.9 });
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x8a7a63, roughness: 0.95, side: THREE.DoubleSide });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, W), floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W, W), wallMat);
-    ceil.rotation.x = Math.PI / 2;
-    ceil.position.y = H;
-    room.add(floor, ceil);
-    const walls: Array<[number, number, number]> = [[0, -W / 2, 0], [0, W / 2, Math.PI], [-W / 2, 0, Math.PI / 2], [W / 2, 0, -Math.PI / 2]];
-    for (const [x, z, ry] of walls) {
-      const wall = new THREE.Mesh(new THREE.PlaneGeometry(W, H), wallMat);
-      wall.position.set(x, H / 2, z);
-      wall.rotation.y = ry;
-      room.add(wall);
-    }
-    room.add(new THREE.PointLight(0xffe0b0, 1.1, 40).translateY(H - 0.6));
-    room.add(new THREE.AmbientLight(0xffffff, 0.35));
-    return room;
-  };
+  // Guards the ONE-TIME interior trimesh bake (see ensureInteriorStatics). Declared here (before
+  // applyInterior uses it) to avoid a temporal-dead-zone reference.
+  let interiorBaked = false;
+  // Real multi-surface interior geometry now lives in src/tellus-building.ts (generateInteriorRoom):
+  // floor slab(s) + perimeter walls (with a doorway gap) + a climbable staircase between levels +
+  // ceiling + warm light, all flagged userData.collide for the physics track. A real sceneUrl GLB
+  // (when it loads) is added INSIDE the same container.
   const applyInterior = (sceneUrl: string) => {
     const u = sceneUrl.trim();
     if (!u || u === interiorSceneUrl) return;
@@ -777,16 +759,28 @@ function createTellusWorld(
     visitorPosition.z = 0;
     lastLocalAvatarPos.x = 0;
     lastLocalAvatarPos.z = 0;
+    // Don't let the return/entry portal at the spawn immediately re-fire (the spawn-on-door loop).
+    armPortalArrivalGrace();
     if (interiorObject) {
       scene.remove(interiorObject);
       disposeObject(interiorObject);
+      rapierPhysics?.clearStatics(); // drop the prior room's trimesh statics before baking the new one
     }
+    interiorBaked = false; // new interior mount → allow exactly one bake (see ensureInteriorStatics)
     // Always show the procedural room immediately; the GLB (if the asset exists) layers in.
     const container = new THREE.Group();
     container.name = "tellus-interior";
-    container.add(buildProceduralRoom());
+    // Track B: real multi-surface interior geometry (floor/walls/stairs/ceiling). Solid meshes carry
+    // userData.collide === true so Track A can bake them into a Rapier static trimesh. Default room:
+    // 16×16, single level (set levels>1 to get a climbable staircase between mezzanine floors).
+    container.add(generateInteriorRoom({ levels: 2 }));
     interiorObject = container;
     scene.add(container);
+    // TRACK-A: bake the interior's solid meshes (userData.collide === true) into a Rapier static
+    // trimesh so floors/walls/stairs are walkable + impassable. Re-adding "interior" replaces any
+    // prior room's statics. Rapier may still be loading (dynamic import) on the first interior — the
+    // proximity check in animate re-arms it via ensureInteriorStatics() once physics is ready.
+    rapierPhysics?.addStaticTrimesh("interior", container);
     addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `Entered interior ${u}` });
     void loadGltfObject(u)
       .then((obj) => {
@@ -795,11 +789,43 @@ function createTellusWorld(
           return;
         }
         obj.name = "tellus-interior-glb";
+        // Server interior GLBs don't carry our userData.collide flags (only the generated room does),
+        // so without this the bake finds 0 collidable meshes and you'd fall through the floor. Flag the
+        // GLB's solid meshes so addStaticTrimesh turns them into walkable/impassable colliders.
+        obj.traverse((node) => {
+          const m = node as THREE.Mesh;
+          if (m.isMesh && m.geometry) m.userData.collide = true;
+        });
         container.add(obj);
+        // The GLB layered in AFTER the initial bake — re-bake once so its floor/walls are collidable.
+        interiorBaked = false;
+        ensureInteriorStatics();
       })
       .catch(() => {
         /* no GLB asset yet — the procedural room stands in. */
       });
+  };
+
+  // Bake the interior's solid meshes into Rapier statics EXACTLY ONCE per interior mount. Critical:
+  // this must NOT retry every frame — a server GLB without our collide flags would otherwise re-cook
+  // the entire trimesh 60×/sec (the 7-FPS interior bug). interiorBaked resets on each applyInterior /
+  // GLB layer-in, so a late-ready Rapier or a late GLB still gets one bake.
+  const ensureInteriorStatics = () => {
+    if (!rapierPhysics || !interiorObject || interiorBaked) return;
+    interiorBaked = true; // mark BEFORE baking so a throw doesn't cause a per-frame retry storm
+    rapierPhysics.addStaticTrimesh("interior", interiorObject);
+  };
+
+  // Leave the interior: drop the room geometry and its physics statics so we fall back to outdoor
+  // terrain grounding. Called when a snapshot arrives WITHOUT a sceneUrl while an interior is active.
+  const exitInterior = () => {
+    if (!interiorObject) return;
+    scene.remove(interiorObject);
+    disposeObject(interiorObject);
+    interiorObject = null;
+    interiorSceneUrl = null;
+    rapierPhysics?.clearStatics();
+    setChunkedFlatGround(isChunked ? 0 : null); // restore the world's normal grounding
   };
 
   // ── TELLUS INFINITY tiles (Phase 4) ── mount a 3D Tileset as the RENDER substrate (the gameplay height
@@ -836,6 +862,9 @@ function createTellusWorld(
   const pendingDeletedPortals = new Map<string, WorldPortal>();
   let lastPortalEnterAt = 0;
   let insidePortalId: string | null = null;
+  // Set on spawn/warp/interior-entry; blocks portal auto-enter until the player is clear of ALL
+  // portals once (prevents the "spawn on the door → bounce back" loop, robust to async portal load).
+  let portalSpawnGuard = false;
   const makePortalMarker = (interior: boolean, pending = false): THREE.Object3D => {
     const g = new THREE.Group();
     const color = pending ? 0x9b7cff : interior ? 0xffc84f : 0xffdc3d;
@@ -1000,7 +1029,10 @@ function createTellusWorld(
         if (bob) child.position.y = (bob > 0 ? 1.35 : 2.05) + Math.sin(now * 0.002) * 0.16 * bob;
       }
     }
-    if (worldPortals.length === 0) return;
+    if (worldPortals.length === 0) {
+      portalSpawnGuard = false; // no portals here — nothing to be guarded against
+      return;
+    }
     let nearId: string | null = null;
     for (const p of worldPortals) {
       if (pendingPortalIds.has(p.id)) continue;
@@ -1010,6 +1042,13 @@ function createTellusWorld(
         nearId = p.id;
         break;
       }
+    }
+    // Spawn protection: while guarded, suppress auto-enter entirely. The guard lifts the moment the
+    // player is clear of every portal — then normal proximity entry resumes.
+    if (portalSpawnGuard) {
+      if (!nearId) portalSpawnGuard = false;
+      insidePortalId = nearId;
+      return;
     }
     if (nearId && nearId !== insidePortalId && now - lastPortalEnterAt > 2500) {
       lastPortalEnterAt = now;
@@ -1023,11 +1062,14 @@ function createTellusWorld(
       if (!started || pendingPortalWarnedIds.has(id) || now - started < 8000) continue;
       pendingPortalWarnedIds.add(id);
       const portal = worldPortals.find((p) => p.id === id);
+      // No confirm AND no rejection after 8s usually means the server isn't acting on the upsert at
+      // all — most often Features.Portals is disabled on this silo, or you don't own this world (only
+      // the owner / an unowned world can manage portals). Be honest rather than spin forever.
       addLog({
         agentId: "world",
         agentName: "Tellus",
         tool: "interact",
-        text: `Still waiting for portal confirmation: ${portal?.label || id}`,
+        text: `Portal "${portal?.label || id}" wasn't confirmed — portals may be disabled on this server, or you may not own this world.`,
       });
       publish();
     }
@@ -1205,6 +1247,20 @@ function createTellusWorld(
       remoteScales,
     };
   };
+
+  // DEV-ONLY: force into a generated interior room WITHOUT a server portal (Features.Portals may be
+  // off on the silo, blocking the real door→portal→interior flow). Lets us verify the interior physics
+  // — walk floors/stairs, hit walls, furniture grounding — locally. window.__tellusEnterInterior() to
+  // build a 2-level room with stairs; window.__tellusExitInterior() to return outdoors. Strip before ship.
+  window.__tellusEnterInterior = () => {
+    // A fake-but-non-empty sceneUrl: applyInterior renders the procedural room (generateInteriorRoom)
+    // and Track A bakes its solid meshes into Rapier trimesh statics; the GLB fetch fails gracefully
+    // (caught) so the generated room stands in. window.__tellusExitInterior() to leave.
+    applyInterior("dev://interior-test");
+  };
+  window.__tellusExitInterior = () => exitInterior();
+  // DEV-ONLY perf readout: window.__tellusPerf() → { fps, vegetation: {tier, chunks, trees, grassTris} }.
+  window.__tellusPerf = () => ({ fps: fpsValue, vegetation: vegetation.stats() });
 
   let yaw = 0.72;
   let pitch = -0.28;
@@ -1725,8 +1781,15 @@ function createTellusWorld(
     const occupied = Array.from(remoteVisitors.values())
       .map((presence) => presence.position)
       .filter((position): position is Vec3 => Boolean(position));
+    // Treat each portal as a no-spawn zone (radius + a margin) so arrivals don't land in a trigger
+    // volume and immediately bounce back through it.
+    const portalZones = worldPortals.map((p) => {
+      const pos = portalAnchorPosition(p);
+      return { pos, r: Math.max(1.2, p.radius) + 1.2 };
+    });
     const isClear = (candidate: Vec3): boolean =>
-      occupied.every((position) => distance2D(candidate, position) >= 2.4);
+      occupied.every((position) => distance2D(candidate, position) >= 2.4) &&
+      portalZones.every((zone) => distance2D(candidate, zone.pos) >= zone.r);
     let best = groundedPosition(x, z, visitorPosition);
     if (isClear(best)) return best;
     const golden = Math.PI * (3 - Math.sqrt(5));
@@ -1830,8 +1893,11 @@ function createTellusWorld(
         const snapshotPortals = portalsFromWorldPatch(parsed);
         if (snapshotPortals) mergePortalSnapshot(snapshotPortals);
         // Phase 3: an interior snapshot carries a sceneUrl → render the GLB room instead of terrain.
+        // A snapshot WITHOUT a sceneUrl while an interior is mounted means we left the room (switched
+        // back to an outdoor world in the same scene) — tear the room + its physics statics down.
         const sceneUrl = (parsed as { sceneUrl?: unknown }).sceneUrl;
         if (typeof sceneUrl === "string" && sceneUrl) applyInterior(sceneUrl);
+        else if (interiorObject) exitInterior();
         // Phase 4: a tiles world carries a tileSetUrl → mount the 3D tileset as the render substrate.
         const tileUrl = (parsed as { tileSetUrl?: unknown }).tileSetUrl;
         if (typeof tileUrl === "string" && tileUrl) mountTileset(tileUrl);
@@ -2619,12 +2685,31 @@ function createTellusWorld(
     if (terrain.visible) terrainRayTargets.push(terrain);
     const chunkTerrain = scene.getObjectByName("tellus-chunk-terrain");
     if (chunkTerrain) terrainRayTargets.push(chunkTerrain);
+    // In an interior the real floor is the room's solid meshes — add them as ray targets so furniture
+    // rests on the actual floor/mezzanine surface (footprintGroundY) instead of the y=0 flat base.
+    if (interiorObject) terrainRayTargets.push(interiorObject);
     if (terrainRayTargets.length === 0) return null;
     terrainRayOrigin.set(x, 480, z);
     terrainRaycaster.set(terrainRayOrigin, terrainRayDirection);
     terrainRaycaster.far = 780;
-    const hit = terrainRaycaster.intersectObjects(terrainRayTargets, true)[0];
-    return hit ? hit.point.y : null;
+    if (!interiorObject) {
+      // Outdoor fast path: nearest (highest) hit is the surface.
+      const hit = terrainRaycaster.intersectObjects(terrainRayTargets, true)[0];
+      return hit ? hit.point.y : null;
+    }
+    // Interior: a top-down ray hits the CEILING before the floor, so take the highest UP-FACING
+    // surface (face normal world-Y > 0) — a floor/mezzanine/stair tread, never a ceiling underside.
+    const hits = terrainRaycaster.intersectObjects(terrainRayTargets, true);
+    for (const h of hits) {
+      const n = h.face?.normal;
+      if (!n) return h.point.y; // terrain hit (no per-face cull needed) — first is highest
+      // Transform the face normal into world space to test its vertical component.
+      const worldN = n.clone().applyNormalMatrix(
+        new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld),
+      );
+      if (worldN.y > 0.3) return h.point.y;
+    }
+    return null;
   };
 
   // Highest terrain height under a thing's footprint. With the wider terrain height variability,
@@ -3339,11 +3424,29 @@ function createTellusWorld(
 
   // Warp the player to a world (x,z) — the click-map teleport. Grounds onto the terrain (chunked-aware via
   // groundedPosition), cancels any fall/run-accel, and republishes presence so peers see the jump.
+  // Arrival grace: after any spawn/warp/interior-entry, if the player is standing inside a portal's
+  // radius (e.g. the return portal sits right at the spawn), mark it already-entered so a single move
+  // doesn't immediately re-trigger it. The portal only re-arms once the player steps OUT of its radius
+  // (updatePortals resets insidePortalId to null on !nearId). Without this you get the "spawn on the
+  // door → move → bounce back → spawn on the door" loop.
+  const armPortalArrivalGrace = () => {
+    insidePortalId = null;
+    lastPortalEnterAt = performance.now();
+    // One-shot spawn protection: block ALL portal auto-enter until the player has been clear of every
+    // portal radius at least once. This is robust even when the destination world's portals load
+    // asynchronously AFTER spawn (the snapshot-at-spawn check alone would miss a late-loading return
+    // portal and you'd bounce straight back).
+    portalSpawnGuard = true;
+  };
+
   const warpTo = (x: number, z: number) => {
+    // clearVisitorSpawnPosition nudges off other players AND off the nearest portal so you don't land
+    // on top of someone or inside a trigger volume.
     visitorPosition = clearVisitorSpawnPosition(x, z);
     playerAirborne = false;
     playerVy = 0;
     moveHoldStartMs = 0;
+    armPortalArrivalGrace();
     sendPresenceUpdate(true);
     publish();
   };
@@ -4394,10 +4497,35 @@ function createTellusWorld(
       sendPresenceUpdate();
       return;
     }
-    // Obstacle resolution, then ground/air vertical dynamics. Rapier owns generated-object solids when
-    // ready; tree colliders stay on the lightweight vegetation pushout path for now.
     const desiredX = visitorPosition.x + movement.x;
     const desiredZ = visitorPosition.z + movement.z;
+    // ── Interior full-3D path ───────────────────────────────────────────────────────────────────
+    // Inside a room the floor/walls/stairs are real Rapier trimesh statics. Route XZ AND a
+    // gravity-integrated Y through movePlayer3D so the kinematic controller does vertical floor/stair
+    // contact (autostep + snap-to-ground) and blocks walls/ceilings — instead of the flat-ground
+    // grounding the outdoor path uses. Jump (playerVy set above) is honoured through the same Y delta.
+    if (rapierPhysics && interiorObject && rapierPhysics.hasStatics()) {
+      // Integrate gravity each frame; when grounded the controller zeroes the downward move, so we
+      // keep a small constant downward bias (never positive unless jumping) to stay glued to stairs.
+      playerVy = playerAirborne ? playerVy - 24 * delta : Math.min(playerVy, 0) - 24 * delta;
+      const desiredY = visitorPosition.y + playerVy * delta;
+      const moved = rapierPhysics.movePlayer3D(visitorPosition, {
+        x: desiredX,
+        y: desiredY,
+        z: desiredZ,
+      });
+      if (moved.grounded) {
+        playerAirborne = false;
+        if (playerVy < 0) playerVy = 0; // landed — cancel accumulated fall speed
+      } else {
+        playerAirborne = true;
+      }
+      visitorPosition = moved.position;
+      sendPresenceUpdate();
+      return;
+    }
+    // Obstacle resolution, then ground/air vertical dynamics. Rapier owns generated-object solids when
+    // ready; tree colliders stay on the lightweight vegetation pushout path for now.
     let pushed = { x: desiredX, z: desiredZ };
     if (rapierPhysics) {
       syncRapierSolids();
@@ -5081,6 +5209,8 @@ function createTellusWorld(
     const delta = clamp((now - lastTime) / 1000, 0, 0.05);
     lastTime = now;
     tick++;
+    // Bake interior trimesh statics once physics finishes its (async) load after a room mounted.
+    ensureInteriorStatics();
     moveVisitor(delta);
     updatePortals(now); // TELLUS INFINITY: spin portal rings + auto-enter on walk-into
     if (tilesRenderer) {
@@ -5149,7 +5279,10 @@ function createTellusWorld(
     // teleport, or an EvoFlow raster lifted the surface — snap the avatar up so they never stand inside
     // the land (the symptom that used to need a manual jump). Only ever pushes UP; downward transitions
     // (ledges, falls) stay owned by the movement update. Skipped while flying, mid-jump/fall, or riding.
-    if (!flying && !playerAirborne && !sailingThingId) {
+    // Also skipped in interiors: the flat groundedPosition (y=0) would yank a player off a mezzanine
+    // or staircase back to the ground floor — interior vertical placement is owned by movePlayer3D.
+    const inInterior = Boolean(interiorObject) && Boolean(rapierPhysics?.hasStatics());
+    if (!flying && !playerAirborne && !sailingThingId && !inInterior) {
       const grounded = groundedPosition(visitorPosition.x, visitorPosition.z, visitorPosition);
       if (grounded.y > visitorPosition.y + 0.05) {
         visitorPosition = grounded;
@@ -5233,6 +5366,11 @@ function createTellusWorld(
       !event.altKey
     ) {
       setCameraMode(cameraMode === "first" ? "third" : "first");
+      return;
+    }
+    // Backtick (`) toggles the on-screen FPS + vegetation-stats overlay (was a finicky brand triple-click).
+    if (event.key === "`" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      window.dispatchEvent(new CustomEvent("tellus:toggle-fps"));
       return;
     }
     // F toggles free-fly (not while riding a vehicle — air mounts have their own ascend/descend).
@@ -6298,6 +6436,9 @@ function createTellusWorld(
       delete window.__tellusViewDebug;
       delete window.__tellusThingsDebug;
       delete window.__tellusMirrorDebug;
+      delete window.__tellusEnterInterior;
+      delete window.__tellusExitInterior;
+      delete window.__tellusPerf;
       for (const rig of avatarRigs.values()) {
         rig.dispose();
       }
@@ -6467,6 +6608,12 @@ function App(): React.ReactElement {
     };
     window.addEventListener("tellus:camera-mode", onMode);
     return () => window.removeEventListener("tellus:camera-mode", onMode);
+  }, []);
+  // Backtick key → toggle the FPS/veg-stats overlay (bridged from the world-layer keydown handler).
+  useEffect(() => {
+    const onToggle = () => setShowFps((v) => !v);
+    window.addEventListener("tellus:toggle-fps", onToggle);
+    return () => window.removeEventListener("tellus:toggle-fps", onToggle);
   }, []);
   // (camera 1st/3rd toggle is handled by the 'V' hotkey in the world layer — no React button anymore)
   // ── Chunk-load radius (chunked-world draw distance; only shown for chunked worlds) ──
@@ -9042,6 +9189,36 @@ function App(): React.ReactElement {
               <span>Tellus</span>
               <small>World Weaver</small>
             </div>
+            {showFps && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  marginTop: 4,
+                  padding: "3px 9px",
+                  borderRadius: 6,
+                  background: "rgba(0,0,0,0.72)",
+                  color: "#7ec850",
+                  font: "600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace",
+                  whiteSpace: "nowrap",
+                  pointerEvents: "none",
+                  zIndex: 40,
+                }}
+              >
+                <div>{fps} FPS</div>
+                {ambientStats && (
+                  <div style={{ marginTop: 2, color: "#b8e08a" }}>
+                    veg T{ambientStats.vegetation.tier} · {ambientStats.vegetation.chunks}ch ·{" "}
+                    {Math.round(ambientStats.vegetation.grassIndices / 3)}tri ·{" "}
+                    {ambientStats.vegetation.trees}🌲 · {ambientStats.physicsBodies}⚙
+                  </div>
+                )}
+                <div style={{ marginTop: 2, color: "#9ad0ff", fontSize: 10 }}>
+                  press ` to hide
+                </div>
+              </div>
+            )}
             <div className="brand-hud-actions">
               <AuthControls />
               <details className="world-help">
