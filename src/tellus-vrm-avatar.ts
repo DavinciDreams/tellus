@@ -208,7 +208,6 @@ export function pickAvatarId(visitorId: string): string {
 // shared); parsed VRMAnimations are cached per clip URL (retarget per avatar is cheap).
 const vrmBufferCache = new Map<string, Promise<ArrayBuffer>>();
 const vrmaCache = new Map<string, Promise<VRMAnimation>>();
-const assetVrmMetadataCache = new Map<string, Promise<boolean | undefined>>();
 let warnedVrmLoadFailure = false;
 
 function makeVrmLoader(rendererIsWebGPU: boolean): GLTFLoader {
@@ -246,54 +245,6 @@ function fetchAssetBuffer(url: string): Promise<ArrayBuffer> {
     vrmBufferCache.set(url, pending);
   }
   return pending;
-}
-
-function assetStoreIdFromUrl(url: string): string | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(url, window.location.href);
-  } catch {
-    return null;
-  }
-  const match = /\/api\/(?:assets\/)?(?:model|download)\/([^/?#]+)/i.exec(parsed.pathname);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function fetchAssetIsVrm(id: string): Promise<boolean | undefined> {
-  let pending = assetVrmMetadataCache.get(id);
-  if (!pending) {
-    pending = (async () => {
-      if (!runtimeConfig.worldApiBase) return undefined;
-      const response = await fetch(
-        `${runtimeConfig.worldApiBase}/api/assets/model/${encodeURIComponent(id)}`,
-        { cache: "force-cache" },
-      );
-      if (!response.ok) return undefined;
-      const parsed = (await response.json()) as unknown;
-      const model =
-        parsed && typeof parsed === "object" && "model" in parsed
-          ? (parsed as { model?: unknown }).model
-          : parsed;
-      if (!model || typeof model !== "object") return undefined;
-      const record = model as Record<string, unknown>;
-      const format = typeof record.file_format === "string" ? record.file_format.toLowerCase() : "";
-      return (
-        format === "vrm" ||
-        record.has_vrm_variant === true ||
-        record.has_optimized_vrm_variant === true
-      );
-    })();
-    pending.catch(() => assetVrmMetadataCache.delete(id));
-    assetVrmMetadataCache.set(id, pending);
-  }
-  return pending;
-}
-
-async function shouldAttemptVrmObjectLoad(url: string): Promise<boolean> {
-  const assetId = assetStoreIdFromUrl(url);
-  if (!assetId) return true;
-  const isVrm = await fetchAssetIsVrm(assetId).catch(() => undefined);
-  return isVrm !== false;
 }
 
 export async function loadVrm(url: string, rendererIsWebGPU: boolean): Promise<VRM> {
@@ -943,16 +894,14 @@ export class VrmObjectRig {
 /**
  * Try to load `url` as a VRM object. Resolves a {scene, vrm, clips} bundle when the asset really is a
  * VRM (so the caller can mount it as a rig); resolves null for a plain GLB (caller stays on the
- * existing GLTFLoader path). Store metadata is checked first so regular asset GLBs don't pay for a
- * full VRM-sniff binary download. Never throws for a non-VRM — only a genuine fetch/parse error
- * rejects.
+ * existing GLTFLoader path). Reuses the avatar VRM loader + VRMA cache. Never throws for a non-VRM —
+ * only a genuine fetch/parse error rejects.
  */
 export async function tryLoadVrmObject(
   url: string,
   rendererIsWebGPU: boolean,
 ): Promise<{ scene: THREE.Object3D; vrm: VRM; clips: Record<string, VRMAnimation> } | null> {
   if (!runtimeConfig.worldApiBase && !url.startsWith("http")) return null;
-  if (!(await shouldAttemptVrmObjectLoad(url))) return null;
   const buffer = await fetchAssetBuffer(url);
   // Sniff the glTF JSON for the VRM extension before a full VRM parse (a non-VRM GLB has neither).
   if (!bufferDeclaresVrm(buffer)) return null;
