@@ -161,6 +161,42 @@ describe("createChunkRenderer lifecycle", () => {
     expect(group.children.length).toBe(0);
     r.dispose();
   });
+
+  it("retries failed chunk fetches even when the player remains in the same center chunk", async () => {
+    let now = 1_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const calls = new Map<string, number>();
+    vi.stubGlobal("fetch", (url: string) => {
+      const m = /\/chunk\/(-?\d+)\/(-?\d+)/.exec(url);
+      const cx = Number(m![1]);
+      const cz = Number(m![2]);
+      const k = `${cx},${cz}`;
+      const count = (calls.get(k) ?? 0) + 1;
+      calls.set(k, count);
+      if (k === "10,10" && count === 1) {
+        return Promise.resolve({ ok: false } as Response);
+      }
+      const data = makeChunk({ cx, cz, revision: count });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(data) } as Response);
+    });
+
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    r.update(CHUNK_SPAN * 10 + 1, CHUNK_SPAN * 10 + 1);
+    await new Promise((res) => setTimeout(res, 0));
+    expect(calls.get("10,10")).toBe(1);
+    expect(r.stats().failed).toBe(1);
+
+    r.update(CHUNK_SPAN * 10 + 1, CHUNK_SPAN * 10 + 1);
+    expect(calls.get("10,10")).toBe(1);
+
+    now += 2_100;
+    r.update(CHUNK_SPAN * 10 + 1, CHUNK_SPAN * 10 + 1);
+    await new Promise((res) => setTimeout(res, 0));
+    expect(calls.get("10,10")).toBe(2);
+    r.dispose();
+    nowSpy.mockRestore();
+  });
 });
 
 describe("createChunkRenderer sampleHeight (walk the sculpted chunk height)", () => {

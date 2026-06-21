@@ -13,6 +13,7 @@ import {
   Map as MapIcon,
   MessageCircle,
   Mic,
+  MicOff,
   Minus,
   Mountain,
   PawPrint,
@@ -27,6 +28,9 @@ import {
   Sprout,
   Trash2,
   Video,
+  VideoOff,
+  Volume2,
+  VolumeX,
   Waves,
   X,
 } from "lucide-react";
@@ -110,6 +114,8 @@ import {
   biomeCellsFromWorldPatch,
   biomeCellsFromSnapshot,
   dedupePresenceForDisplay,
+  isLivePresence,
+  repairGeneratedCloneModelLinks,
   type WorldBiomeCell,
   isTellusTerrainState,
   isWorldGeneratedThing,
@@ -120,9 +126,9 @@ import {
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood } from "./tellus-types";
-import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
+import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
-import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig } from "./tellus-runtime-config";
+import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig, worldApiUrl } from "./tellus-runtime-config";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, toAssetId } from "./tellus-urls-identity";
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
@@ -145,6 +151,13 @@ import {
   type AssetSurfaceContext,
 } from "./tellus-asset-reuse";
 import { actorKindForVisitorId, friendlyVisitorName } from "./tellus-visitor-names";
+import {
+  buildWorldThingRuntimeProfile,
+  defaultScaleForRealisticKind,
+  normalizeWorldThingAssetIdentity,
+  seatPositionForWorldThing,
+  type WorldThingRuntimeProfile,
+} from "./tellus-world-object-profile";
 import {
   DAY_NIGHT_MODE_OPTIONS,
   LIGHTING_MOOD_OPTIONS,
@@ -190,6 +203,17 @@ interface AgentStatus {
   processing?: boolean;
   /** The agent's own durable `remember` notes (newest first) — surfaced live in the memories block. */
   memories?: AgentRememberNote[];
+}
+
+interface OnlineContact {
+  visitorId: string;
+  name: string;
+  kind: "player" | "agent";
+  worldId: string;
+  position?: Vec3;
+  online: boolean;
+  currentWorld: boolean;
+  lastSeenAt?: string;
 }
 
 // One turn of the server-side agent's recent conversation. "assistant" = the agent speaking; "tool" = a tool
@@ -327,7 +351,13 @@ function createTellusWorld(
   const worldBiomeCells = new Map<string, WorldBiomeCell>();
   const seenWorldChatIds = new Set<string>();
   const generatedMeshes = new Map<string, THREE.Object3D>();
-  const generatedAnimationMixers = new Map<string, THREE.AnimationMixer>();
+  type GeneratedAnimationState = {
+    mixer: THREE.AnimationMixer;
+    action?: THREE.AnimationAction;
+    clipName?: string;
+    mode: "idle" | "move";
+  };
+  const generatedAnimationMixers = new Map<string, GeneratedAnimationState>();
   // Placed VRM things (auton/Atlantean store models) animate through a real VRM rig — a VRMA idle clip
   // looped by default, advanced (mixer + spring bones) each frame here. Parallel to the plain-GLB
   // mixers above; a thing is in exactly one of the two maps.
@@ -355,6 +385,8 @@ function createTellusWorld(
   const skyboxTintMaterials = new Set<THREE.MeshBasicMaterial>();
   const pendingGenerationControllers = new Map<string, AbortController>();
   const pendingManifestReconciliations = new Set<string>();
+  const transientModelLoadFailures = new Map<string, number>();
+  const transientModelRetryTimers = new Map<string, number>();
   const keys = new Set<string>();
   let selectedThingId: string | undefined;
   let sailingThingId: string | undefined;
@@ -376,6 +408,7 @@ function createTellusWorld(
   // animate(); rigs are disposed on remote prune and on destroy.
   const avatarRigs = new Map<string, AvatarRig>();
   let lastPresenceSentAt = 0;
+  let lastPresencePruneAt = 0;
 
   // ── P2P video mesh (WebRTC, RX-on/TX-off by default) ──────────────────────
   // The mesh is the sole owner of all RTCPeerConnections; it lives outside the render loop and
@@ -604,6 +637,8 @@ function createTellusWorld(
   // on WebGPU too. (Same call as Codex's WebGPU-mirror fallback.) WebGL never had the refractive water.
   const ocean = createOceanSurface(false);
   const archipelago = createDistantArchipelago(useWebGPU);
+  let chunkRenderer: ChunkRenderer | null = null;
+  let lastActiveChunkCount = -1; // re-ground placed assets when the active chunk set changes
   // Ambient procedural vegetation (wind-swayed grass/flowers streamed around the player + island-wide
   // trees/rocks) and the lightweight physics world (thrown things, player jump/obstacles). Both are
   // deterministic from the synced terrain state — no protocol changes.
@@ -635,7 +670,7 @@ function createTellusWorld(
         scene,
         useWebGPU,
         sampleHeight: isChunked
-          ? (x, z) => groundHeightAt(x, z) ?? 0
+          ? (x, z) => chunkRenderer?.sampleHeight(x, z) ?? SEA_LEVEL - 100
           : terrainHeight,
         samplePaint: isChunked
           ? (x, z) => {
@@ -698,8 +733,6 @@ function createTellusWorld(
     .catch((error) => {
       console.warn("Tellus Rapier physics unavailable", error);
     });
-  let chunkRenderer: ChunkRenderer | null = null;
-  let lastActiveChunkCount = -1; // re-ground placed assets when the active chunk set changes
   const terrain = new THREE.Mesh(
     createTerrainGeometry(terrainRenderSegments),
     createTerrainMaterial(useWebGPU, { roughness: 0.88 }),
@@ -761,8 +794,8 @@ function createTellusWorld(
     interiorSceneUrl = u;
     for (const m of [ocean, archipelago, terrain, pondWater, flowerPatchGroup]) m.visible = false;
     setChunkedFlatGround(0); // ground the player on the room floor (no heightfield inside)
-    // The procedural room is centered at the origin, but a non-chunked world defaults the player to an
-    // off-origin island spot — so drop them INTO the room (origin, flat floor) on entry.
+    // The procedural room is centered at the origin; drop the player INTO the room (origin, flat floor)
+    // on entry instead of preserving an outdoor spawn point.
     visitorPosition.x = 0;
     visitorPosition.y = 0;
     visitorPosition.z = 0;
@@ -1101,7 +1134,7 @@ function createTellusWorld(
 
   const visitor = createVisitorMesh(useWebGPU);
   // Chunked worlds place origin at a CORNER, so spawn at the world centre (from the manifest bounds)
-  // to land in the middle of the tiled plane; classic worlds keep the island-disc spawn.
+  // to land in the middle of the tiled plane; non-chunked special worlds use the compatibility spawn.
   const chunkedCenter = chunkedWorldCenter();
   let visitorPosition = chunkedCenter
     ? groundedPosition(chunkedCenter.x, chunkedCenter.z)
@@ -1346,13 +1379,55 @@ function createTellusWorld(
   // (every WS patch, every transform-drag frame); each onSnapshot is a deep-cloned snapshot + a React
   // re-render, so collapsing them to a single flush in animate() removes the per-frame clone/render storm.
   let publishPending = false;
+  let lastSnapshotFlushAt = 0;
+  let lastSnapshotSignature = "";
+  const MIN_SNAPSHOT_FLUSH_MS = 250;
+  const snapshotSignature = (s: TellusSnapshot): string => {
+    const pos = s.visitorPosition ?? { x: 0, y: 0, z: 0 };
+    const generatedSig = s.generated
+      .map((thing) =>
+        [
+          thing.id,
+          thing.generationStatus ?? "",
+          Math.round(thing.position.x * 2),
+          Math.round(thing.position.y * 2),
+          Math.round(thing.position.z * 2),
+          Math.round((thing.rotationY ?? 0) * 20),
+        ].join(":"),
+      )
+      .join("|");
+    return [
+      Math.round(pos.x * 2),
+      Math.round(pos.y * 2),
+      Math.round(pos.z * 2),
+      Math.round((s.visitorYaw ?? 0) * 20),
+      s.selectedThingId ?? "",
+      s.sailingThingId ?? "",
+      s.logs.length,
+      s.worldChat.length,
+      s.remoteVisitors.length,
+      s.portals?.length ?? 0,
+      s.portalSwitch
+        ? `${s.portalSwitch.toWorldId}:${s.portalSwitch.spawn?.x ?? 0}:${s.portalSwitch.spawn?.z ?? 0}`
+        : "",
+      generatedSig,
+    ].join(";");
+  };
   const publish = () => {
     publishPending = true;
   };
   const flushPublish = () => {
     if (!publishPending) return;
+    const nowMs = performance.now();
+    const force = pendingPortalSwitch !== null;
+    if (!force && nowMs - lastSnapshotFlushAt < MIN_SNAPSHOT_FLUSH_MS) return;
     publishPending = false;
-    onSnapshot(snapshot());
+    const nextSnapshot = snapshot();
+    const signature = snapshotSignature(nextSnapshot);
+    if (!force && signature === lastSnapshotSignature) return;
+    lastSnapshotFlushAt = nowMs;
+    lastSnapshotSignature = signature;
+    onSnapshot(nextSnapshot);
     // The world.portal.entered signal is one-shot — the snapshot captured it by value, so clear it now so it
     // doesn't re-fire the React world-switch effect on the next publish.
     pendingPortalSwitch = null;
@@ -1709,10 +1784,47 @@ function createTellusWorld(
     publish();
   };
 
+  const removeRemoteVisitor = (remoteId: string) => {
+    const mesh = remoteVisitorMeshes.get(remoteId);
+    if (!mesh) {
+      remoteVisitors.delete(remoteId);
+      pendingPeerStreams.delete(remoteId);
+      return;
+    }
+    // Detach + dispose the TV video (texture/<video>) BEFORE removing the avatar.
+    setPeerVideo(remoteId, null);
+    pendingPeerStreams.delete(remoteId);
+    avatarRigs.get(remoteId)?.dispose();
+    avatarRigs.delete(remoteId);
+    appliedAvatarIds.delete(remoteId);
+    avatarApplyTokens.delete(remoteId); // also invalidates any in-flight avatar load for them
+    scene.remove(mesh);
+    remoteVisitorMeshes.delete(remoteId);
+    remoteVisitors.delete(remoteId);
+  };
+
+  const pruneStaleRemotePresence = (nowMs = Date.now()) => {
+    let changed = false;
+    for (const [remoteId, presence] of remoteVisitors) {
+      if (isLivePresence(presence, nowMs)) continue;
+      removeRemoteVisitor(remoteId);
+      changed = true;
+    }
+    if (!changed) return;
+    feedP2pPresence(Array.from(remoteVisitorMeshes.keys()));
+    publish();
+  };
+
   const applyRemotePresence = (presenceRaw: WorldPresence[]) => {
     // One logged-in account = one player: collapse a human's several live connections (stale tabs /
     // reconnects, each a distinct visitorId under the same ownerUserId) and drop my own other connections.
-    const presence = dedupePresenceForDisplay(presenceRaw, userId?.trim() || null);
+    // Anonymous sessions have no ownerUserId, so stale timestamp filtering is the safety net there.
+    const presence = dedupePresenceForDisplay(
+      presenceRaw,
+      userId?.trim() || null,
+      Date.now(),
+      visitorId,
+    );
     const activeRemoteIds = new Set<string>();
     for (const remote of presence) {
       if (remote.visitorId === visitorId || !remote.position) continue;
@@ -1768,18 +1880,9 @@ function createTellusWorld(
         .get(remote.visitorId)
         ?.notePresenceUpdate(position.x, position.y, position.z, performance.now());
     }
-    for (const [remoteId, mesh] of remoteVisitorMeshes) {
+    for (const remoteId of remoteVisitorMeshes.keys()) {
       if (activeRemoteIds.has(remoteId)) continue;
-      // Detach + dispose the TV video (texture/<video>) BEFORE removing the avatar.
-      setPeerVideo(remoteId, null);
-      pendingPeerStreams.delete(remoteId);
-      avatarRigs.get(remoteId)?.dispose();
-      avatarRigs.delete(remoteId);
-      appliedAvatarIds.delete(remoteId);
-      avatarApplyTokens.delete(remoteId); // also invalidates any in-flight avatar load for them
-      scene.remove(mesh);
-      remoteVisitorMeshes.delete(remoteId);
-      remoteVisitors.delete(remoteId);
+      removeRemoteVisitor(remoteId);
     }
     // Feed the live roster to the mesh (drives connect/disconnect of PCs).
     feedP2pPresence(Array.from(activeRemoteIds));
@@ -2130,7 +2233,7 @@ function createTellusWorld(
     } else {
       const targetHeight = terrainHeight(center.x, center.z);
       // The central brush radius scales with the world so it covers the same grid cells as the
-      // classic brush — keeps the math identical to the server's classic-space sculpt port.
+      // legacy brush — keeps the math identical to the server's compatibility sculpt port.
       const brushRadius = TERRAIN_SCULPT_RADIUS * WORLD_SCALE * (paintCode ? 0.68 : 1);
       for (let zIndex = 0; zIndex <= TERRAIN_SEGMENTS; zIndex++) {
         const z = (zIndex / TERRAIN_SEGMENTS - 0.5) * WORLD_RADIUS * 2;
@@ -2193,9 +2296,9 @@ function createTellusWorld(
     publish();
   };
 
-  // Chunked worlds hold NO inline classic grid — terrain lives in per-chunk grains. So a sculpt must go to
+  // Chunked worlds hold NO inline terrain grid — terrain lives in per-chunk grains. So a sculpt must go to
   // the SERVER as a terrain.sculpt action (world grain → owning chunk grain(s) → chunk.updated patch →
-  // chunkRenderer.reloadChunk), NOT edit the hidden 97² classic grid the way classic worlds do.
+  // chunkRenderer.reloadChunk), not edit the compatibility 97² grid.
   const sendChunkedSculpt = (mode: TerrainEditMode, center: Vec3) => {
     if (!tellusWorldBackendAvailable) return;
     const action = {
@@ -2267,6 +2370,7 @@ function createTellusWorld(
   // A thing is a *candidate* for folding if its loaded static GLB is mounted (sharedGltf + matching
   // loadedModelUrl) and it isn't animated. Selection/duplicate-count gating is applied separately.
   const isInstanceCandidate = (thing: GeneratedThing): boolean => {
+    if (thing.id === sailingThingId) return false;
     if (!thing.modelUrl || thing.generationStatus !== "ready") return false;
     const mesh = generatedMeshes.get(thing.id);
     if (!mesh) return false;
@@ -2507,8 +2611,11 @@ function createTellusWorld(
       const candidates = generated.filter(
         (t) => t.modelUrl === modelUrl && isInstanceCandidate(t),
       );
-      // Foldable = candidate AND not currently selected.
-      const foldable = candidates.filter((t) => t.id !== selectedThingId);
+      // Foldable = candidate AND not currently selected/ridden. A ridden thing
+      // must stay as its own mesh so rider positioning and movement can update it directly.
+      const foldable = candidates.filter(
+        (t) => t.id !== selectedThingId && t.id !== sailingThingId,
+      );
 
       if (foldable.length < 2) {
         // Below threshold → pop everyone in this group back out (regular meshes), drop the pool.
@@ -2567,10 +2674,13 @@ function createTellusWorld(
     const urls = new Set<string>();
     const prev = previousSelectedId ? thingById(previousSelectedId) : undefined;
     const next = nextSelectedId ? thingById(nextSelectedId) : undefined;
+    const ridden = sailingThingId ? thingById(sailingThingId) : undefined;
     if (prev?.modelUrl) urls.add(prev.modelUrl);
     if (next?.modelUrl) urls.add(next.modelUrl);
-    // A selected thing is never instanced; pop it out first so its regular mesh is live before any re-fold.
+    if (ridden?.modelUrl) urls.add(ridden.modelUrl);
+    // A selected/ridden thing is never instanced; pop it out first so its regular mesh is live before any re-fold.
     if (nextSelectedId) uninstanceThing(nextSelectedId);
+    if (sailingThingId) uninstanceThing(sailingThingId);
     for (const url of urls) reevaluateInstanceGroup(url);
   };
 
@@ -2583,7 +2693,7 @@ function createTellusWorld(
     }
     const mixer = generatedAnimationMixers.get(id);
     if (!mixer) return;
-    mixer.stopAllAction();
+    mixer.mixer.stopAllAction();
     generatedAnimationMixers.delete(id);
   };
 
@@ -2605,6 +2715,85 @@ function createTellusWorld(
     return generatedModelClips(mesh).map((clip) => clip.name);
   };
 
+  const generatedClipNameIncludes = (clip: THREE.AnimationClip, fragments: string[]) => {
+    const name = (clip.name ?? "").toLowerCase();
+    return fragments.some((fragment) => name.includes(fragment));
+  };
+
+  const badGeneratedClip = (clip: THREE.AnimationClip) =>
+    generatedClipNameIncludes(clip, [
+      "rest",
+      "t-pose",
+      "tpose",
+      "death",
+      "die",
+      "attack",
+      "bite",
+      "kick",
+      "hitreact",
+    ]);
+
+  const selectGeneratedClip = (
+    clips: THREE.AnimationClip[],
+    thing: GeneratedThing | undefined,
+    mode: "idle" | "move",
+    vehicle: VehicleMode | null = null,
+  ): THREE.AnimationClip | undefined => {
+    if (clips.length === 0) return undefined;
+    const wanted = thing?.animation?.trim();
+    const wantedClip = wanted
+      ? clips.find((c) => c.name === wanted) ??
+        clips.find((c) => c.name?.toLowerCase() === wanted.toLowerCase())
+      : undefined;
+    if (wantedClip) return wantedClip;
+    const findAny = (fragments: string[]) =>
+      clips.find((clip) => generatedClipNameIncludes(clip, fragments) && !badGeneratedClip(clip));
+    if (mode === "move") {
+      if (vehicle === "air") {
+        const fly = findAny(["fly", "flying", "glide", "hover"]);
+        if (fly) return fly;
+      }
+      return (
+        findAny(["run", "gallop", "canter"]) ??
+        findAny(["walk", "trot"]) ??
+        findAny(["fly", "glide"]) ??
+        findAny(["idle"])
+      );
+    }
+    return findAny(["idle"]) ?? findAny(["stand"]) ?? findAny(["walk"]) ?? clips.find((c) => !badGeneratedClip(c)) ?? clips[0];
+  };
+
+  const playGeneratedClip = (
+    id: string,
+    model: THREE.Object3D,
+    mode: "idle" | "move",
+    vehicle: VehicleMode | null = null,
+  ) => {
+    const clips = generatedModelClips(model);
+    const clip = selectGeneratedClip(clips, thingById(id), mode, vehicle);
+    if (!clip) return;
+    let state = generatedAnimationMixers.get(id);
+    if (!state) {
+      state = { mixer: new THREE.AnimationMixer(model), mode };
+      generatedAnimationMixers.set(id, state);
+    }
+    if (state.clipName === clip.name && state.mode === mode && state.action) return;
+    const next = state.mixer.clipAction(clip);
+    next.reset();
+    next.enabled = true;
+    next.setEffectiveWeight(1);
+    next.setEffectiveTimeScale(mode === "move" ? 1.15 : 1);
+    if (state.action && state.action !== next) {
+      next.play();
+      state.action.crossFadeTo(next, 0.18, false);
+    } else {
+      next.play();
+    }
+    state.action = next;
+    state.clipName = clip.name;
+    state.mode = mode;
+  };
+
   const startGeneratedAnimation = (id: string, model: THREE.Object3D) => {
     stopGeneratedAnimation(id);
     // VRM things animate through their VRM rig (retargeted VRMA clips), not an embedded-clip mixer.
@@ -2621,25 +2810,9 @@ function createTellusWorld(
     // EVERYTHING at once — every clip fighting over the same bones each frame, which rendered as
     // glitchy "blinking". An explicit per-thing pick (`thing.animation`, synced over
     // generated.upsert) wins; otherwise prefer an idle/walk loop; avoid one-shot/pose clips.
-    const wanted = thingById(id)?.animation?.trim();
-    const wantedClip = wanted
-      ? clips.find((c) => c.name === wanted) ??
-        clips.find((c) => c.name?.toLowerCase() === wanted.toLowerCase())
-      : undefined;
-    const find = (frag: string) => clips.find((c) => c.name?.toLowerCase().includes(frag));
-    const bad = (c: THREE.AnimationClip) => {
-      const n = (c.name ?? "").toLowerCase();
-      return (
-        n.includes("rest") || n.includes("t-pose") || n.includes("tpose") ||
-        n.includes("death") || n.includes("die") || n.includes("attack") || n.includes("bite")
-      );
-    };
     // Missing/renamed picks fall back to the heuristic rather than freezing the model.
-    const clip =
-      wantedClip ?? find("idle") ?? find("walk") ?? clips.find((c) => !bad(c)) ?? clips[0];
-    const mixer = new THREE.AnimationMixer(model);
-    mixer.clipAction(clip).play();
-    generatedAnimationMixers.set(id, mixer);
+    const thing = thingById(id);
+    playGeneratedClip(id, model, "idle", thing ? vehicleMode(thing) : null);
   };
 
   // If a thing is currently folded into a pool (a non-selected instanced thing moved — rare), re-copy its
@@ -2767,9 +2940,21 @@ function createTellusWorld(
   const isVisiblyOffsetFromLiveGround = (thing: GeneratedThing): boolean => {
     const offset = liveGroundOffsetFrom(thing);
     return offset !== null
-      ? Math.abs(offset) > 0.35
+      ? Math.abs(offset) > 0.05
       : isIntentionallyOffsetFromGround(thing);
   };
+
+  const runtimeProfileForThing = (
+    thing: GeneratedThing,
+    options: { mounted?: boolean; includeRenderedGround?: boolean } = {},
+  ): WorldThingRuntimeProfile =>
+    buildWorldThingRuntimeProfile(thing, {
+      dimensions: thingFootprint(thing) ?? undefined,
+      groundY: options.includeRenderedGround
+        ? footprintGroundY(thing)
+        : groundHeightAt(thing.position.x, thing.position.z),
+      mounted: options.mounted,
+    });
 
   const updateThingMeshPosition = (thing: GeneratedThing) => {
     const mesh = generatedMeshes.get(thing.id);
@@ -2791,9 +2976,9 @@ function createTellusWorld(
     // commands set the authoritative y and call us to repaint; mutating here would fight them).
     // PERF: isVisiblyOffsetFromLiveGround + footprintGroundY each do ~9 terrain RAYCASTS (+ a Box3
     // bounds traversal). They're ONLY needed to gate the chunked-world live reground below, so compute
-    // them ONLY when isChunked. On classic worlds this whole block was raycasting 9× per asset on every
+    // them ONLY when isChunked. On legacy worlds this whole block was raycasting 9× per asset on every
     // updateThingMeshPosition (incl. once per asset during the load storm) and being thrown away — the
-    // cause of the multi-second load freeze with many assets. Skip it entirely on classic worlds.
+    // cause of the multi-second load freeze with many assets. Skip it entirely outside chunked worlds.
     const liveGround =
       isChunked && !isVisiblyOffsetFromLiveGround(thing) ? footprintGroundY(thing) : null;
     const placeAt =
@@ -2901,18 +3086,11 @@ function createTellusWorld(
     modelUrl?: string,
     assetStoreModelId?: string,
   ): { modelUrl?: string; assetStoreModelId?: string } => {
-    const assetId =
-      assetStoreModelId?.trim() ||
-      (modelUrl ? assetStoreIdFromModelUrl(modelUrl) ?? undefined : undefined);
-    if (assetId) {
-      return {
-        assetStoreModelId: assetId,
-        modelUrl: assetStoreGameOptimizedModelUrl(assetId),
-      };
-    }
+    const identity = normalizeWorldThingAssetIdentity(modelUrl, assetStoreModelId);
     return {
-      modelUrl: modelUrl
-        ? (sanitizeProceduralModelUrl(modelUrl) ?? absoluteTellusApiUrl(modelUrl))
+      assetStoreModelId: identity.assetStoreModelId,
+      modelUrl: identity.modelUrl
+        ? (sanitizeProceduralModelUrl(identity.modelUrl) ?? absoluteTellusApiUrl(identity.modelUrl))
         : undefined,
     };
   };
@@ -2962,6 +3140,45 @@ function createTellusWorld(
     existing.generationStatus = normalized.modelUrl
       ? "ready"
       : normalized.generationStatus;
+  };
+
+  const failedPromptRelinkAttempts = new Set<string>();
+  const normalizedAssetName = (value: string): string =>
+    value.trim().replace(/\s+/g, " ").toLowerCase();
+  const reconcileFailedAssetStorePrompt = (thing: GeneratedThing) => {
+    if (thing.modelUrl || thing.generationStatus !== "failed") return;
+    const prompt = thing.prompt.trim();
+    if (!prompt || failedPromptRelinkAttempts.has(thing.id)) return;
+    failedPromptRelinkAttempts.add(thing.id);
+    void browseAssetLibrary(prompt, 1, "name", 8)
+      .then((result) => {
+        if (destroyed) return;
+        const current = thingById(thing.id);
+        if (!current || current.modelUrl || current.generationStatus !== "failed") return;
+        const exact = result.models.filter(
+          (model) => normalizedAssetName(model.name) === normalizedAssetName(prompt),
+        );
+        if (exact.length !== 1) return;
+        const match = exact[0];
+        const assetStoreModelId = match.assetStoreModelId ?? match.id;
+        current.assetStoreModelId = assetStoreModelId;
+        current.modelUrl = assetStoreGameOptimizedModelUrl(assetStoreModelId);
+        current.pipelineId = undefined;
+        current.generationStatus = "ready";
+        ensureGeneratedVisual(current);
+        publishGeneratedThing(current);
+        loadRemoteGeneratedModel(current);
+        addLog({
+          agentId: "world",
+          agentName: "Tellus",
+          tool: "interact",
+          text: `Relinked ${current.kind}: ${current.prompt} to asset-store model ${assetStoreModelId}.`,
+        });
+        publish();
+      })
+      .catch((error) => {
+        console.warn("Failed asset prompt relink skipped", error);
+      });
   };
 
   const generatedPlacementStorageKey = () =>
@@ -3048,6 +3265,51 @@ function createTellusWorld(
     }
   };
 
+  const isDefinitelyDeadModelUrl = async (url: string): Promise<boolean> => {
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Range: "bytes=0-0" },
+        cache: "no-store",
+      });
+      return res.status === 404 || res.status === 410;
+    } catch {
+      return false;
+    }
+  };
+
+  const showTransientGeneratedLoadFailure = (thing: GeneratedThing, error: unknown) => {
+    const oldMesh = generatedMeshes.get(thing.id);
+    if (oldMesh?.userData.transientLoadFailedFor === thing.modelUrl) return;
+    if (oldMesh) {
+      uninstanceThing(thing.id);
+      stopGeneratedAnimation(thing.id);
+      scene.remove(oldMesh);
+      disposeObject(oldMesh);
+    }
+    const failedMesh = createGeneratedMesh({ ...thing, generationStatus: "failed" });
+    failedMesh.userData.transientLoadFailedFor = thing.modelUrl;
+    failedMesh.userData.transientLoadError =
+      error instanceof Error ? error.message : String(error);
+    generatedMeshes.set(thing.id, failedMesh);
+    scene.add(failedMesh);
+    syncTransformControls();
+    updateThingMeshPosition(thing);
+  };
+
+  const scheduleTransientModelRetry = (thingId: string, modelUrl: string) => {
+    if (transientModelRetryTimers.has(thingId)) return;
+    const attempts = transientModelLoadFailures.get(thingId) ?? 1;
+    const delay = Math.min(30_000, 1_500 * Math.pow(2, Math.max(0, attempts - 1)));
+    const timer = window.setTimeout(() => {
+      transientModelRetryTimers.delete(thingId);
+      const current = thingById(thingId);
+      if (!current || current.modelUrl !== modelUrl || current.generationStatus !== "ready") return;
+      loadRemoteGeneratedModel(current);
+    }, delay);
+    transientModelRetryTimers.set(thingId, timer);
+  };
+
   const sortWorldModelLoadQueue = () => {
     worldModelLoadQueue.sort((a, b) => {
       if (selectedThingId === a) return -1;
@@ -3098,6 +3360,12 @@ function createTellusWorld(
             disposeObject(model);
             return;
           }
+          transientModelLoadFailures.delete(id);
+          const retryTimer = transientModelRetryTimers.get(id);
+          if (retryTimer !== undefined) {
+            window.clearTimeout(retryTimer);
+            transientModelRetryTimers.delete(id);
+          }
           const oldMesh = generatedMeshes.get(id);
           if (oldMesh) {
             uninstanceThing(id); // free any instance slot the old mesh held before we swap it out
@@ -3113,15 +3381,23 @@ function createTellusWorld(
           reevaluateInstanceGroup(modelUrl);
           publish();
         })
-        .catch((error) => {
+        .catch(async (error) => {
           const current = thingById(id);
           console.warn("Remote generated model load failed", error);
           if (!current || current.modelUrl !== modelUrl) return;
-          current.modelUrl = undefined;
-          current.generationStatus = "failed";
-          current.pipelineId = undefined;
-          ensureGeneratedVisual(current);
-          publishGeneratedThing(current);
+          const definitelyDead = await isDefinitelyDeadModelUrl(modelUrl);
+          if (!current || current.modelUrl !== modelUrl) return;
+          if (definitelyDead) {
+            current.modelUrl = undefined;
+            current.generationStatus = "failed";
+            current.pipelineId = undefined;
+            ensureGeneratedVisual(current);
+            publishGeneratedThing(current);
+          } else {
+            transientModelLoadFailures.set(id, (transientModelLoadFailures.get(id) ?? 0) + 1);
+            showTransientGeneratedLoadFailure(current, error);
+            scheduleTransientModelRetry(id, modelUrl);
+          }
           publish();
         })
         .finally(() => {
@@ -3220,15 +3496,18 @@ function createTellusWorld(
     const normalized = normalizeGeneratedThing(remote);
     const existing = thingById(normalized.id);
     if (existing) {
+      const locallyRidden = existing.id === sailingThingId;
       existing.kind = normalized.kind as GeneratedKind;
       existing.prompt = normalized.prompt;
       existing.creatorId = normalized.creatorId as AgentId | "visitor";
       existing.ownerUserId = normalized.ownerUserId;
-      existing.position = { ...normalized.position };
-      existing.rotationX = normalized.rotationX ?? 0;
-      existing.rotationY = normalized.rotationY;
-      existing.rotationZ = normalized.rotationZ ?? 0;
-      existing.scale = normalized.scale;
+      if (!locallyRidden) {
+        existing.position = { ...normalized.position };
+        existing.rotationX = normalized.rotationX ?? 0;
+        existing.rotationY = normalized.rotationY;
+        existing.rotationZ = normalized.rotationZ ?? 0;
+        existing.scale = normalized.scale;
+      }
       existing.color = normalized.color;
       existing.assetStoreModelId = normalized.assetStoreModelId ?? existing.assetStoreModelId;
       // animation wire convention (mirrors presence.avatarId): "" = explicit default, a non-empty
@@ -3253,6 +3532,7 @@ function createTellusWorld(
       }
       loadRemoteGeneratedModel(existing);
       reconcileRemoteGeneratedManifest(existing);
+      reconcileFailedAssetStorePrompt(existing);
       if (healedPending) {
         publishGeneratedThing(existing);
       }
@@ -3286,14 +3566,23 @@ function createTellusWorld(
     updateThingMeshPosition(thing);
     loadRemoteGeneratedModel(thing);
     reconcileRemoteGeneratedManifest(thing);
+    reconcileFailedAssetStorePrompt(thing);
     if (healedPending) {
       publishGeneratedThing(thing);
     }
   };
 
   const applyRemoteGeneratedThings = (remoteThings: WorldGeneratedThing[]) => {
-    for (const remote of remoteThings) {
+    const repaired = repairGeneratedCloneModelLinks(
+      remoteThings,
+      generated.map((thing) => worldGeneratedThing(thing)),
+    );
+    for (const remote of repaired.things) {
       applyRemoteGeneratedThing(remote);
+    }
+    for (const id of repaired.repairedIds) {
+      const thing = thingById(id);
+      if (thing) publishGeneratedThing(thing);
     }
     saveGeneratedPlacementSnapshot();
     publish();
@@ -3397,6 +3686,12 @@ function createTellusWorld(
     if (index === -1) return;
     const [removed] = generated.splice(index, 1);
     const removedModelUrl = removed?.modelUrl;
+    const retryTimer = transientModelRetryTimers.get(id);
+    if (retryTimer !== undefined) {
+      window.clearTimeout(retryTimer);
+      transientModelRetryTimers.delete(id);
+    }
+    transientModelLoadFailures.delete(id);
     const mesh = generatedMeshes.get(id);
     if (mesh) {
       uninstanceThing(id); // free the instance slot before the mesh goes away
@@ -3456,11 +3751,11 @@ function createTellusWorld(
       distance > 0.001
         ? { x: thing.position.x / distance, z: thing.position.z / distance }
         : { x: 1, z: 0 };
-    visitorPosition = groundedPosition(
-      thing.position.x - offset.x * 3.2,
-      thing.position.z - offset.z * 3.2,
-      visitorPosition,
-    );
+    const targetX = thing.position.x - offset.x * 3.2;
+    const targetZ = thing.position.z - offset.z * 3.2;
+    if (!moveMountedUnitTo(targetX, targetZ)) {
+      visitorPosition = groundedPosition(targetX, targetZ, visitorPosition);
+    }
     updateSelectionIndicator();
     syncTransformControls();
     sendPresenceUpdate(true);
@@ -3484,10 +3779,28 @@ function createTellusWorld(
     portalSpawnGuard = true;
   };
 
+  const moveMountedUnitTo = (x: number, z: number): boolean => {
+    if (!sailingThingId) return false;
+    const mount = thingById(sailingThingId);
+    if (!mount) {
+      sailingThingId = undefined;
+      return false;
+    }
+    const arrival = clearVisitorSpawnPosition(x, z);
+    mount.position = movedVehiclePosition(mount, arrival.x, arrival.z, mount.position);
+    updateThingMeshPosition(mount);
+    visitorPosition = riderPositionForThing(mount);
+    publishGeneratedThing(mount);
+    syncAnchoredPortalsForThing(mount);
+    return true;
+  };
+
   const warpTo = (x: number, z: number) => {
     // clearVisitorSpawnPosition nudges off other players AND off the nearest portal so you don't land
     // on top of someone or inside a trigger volume.
-    visitorPosition = clearVisitorSpawnPosition(x, z);
+    if (!moveMountedUnitTo(x, z)) {
+      visitorPosition = clearVisitorSpawnPosition(x, z);
+    }
     playerAirborne = false;
     playerVy = 0;
     moveHoldStartMs = 0;
@@ -3766,8 +4079,13 @@ function createTellusWorld(
     if (!thing || !mode) return;
     const previousSelectedId = selectedThingId;
     sailingThingId = id;
-    selectedThingId = id;
+    selectedThingId = undefined;
+    draggingThingId = null;
+    setMoveMode(null);
+    uninstanceThing(id);
     reevaluateInstancingForSelection(previousSelectedId, selectedThingId);
+    updateSelectionIndicator();
+    syncTransformControls();
     if (mode === "water" && waterBlockedByLand(thing.position)) {
       moveGeneratedToWater(id);
     } else if (mode === "air") {
@@ -3793,6 +4111,12 @@ function createTellusWorld(
     const boat = thingById(sailingThingId);
     sailingThingId = undefined;
     if (boat) {
+      publishGeneratedThing(boat);
+      const mountedMesh = generatedMeshes.get(boat.id);
+      if (mountedMesh && mountedMesh.userData.loadedModelUrl === boat.modelUrl && isMountThing(boat)) {
+        uninstanceThing(boat.id);
+        mountedMesh.visible = true;
+      }
       const mode = vehicleMode(boat);
       const nearbyIsland = nearestDistantIsland(
         boat.position.x,
@@ -3816,6 +4140,20 @@ function createTellusWorld(
           boat.position.z,
           visitorPosition,
         );
+      } else if (mode === "ground") {
+        const footprint = thingFootprint(boat);
+        const stepAway = Math.max(1.8, (footprint?.radius ?? 0.8) + 0.8);
+        const candidates = [
+          boat.rotationY + Math.PI / 2,
+          boat.rotationY - Math.PI / 2,
+          boat.rotationY + Math.PI,
+          boat.rotationY,
+        ];
+        const angle = candidates.find((candidate) => Number.isFinite(candidate)) ?? boat.rotationY;
+        visitorPosition = clearVisitorSpawnPosition(
+          boat.position.x + Math.sin(angle) * stepAway,
+          boat.position.z + Math.cos(angle) * stepAway,
+        );
       } else if (shoreDirection.lengthSq() > 0.001) {
         shoreDirection.normalize();
         visitorPosition = groundedPosition(
@@ -3831,6 +4169,7 @@ function createTellusWorld(
       tool: "interact",
       text: "stepped back onto Tellus.",
     });
+    sendPresenceUpdate(true);
     publish();
   };
 
@@ -3902,7 +4241,7 @@ function createTellusWorld(
         request.ownerUserId ?? (request.creatorId === "visitor" ? userId : undefined),
       position,
       rotationY: 0,
-      scale: request.scale ?? 0.75 + rand(tick + generated.length) * 0.8,
+      scale: request.scale ?? defaultScaleForRealisticKind(kind, request.prompt),
       color: kindColor(kind, request.prompt),
       generationStatus: "local",
     };
@@ -4164,6 +4503,7 @@ function createTellusWorld(
       creatorId?: AgentId | "visitor";
       ownerUserId?: string;
       location?: GenerateRequest["location"];
+      scale?: number;
     } = {},
   ): GeneratedThing => {
     const prompt = model.description?.trim() || model.name;
@@ -4203,7 +4543,7 @@ function createTellusWorld(
       ownerUserId: opts.ownerUserId ?? (creatorId === "visitor" ? userId : undefined),
       position,
       rotationY: 0,
-      scale: 1,
+      scale: opts.scale ?? defaultScaleForRealisticKind(kind, prompt),
       color: kindColor(kind, prompt),
       assetStoreModelId,
       modelUrl,
@@ -4242,16 +4582,16 @@ function createTellusWorld(
         publish();
       })
       .catch((error) => {
-        thing.generationStatus = "failed";
-        ensureGeneratedVisual(thing);
+        transientModelLoadFailures.set(thing.id, (transientModelLoadFailures.get(thing.id) ?? 0) + 1);
+        showTransientGeneratedLoadFailure(thing, error);
+        scheduleTransientModelRetry(thing.id, modelUrl);
         syncTransformControls();
         publish();
-        publishGeneratedThing(thing);
         addLog({
           agentId: "world",
           agentName: "Tellus",
           tool: "generate",
-          text: `Library asset failed to load: ${
+          text: `Library asset load will retry: ${
             error instanceof Error ? error.message : "unknown error"
           }`,
         });
@@ -4381,6 +4721,7 @@ function createTellusWorld(
   const RUN_GRACE_MS = 2000;
   const RUN_EXP_BASE = 1.7; // exponential growth per second past the grace
   const RUN_MAX_MULT = 6; // top speed = 6× walk
+  const MOUNT_SPEED_MULT = 4.2;
   const runSpeedMultiplier = (nowMs: number): number => {
     if (moveHoldStartMs === 0) return 1;
     const heldS = (nowMs - moveHoldStartMs - RUN_GRACE_MS) / 1000;
@@ -4390,37 +4731,54 @@ function createTellusWorld(
   let obstacleCache: ObstacleCircle[] = [];
   let obstacleCacheAt = 0;
   let rapierSolidsCacheAt = 0;
+  const riderOffsetCache = new Map<string, Vec3>();
   const riderPositionForThing = (thing: GeneratedThing): Vec3 => {
     const mesh = generatedMeshes.get(thing.id);
     if (mesh) {
-      const box = measureModelBounds(mesh);
-      if (!box.isEmpty() && Number.isFinite(box.max.y)) {
-        return {
-          x: thing.position.x,
-          y: Math.max(thing.position.y, box.max.y) + 0.08,
-          z: thing.position.z,
-        };
+      const key = `${thing.id}:${thing.modelUrl ?? ""}:${thing.scale.toFixed(2)}`;
+      let offset = riderOffsetCache.get(key);
+      if (!offset) {
+        const box = measureModelBounds(mesh);
+        if (!box.isEmpty() && Number.isFinite(box.max.y)) {
+          const center = box.getCenter(new THREE.Vector3());
+          offset = {
+            x: center.x - thing.position.x,
+            y: 0,
+            z: center.z - thing.position.z,
+          };
+          riderOffsetCache.set(key, offset);
+          if (riderOffsetCache.size > 200) riderOffsetCache.clear();
+        }
+      }
+      if (offset) {
+        return seatPositionForWorldThing(
+          thing,
+          runtimeProfileForThing(thing, { mounted: true }),
+          offset,
+        );
       }
     }
-    return {
-      x: thing.position.x,
-      y: thing.position.y + Math.max(0.4, assetTargetHeight(thing)) + 0.08,
-      z: thing.position.z,
-    };
+    return seatPositionForWorldThing(thing, runtimeProfileForThing(thing, { mounted: true }));
   };
   const solidForThing = (thing: GeneratedThing): RapierSolid | null => {
     if (thing.id === sailingThingId || ambientPhysics.has(thing.id)) return null;
     if (thing.id === draggingThingId) return null;
-    const fp = thingFootprint(thing);
-    if (!fp || fp.height < 1.4 || fp.radius < 0.55) return null;
+    const profile = runtimeProfileForThing(thing);
+    if (
+      !profile.dimensions ||
+      profile.dimensions.height < 1.4 ||
+      profile.dimensions.radius < 0.55
+    ) {
+      return null;
+    }
     if (thing.position.y > visitorPosition.y + 2.2) return null;
     return {
       id: thing.id,
       x: thing.position.x,
       y: thing.position.y,
       z: thing.position.z,
-      radius: clamp(fp.radius * 0.72, 0.45, 4.2),
-      height: clamp(fp.height, 0.8, 18),
+      radius: profile.collisionRadius,
+      height: profile.collisionHeight,
     };
   };
   const syncRapierSolids = (force = false) => {
@@ -4504,9 +4862,24 @@ function createTellusWorld(
     } else {
       moveHoldStartMs = 0;
     }
+    if (!hasInput && !playerAirborne && !flying && sailingThingId && !verticalInput) {
+      const boat = thingById(sailingThingId);
+      const mountedMesh = boat ? generatedMeshes.get(boat.id) : undefined;
+      if (boat && mountedMesh && mountedMesh.userData.loadedModelUrl === boat.modelUrl && isMountThing(boat)) {
+        uninstanceThing(boat.id);
+        mountedMesh.visible = true;
+      }
+      return;
+    }
     // Proceed if there's horizontal input, we're mid-air, free-flying, or giving vertical input on a mount.
     if (!hasInput && !playerAirborne && !flying && !(sailingThingId && verticalInput)) return;
-    if (hasInput) movement.normalize().multiplyScalar(scaledPlayerSpeed() * runSpeedMultiplier(performance.now()) * delta);
+    const nowMs = performance.now();
+    if (hasInput) {
+      const speed = scaledPlayerSpeed() *
+        runSpeedMultiplier(nowMs) *
+        (sailingThingId ? MOUNT_SPEED_MULT : 1);
+      movement.normalize().multiplyScalar(speed * delta);
+    }
     if (sailingThingId) {
       playerAirborne = false;
       playerVy = 0;
@@ -4515,7 +4888,8 @@ function createTellusWorld(
         sailingThingId = undefined;
         return;
       }
-      if (vehicleMode(boat) === "air") {
+      const mode = vehicleMode(boat);
+      if (mode === "air") {
         // Air mount: horizontal via airPosition (keeps world-bounds clamping), vertical via Space/C with a
         // high ceiling — no longer pinned to a fixed +12 altitude.
         const horiz = airPosition(boat.position.x + movement.x, boat.position.z + movement.z);
@@ -4536,11 +4910,14 @@ function createTellusWorld(
       if (movement.lengthSq() > 0.001) {
         boat.rotationY = Math.atan2(movement.x, movement.z);
       }
+      const mountedMesh = generatedMeshes.get(boat.id);
+      if (mountedMesh && mountedMesh.userData.loadedModelUrl === boat.modelUrl && isMountThing(boat)) {
+        uninstanceThing(boat.id);
+        mountedMesh.visible = true;
+      }
       updateThingMeshPosition(boat);
       visitorPosition = riderPositionForThing(boat);
-      publishGeneratedThing(boat);
       sendPresenceUpdate();
-      publish();
       return;
     }
     // Free-fly (on foot): no gravity; move horizontally + ascend/descend, clamped above ground to the ceiling.
@@ -5275,8 +5652,8 @@ function createTellusWorld(
       camera.updateMatrixWorld();
       tilesRenderer.update(); // stream the 3D tileset against the current camera
     }
-    for (const mixer of generatedAnimationMixers.values()) {
-      mixer.update(delta);
+    for (const state of generatedAnimationMixers.values()) {
+      state.mixer.update(delta);
     }
     // Placed VRM things: advance the mixer + VRM spring bones (a static idle still needs spring-bone
     // settle; a looping VRMA clip plays here).
@@ -5327,9 +5704,31 @@ function createTellusWorld(
       const activeChunks = chunkRenderer.stats().active;
       if (activeChunks !== lastActiveChunkCount) {
         lastActiveChunkCount = activeChunks;
+        vegetation.notifyTerrainChanged();
+        const mounted = sailingThingId ? thingById(sailingThingId) : undefined;
+        if (mounted && !isFreeMovingVehicle(mounted) && !isVisiblyOffsetFromLiveGround(mounted)) {
+          groundThingToRenderedSurface(mounted);
+          updateThingMeshPosition(mounted);
+          visitorPosition = riderPositionForThing(mounted);
+          publishGeneratedThing(mounted);
+          sendPresenceUpdate(true);
+        }
         for (const thing of generated) {
           if (isFreeMovingVehicle(thing) || isVisiblyOffsetFromLiveGround(thing)) continue;
           updateThingMeshPosition(thing);
+        }
+      }
+    }
+    if (sailingThingId) {
+      const mounted = thingById(sailingThingId);
+      if (mounted && !isFreeMovingVehicle(mounted)) {
+        const liveGround = footprintGroundY(mounted);
+        if (liveGround !== null && Number.isFinite(liveGround) && liveGround > mounted.position.y + 0.05) {
+          mounted.position = { ...mounted.position, y: liveGround };
+          updateThingMeshPosition(mounted);
+          visitorPosition = riderPositionForThing(mounted);
+          publishGeneratedThing(mounted);
+          sendPresenceUpdate(true);
         }
       }
     }
@@ -5347,13 +5746,17 @@ function createTellusWorld(
         sendPresenceUpdate();
       }
     }
-    // Keep the minimap view-cone live while turning in place (~10fps, only on a real yaw change).
-    if (Math.abs(yaw - lastConeYaw) > 0.02 && now - lastConePublishMs > 100) {
+    // Keep the minimap view-cone from driving React during camera-only motion. Presence still carries yaw-ish
+    // movement updates when the player actually moves; a future minimap overlay can subscribe outside React.
+    if (Math.abs(yaw - lastConeYaw) > 0.02 && now - lastConePublishMs > 1000) {
       lastConeYaw = yaw;
       lastConePublishMs = now;
-      publish();
     }
     flushPublish();
+    if (now - lastPresencePruneAt > 5_000) {
+      lastPresencePruneAt = now;
+      pruneStaleRemotePresence(Date.now());
+    }
     vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
     ambientPhysics.step(delta);
     try {
@@ -5459,13 +5862,16 @@ function createTellusWorld(
   };
   const handleKeyUp = (event: KeyboardEvent) =>
     keys.delete(event.key.toLowerCase());
-  const handlePageHide = () => {
+  const persistPageStateNow = () => {
     publishTerrainStateNow();
     saveTellusStateNow();
   };
+  const handlePageHide = () => {
+    persistPageStateNow();
+  };
   const handleVisibilityChange = () => {
     if (document.visibilityState === "hidden") {
-      handlePageHide();
+      persistPageStateNow();
     }
   };
   const handlePointerDown = (event: PointerEvent) => {
@@ -6397,7 +6803,7 @@ function createTellusWorld(
     getAvatarScale: () => localAvatarScale,
     setCameraMode,
     getCameraMode: () => cameraMode,
-    // Chunked-world draw distance: rings of chunks loaded around the player (no-op on classic worlds).
+    // Chunked-world draw distance: rings of chunks loaded around the player.
     setChunkLoadRadius: (radius: number) => {
       chunkRenderer?.setLoadRadius(radius);
     },
@@ -6422,6 +6828,7 @@ function createTellusWorld(
     setMoveMode,
     getAmbientStats: () => ({
       vegetation: vegetation.stats(),
+      chunkTerrain: chunkRenderer?.stats() ?? null,
       physicsBodies: ambientPhysics.activeCount(),
       rapierSolids: rapierPhysics?.stats().solids ?? 0,
     }),
@@ -6458,6 +6865,11 @@ function createTellusWorld(
       for (const id of generatedAnimationMixers.keys()) {
         stopGeneratedAnimation(id);
       }
+      for (const timer of transientModelRetryTimers.values()) {
+        window.clearTimeout(timer);
+      }
+      transientModelRetryTimers.clear();
+      transientModelLoadFailures.clear();
       // Dispose placed VRM rigs (own mixer + skinned scene buffers) and clear the live-mirror slots.
       for (const rig of generatedVrmRigs.values()) {
         rig.dispose();
@@ -6620,7 +7032,10 @@ function App(): React.ReactElement {
     visitorId: string;
     name: string;
     kind: "player" | "agent";
+    worldId?: string;
+    position?: Vec3;
   } | null>(null);
+  const [crossWorldPresence, setCrossWorldPresence] = useState<Record<string, WorldPresence[]>>({});
   const [portalTargetWorldId, setPortalTargetWorldId] = useState("");
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
   const [showFps, setShowFps] = useState(false);
@@ -6636,8 +7051,7 @@ function App(): React.ReactElement {
       setShowFps((v) => !v);
     }
   };
-  // ── P2P video panel state (RX inbound default ON, TX local camera default OFF) ──
-  const [p2pPanelOpen, setP2pPanelOpen] = useState(false);
+  // ── P2P video state (RX inbound default ON, TX local camera default OFF) ──
   const [rxEnabled, setRxEnabled] = useState(true);
   const [txEnabled, setTxEnabled] = useState(false);
   const [audioListen, setAudioListen] = useState(false); // hear peers (RX audio) — off by default (autoplay)
@@ -6853,21 +7267,15 @@ function App(): React.ReactElement {
     void worldRef.current?.setP2pDevices(selectedMic || undefined, id || undefined).then(attachSelfPreview);
   };
 
-  // Re-attach the self-preview when the panel mounts the <video> (panel open + TX already on).
+  // Sample mesh stats while the social panel OR the debug overlay is open (≈1Hz).
   useEffect(() => {
-    if (p2pPanelOpen && txEnabled) attachSelfPreview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p2pPanelOpen, txEnabled]);
-
-  // Sample mesh stats while the P2P panel OR the debug overlay is open (≈1Hz).
-  useEffect(() => {
-    if (!p2pPanelOpen && !showFps) return;
+    if (!worldChatOpen && !showFps) return;
     const id = window.setInterval(() => {
       setP2pStats(worldRef.current?.getP2pStats() ?? null);
       setAmbientStats(worldRef.current?.getAmbientStats() ?? null);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [p2pPanelOpen, showFps]);
+  }, [worldChatOpen, showFps]);
 
   // ── "Your Agent" panel handlers (self-contained; pure fetch against the Hyades world agent API) ──
   const fetchAgentStatus = useCallback(async (signal?: AbortSignal): Promise<AgentStatus | null> => {
@@ -7000,18 +7408,17 @@ function App(): React.ReactElement {
     if (additions.length) setAgentChat((prev) => [...prev, ...additions]);
   }, []);
 
-  const onAgentSend = useCallback(async () => {
-    const text = agentChatInput.trim();
-    if (!text) return;
+  const sendAgentMessage = useCallback(async (rawText: string): Promise<boolean> => {
+    const text = rawText.trim();
+    if (!text) return false;
     if (!agentStatus?.optedIn) {
       setAgentError("Start your agent before talking to it.");
-      return;
+      return false;
     }
     // Pre-seed the dedup key so the same line coming back from the transcript poll (as a `user` message)
     // doesn't double-add it; on a fresh reload the seen set is empty so the transcript restores it cleanly.
     agentMergedKeysRef.current.add(`user|${text}`);
     setAgentChat((prev) => [...prev, { id: ++agentChatSeqRef.current, who: "you", text }]);
-    setAgentChatInput("");
     setAgentError(null);
     try {
       const res = await fetch(tellusAgentUrl("say"), {
@@ -7025,11 +7432,19 @@ function App(): React.ReactElement {
             ? "Start your agent before talking to it."
             : `Send failed (${res.status})`,
         );
+        return false;
       }
+      return true;
     } catch (err) {
       setAgentError(err instanceof Error ? err.message : "Send failed.");
+      return false;
     }
-  }, [agentChatInput, agentStatus?.optedIn]);
+  }, [agentStatus?.optedIn]);
+
+  const onAgentSend = useCallback(async () => {
+    const sent = await sendAgentMessage(agentChatInput);
+    if (sent) setAgentChatInput("");
+  }, [agentChatInput, sendAgentMessage]);
 
   // Poll the agent status every ~3s while the panel is open OR the POV viewport is up (the viewport
   // outlives the panel, and the thinking/sleep state should stay fresh); prime the persona draft on
@@ -7503,7 +7918,7 @@ function App(): React.ReactElement {
 
         {agentError && <div style={{ fontSize: 11, color: "#ff9a9a" }}>{agentError}</div>}
 
-        {/* Chat thread — always visible (chat-first). */}
+        {/* Agent composer — the big box is the input; transcript appears above once there is history. */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 11, opacity: 0.7 }}>Chat</span>
           <button
@@ -7515,69 +7930,49 @@ function App(): React.ReactElement {
             ⤢
           </button>
         </div>
-        <div
-          ref={agentTranscriptScrollRef}
-          style={{
-            flex: "1 1 auto",
-            minHeight: 80,
-            maxHeight: 280,
-            overflowY: "auto",
-            background: "rgba(0,0,0,0.32)",
-            border: "1px solid rgba(255,255,255,0.12)",
-            borderRadius: 6,
-            padding: "6px 8px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
+        {(agentChat.length > 0 || agentStatus?.processing) && (
+          <div
+            ref={agentTranscriptScrollRef}
+            className="agent-tab-transcript"
+          >
+            {agentFeed.map(renderAgentFeedItem)}
+            {optedIn && agentStatus?.processing && (
+              <span style={{ fontSize: 11, color: "#9ec8ff", fontStyle: "italic", opacity: 0.85 }}>thinking...</span>
+            )}
+          </div>
+        )}
+        <textarea
+          className="agent-tab-composer"
+          value={agentChatInput}
+          onChange={(e) => setAgentChatInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void onAgentSend();
+            }
           }}
-        >
-          {agentChat.length === 0 && !agentStatus?.processing ? (
-            <span style={{ fontSize: 11, opacity: 0.5, fontStyle: "italic" }}>
-              {optedIn ? "Say hello to your agent below." : "Start your agent (Settings), then say hello below."}
-            </span>
-          ) : (
-            agentFeed.map(renderAgentFeedItem)
+          placeholder={optedIn ? "Talk to your agent..." : "Start your agent first (Settings)"}
+          disabled={!optedIn}
+          rows={5}
+        />
+        <div className="agent-tab-actions">
+          {agentSpeech.supported && (
+            <button
+              type="button"
+              className={agentSpeech.listening ? "agent-tab-mic active" : "agent-tab-mic"}
+              title={agentSpeech.listening ? "Listening..." : "Speak to your agent"}
+              disabled={!optedIn}
+              onClick={agentSpeech.start}
+            >
+              <Mic size={14} />
+              <span>{agentSpeech.listening ? "Listening" : "Mic"}</span>
+            </button>
           )}
-          {optedIn && agentStatus?.processing && (
-            <span style={{ fontSize: 11, color: "#9ec8ff", fontStyle: "italic", opacity: 0.85 }}>💭 thinking…</span>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 4 }}>
-          <input
-            type="text"
-            value={agentChatInput}
-            onChange={(e) => setAgentChatInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void onAgentSend();
-              }
-            }}
-            placeholder={optedIn ? "Talk to your agent…" : "Start your agent first (Settings)"}
-            disabled={!optedIn}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              fontSize: 12,
-              padding: "5px 8px",
-              borderRadius: 6,
-              border: "1px solid rgba(255,255,255,0.18)",
-              background: "rgba(0,0,0,0.3)",
-              color: "#eef2ea",
-              opacity: optedIn ? 1 : 0.5,
-            }}
-          />
           <button
             type="button"
+            className="agent-tab-send"
             onClick={() => void onAgentSend()}
             disabled={!optedIn || agentChatInput.trim().length === 0}
-            style={{
-              ...p2pBtnStyle(false),
-              flex: "none",
-              padding: "5px 12px",
-              opacity: optedIn && agentChatInput.trim().length > 0 ? 1 : 0.5,
-              cursor: optedIn && agentChatInput.trim().length > 0 ? "pointer" : "default",
-            }}
           >
             Send
           </button>
@@ -7730,6 +8125,7 @@ function App(): React.ReactElement {
   // returns SEEDED worlds, so we union it with locally-remembered ids + the current one.
   const [activeWorldId, setActiveWorldId] = useState<string | null>(null);
   const [worlds, setWorlds] = useState<string[]>([]);
+  const sharedLocationRef = useRef<{ worldId: string; x: number; z: number; consumed: boolean } | null>(null);
   const [newWorldTemplate, setNewWorldTemplate] = useState<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
   );
@@ -7740,8 +8136,6 @@ function App(): React.ReactElement {
   const [newWorldName, setNewWorldName] = useState("");
   const [newWorldPanelOpen, setNewWorldPanelOpen] = useState(false);
   const [newWorldPrivate, setNewWorldPrivate] = useState(false);
-  // Chunked-only: new worlds are always chunked (the classic/non-chunked render path is retired).
-  const [newWorldChunked, setNewWorldChunked] = useState(true);
   const [newWorldChunkSize, setNewWorldChunkSize] = useState(8);
   const [currentWorldTemplate, setCurrentWorldTemplate] = useState<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
@@ -7775,7 +8169,6 @@ function App(): React.ReactElement {
   const NEW_WORLD_SKYBOX_KEY = "tellus.newWorldSkyboxUrl";
   const NEW_WORLD_NAME_KEY = "tellus.newWorldName";
   const NEW_WORLD_PRIVATE_KEY = "tellus.newWorldPrivate";
-  const NEW_WORLD_CHUNKED_KEY = "tellus.newWorldChunked";
   const NEW_WORLD_CHUNK_SIZE_KEY = "tellus.newWorldChunkSize";
   const defaultWorldTemplateRef = useRef<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
@@ -7993,8 +8386,9 @@ function App(): React.ReactElement {
     }
   };
   const rememberWorld = (id: string) => {
+    const worldId = canonicalWorldId(id);
     try {
-      const next = [...new Set([...loadKnownWorlds(), id])];
+      const next = [...new Set([...loadKnownWorlds().map(canonicalWorldId), worldId])];
       window.localStorage.setItem(KNOWN_WORLDS_KEY, JSON.stringify(next));
     } catch {
       /* ignore */
@@ -8014,12 +8408,13 @@ function App(): React.ReactElement {
       if (Array.isArray(list)) {
         server = list
           .map((w) => {
-            if (typeof w === "string") return w;
+            if (typeof w === "string") return canonicalWorldId(w);
             const world = w as { worldId?: string };
             if (typeof world.worldId === "string" && world.worldId.length > 0) {
+              const worldId = canonicalWorldId(world.worldId);
               const profile = parseWorldRenderProfile(w);
-              if (profile.displayName) rememberWorldProfile(world.worldId, profile);
-              return world.worldId;
+              if (profile.displayName) rememberWorldProfile(worldId, profile);
+              return worldId;
             }
             return undefined;
           })
@@ -8028,19 +8423,35 @@ function App(): React.ReactElement {
     } catch {
       /* offline / no index — fall back to local */
     }
-    const cur = current ?? activeWorldId ?? runtimeConfig.worldId;
-    setWorlds([...new Set([...server, ...loadKnownWorlds(), ...(cur ? [cur] : [])])].sort());
+    const cur = canonicalWorldId(current ?? activeWorldId ?? runtimeConfig.worldId);
+    setWorlds([...new Set([...server, ...loadKnownWorlds().map(canonicalWorldId), ...(cur ? [cur] : [])])].sort());
   };
   const switchWorld = (id: string) => {
-    if (!id || id === activeWorldId) return;
-    rememberWorld(id);
+    const next = canonicalWorldId(id);
+    if (!next || next === activeWorldId) return;
+    rememberWorld(next);
     try {
-      window.localStorage.setItem(ACTIVE_WORLD_KEY, id);
+      window.localStorage.setItem(ACTIVE_WORLD_KEY, next);
     } catch {
       /* ignore */
     }
-    setActiveWorldId(id);
-    void refreshWorldList(id);
+    setActiveWorldId(next);
+    void refreshWorldList(next);
+  };
+  const parseSharedLocation = (): { worldId: string; x: number; z: number; consumed: boolean } | null => {
+    const params = new URLSearchParams(window.location.search);
+    const worldId = params.get("world")?.trim();
+    const x = Number(params.get("x"));
+    const z = Number(params.get("z"));
+    if (!worldId || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+    return { worldId: canonicalWorldId(worldId), x, z, consumed: false };
+  };
+  const shareLocationUrl = (worldId: string, x: number, z: number): string => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("world", canonicalWorldId(worldId));
+    url.searchParams.set("x", String(Math.round(x)));
+    url.searchParams.set("z", String(Math.round(z)));
+    return url.toString();
   };
   const portalArrivalPosition = (x: number, z: number) => {
     const len = Math.hypot(x, z);
@@ -8145,15 +8556,12 @@ function App(): React.ReactElement {
       setNewWorldPanelOpen(true);
       return;
     }
-    let id = sanitized;
-    if (newWorldChunked) {
-      const size = Math.min(64, Math.max(1, Math.round(newWorldChunkSize) || 1));
-      // Server parses N from "chunked-<n>-<name>"; keep the name suffix non-empty.
-      const namePart = sanitized.startsWith("chunked-")
-        ? sanitized.replace(/^chunked-(?:\d+-)?/, "")
-        : sanitized;
-      id = `chunked-${size}-${namePart || "world"}`;
-    }
+    const size = Math.min(64, Math.max(1, Math.round(newWorldChunkSize) || 1));
+    // Server parses N from "chunked-<n>-<name>"; keep the name suffix non-empty.
+    const namePart = sanitized.startsWith("chunked-")
+      ? sanitized.replace(/^chunked-(?:\d+-)?/, "")
+      : sanitized;
+    const id = `chunked-${size}-${namePart || "world"}`;
     if (!id) return;
     const pickedTemplate = parseWorldTemplateId(
       newWorldTemplate,
@@ -8493,13 +8901,16 @@ function App(): React.ReactElement {
   const [worldMenuOpen, setWorldMenuOpen] = useState(false);
   const [worldMapOpen, setWorldMapOpen] = useState(true);
   // Portals card: foldable + dismissable (was always-on with no close — the worst right-side offender).
-  const [portalsPanelOpen, setPortalsPanelOpen] = useState(true);
+  const [portalsPanelOpen, setPortalsPanelOpen] = useState(false);
   const [mapActorList, setMapActorList] = useState<"items" | "players" | "agents" | null>(null);
   const [mapMode, setMapMode] = useState<"terrain" | "biomes">("biomes");
   const worldMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const { listening, supported, start } = useSpeechInput((text) =>
     setPrompt(text),
+  );
+  const agentSpeech = useSpeechInput((text) =>
+    setAgentChatInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text)),
   );
   const importedGeneratedThings = (value: unknown): WorldGeneratedThing[] => {
     const source = Array.isArray(value)
@@ -8688,7 +9099,6 @@ function App(): React.ReactElement {
           const savedSkyboxUrl = window.localStorage.getItem(NEW_WORLD_SKYBOX_KEY);
           const savedWorldName = window.localStorage.getItem(NEW_WORLD_NAME_KEY);
           const savedPrivate = window.localStorage.getItem(NEW_WORLD_PRIVATE_KEY);
-          const savedChunked = window.localStorage.getItem(NEW_WORLD_CHUNKED_KEY);
           const savedChunkSize = window.localStorage.getItem(NEW_WORLD_CHUNK_SIZE_KEY);
           setNewWorldTemplate(
             parseWorldTemplateId(savedTemplate, defaultWorldTemplateRef.current),
@@ -8700,7 +9110,6 @@ function App(): React.ReactElement {
           );
           setNewWorldName(savedWorldName ?? "");
           setNewWorldPrivate(savedPrivate === "1");
-          void savedChunked;
           if (savedChunkSize) {
             const parsed = Math.round(Number(savedChunkSize));
             if (Number.isFinite(parsed)) {
@@ -8714,15 +9123,16 @@ function App(): React.ReactElement {
           );
           setNewWorldName("");
           setNewWorldPrivate(false);
-          setNewWorldChunked(true);
           setNewWorldChunkSize(8);
         }
-        const configDefault = runtimeConfig.worldId; // typically "main" — always keep it reachable
+        const sharedLocation = parseSharedLocation();
+        sharedLocationRef.current = sharedLocation;
+        const configDefault = canonicalWorldId(runtimeConfig.worldId);
         rememberWorld(configDefault);
-        let initial = configDefault;
+        let initial = sharedLocation?.worldId ?? configDefault;
         try {
           const saved = window.localStorage.getItem(ACTIVE_WORLD_KEY);
-          if (saved && saved.trim()) initial = saved.trim();
+          if (!sharedLocation && saved && saved.trim()) initial = canonicalWorldId(saved);
         } catch {
           /* ignore */
         }
@@ -8750,12 +9160,11 @@ function App(): React.ReactElement {
       window.localStorage.setItem(NEW_WORLD_SKYBOX_KEY, newWorldSkyboxUrl);
       window.localStorage.setItem(NEW_WORLD_NAME_KEY, newWorldName);
       window.localStorage.setItem(NEW_WORLD_PRIVATE_KEY, newWorldPrivate ? "1" : "0");
-      window.localStorage.setItem(NEW_WORLD_CHUNKED_KEY, newWorldChunked ? "1" : "0");
       window.localStorage.setItem(NEW_WORLD_CHUNK_SIZE_KEY, String(newWorldChunkSize));
     } catch {
       /* ignore */
     }
-  }, [newWorldTemplate, newWorldSkyboxUrl, newWorldName, newWorldPrivate, newWorldChunked, newWorldChunkSize]);
+  }, [newWorldTemplate, newWorldSkyboxUrl, newWorldName, newWorldPrivate, newWorldChunkSize]);
 
   useEffect(() => {
     return () => {
@@ -8797,13 +9206,27 @@ function App(): React.ReactElement {
         rebuildDistantIslandSpecs();
         await loadTellusState().catch(() => undefined);
         // Chunked worlds: learn bounds (renderer edge-clamp) + arm centre-spawn/flat-grounding BEFORE
-        // the world view mounts. Clears both for classic worlds, so switching back is clean.
+        // the world view mounts. Clears both for non-chunked special worlds, so switching back is clean.
         await loadChunkedWorldBounds().catch(() => undefined);
       })
       .then(() => {
         if (cancelled) return;
         world = createTellusWorld(container, setSnapshot);
         worldRef.current = world;
+        const mountedWorld = world;
+        const sharedLocation = sharedLocationRef.current;
+        if (
+          sharedLocation &&
+          !sharedLocation.consumed &&
+          sharedLocation.worldId === activeWorldId
+        ) {
+          sharedLocation.consumed = true;
+          window.setTimeout(() => {
+            if (!cancelled && worldRef.current === mountedWorld) {
+              mountedWorld.warpTo(sharedLocation.x, sharedLocation.z);
+            }
+          }, 250);
+        }
       });
     return () => {
       cancelled = true;
@@ -8828,6 +9251,34 @@ function App(): React.ReactElement {
     [snapshot.generated, snapshot.selectedThingId],
   );
   const activeSelectedThing = snapshot.selectedThingId ? selectedThing : null;
+  const selectedRuntimeProfile = activeSelectedThing
+    ? buildWorldThingRuntimeProfile(activeSelectedThing, {
+        groundY: groundHeightAt(activeSelectedThing.position.x, activeSelectedThing.position.z),
+      })
+    : null;
+  const debugGeneratedStats = useMemo(() => {
+    let ready = 0;
+    let pending = 0;
+    let failed = 0;
+    let missingIdentity = 0;
+    let assetStoreBacked = 0;
+    for (const thing of snapshot.generated) {
+      if (thing.generationStatus === "failed") failed += 1;
+      else if (thing.generationStatus === "queued" || thing.generationStatus === "generating") pending += 1;
+      else if (thing.generationStatus === "ready" || thing.modelUrl) ready += 1;
+      const identity = normalizeWorldThingAssetIdentity(thing.modelUrl, thing.assetStoreModelId);
+      if (identity.source === "asset-store") assetStoreBacked += 1;
+      if (identity.source === "missing") missingIdentity += 1;
+    }
+    return {
+      total: snapshot.generated.length,
+      ready,
+      pending,
+      failed,
+      missingIdentity,
+      assetStoreBacked,
+    };
+  }, [snapshot.generated]);
   // Embedded clip names of the selected thing's LOADED model ([] until the GLB mounts — the world
   // publishes a snapshot when the model lands, so this re-renders with the clip list).
   const selectedClipNames = activeSelectedThing
@@ -9020,6 +9471,48 @@ function App(): React.ReactElement {
     return friendlyVisitorName(visitor.visitorId, visitor.name, snapshot.visitorId);
   };
   const currentWorldId = activeWorldId ?? runtimeConfig.worldId;
+  useEffect(() => {
+    if (!worldChatOpen || chatTab !== "dm") return;
+    const controller = new AbortController();
+    let cancelled = false;
+    const targetWorlds = worlds
+      .map(canonicalWorldId)
+      .filter((worldId) => worldId && worldId !== currentWorldId)
+      .slice(0, 12);
+    if (targetWorlds.length === 0) return () => controller.abort();
+
+    const loadPresence = async () => {
+      const entries = await Promise.all(
+        targetWorlds.map(async (worldId) => {
+          try {
+            const res = await fetch(
+              worldApiUrl(`/api/world/${encodeURIComponent(worldId)}/state?userId=${encodeURIComponent(tellusUserId())}`),
+              { cache: "no-store", signal: controller.signal },
+            );
+            if (!res.ok) return [worldId, [] as WorldPresence[]] as const;
+            const parsed = await res.json();
+            return [worldId, (presenceFromWorldPatch(parsed) ?? []).filter(isLivePresence)] as const;
+          } catch {
+            return [worldId, [] as WorldPresence[]] as const;
+          }
+        }),
+      );
+      if (cancelled) return;
+      setCrossWorldPresence((prev) => {
+        const next: Record<string, WorldPresence[]> = { ...prev };
+        for (const [worldId, presence] of entries) next[worldId] = presence;
+        return next;
+      });
+    };
+
+    void loadPresence();
+    const interval = window.setInterval(() => void loadPresence(), 10000);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [chatTab, currentWorldId, worldChatOpen, worlds.join("\n")]);
   const portalTargetOptions = worlds.filter((worldId) => worldId && worldId !== currentWorldId);
   useEffect(() => {
     if (portalTargetWorldId && portalTargetOptions.includes(portalTargetWorldId)) return;
@@ -9032,21 +9525,123 @@ function App(): React.ReactElement {
     }
     return "";
   }, [snapshot.logs]);
-  const chatTargets = [...remoteAgents, ...remotePlayers].map((visitor) => ({
-    visitorId: visitor.visitorId,
-    name: actorName(visitor),
-    kind: visitor.visitorId.startsWith("agent:") ? "agent" as const : "player" as const,
-  }));
-  const openDirectChatFor = (visitor: { visitorId: string; name?: string }) => {
+  const chatTargets = useMemo<OnlineContact[]>(() => {
+    const byKey = new Map<string, OnlineContact>();
+    const merge = (presence: WorldPresence, worldId: string, currentWorld: boolean) => {
+      if (presence.visitorId === snapshot.visitorId) return;
+      if (presence.ownerUserId && presence.ownerUserId === snapshot.userId) return;
+      const kind = presence.visitorId.startsWith("agent:") ? "agent" : "player";
+      const key = kind === "player" && presence.ownerUserId
+        ? `player:${presence.ownerUserId}`
+        : `${kind}:${presence.visitorId}`;
+      const next: OnlineContact = {
+        visitorId: presence.visitorId,
+        name: actorName(presence),
+        kind,
+        worldId,
+        position: presence.position,
+        online: isLivePresence(presence),
+        currentWorld,
+        lastSeenAt: presence.lastSeenAt,
+      };
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, next);
+        return;
+      }
+      const prevSeen = prev.lastSeenAt ? Date.parse(prev.lastSeenAt) : 0;
+      const nextSeen = next.lastSeenAt ? Date.parse(next.lastSeenAt) : 0;
+      if (
+        next.currentWorld ||
+        (!prev.currentWorld && (nextSeen >= prevSeen || (!prev.position && next.position)))
+      ) {
+        byKey.set(key, next);
+      }
+    };
+
+    for (const visitor of [...remoteAgents, ...remotePlayers]) merge(visitor, currentWorldId, true);
+    for (const [worldId, presence] of Object.entries(crossWorldPresence)) {
+      if (worldId === currentWorldId) continue;
+      for (const visitor of presence) merge(visitor, worldId, false);
+    }
+
+    if (agentStatus?.optedIn && agentStatus.visitorId) {
+      const agentWorldId = canonicalWorldId(agentStatus.worldId || currentWorldId);
+      const key = `agent:${agentStatus.visitorId}`;
+      const existing = byKey.get(key);
+      byKey.set(key, {
+        visitorId: agentStatus.visitorId,
+        name: existing?.name || actorName({ visitorId: agentStatus.visitorId, name: "Your agent" }),
+        kind: "agent",
+        worldId: existing?.worldId || agentWorldId,
+        position: existing?.position,
+        online: existing?.online ?? Boolean(agentStatus.enabled || agentStatus.ownerPresent || agentStatus.offlinePersistence),
+        currentWorld: existing?.currentWorld ?? agentWorldId === currentWorldId,
+        lastSeenAt: existing?.lastSeenAt || agentStatus.lastTickAt || undefined,
+      });
+    }
+
+    return [...byKey.values()]
+      .filter((contact) => contact.online)
+      .sort((a, b) => {
+        if (a.currentWorld !== b.currentWorld) return a.currentWorld ? -1 : 1;
+        if (a.kind !== b.kind) return a.kind === "agent" ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [
+    agentStatus?.enabled,
+    agentStatus?.lastTickAt,
+    agentStatus?.offlinePersistence,
+    agentStatus?.optedIn,
+    agentStatus?.ownerPresent,
+    agentStatus?.visitorId,
+    agentStatus?.worldId,
+    crossWorldPresence,
+    currentWorldId,
+    remoteAgents,
+    remotePlayers,
+    snapshot.userId,
+    snapshot.visitorId,
+  ]);
+  const openDirectChatFor = (visitor: { visitorId: string; name?: string; position?: Vec3 }) => {
     const target = {
       visitorId: visitor.visitorId,
       name: actorName(visitor),
       kind: visitor.visitorId.startsWith("agent:") ? "agent" as const : "player" as const,
+      worldId: currentWorldId,
+      position: visitor.position,
     };
     setWorldChatOpen(true);
     setWorldChatChannel("dm");
     setWorldChatDmTarget(target);
     setWorldChatInput("");
+  };
+  const goToOnlineContact = (contact: OnlineContact) => {
+    if (!contact.position) return;
+    if (contact.worldId === currentWorldId) {
+      worldRef.current?.warpTo(contact.position.x, contact.position.z);
+      return;
+    }
+    const nextLocation = {
+      worldId: canonicalWorldId(contact.worldId),
+      x: contact.position.x,
+      z: contact.position.z,
+      consumed: false,
+    };
+    sharedLocationRef.current = nextLocation;
+    try {
+      window.history.replaceState(null, "", shareLocationUrl(nextLocation.worldId, nextLocation.x, nextLocation.z));
+    } catch {
+      /* ignore */
+    }
+    switchWorld(nextLocation.worldId);
+  };
+  const toggleMicControl = () => {
+    if (!txEnabled) {
+      void toggleTx();
+      return;
+    }
+    toggleMic();
   };
   const visibleWorldChat = snapshot.worldChat.filter((message) => {
     if (worldChatChannel === "world") return message.channel === "world";
@@ -9068,6 +9663,19 @@ function App(): React.ReactElement {
   });
   const sendWorldChatMessage = () => {
     if (worldChatChannel === "dm" && !worldChatDmTarget) return;
+    if (
+      worldChatChannel === "dm" &&
+      worldChatDmTarget?.visitorId &&
+      agentStatus?.visitorId &&
+      worldChatDmTarget.visitorId === agentStatus.visitorId
+    ) {
+      void sendAgentMessage(worldChatInput).then((sent) => {
+        if (!sent) return;
+        setWorldChatInput("");
+        setChatTab("agent");
+      });
+      return;
+    }
     const sent = worldRef.current?.sendWorldChat(
       worldChatInput,
       worldChatChannel,
@@ -9138,6 +9746,92 @@ function App(): React.ReactElement {
     }
   };
 
+  const debugPanel = showFps ? (
+    <div className="debug-stats-panel" aria-label="Tellus debug stats">
+      <div className="debug-stats-grid">
+        <span>FPS</span>
+        <strong>{fps}</strong>
+        <span>Items</span>
+        <strong>{debugGeneratedStats.total}</strong>
+        <span>Ready</span>
+        <strong>{debugGeneratedStats.ready}</strong>
+        <span>Pending</span>
+        <strong>{debugGeneratedStats.pending}</strong>
+        <span>Failed</span>
+        <strong>{debugGeneratedStats.failed}</strong>
+        <span>Missing ID</span>
+        <strong>{debugGeneratedStats.missingIdentity}</strong>
+        <span>Store IDs</span>
+        <strong>{debugGeneratedStats.assetStoreBacked}</strong>
+        <span>Players</span>
+        <strong>{remotePlayers.length}</strong>
+        <span>Agents</span>
+        <strong>{remoteAgents.length}</strong>
+      </div>
+      {ambientStats && (
+        <div className="debug-stats-row">
+          veg T{ambientStats.vegetation.tier} · {ambientStats.vegetation.chunks} chunks ·{" "}
+          {Math.round(ambientStats.vegetation.grassIndices / 3)} grass tris ·{" "}
+          {ambientStats.vegetation.trees} trees · physics {ambientStats.physicsBodies} · rapier{" "}
+          {ambientStats.rapierSolids}
+        </div>
+      )}
+      {ambientStats?.chunkTerrain && (
+        <div className="debug-stats-row">
+          terrain chunks {ambientStats.chunkTerrain.active} active ·{" "}
+          {ambientStats.chunkTerrain.pending} pending · {ambientStats.chunkTerrain.failed} failed
+        </div>
+      )}
+      {isChunkedWorldId(activeWorldId ?? "") && (() => {
+        const side = 2 * chunkLoadRadius + 1;
+        return (
+          <div className="debug-chunk-control">
+            <div>
+              <span>Draw distance</span>
+              <strong>{side}×{side} chunks</strong>
+            </div>
+            <input
+              type="range"
+              aria-label="Chunk load radius"
+              data-testid="chunk-load-radius-slider"
+              min={CHUNK_LOAD_RADIUS_MIN}
+              max={CHUNK_LOAD_RADIUS_MAX}
+              step={1}
+              value={chunkLoadRadius}
+              onChange={(event) => onChunkLoadRadius(Number(event.target.value))}
+            />
+          </div>
+        );
+      })()}
+      <div className="debug-stats-row">
+        P2P {p2pStats?.tx ? "TX on" : "TX off"} ·{" "}
+        {(p2pStats?.rx ?? rxEnabled) ? "RX on" : "RX off"} · {p2pStats?.rxStreams ?? 0}/16 streams
+      </div>
+      {selectedRuntimeProfile && activeSelectedThing && (
+        <div className="debug-object-profile">
+          <strong>{activeSelectedThing.prompt}</strong>
+          <span>{selectedRuntimeProfile.controllerKind} · {selectedRuntimeProfile.placementMode}</span>
+          <span>
+            asset {selectedRuntimeProfile.asset.source} · {selectedRuntimeProfile.asset.stableKey}
+          </span>
+          <span>
+            h {selectedRuntimeProfile.targetHeight.toFixed(2)} · seat{" "}
+            {selectedRuntimeProfile.seatHeight.toFixed(2)} · scale {activeSelectedThing.scale.toFixed(2)}
+          </span>
+          {selectedRuntimeProfile.groundOffset !== undefined && (
+            <span>ground offset {selectedRuntimeProfile.groundOffset.toFixed(2)}</span>
+          )}
+        </div>
+      )}
+      {(p2pStats?.peers ?? []).slice(0, 4).map((peer) => (
+        <div key={peer.id} className="debug-stats-row">
+          {peer.id.slice(0, 6)} {peer.state} · {Math.round(peer.kbps)} kbps
+        </div>
+      ))}
+      <div className="debug-stats-hint">triple-click logo or press ` to hide</div>
+    </div>
+  ) : null;
+
   useEffect(() => {
     const textarea = promptRef.current;
     if (!textarea) return;
@@ -9186,24 +9880,21 @@ function App(): React.ReactElement {
                     ? worldChatDmTarget
                       ? `DM - ${worldChatDmTarget.name}`
                       : "DMs"
-                    : worldChatChannel === "nearby"
-                      ? "Nearby Chat"
-                      : "World Chat"}
+                    : "World Chat"}
               </span>
               <button type="button" className="panel-mini-button" onClick={() => setWorldChatOpen(false)}>
                 Close
               </button>
             </header>
             <nav className="mini-chat-tabs" aria-label="Chat channels">
-              {(["world", "nearby", "dm", "agent"] as const).map((tab) => (
+              {(["world", "dm", "agent"] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   className={chatTab === tab ? "active" : ""}
                   onClick={() => {
                     setChatTab(tab);
-                    // The three real channels also drive the wire-protocol channel used for sending.
-                    if (tab !== "agent") setWorldChatChannel(tab);
+                    if (tab === "world" || tab === "dm") setWorldChatChannel(tab);
                   }}
                 >
                   {tab === "dm" ? "DMs" : tab[0].toUpperCase() + tab.slice(1)}
@@ -9216,22 +9907,38 @@ function App(): React.ReactElement {
                 {worldChatChannel === "dm" && (
               <div className="mini-chat-dm-targets" aria-label="DM recipients">
                 {chatTargets.length === 0 ? (
-                  <span>No players or agents visible.</span>
+                  <span>No online players or agents found.</span>
                 ) : (
                   <>
                     <span>To</span>
                     <div>
                       {chatTargets.map((target) => (
-                        <button
+                        <div
                           key={target.visitorId}
-                          type="button"
-                          className={worldChatDmTarget?.visitorId === target.visitorId ? "active" : ""}
-                          title={target.visitorId}
-                          onClick={() => setWorldChatDmTarget(target)}
+                          className={`mini-chat-contact ${worldChatDmTarget?.visitorId === target.visitorId ? "active" : ""}`}
+                          title={`${target.name} in ${target.worldId}`}
                         >
-                          {target.name}
-                          <small>{target.kind}</small>
-                        </button>
+                          <button
+                            type="button"
+                            className="mini-chat-contact-main"
+                            onClick={() => setWorldChatDmTarget(target)}
+                          >
+                            <span className="presence-dot online" aria-hidden="true" />
+                            <span>{target.name}</span>
+                            <small>{target.currentWorld ? "here" : target.worldId}</small>
+                          </button>
+                          <button
+                            type="button"
+                            className="mini-chat-contact-go"
+                            disabled={!target.position}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              goToOnlineContact(target);
+                            }}
+                          >
+                            Go
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </>
@@ -9305,13 +10012,6 @@ function App(): React.ReactElement {
               }}
             />
             <div className="mini-chat-actions">
-              <span className="mini-chat-channel-label">
-                {worldChatChannel === "dm"
-                  ? worldChatDmTarget?.name || "No DM target"
-                  : worldChatChannel === "nearby"
-                    ? "Nearby"
-                    : "World"}
-              </span>
               <button
                 type="button"
                 className="mini-chat-submit"
@@ -9320,6 +10020,34 @@ function App(): React.ReactElement {
               >
                 Send
               </button>
+              <div className="mini-chat-call-controls" aria-label="Voice and video controls">
+                <button
+                  type="button"
+                  className={audioListen ? "mini-chat-call-button active" : "mini-chat-call-button"}
+                  title={audioListen ? "Mute incoming audio" : "Hear others"}
+                  onClick={toggleAudioListen}
+                >
+                  {audioListen ? <Volume2 size={15} /> : <VolumeX size={15} />}
+                </button>
+                <button
+                  type="button"
+                  className={txEnabled && micOn ? "mini-chat-call-button active" : "mini-chat-call-button"}
+                  title={!txEnabled ? "Start camera and microphone" : micOn ? "Mute microphone" : "Unmute microphone"}
+                  disabled={!p2pSupported}
+                  onClick={toggleMicControl}
+                >
+                  {txEnabled && micOn ? <Mic size={15} /> : <MicOff size={15} />}
+                </button>
+                <button
+                  type="button"
+                  className={txEnabled ? "mini-chat-call-button active" : "mini-chat-call-button primary"}
+                  title={txEnabled ? "Stop sharing camera" : "Start camera"}
+                  disabled={!p2pSupported}
+                  onClick={() => void toggleTx()}
+                >
+                  {txEnabled ? <Video size={15} /> : <VideoOff size={15} />}
+                </button>
+              </div>
             </div>
               </>
             )}
@@ -9336,36 +10064,7 @@ function App(): React.ReactElement {
               <span>Tellus</span>
               <small>World Weaver</small>
             </div>
-            {showFps && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "100%",
-                  left: 0,
-                  marginTop: 4,
-                  padding: "3px 9px",
-                  borderRadius: 6,
-                  background: "rgba(0,0,0,0.72)",
-                  color: "#7ec850",
-                  font: "600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace",
-                  whiteSpace: "nowrap",
-                  pointerEvents: "none",
-                  zIndex: 40,
-                }}
-              >
-                <div>{fps} FPS</div>
-                {ambientStats && (
-                  <div style={{ marginTop: 2, color: "#b8e08a" }}>
-                    veg T{ambientStats.vegetation.tier} · {ambientStats.vegetation.chunks}ch ·{" "}
-                    {Math.round(ambientStats.vegetation.grassIndices / 3)}tri ·{" "}
-                    {ambientStats.vegetation.trees}🌲 · {ambientStats.physicsBodies}⚙
-                  </div>
-                )}
-                <div style={{ marginTop: 2, color: "#9ad0ff", fontSize: 10 }}>
-                  press ` to hide
-                </div>
-              </div>
-            )}
+            {debugPanel}
             <div className="brand-hud-actions">
               <AuthControls />
               <details className="world-help">
@@ -9420,43 +10119,7 @@ function App(): React.ReactElement {
               <span>Tellus</span>
               <small>World Weaver</small>
             </div>
-            {showFps && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "100%",
-                  left: 0,
-                  marginTop: 4,
-                  padding: "2px 8px",
-                  borderRadius: 6,
-                  background: "rgba(0,0,0,0.6)",
-                  color: "#7ec850",
-                  font: "600 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace",
-                  whiteSpace: "nowrap",
-                  pointerEvents: "none",
-                  zIndex: 20,
-                }}
-              >
-                <div>{fps} FPS</div>
-                {ambientStats && (
-                  <div style={{ marginTop: 3, color: "#b8e08a" }}>
-                    veg T{ambientStats.vegetation.tier} · {ambientStats.vegetation.chunks}ch ·{" "}
-                    {Math.round(ambientStats.vegetation.grassIndices / 3)}tri ·{" "}
-                    {ambientStats.vegetation.trees}🌲 · {ambientStats.physicsBodies}⚙
-                  </div>
-                )}
-                <div style={{ marginTop: 3, color: "#9ad0ff" }}>
-                  P2P {p2pStats?.tx ? "TX●" : "tx○"} {p2pStats?.rx ?? rxEnabled ? "RX●" : "rx○"} ·{" "}
-                  {p2pStats?.rxStreams ?? 0}/16 streams
-                </div>
-                {(p2pStats?.peers ?? []).map((peer) => (
-                  <div key={peer.id} style={{ color: "#c8c8c8" }}>
-                    {peer.id.slice(0, 6)} {peer.state}
-                    {peer.haveRemoteVideo ? " 📺" : ""} {Math.round(peer.kbps)}kbps
-                  </div>
-                ))}
-              </div>
-            )}
+            {debugPanel}
           </div>
           <div
             className="world-switcher"
@@ -9834,20 +10497,6 @@ function App(): React.ReactElement {
             <RotateCw size={18} />
             <span>Move</span>
           </button>
-          {p2pSupported && (
-            <button
-              type="button"
-              className={p2pPanelOpen ? "toolbelt-button active" : "toolbelt-button"}
-              title="P2P Video"
-              onClick={() => {
-                setP2pPanelOpen((open) => !open);
-                void refreshP2pDevices();
-              }}
-            >
-              <Video size={18} />
-              <span>P2P</span>
-            </button>
-          )}
           <button
             type="button"
             className={agentPanelOpen ? "toolbelt-button active" : "toolbelt-button"}
@@ -9870,11 +10519,7 @@ function App(): React.ReactElement {
             <span>Avatar</span>
           </button>
         </aside>
-        {/* Panel layout policy: every bottom panel gets its OWN anchor so any combination can be
-            open at once — avatar picker = LEFT edge column, P2P = just left-of-center, agent =
-            just right-of-center; each is height-capped with internal scroll. The login dialog is
-            a true modal (fullscreen dimmed overlay, z-index 70) ABOVE all of them by design. The
-            open avatar picker temporarily covers the agent-PiP corner (close it to see the PiP). */}
+        {/* The login dialog is a true modal (fullscreen dimmed overlay, z-index 70) ABOVE all panels. */}
         {false && (
           <aside
             className="avatar-panel"
@@ -9968,112 +10613,6 @@ function App(): React.ReactElement {
               <span style={{ fontSize: 10, opacity: 0.55 }}>
                 0.1× – 8× · visual only (movement unchanged)
               </span>
-            </div>
-          </aside>
-        )}
-        {p2pPanelOpen && p2pSupported && (
-          <aside
-            className="p2p-panel hud-card"
-            aria-label="P2P video"
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <strong style={{ fontSize: 13 }}>P2P Video</strong>
-              <span style={{ fontSize: 11, opacity: 0.7 }}>
-                {p2pStats?.rxStreams ?? 0}/16 · 480p
-              </span>
-            </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11 }}>
-              Microphone
-              <select
-                value={selectedMic}
-                onChange={(e) => onMicChange(e.target.value)}
-                style={p2pSelectStyle}
-              >
-                <option value="">Default</option>
-                {audioInputs.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11 }}>
-              Camera
-              <select
-                value={selectedCam}
-                onChange={(e) => onCamChange(e.target.value)}
-                style={p2pSelectStyle}
-              >
-                <option value="">Default</option>
-                {videoInputs.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Cam ${d.deviceId.slice(0, 6)}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <video
-              ref={selfVideoRef}
-              muted
-              playsInline
-              autoPlay
-              style={{
-                width: "100%",
-                aspectRatio: "16 / 9",
-                borderRadius: 8,
-                background: "#000",
-                objectFit: "cover",
-                display: txEnabled ? "block" : "none",
-                transform: "scaleX(-1)", // mirror, like a webcam preview
-              }}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => void refreshP2pDevices()}
-                style={p2pBtnStyle(false)}
-              >
-                Refresh
-              </button>
-              <button
-                type="button"
-                onClick={toggleRx}
-                style={p2pBtnStyle(rxEnabled)}
-              >
-                RX {rxEnabled ? "On" : "Off"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void toggleTx()}
-                style={p2pBtnStyle(txEnabled)}
-              >
-                TX {txEnabled ? "On" : "Off"}
-              </button>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={toggleAudioListen}
-                style={p2pBtnStyle(audioListen)}
-                title="Hear other players' audio"
-              >
-                🔊 Listen {audioListen ? "On" : "Off"}
-              </button>
-              <button
-                type="button"
-                onClick={toggleMic}
-                disabled={!txEnabled}
-                style={{ ...p2pBtnStyle(txEnabled && micOn), opacity: txEnabled ? 1 : 0.45 }}
-                title={txEnabled ? "Mute/unmute your mic" : "Turn TX on to use your mic"}
-              >
-                🎤 {txEnabled ? (micOn ? "On" : "Muted") : "Off"}
-              </button>
-            </div>
-            {p2pError && (
-              <div style={{ fontSize: 11, color: "#ff9a9a" }}>{p2pError}</div>
-            )}
-            <div style={{ fontSize: 10, opacity: 0.6 }}>
-              RX shows others' cameras; TX shares your camera + mic (480p). Listen = hear others.
             </div>
           </aside>
         )}
@@ -10264,25 +10803,6 @@ function App(): React.ReactElement {
               style={{ cursor: "crosshair" }}
               onClick={handleWorldMapClick}
             >
-              <canvas className="world-map-terrain" ref={worldMapCanvasRef} aria-hidden="true" />
-              {snapshot.biomeCells && snapshot.biomeCells.length > 0 && (
-                <div className="world-map-mode" role="group" aria-label="Map mode">
-                  {(["terrain", "biomes"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      className={mapMode === m ? "active" : ""}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setMapMode(m);
-                      }}
-                      title={m === "biomes" ? "Whole-world biome overview (live)" : "Local terrain relief"}
-                    >
-                      {m === "biomes" ? "Biomes" : "Terrain"}
-                    </button>
-                  ))}
-                </div>
-              )}
               {snapshot.visitorPosition && snapshot.visitorYaw !== undefined && (() => {
                 // View cone: from the player marker, along the facing yaw, reaching the view distance —
                 // shows which way you're looking and how far you can see. forward = (sin yaw, cos yaw) in
@@ -10534,7 +11054,7 @@ function App(): React.ReactElement {
             </section>
             {snapshot.visitorPosition && (() => {
               // Position readout: where you are, so you can tell others. Chunked worlds also show the
-              // chunk cell (origin at a corner, CHUNK_SPAN units/chunk); classic worlds just world coords.
+              // chunk cell (origin at a corner, CHUNK_SPAN units/chunk); other worlds just show coords.
               const pos = snapshot.visitorPosition;
               const wx = Math.round(pos.x);
               const wz = Math.round(pos.z);
@@ -10542,63 +11062,33 @@ function App(): React.ReactElement {
               const cell = chunked
                 ? `chunk ${Math.floor(pos.x / CHUNK_SPAN)},${Math.floor(pos.z / CHUNK_SPAN)} · `
                 : "";
+              const locationText = `${worldDisplayName(currentWorldId)} · ${cell}(${wx}, ${wz})`;
               return (
-                <div className="world-pos-readout" title="Your location — copy to share">
-                  {cell}({wx}, {wz})
-                </div>
-              );
-            })()}
-            {isChunkedWorldId(activeWorldId ?? "") && (() => {
-              // Chunk-load radius slider: how many chunk-rings stream around you. Higher = more draw
-              // distance (and more cost). Loaded chunks = (2r+1)² (a (2r+1)×(2r+1) square centred on you).
-              const side = 2 * chunkLoadRadius + 1;
-              return (
-                <div
-                  className="chunk-load-radius"
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 4,
-                    marginTop: 8,
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    background: "rgba(12,16,22,0.55)",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    color: "#dfe7d8",
-                    font: "500 12px/1.4 system-ui, sans-serif",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 8,
+                <div className="world-map-action-bar" aria-label="Map actions">
+                  <button
+                    type="button"
+                    title="Copy a link to your world location"
+                    onClick={() => {
+                      const url = shareLocationUrl(currentWorldId, pos.x, pos.z);
+                      void navigator.clipboard?.writeText(url).catch(() => undefined);
                     }}
                   >
-                    <span style={{ fontWeight: 600 }}>Draw distance</span>
-                    <span data-testid="chunk-load-radius-label" style={{ opacity: 0.8 }}>
-                      Chunks: {side}×{side} ({side * side})
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    aria-label="Chunk load radius"
-                    data-testid="chunk-load-radius-slider"
-                    min={CHUNK_LOAD_RADIUS_MIN}
-                    max={CHUNK_LOAD_RADIUS_MAX}
-                    step={1}
-                    value={chunkLoadRadius}
-                    onChange={(event) => onChunkLoadRadius(Number(event.target.value))}
-                    style={{ width: "100%" }}
-                  />
-                  <span style={{ fontSize: 10, opacity: 0.55 }}>
-                    higher = farther view · more chunks loaded (more cost)
-                  </span>
+                    <span className="world-info-label">Share</span>
+                    <span className="world-info-value">{locationText}</span>
+                  </button>
+                  <button
+                    type="button"
+                    title="Open portal menu"
+                    className={portalsPanelOpen ? "active" : undefined}
+                    onClick={() => setPortalsPanelOpen((open) => !open)}
+                  >
+                    <span className="world-info-label">Portal</span>
+                    <span className="world-info-value">{snapshot.portals?.length ?? 0}</span>
+                  </button>
                 </div>
               );
             })()}
-        {(() => {
+        {portalsPanelOpen && (() => {
           const portalBtn = {
             display: "block",
             width: "100%",
@@ -10614,23 +11104,9 @@ function App(): React.ReactElement {
           };
           return (
             <aside
-              className={`portal-panel hud-card${portalsPanelOpen ? "" : " is-collapsed"}`}
+              className="portal-panel hud-card"
               aria-label="Portals"
             >
-              <button
-                type="button"
-                className="hud-card-header"
-                aria-expanded={portalsPanelOpen}
-                onClick={() => setPortalsPanelOpen((open) => !open)}
-                title={portalsPanelOpen ? "Collapse portals" : "Expand portals"}
-              >
-                <span className="hud-card-caret">{portalsPanelOpen ? "▾" : "▸"}</span>
-                <span className="hud-card-title">Portals</span>
-                {(snapshot.portals?.length ?? 0) > 0 && (
-                  <span className="hud-card-badge">{snapshot.portals?.length}</span>
-                )}
-              </button>
-              {portalsPanelOpen && (
               <div className="hud-card-body">
               {(snapshot.portals ?? []).map((p) => {
                 const targetChoices = portalTargetOptions.includes(p.target.worldId)
@@ -10729,7 +11205,6 @@ function App(): React.ReactElement {
                 </div>
               )}
               </div>
-              )}
             </aside>
           );
         })()}
@@ -10747,7 +11222,7 @@ function App(): React.ReactElement {
             <span>Dismount</span>
           </button>
         )}
-        {activeSelectedThing && (
+        {activeSelectedThing && !snapshot.sailingThingId && (
           <div className="selected-transform-hud" aria-label="Selected asset controls">
             <div className="selected-transform-label">
               <Box size={15} />

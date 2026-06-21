@@ -27,11 +27,9 @@ import {
   setClassicPondShape,
   terrainColors,
   terrainPaintKinds,
-  waterMountTerms,
-  airMountTerms,
-  groundMountTerms,
 } from "./tellus-constants";
-import { clamp, rand, isRecord, promptIncludesAny } from "./tellus-utils";
+import { clamp, rand, isRecord } from "./tellus-utils";
+import { worldThingVehicleMode } from "./tellus-world-object-profile";
 import { runtimeConfig } from "./tellus-runtime-config";
 import {
   tellusApiUrl,
@@ -89,9 +87,9 @@ export function onTerrainTemplateLoaded(callback: (() => void) | null): void {
 }
 
 // Chunked worlds have NO radial island — they're a flat tiled plane (chunk base y=0) + per-chunk
-// sculpts. When set (non-null), grounding ignores the classic origin-centred island math and returns
+// sculpts. When set (non-null), grounding ignores the legacy origin-centred island math and returns
 // this flat base, so the player stands ON the chunk terrain (y=0 is above SEA_LEVEL=-3.35) at the
-// world centre instead of sinking into the origin ocean. Null = classic single-grid world.
+// world centre instead of sinking into the origin ocean. Null = legacy single-grid compatibility world.
 // (Walking the sculpted height is a later refinement; alpha walks the flat base.)
 let chunkedFlatGround: number | null = null;
 export function setChunkedFlatGround(y: number | null): void {
@@ -122,7 +120,7 @@ function chunkedGroundY(x: number, z: number): number {
 }
 
 /// Learn a chunked world's dimensions from the /chunks manifest, then arm the chunk bounds (renderer
-/// upper-clamp + spawn-centring) and flat grounding. For a classic world it clears both. Best-effort:
+/// upper-clamp + spawn-centring) and flat grounding. For non-chunked special worlds it clears both. Best-effort:
 /// a manifest miss still streams (no upper clamp) and still grounds flat.
 export async function loadChunkedWorldBounds(): Promise<void> {
   if (!runtimeConfig.worldId.startsWith("chunked-")) {
@@ -828,43 +826,7 @@ export function distantIslandShorePosition(spec: DistantIslandSpec, x: number, z
 }
 
 export function vehicleMode(thing: GeneratedThing): VehicleMode | null {
-  const lower = thing.prompt.toLowerCase();
-  if (
-    thing.kind === "balloon" ||
-    promptIncludesAny(lower, airMountTerms) ||
-    lower.includes("balloon") ||
-    lower.includes("airship") ||
-    lower.includes("zeppelin") ||
-    lower.includes("glider") ||
-    lower.includes("flying") ||
-    lower.includes("air boat")
-  ) {
-    return "air";
-  }
-  if (
-    promptIncludesAny(lower, waterMountTerms) ||
-    lower.includes("boat") ||
-    lower.includes("ship") ||
-    lower.includes("sail") ||
-    lower.includes("canoe") ||
-    lower.includes("raft") ||
-    lower.includes("skiff") ||
-    lower.includes("dinghy")
-  ) {
-    return "water";
-  }
-  if (
-    promptIncludesAny(lower, groundMountTerms) ||
-    lower.includes("vehicle") ||
-    lower.includes("cart") ||
-    lower.includes("wagon") ||
-    lower.includes("carriage") ||
-    lower.includes("car ") ||
-    lower.includes("truck")
-  ) {
-    return "ground";
-  }
-  return null;
+  return worldThingVehicleMode(thing);
 }
 
 export function isMountThing(thing: GeneratedThing): boolean {
@@ -902,11 +864,26 @@ export function movedVehiclePosition(
   const mode = vehicleMode(thing);
   if (mode === "air") return airPosition(x, z);
   if (mode === "water") return waterVehiclePosition(x, z, fallback);
-  return groundedPosition(x, z, fallback);
+  const position = groundedPosition(x, z, fallback);
+  if (
+    fallback &&
+    position.x === fallback.x &&
+    position.y === fallback.y &&
+    position.z === fallback.z &&
+    (x !== fallback.x || z !== fallback.z)
+  ) {
+    return { ...fallback, x, z };
+  }
+  if (!fallback) return position;
+  const previousGround = groundHeightAt(fallback.x, fallback.z);
+  if (previousGround === null || !Number.isFinite(previousGround)) return position;
+  const manualOffset = fallback.y - previousGround;
+  if (manualOffset <= 0.05) return position;
+  return { ...position, y: position.y + manualOffset };
 }
 
 export function baseTerrainHeight(x: number, z: number): number {
-  // Classic-space transform: the feature math always runs at the classic 72-radius scale, so on a
+  // Legacy-space transform: the feature math always runs at the original 72-radius scale, so on a
   // scaled-up world the mountain/ridge/pond stretch with the island (heights unchanged). The Hyades
   // server's terrain port applies the IDENTICAL transform — keep the two in lockstep.
   const cx = x / WORLD_SCALE;

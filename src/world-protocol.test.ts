@@ -9,11 +9,13 @@ import {
   biomeCellsFromSnapshot,
   biomeCellsFromWorldPatch,
   dedupePresenceForDisplay,
+  repairGeneratedCloneModelLinks,
 } from "./world-protocol";
 
 describe("dedupePresenceForDisplay", () => {
   const p = (visitorId: string, ownerUserId?: string, lastSeenAt = "2026-01-01T00:00:00Z") =>
     ({ visitorId, ownerUserId, lastSeenAt, connectedAt: lastSeenAt }) as never;
+  const now = Date.parse("2026-01-01T00:02:00Z");
 
   it("collapses one account's many connections to its newest, and hides the viewer's own", () => {
     const roster = [
@@ -23,7 +25,7 @@ describe("dedupePresenceForDisplay", () => {
       p("me1", "me", "2026-01-01T00:00:02Z"),
       p("me2", "me", "2026-01-01T00:00:08Z"), // both mine → dropped
     ];
-    const out = dedupePresenceForDisplay(roster, "me");
+    const out = dedupePresenceForDisplay(roster, "me", now);
     expect(out.map((r) => r.visitorId)).toEqual(["a2"]); // one alice (newest), zero of mine
   });
 
@@ -34,8 +36,18 @@ describe("dedupePresenceForDisplay", () => {
       p("anon1"),
       p("anon2"), // no owner — both kept
     ];
-    const out = dedupePresenceForDisplay(roster, "me");
+    const out = dedupePresenceForDisplay(roster, "me", now);
     expect(out.map((r) => r.visitorId).sort()).toEqual(["agent:bob", "agent:cara", "anon1", "anon2"]);
+  });
+
+  it("filters stale anonymous presences and never shows this visitor as remote", () => {
+    const roster = [
+      p("old-anon", undefined, "2025-12-31T23:59:50Z"),
+      p("fresh-anon", undefined, "2026-01-01T00:01:20Z"),
+      p("my-visitor", undefined, "2026-01-01T00:01:50Z"),
+    ];
+    const out = dedupePresenceForDisplay(roster, null, now, "my-visitor");
+    expect(out.map((r) => r.visitorId)).toEqual(["fresh-anon"]);
   });
 });
 
@@ -56,6 +68,42 @@ describe("biome cell extraction", () => {
     // the diff extractor must NOT consume a snapshot (else it would merge instead of reset)
     expect(biomeCellsFromWorldPatch({ type: "world.snapshot", biomeCells: cells })).toBeNull();
     expect(biomeCellsFromWorldPatch({ type: "world.biome.patch", biomeCells: cells })).toHaveLength(3);
+  });
+});
+
+describe("repairGeneratedCloneModelLinks", () => {
+  const base = {
+    kind: "flower",
+    prompt: "Stylized Yellow Flower Plant",
+    creatorId: "visitor",
+    position: { x: 0, y: 0, z: 0 },
+    rotationY: 0,
+    scale: 1,
+    color: 0xffff00,
+    updatedAt: "2026-01-01T00:00:00Z",
+  };
+
+  it("repairs a failed clone from a ready sibling with the same kind and prompt", () => {
+    const donor = {
+      ...base,
+      id: "ready-flower",
+      modelUrl: "/api/assets/model/asset-1/game-optimized",
+      assetStoreModelId: "asset-1",
+      generationStatus: "ready" as const,
+    };
+    const failed = {
+      ...base,
+      id: "failed-flower",
+      generationStatus: "failed" as const,
+    };
+    const out = repairGeneratedCloneModelLinks([failed, donor]);
+    expect(out.repairedIds).toEqual(["failed-flower"]);
+    expect(out.things[0]).toMatchObject({
+      id: "failed-flower",
+      modelUrl: donor.modelUrl,
+      assetStoreModelId: donor.assetStoreModelId,
+      generationStatus: "ready",
+    });
   });
 });
 

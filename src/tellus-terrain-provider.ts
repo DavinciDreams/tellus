@@ -3,11 +3,10 @@
 // Splits terrain into three layers (PRD Core Concept): RENDER substrate (what you see), GAMEPLAY substrate
 // (what players + agents stand on / query / collide with), and the EDITABLE overlay (sculpt/paint/objects).
 // This module owns the GAMEPLAY substrate: every system asks the ACTIVE provider for height/kind instead of
-// calling the classic terrain math directly. Per the dev decision, the provider's sampleHeight IS the
+// calling the legacy terrain math directly. Per the dev decision, the provider's sampleHeight IS the
 // authoritative grounding path — the SAME sampler used for rendering — so agents and players always agree
-// (height = base/substrate sampler + chunk/edit overlay). Classic + chunked wrap existing functions with ZERO
-// behavior change (locked by terrain-provider.test.ts parity against the frozen tellus-ref vectors); tiles +
-// interior land in their phases.
+// (height = base/substrate sampler + chunk/edit overlay). ClassicTerrainProvider is now the compatibility
+// fallback when a specialized renderer is not mounted yet; chunked is the default outdoor path.
 
 import type { Camera, Ray } from "three";
 import type { TerrainKind } from "./tellus-types";
@@ -24,7 +23,7 @@ export interface TerrainHit {
 
 export interface TerrainProvider {
   readonly kind: TerrainProviderKind;
-  /** Per-frame hook (load/evict chunks, advance tile LOD). No-op for classic. */
+  /** Per-frame hook (load/evict chunks, advance tile LOD). No-op for compatibility terrain. */
   update?(center: Vec3, camera: Camera): void;
   /** Authoritative gameplay height at world (x,z); null when not yet known (unloaded chunk/tile). */
   sampleHeight(x: number, z: number): number | null;
@@ -37,9 +36,9 @@ export interface TerrainProvider {
 }
 
 /**
- * Classic radial-island substrate (and distant islands). groundHeightAt already folds in the Evoflow raster
- * (it rides inside terrainHeight), so an evoflow-* world reports kind 'classic' here — the raster is a height
- * prior, not a separate substrate. This wraps the existing math; it must stay a pure delegate (parity-tested).
+ * Compatibility radial-island substrate (and distant islands). groundHeightAt already folds in the Evoflow
+ * raster (it rides inside terrainHeight), so an evoflow-* world reports kind 'classic' here — the raster is
+ * a height prior, not a separate substrate. This wraps the existing math; it must stay a pure delegate.
  */
 export class ClassicTerrainProvider implements TerrainProvider {
   readonly kind: TerrainProviderKind = "classic";
@@ -54,7 +53,7 @@ export class ClassicTerrainProvider implements TerrainProvider {
 /**
  * Chunked streamed substrate. Height comes from the chunk renderer's sampleHeight — which returns null for a
  * chunk that isn't loaded yet; that null is meaningful (caller falls back / waits) and MUST be preserved
- * exactly. Chunked worlds carry no classic paint, so kind is a flat 'meadow' (matches the Hyades server
+ * exactly. Chunked worlds carry no inline grid paint, so kind is a flat 'meadow' (matches the Hyades server
  * agent-view, which hard-codes meadow for chunked).
  */
 export class ChunkedTerrainProvider implements TerrainProvider {
@@ -91,8 +90,8 @@ export class TilesTerrainProvider implements TerrainProvider {
 /**
  * Pick the gameplay provider for a world. The explicit kind (from the snapshot's terrainProviderKind, which
  * the server stamps + a persisted value wins) takes precedence; null falls back to a worldId-prefix inference
- * mirroring the server's TellusChunkKey.InferSubstrate. tiles/interior providers arrive in their phases and
- * fall back to classic until then.
+ * mirroring the client canonical-world policy. tiles/interior providers arrive in their phases and fall back
+ * to the compatibility terrain until then.
  */
 export function selectTerrainProvider(
   worldId: string,
@@ -106,21 +105,21 @@ export function selectTerrainProvider(
   if (resolved === "tiles" && deps.chunkRenderer) {
     return new TilesTerrainProvider(deps.chunkRenderer);
   }
-  // classic | evoflow | interior | (chunked|tiles)-without-renderer → classic math
+  // Compatibility terrain only: if a chunk/tile renderer is not mounted yet, keep land visible.
   return new ClassicTerrainProvider();
 }
 
-/** Mirror of the server TellusChunkKey.InferSubstrate (keep in lockstep). */
+/** Outdoor worlds are chunked by default; specialized prefixes opt into their own substrate. */
 export function inferSubstrate(worldId: string): TerrainProviderKind {
   if (worldId.startsWith("tiles-")) return "tiles";
   if (worldId.startsWith("interior-")) return "interior";
   if (worldId.startsWith("evoflow-")) return "evoflow";
   if (worldId.startsWith("chunked-")) return "chunked";
-  return "classic";
+  return "chunked";
 }
 
 // Active-provider holder. Systems query getActiveTerrainProvider() for height/kind; the world-load path sets
-// it on each world switch. Defaults to classic so callers are safe before the first world loads.
+// it on each world switch. Defaults to compatibility terrain so callers are safe before the first world loads.
 let activeProvider: TerrainProvider = new ClassicTerrainProvider();
 
 export function setActiveTerrainProvider(provider: TerrainProvider): void {
