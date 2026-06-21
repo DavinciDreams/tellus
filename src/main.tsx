@@ -635,7 +635,7 @@ function createTellusWorld(
   // deterministic from the synced terrain state — no protocol changes.
   //
   // Chunked worlds keep 3D flowers/reeds/small flora on by default, but suppress the hair-like grass
-  // layer unless localStorage "tellus.grass"="1". "tellus.grass"="0" disables this vegetation pass.
+  // layer. "tellus.grass"="0" disables this vegetation pass entirely; classic worlds remain opt-in.
   // Classic-world vegetation remains opt-in via "tellus.grass"="1".
   const isChunked = isChunkedWorldId(runtimeConfig.worldId);
   const chunkedDims = isChunked ? getChunkedWorldChunks() : null;
@@ -686,7 +686,7 @@ function createTellusWorld(
     }
   })();
   const vegetationEnabled = vegetationPreference !== "0" && (isChunked || vegetationPreference === "1");
-  const groundGrassEnabled = vegetationPreference === "1";
+  const groundGrassEnabled = !isChunked && vegetationPreference === "1";
   const vegetation = vegetationEnabled
     ? createVegetation({
         scene,
