@@ -2885,14 +2885,12 @@ function createTellusWorld(
     scale: thing.scale,
     color: thing.color,
     assetStoreModelId: thing.assetStoreModelId,
-    modelUrl: thing.generationStatus === "failed" ? undefined : thing.modelUrl,
+    modelUrl: thing.modelUrl,
     pipelineId: thing.modelUrl ? undefined : thing.pipelineId,
     generationStatus:
-      thing.generationStatus === "failed"
-        ? "failed"
-        : thing.modelUrl
-          ? "ready"
-          : thing.generationStatus,
+      thing.modelUrl
+        ? "ready"
+        : thing.generationStatus,
     // "" = explicit "default" (mirrors presence.avatarId): a mid-rollout server that doesn't know
     // the field yet echoes it back ABSENT, and absent must mean "keep what you have", not "clear".
     animation: thing.animation ?? "",
@@ -2922,10 +2920,7 @@ function createTellusWorld(
   const normalizeGeneratedThing = (thing: WorldGeneratedThing): WorldGeneratedThing => {
     // procedural:// URLs are scheme-addressed local builds — absolutizing them (meant for legacy
     // relative GLB paths) would mangle them into "/procedural://…" and break rendering.
-    const resolved =
-      thing.generationStatus === "failed"
-        ? { modelUrl: undefined, assetStoreModelId: thing.assetStoreModelId }
-        : resolveAssetBackedModel(thing.modelUrl, thing.assetStoreModelId);
+    const resolved = resolveAssetBackedModel(thing.modelUrl, thing.assetStoreModelId);
     const modelUrl = resolved.modelUrl;
     const stalePending = isStalePendingGeneratedThing(thing);
     return {

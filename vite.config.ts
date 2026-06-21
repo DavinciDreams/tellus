@@ -131,6 +131,11 @@ export default defineConfig(({ mode }) => {
           ws: true,
           rewrite: (path) => path.replace(/^\/__hyades/, ""),
         },
+        "/api/assets": {
+          target: "https://hyades.gnostr.cloud",
+          changeOrigin: true,
+          secure: true,
+        },
         ...(hyadesApiKey
           ? {
               "/api/tts": {

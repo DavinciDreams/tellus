@@ -100,7 +100,7 @@ describe("asset library browsing", () => {
     const assetIds = await generatedAssetManifestAssetIds();
 
     expect(entries[0]).toEqual(expect.objectContaining({ assetStoreModelId: "asset-123" }));
-    expect(modelUrls.get("thing-1")).toBe("https://hyades.example/api/assets/model/asset-123/game-optimized");
+    expect(modelUrls.get("thing-1")).toBe("/api/assets/model/asset-123/game-optimized");
     expect(assetIds.get("thing-1")).toBe("asset-123");
   });
 });

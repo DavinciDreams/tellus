@@ -42,14 +42,15 @@ export function assetStoreIdFromModelUrl(url: string): string | null {
   } catch {
     return null;
   }
+  const pathname = parsed.pathname.replace(/^\/__hyades(?=\/api\/)/i, "");
   const match =
-    /^\/api\/(?:view|download|model)\/([^/?#]+)/i.exec(parsed.pathname) ??
-    /^\/api\/assets\/(?:model|download)\/([^/?#]+)/i.exec(parsed.pathname);
+    /^\/api\/(?:view|download|model)\/([^/?#]+)/i.exec(pathname) ??
+    /^\/api\/assets\/(?:model|download)\/([^/?#]+)/i.exec(pathname);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
 export function assetStoreGameOptimizedModelUrl(assetId: string): string {
-  return tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(assetId)}/game-optimized`);
+  return `/api/assets/model/${encodeURIComponent(assetId)}/game-optimized`;
 }
 
 // A generated model can arrive as a RAW asset-store URL (e.g. https://3d.flobots.xyz/api/view/{id})
