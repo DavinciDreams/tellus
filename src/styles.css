@@ -1119,13 +1119,14 @@ textarea::placeholder {
 }
 
 .map-marker.player {
-  width: 11px;
-  height: 11px;
-  border-color: #ffffff;
-  background: #27b7ff;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #fff6b7;
+  background: #ff5f67;
   box-shadow:
-    0 0 0 2px rgb(0 0 0 / 78%),
-    0 0 12px rgb(39 183 255 / 92%);
+    0 0 0 2px rgb(0 0 0 / 80%),
+    0 0 14px rgb(255 95 103 / 90%),
+    0 0 22px rgb(255 246 183 / 34%);
 }
 
 .map-marker.remote-player {
@@ -1165,6 +1166,17 @@ textarea::placeholder {
   height: 8px;
   border-radius: 2px;
   background: #d8bf75;
+}
+
+.map-marker.asset.animated {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border-color: #e7ffd1;
+  background: #42d46b;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 74%),
+    0 0 11px rgb(66 212 107 / 86%);
 }
 
 .map-marker.asset.selected {

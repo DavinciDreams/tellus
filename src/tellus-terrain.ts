@@ -129,6 +129,9 @@ export async function loadChunkedWorldBounds(): Promise<void> {
     setChunkedHeightProvider(null);
     return;
   }
+  const idSize = /^chunked-(\d+)-/i.exec(runtimeConfig.worldId)?.[1];
+  const fallbackSize = idSize ? Math.max(1, Math.min(256, Math.round(Number(idSize)))) : 64;
+  setChunkedWorldChunks({ w: fallbackSize, h: fallbackSize });
   try {
     const res = await fetch(tellusWorldChunksManifestUrl(0, 0, 0), { cache: "no-store" });
     if (res.ok) {

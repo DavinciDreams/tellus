@@ -449,6 +449,27 @@ export function createMoonCloudVeil(): {
   return { group, materials };
 }
 
+export function createAnimatedWaterMaterial(): MeshBasicNodeMaterial {
+  const t = time.mul(0.62);
+  const waterUV = positionWorld.xzy;
+  const broadFlow = mx_worley_noise_float(waterUV.mul(0.36).add(t.mul(0.52)));
+  const waveCells = mx_worley_noise_float(
+    waterUV.mul(1.35).add(broadFlow.mul(0.38)).add(t),
+  );
+  const surfaceIntensity = waveCells.mul(broadFlow).mul(1.18);
+  const waterColor = surfaceIntensity.mix(color(0x0476b7), color(0x7bd7f5));
+  const illuminatedColor = waterColor.add(
+    color(0xb7f6ff).mul(surfaceIntensity.mul(0.12)),
+  );
+  const material = new MeshBasicNodeMaterial();
+  material.colorNode = illuminatedColor;
+  material.transparent = true;
+  material.opacity = 0.72;
+  material.depthWrite = false;
+  material.side = THREE.DoubleSide;
+  return material;
+}
+
 export function createBackdropWaterMaterial(): MeshBasicNodeMaterial {
   const t = time.mul(0.62);
   const waterUV = positionWorld.xzy;
@@ -903,25 +924,34 @@ export async function loadGeneratedModel(
   return fitted;
 }
 
-export function createPondWater(): THREE.Group {
+export function createPondWater(options: {
+  center?: { x: number; z: number };
+  radius?: number;
+  waterLevel?: number;
+  animated?: boolean;
+} = {}): THREE.Group {
   const group = new THREE.Group();
   group.name = "tellus-pond-water";
   group.userData = { waterSurface: true };
 
-  const waterLevel = pondWaterLevel();
+  const center = options.center ?? POND_CENTER;
+  const radius = options.radius ?? POND_RADIUS;
+  const waterLevel = options.waterLevel ?? pondWaterLevel();
   const water = new THREE.Mesh(
-    new THREE.CircleGeometry(POND_RADIUS, 96),
-    new THREE.MeshBasicMaterial({
-      color: 0x6fb7d7,
-      transparent: true,
-      opacity: 0.55,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    }),
+    new THREE.CircleGeometry(radius, 96),
+    options.animated
+      ? createBackdropWaterMaterial()
+      : new THREE.MeshBasicMaterial({
+          color: 0x6fb7d7,
+          transparent: true,
+          opacity: 0.55,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
   );
   water.name = "tellus-pond-surface";
   water.rotation.x = -Math.PI / 2;
-  water.position.set(POND_CENTER.x, waterLevel, POND_CENTER.z);
+  water.position.set(center.x, waterLevel, center.z);
   water.renderOrder = 2;
 
   const rippleMaterial = new THREE.MeshBasicMaterial({
@@ -934,19 +964,19 @@ export function createPondWater(): THREE.Group {
   const rippleGeometry = new THREE.RingGeometry(0.88, 0.93, 96);
   const ripples = new THREE.Group();
   ripples.name = "tellus-pond-ripples";
-  ripples.position.set(POND_CENTER.x, waterLevel + 0.035, POND_CENTER.z);
+  ripples.position.set(center.x, waterLevel + 0.035, center.z);
   ripples.rotation.x = -Math.PI / 2;
 
   for (let i = 0; i < 4; i++) {
     const ripple = new THREE.Mesh(rippleGeometry, rippleMaterial.clone());
-    const scale = POND_RADIUS * (0.28 + i * 0.18);
+    const scale = radius * (0.28 + i * 0.18);
     ripple.scale.setScalar(scale);
     ripple.userData = { rippleIndex: i };
     ripples.add(ripple);
   }
 
   const shore = new THREE.Mesh(
-    new THREE.RingGeometry(POND_RADIUS * 0.96, POND_RADIUS * 1.08, 128),
+    new THREE.RingGeometry(radius * 0.96, radius * 1.08, 128),
     new THREE.MeshStandardMaterial({
       color: 0x7b6b48,
       roughness: 0.95,
@@ -955,7 +985,7 @@ export function createPondWater(): THREE.Group {
   );
   shore.name = "tellus-pond-shore";
   shore.rotation.x = -Math.PI / 2;
-  shore.position.set(POND_CENTER.x, waterLevel - 0.035, POND_CENTER.z);
+  shore.position.set(center.x, waterLevel - 0.035, center.z);
 
   group.add(shore, water, ripples);
   return group;
