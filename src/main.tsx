@@ -805,7 +805,8 @@ function createTellusWorld(
     const u = sceneUrl.trim();
     if (!u || u === interiorSceneUrl) return;
     interiorSceneUrl = u;
-    for (const m of [ocean, archipelago, terrain, pondWater, flowerPatchGroup]) m.visible = false;
+    ocean.visible = true;
+    for (const m of [archipelago, terrain, pondWater, flowerPatchGroup, floatingRim]) m.visible = false;
     setChunkedFlatGround(0); // ground the player on the room floor (no heightfield inside)
     // The procedural room is centered at the origin; drop the player INTO the room (origin, flat floor)
     // on entry instead of preserving an outdoor spawn point.
@@ -880,6 +881,12 @@ function createTellusWorld(
     interiorObject = null;
     interiorSceneUrl = null;
     rapierPhysics?.clearStatics();
+    ocean.visible = true;
+    archipelago.visible = true;
+    terrain.visible = !isChunked;
+    pondWater.visible = !isChunked;
+    flowerPatchGroup.visible = true;
+    floatingRim.visible = !isChunked;
     setChunkedFlatGround(isChunked ? 0 : null); // restore the world's normal grounding
   };
 
