@@ -13,6 +13,7 @@ import {
   Map as MapIcon,
   MessageCircle,
   Mic,
+  MicOff,
   Minus,
   Mountain,
   PawPrint,
@@ -27,6 +28,9 @@ import {
   Sprout,
   Trash2,
   Video,
+  VideoOff,
+  Volume2,
+  VolumeX,
   Waves,
   X,
 } from "lucide-react";
@@ -124,7 +128,7 @@ import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood } from "./tellus-types";
 import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
-import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig } from "./tellus-runtime-config";
+import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig, worldApiUrl } from "./tellus-runtime-config";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, toAssetId } from "./tellus-urls-identity";
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
@@ -199,6 +203,17 @@ interface AgentStatus {
   processing?: boolean;
   /** The agent's own durable `remember` notes (newest first) — surfaced live in the memories block. */
   memories?: AgentRememberNote[];
+}
+
+interface OnlineContact {
+  visitorId: string;
+  name: string;
+  kind: "player" | "agent";
+  worldId: string;
+  position?: Vec3;
+  online: boolean;
+  currentWorld: boolean;
+  lastSeenAt?: string;
 }
 
 // One turn of the server-side agent's recent conversation. "assistant" = the agent speaking; "tool" = a tool
@@ -7017,7 +7032,10 @@ function App(): React.ReactElement {
     visitorId: string;
     name: string;
     kind: "player" | "agent";
+    worldId?: string;
+    position?: Vec3;
   } | null>(null);
+  const [crossWorldPresence, setCrossWorldPresence] = useState<Record<string, WorldPresence[]>>({});
   const [portalTargetWorldId, setPortalTargetWorldId] = useState("");
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
   const [showFps, setShowFps] = useState(false);
@@ -7033,8 +7051,7 @@ function App(): React.ReactElement {
       setShowFps((v) => !v);
     }
   };
-  // ── P2P video panel state (RX inbound default ON, TX local camera default OFF) ──
-  const [p2pPanelOpen, setP2pPanelOpen] = useState(false);
+  // ── P2P video state (RX inbound default ON, TX local camera default OFF) ──
   const [rxEnabled, setRxEnabled] = useState(true);
   const [txEnabled, setTxEnabled] = useState(false);
   const [audioListen, setAudioListen] = useState(false); // hear peers (RX audio) — off by default (autoplay)
@@ -7250,21 +7267,15 @@ function App(): React.ReactElement {
     void worldRef.current?.setP2pDevices(selectedMic || undefined, id || undefined).then(attachSelfPreview);
   };
 
-  // Re-attach the self-preview when the panel mounts the <video> (panel open + TX already on).
+  // Sample mesh stats while the social panel OR the debug overlay is open (≈1Hz).
   useEffect(() => {
-    if (p2pPanelOpen && txEnabled) attachSelfPreview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p2pPanelOpen, txEnabled]);
-
-  // Sample mesh stats while the P2P panel OR the debug overlay is open (≈1Hz).
-  useEffect(() => {
-    if (!p2pPanelOpen && !showFps) return;
+    if (!worldChatOpen && !showFps) return;
     const id = window.setInterval(() => {
       setP2pStats(worldRef.current?.getP2pStats() ?? null);
       setAmbientStats(worldRef.current?.getAmbientStats() ?? null);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [p2pPanelOpen, showFps]);
+  }, [worldChatOpen, showFps]);
 
   // ── "Your Agent" panel handlers (self-contained; pure fetch against the Hyades world agent API) ──
   const fetchAgentStatus = useCallback(async (signal?: AbortSignal): Promise<AgentStatus | null> => {
@@ -7397,18 +7408,17 @@ function App(): React.ReactElement {
     if (additions.length) setAgentChat((prev) => [...prev, ...additions]);
   }, []);
 
-  const onAgentSend = useCallback(async () => {
-    const text = agentChatInput.trim();
-    if (!text) return;
+  const sendAgentMessage = useCallback(async (rawText: string): Promise<boolean> => {
+    const text = rawText.trim();
+    if (!text) return false;
     if (!agentStatus?.optedIn) {
       setAgentError("Start your agent before talking to it.");
-      return;
+      return false;
     }
     // Pre-seed the dedup key so the same line coming back from the transcript poll (as a `user` message)
     // doesn't double-add it; on a fresh reload the seen set is empty so the transcript restores it cleanly.
     agentMergedKeysRef.current.add(`user|${text}`);
     setAgentChat((prev) => [...prev, { id: ++agentChatSeqRef.current, who: "you", text }]);
-    setAgentChatInput("");
     setAgentError(null);
     try {
       const res = await fetch(tellusAgentUrl("say"), {
@@ -7422,11 +7432,19 @@ function App(): React.ReactElement {
             ? "Start your agent before talking to it."
             : `Send failed (${res.status})`,
         );
+        return false;
       }
+      return true;
     } catch (err) {
       setAgentError(err instanceof Error ? err.message : "Send failed.");
+      return false;
     }
-  }, [agentChatInput, agentStatus?.optedIn]);
+  }, [agentStatus?.optedIn]);
+
+  const onAgentSend = useCallback(async () => {
+    const sent = await sendAgentMessage(agentChatInput);
+    if (sent) setAgentChatInput("");
+  }, [agentChatInput, sendAgentMessage]);
 
   // Poll the agent status every ~3s while the panel is open OR the POV viewport is up (the viewport
   // outlives the panel, and the thinking/sleep state should stay fresh); prime the persona draft on
@@ -7900,7 +7918,7 @@ function App(): React.ReactElement {
 
         {agentError && <div style={{ fontSize: 11, color: "#ff9a9a" }}>{agentError}</div>}
 
-        {/* Chat thread — always visible (chat-first). */}
+        {/* Agent composer — the big box is the input; transcript appears above once there is history. */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 11, opacity: 0.7 }}>Chat</span>
           <button
@@ -7912,69 +7930,49 @@ function App(): React.ReactElement {
             ⤢
           </button>
         </div>
-        <div
-          ref={agentTranscriptScrollRef}
-          style={{
-            flex: "1 1 auto",
-            minHeight: 80,
-            maxHeight: 280,
-            overflowY: "auto",
-            background: "rgba(0,0,0,0.32)",
-            border: "1px solid rgba(255,255,255,0.12)",
-            borderRadius: 6,
-            padding: "6px 8px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
+        {(agentChat.length > 0 || agentStatus?.processing) && (
+          <div
+            ref={agentTranscriptScrollRef}
+            className="agent-tab-transcript"
+          >
+            {agentFeed.map(renderAgentFeedItem)}
+            {optedIn && agentStatus?.processing && (
+              <span style={{ fontSize: 11, color: "#9ec8ff", fontStyle: "italic", opacity: 0.85 }}>thinking...</span>
+            )}
+          </div>
+        )}
+        <textarea
+          className="agent-tab-composer"
+          value={agentChatInput}
+          onChange={(e) => setAgentChatInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void onAgentSend();
+            }
           }}
-        >
-          {agentChat.length === 0 && !agentStatus?.processing ? (
-            <span style={{ fontSize: 11, opacity: 0.5, fontStyle: "italic" }}>
-              {optedIn ? "Say hello to your agent below." : "Start your agent (Settings), then say hello below."}
-            </span>
-          ) : (
-            agentFeed.map(renderAgentFeedItem)
+          placeholder={optedIn ? "Talk to your agent..." : "Start your agent first (Settings)"}
+          disabled={!optedIn}
+          rows={5}
+        />
+        <div className="agent-tab-actions">
+          {agentSpeech.supported && (
+            <button
+              type="button"
+              className={agentSpeech.listening ? "agent-tab-mic active" : "agent-tab-mic"}
+              title={agentSpeech.listening ? "Listening..." : "Speak to your agent"}
+              disabled={!optedIn}
+              onClick={agentSpeech.start}
+            >
+              <Mic size={14} />
+              <span>{agentSpeech.listening ? "Listening" : "Mic"}</span>
+            </button>
           )}
-          {optedIn && agentStatus?.processing && (
-            <span style={{ fontSize: 11, color: "#9ec8ff", fontStyle: "italic", opacity: 0.85 }}>💭 thinking…</span>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 4 }}>
-          <input
-            type="text"
-            value={agentChatInput}
-            onChange={(e) => setAgentChatInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void onAgentSend();
-              }
-            }}
-            placeholder={optedIn ? "Talk to your agent…" : "Start your agent first (Settings)"}
-            disabled={!optedIn}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              fontSize: 12,
-              padding: "5px 8px",
-              borderRadius: 6,
-              border: "1px solid rgba(255,255,255,0.18)",
-              background: "rgba(0,0,0,0.3)",
-              color: "#eef2ea",
-              opacity: optedIn ? 1 : 0.5,
-            }}
-          />
           <button
             type="button"
+            className="agent-tab-send"
             onClick={() => void onAgentSend()}
             disabled={!optedIn || agentChatInput.trim().length === 0}
-            style={{
-              ...p2pBtnStyle(false),
-              flex: "none",
-              padding: "5px 12px",
-              opacity: optedIn && agentChatInput.trim().length > 0 ? 1 : 0.5,
-              cursor: optedIn && agentChatInput.trim().length > 0 ? "pointer" : "default",
-            }}
           >
             Send
           </button>
@@ -8127,6 +8125,7 @@ function App(): React.ReactElement {
   // returns SEEDED worlds, so we union it with locally-remembered ids + the current one.
   const [activeWorldId, setActiveWorldId] = useState<string | null>(null);
   const [worlds, setWorlds] = useState<string[]>([]);
+  const sharedLocationRef = useRef<{ worldId: string; x: number; z: number; consumed: boolean } | null>(null);
   const [newWorldTemplate, setNewWorldTemplate] = useState<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
   );
@@ -8438,6 +8437,21 @@ function App(): React.ReactElement {
     }
     setActiveWorldId(next);
     void refreshWorldList(next);
+  };
+  const parseSharedLocation = (): { worldId: string; x: number; z: number; consumed: boolean } | null => {
+    const params = new URLSearchParams(window.location.search);
+    const worldId = params.get("world")?.trim();
+    const x = Number(params.get("x"));
+    const z = Number(params.get("z"));
+    if (!worldId || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+    return { worldId: canonicalWorldId(worldId), x, z, consumed: false };
+  };
+  const shareLocationUrl = (worldId: string, x: number, z: number): string => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("world", canonicalWorldId(worldId));
+    url.searchParams.set("x", String(Math.round(x)));
+    url.searchParams.set("z", String(Math.round(z)));
+    return url.toString();
   };
   const portalArrivalPosition = (x: number, z: number) => {
     const len = Math.hypot(x, z);
@@ -8895,6 +8909,9 @@ function App(): React.ReactElement {
   const { listening, supported, start } = useSpeechInput((text) =>
     setPrompt(text),
   );
+  const agentSpeech = useSpeechInput((text) =>
+    setAgentChatInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text)),
+  );
   const importedGeneratedThings = (value: unknown): WorldGeneratedThing[] => {
     const source = Array.isArray(value)
       ? value
@@ -9108,12 +9125,14 @@ function App(): React.ReactElement {
           setNewWorldPrivate(false);
           setNewWorldChunkSize(8);
         }
+        const sharedLocation = parseSharedLocation();
+        sharedLocationRef.current = sharedLocation;
         const configDefault = canonicalWorldId(runtimeConfig.worldId);
         rememberWorld(configDefault);
-        let initial = configDefault;
+        let initial = sharedLocation?.worldId ?? configDefault;
         try {
           const saved = window.localStorage.getItem(ACTIVE_WORLD_KEY);
-          if (saved && saved.trim()) initial = canonicalWorldId(saved);
+          if (!sharedLocation && saved && saved.trim()) initial = canonicalWorldId(saved);
         } catch {
           /* ignore */
         }
@@ -9194,6 +9213,20 @@ function App(): React.ReactElement {
         if (cancelled) return;
         world = createTellusWorld(container, setSnapshot);
         worldRef.current = world;
+        const mountedWorld = world;
+        const sharedLocation = sharedLocationRef.current;
+        if (
+          sharedLocation &&
+          !sharedLocation.consumed &&
+          sharedLocation.worldId === activeWorldId
+        ) {
+          sharedLocation.consumed = true;
+          window.setTimeout(() => {
+            if (!cancelled && worldRef.current === mountedWorld) {
+              mountedWorld.warpTo(sharedLocation.x, sharedLocation.z);
+            }
+          }, 250);
+        }
       });
     return () => {
       cancelled = true;
@@ -9438,6 +9471,48 @@ function App(): React.ReactElement {
     return friendlyVisitorName(visitor.visitorId, visitor.name, snapshot.visitorId);
   };
   const currentWorldId = activeWorldId ?? runtimeConfig.worldId;
+  useEffect(() => {
+    if (!worldChatOpen || chatTab !== "dm") return;
+    const controller = new AbortController();
+    let cancelled = false;
+    const targetWorlds = worlds
+      .map(canonicalWorldId)
+      .filter((worldId) => worldId && worldId !== currentWorldId)
+      .slice(0, 12);
+    if (targetWorlds.length === 0) return () => controller.abort();
+
+    const loadPresence = async () => {
+      const entries = await Promise.all(
+        targetWorlds.map(async (worldId) => {
+          try {
+            const res = await fetch(
+              worldApiUrl(`/api/world/${encodeURIComponent(worldId)}/state?userId=${encodeURIComponent(tellusUserId())}`),
+              { cache: "no-store", signal: controller.signal },
+            );
+            if (!res.ok) return [worldId, [] as WorldPresence[]] as const;
+            const parsed = await res.json();
+            return [worldId, (presenceFromWorldPatch(parsed) ?? []).filter(isLivePresence)] as const;
+          } catch {
+            return [worldId, [] as WorldPresence[]] as const;
+          }
+        }),
+      );
+      if (cancelled) return;
+      setCrossWorldPresence((prev) => {
+        const next: Record<string, WorldPresence[]> = { ...prev };
+        for (const [worldId, presence] of entries) next[worldId] = presence;
+        return next;
+      });
+    };
+
+    void loadPresence();
+    const interval = window.setInterval(() => void loadPresence(), 10000);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [chatTab, currentWorldId, worldChatOpen, worlds.join("\n")]);
   const portalTargetOptions = worlds.filter((worldId) => worldId && worldId !== currentWorldId);
   useEffect(() => {
     if (portalTargetWorldId && portalTargetOptions.includes(portalTargetWorldId)) return;
@@ -9450,21 +9525,123 @@ function App(): React.ReactElement {
     }
     return "";
   }, [snapshot.logs]);
-  const chatTargets = [...remoteAgents, ...remotePlayers].map((visitor) => ({
-    visitorId: visitor.visitorId,
-    name: actorName(visitor),
-    kind: visitor.visitorId.startsWith("agent:") ? "agent" as const : "player" as const,
-  }));
-  const openDirectChatFor = (visitor: { visitorId: string; name?: string }) => {
+  const chatTargets = useMemo<OnlineContact[]>(() => {
+    const byKey = new Map<string, OnlineContact>();
+    const merge = (presence: WorldPresence, worldId: string, currentWorld: boolean) => {
+      if (presence.visitorId === snapshot.visitorId) return;
+      if (presence.ownerUserId && presence.ownerUserId === snapshot.userId) return;
+      const kind = presence.visitorId.startsWith("agent:") ? "agent" : "player";
+      const key = kind === "player" && presence.ownerUserId
+        ? `player:${presence.ownerUserId}`
+        : `${kind}:${presence.visitorId}`;
+      const next: OnlineContact = {
+        visitorId: presence.visitorId,
+        name: actorName(presence),
+        kind,
+        worldId,
+        position: presence.position,
+        online: isLivePresence(presence),
+        currentWorld,
+        lastSeenAt: presence.lastSeenAt,
+      };
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, next);
+        return;
+      }
+      const prevSeen = prev.lastSeenAt ? Date.parse(prev.lastSeenAt) : 0;
+      const nextSeen = next.lastSeenAt ? Date.parse(next.lastSeenAt) : 0;
+      if (
+        next.currentWorld ||
+        (!prev.currentWorld && (nextSeen >= prevSeen || (!prev.position && next.position)))
+      ) {
+        byKey.set(key, next);
+      }
+    };
+
+    for (const visitor of [...remoteAgents, ...remotePlayers]) merge(visitor, currentWorldId, true);
+    for (const [worldId, presence] of Object.entries(crossWorldPresence)) {
+      if (worldId === currentWorldId) continue;
+      for (const visitor of presence) merge(visitor, worldId, false);
+    }
+
+    if (agentStatus?.optedIn && agentStatus.visitorId) {
+      const agentWorldId = canonicalWorldId(agentStatus.worldId || currentWorldId);
+      const key = `agent:${agentStatus.visitorId}`;
+      const existing = byKey.get(key);
+      byKey.set(key, {
+        visitorId: agentStatus.visitorId,
+        name: existing?.name || actorName({ visitorId: agentStatus.visitorId, name: "Your agent" }),
+        kind: "agent",
+        worldId: existing?.worldId || agentWorldId,
+        position: existing?.position,
+        online: existing?.online ?? Boolean(agentStatus.enabled || agentStatus.ownerPresent || agentStatus.offlinePersistence),
+        currentWorld: existing?.currentWorld ?? agentWorldId === currentWorldId,
+        lastSeenAt: existing?.lastSeenAt || agentStatus.lastTickAt || undefined,
+      });
+    }
+
+    return [...byKey.values()]
+      .filter((contact) => contact.online)
+      .sort((a, b) => {
+        if (a.currentWorld !== b.currentWorld) return a.currentWorld ? -1 : 1;
+        if (a.kind !== b.kind) return a.kind === "agent" ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [
+    agentStatus?.enabled,
+    agentStatus?.lastTickAt,
+    agentStatus?.offlinePersistence,
+    agentStatus?.optedIn,
+    agentStatus?.ownerPresent,
+    agentStatus?.visitorId,
+    agentStatus?.worldId,
+    crossWorldPresence,
+    currentWorldId,
+    remoteAgents,
+    remotePlayers,
+    snapshot.userId,
+    snapshot.visitorId,
+  ]);
+  const openDirectChatFor = (visitor: { visitorId: string; name?: string; position?: Vec3 }) => {
     const target = {
       visitorId: visitor.visitorId,
       name: actorName(visitor),
       kind: visitor.visitorId.startsWith("agent:") ? "agent" as const : "player" as const,
+      worldId: currentWorldId,
+      position: visitor.position,
     };
     setWorldChatOpen(true);
     setWorldChatChannel("dm");
     setWorldChatDmTarget(target);
     setWorldChatInput("");
+  };
+  const goToOnlineContact = (contact: OnlineContact) => {
+    if (!contact.position) return;
+    if (contact.worldId === currentWorldId) {
+      worldRef.current?.warpTo(contact.position.x, contact.position.z);
+      return;
+    }
+    const nextLocation = {
+      worldId: canonicalWorldId(contact.worldId),
+      x: contact.position.x,
+      z: contact.position.z,
+      consumed: false,
+    };
+    sharedLocationRef.current = nextLocation;
+    try {
+      window.history.replaceState(null, "", shareLocationUrl(nextLocation.worldId, nextLocation.x, nextLocation.z));
+    } catch {
+      /* ignore */
+    }
+    switchWorld(nextLocation.worldId);
+  };
+  const toggleMicControl = () => {
+    if (!txEnabled) {
+      void toggleTx();
+      return;
+    }
+    toggleMic();
   };
   const visibleWorldChat = snapshot.worldChat.filter((message) => {
     if (worldChatChannel === "world") return message.channel === "world";
@@ -9486,6 +9663,19 @@ function App(): React.ReactElement {
   });
   const sendWorldChatMessage = () => {
     if (worldChatChannel === "dm" && !worldChatDmTarget) return;
+    if (
+      worldChatChannel === "dm" &&
+      worldChatDmTarget?.visitorId &&
+      agentStatus?.visitorId &&
+      worldChatDmTarget.visitorId === agentStatus.visitorId
+    ) {
+      void sendAgentMessage(worldChatInput).then((sent) => {
+        if (!sent) return;
+        setWorldChatInput("");
+        setChatTab("agent");
+      });
+      return;
+    }
     const sent = worldRef.current?.sendWorldChat(
       worldChatInput,
       worldChatChannel,
@@ -9690,24 +9880,21 @@ function App(): React.ReactElement {
                     ? worldChatDmTarget
                       ? `DM - ${worldChatDmTarget.name}`
                       : "DMs"
-                    : worldChatChannel === "nearby"
-                      ? "Nearby Chat"
-                      : "World Chat"}
+                    : "World Chat"}
               </span>
               <button type="button" className="panel-mini-button" onClick={() => setWorldChatOpen(false)}>
                 Close
               </button>
             </header>
             <nav className="mini-chat-tabs" aria-label="Chat channels">
-              {(["world", "nearby", "dm", "agent"] as const).map((tab) => (
+              {(["world", "dm", "agent"] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   className={chatTab === tab ? "active" : ""}
                   onClick={() => {
                     setChatTab(tab);
-                    // The three real channels also drive the wire-protocol channel used for sending.
-                    if (tab !== "agent") setWorldChatChannel(tab);
+                    if (tab === "world" || tab === "dm") setWorldChatChannel(tab);
                   }}
                 >
                   {tab === "dm" ? "DMs" : tab[0].toUpperCase() + tab.slice(1)}
@@ -9720,22 +9907,38 @@ function App(): React.ReactElement {
                 {worldChatChannel === "dm" && (
               <div className="mini-chat-dm-targets" aria-label="DM recipients">
                 {chatTargets.length === 0 ? (
-                  <span>No players or agents visible.</span>
+                  <span>No online players or agents found.</span>
                 ) : (
                   <>
                     <span>To</span>
                     <div>
                       {chatTargets.map((target) => (
-                        <button
+                        <div
                           key={target.visitorId}
-                          type="button"
-                          className={worldChatDmTarget?.visitorId === target.visitorId ? "active" : ""}
-                          title={target.visitorId}
-                          onClick={() => setWorldChatDmTarget(target)}
+                          className={`mini-chat-contact ${worldChatDmTarget?.visitorId === target.visitorId ? "active" : ""}`}
+                          title={`${target.name} in ${target.worldId}`}
                         >
-                          {target.name}
-                          <small>{target.kind}</small>
-                        </button>
+                          <button
+                            type="button"
+                            className="mini-chat-contact-main"
+                            onClick={() => setWorldChatDmTarget(target)}
+                          >
+                            <span className="presence-dot online" aria-hidden="true" />
+                            <span>{target.name}</span>
+                            <small>{target.currentWorld ? "here" : target.worldId}</small>
+                          </button>
+                          <button
+                            type="button"
+                            className="mini-chat-contact-go"
+                            disabled={!target.position}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              goToOnlineContact(target);
+                            }}
+                          >
+                            Go
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </>
@@ -9809,13 +10012,6 @@ function App(): React.ReactElement {
               }}
             />
             <div className="mini-chat-actions">
-              <span className="mini-chat-channel-label">
-                {worldChatChannel === "dm"
-                  ? worldChatDmTarget?.name || "No DM target"
-                  : worldChatChannel === "nearby"
-                    ? "Nearby"
-                    : "World"}
-              </span>
               <button
                 type="button"
                 className="mini-chat-submit"
@@ -9824,6 +10020,34 @@ function App(): React.ReactElement {
               >
                 Send
               </button>
+              <div className="mini-chat-call-controls" aria-label="Voice and video controls">
+                <button
+                  type="button"
+                  className={audioListen ? "mini-chat-call-button active" : "mini-chat-call-button"}
+                  title={audioListen ? "Mute incoming audio" : "Hear others"}
+                  onClick={toggleAudioListen}
+                >
+                  {audioListen ? <Volume2 size={15} /> : <VolumeX size={15} />}
+                </button>
+                <button
+                  type="button"
+                  className={txEnabled && micOn ? "mini-chat-call-button active" : "mini-chat-call-button"}
+                  title={!txEnabled ? "Start camera and microphone" : micOn ? "Mute microphone" : "Unmute microphone"}
+                  disabled={!p2pSupported}
+                  onClick={toggleMicControl}
+                >
+                  {txEnabled && micOn ? <Mic size={15} /> : <MicOff size={15} />}
+                </button>
+                <button
+                  type="button"
+                  className={txEnabled ? "mini-chat-call-button active" : "mini-chat-call-button primary"}
+                  title={txEnabled ? "Stop sharing camera" : "Start camera"}
+                  disabled={!p2pSupported}
+                  onClick={() => void toggleTx()}
+                >
+                  {txEnabled ? <Video size={15} /> : <VideoOff size={15} />}
+                </button>
+              </div>
             </div>
               </>
             )}
@@ -10273,20 +10497,6 @@ function App(): React.ReactElement {
             <RotateCw size={18} />
             <span>Move</span>
           </button>
-          {p2pSupported && (
-            <button
-              type="button"
-              className={p2pPanelOpen ? "toolbelt-button active" : "toolbelt-button"}
-              title="P2P Video"
-              onClick={() => {
-                setP2pPanelOpen((open) => !open);
-                void refreshP2pDevices();
-              }}
-            >
-              <Video size={18} />
-              <span>P2P</span>
-            </button>
-          )}
           <button
             type="button"
             className={agentPanelOpen ? "toolbelt-button active" : "toolbelt-button"}
@@ -10309,11 +10519,7 @@ function App(): React.ReactElement {
             <span>Avatar</span>
           </button>
         </aside>
-        {/* Panel layout policy: every bottom panel gets its OWN anchor so any combination can be
-            open at once — avatar picker = LEFT edge column, P2P = just left-of-center, agent =
-            just right-of-center; each is height-capped with internal scroll. The login dialog is
-            a true modal (fullscreen dimmed overlay, z-index 70) ABOVE all of them by design. The
-            open avatar picker temporarily covers the agent-PiP corner (close it to see the PiP). */}
+        {/* The login dialog is a true modal (fullscreen dimmed overlay, z-index 70) ABOVE all panels. */}
         {false && (
           <aside
             className="avatar-panel"
@@ -10407,112 +10613,6 @@ function App(): React.ReactElement {
               <span style={{ fontSize: 10, opacity: 0.55 }}>
                 0.1× – 8× · visual only (movement unchanged)
               </span>
-            </div>
-          </aside>
-        )}
-        {p2pPanelOpen && p2pSupported && (
-          <aside
-            className="p2p-panel hud-card"
-            aria-label="P2P video"
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <strong style={{ fontSize: 13 }}>P2P Video</strong>
-              <span style={{ fontSize: 11, opacity: 0.7 }}>
-                {p2pStats?.rxStreams ?? 0}/16 · 480p
-              </span>
-            </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11 }}>
-              Microphone
-              <select
-                value={selectedMic}
-                onChange={(e) => onMicChange(e.target.value)}
-                style={p2pSelectStyle}
-              >
-                <option value="">Default</option>
-                {audioInputs.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Mic ${d.deviceId.slice(0, 6)}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11 }}>
-              Camera
-              <select
-                value={selectedCam}
-                onChange={(e) => onCamChange(e.target.value)}
-                style={p2pSelectStyle}
-              >
-                <option value="">Default</option>
-                {videoInputs.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Cam ${d.deviceId.slice(0, 6)}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <video
-              ref={selfVideoRef}
-              muted
-              playsInline
-              autoPlay
-              style={{
-                width: "100%",
-                aspectRatio: "16 / 9",
-                borderRadius: 8,
-                background: "#000",
-                objectFit: "cover",
-                display: txEnabled ? "block" : "none",
-                transform: "scaleX(-1)", // mirror, like a webcam preview
-              }}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => void refreshP2pDevices()}
-                style={p2pBtnStyle(false)}
-              >
-                Refresh
-              </button>
-              <button
-                type="button"
-                onClick={toggleRx}
-                style={p2pBtnStyle(rxEnabled)}
-              >
-                RX {rxEnabled ? "On" : "Off"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void toggleTx()}
-                style={p2pBtnStyle(txEnabled)}
-              >
-                TX {txEnabled ? "On" : "Off"}
-              </button>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={toggleAudioListen}
-                style={p2pBtnStyle(audioListen)}
-                title="Hear other players' audio"
-              >
-                🔊 Listen {audioListen ? "On" : "Off"}
-              </button>
-              <button
-                type="button"
-                onClick={toggleMic}
-                disabled={!txEnabled}
-                style={{ ...p2pBtnStyle(txEnabled && micOn), opacity: txEnabled ? 1 : 0.45 }}
-                title={txEnabled ? "Mute/unmute your mic" : "Turn TX on to use your mic"}
-              >
-                🎤 {txEnabled ? (micOn ? "On" : "Muted") : "Off"}
-              </button>
-            </div>
-            {p2pError && (
-              <div style={{ fontSize: 11, color: "#ff9a9a" }}>{p2pError}</div>
-            )}
-            <div style={{ fontSize: 10, opacity: 0.6 }}>
-              RX shows others' cameras; TX shares your camera + mic (480p). Listen = hear others.
             </div>
           </aside>
         )}
@@ -10967,10 +11067,10 @@ function App(): React.ReactElement {
                 <div className="world-map-action-bar" aria-label="Map actions">
                   <button
                     type="button"
-                    title="Copy your world location"
+                    title="Copy a link to your world location"
                     onClick={() => {
-                      const text = `${currentWorldId} ${cell}(${wx}, ${wz})`;
-                      void navigator.clipboard?.writeText(text).catch(() => undefined);
+                      const url = shareLocationUrl(currentWorldId, pos.x, pos.z);
+                      void navigator.clipboard?.writeText(url).catch(() => undefined);
                     }}
                   >
                     <span className="world-info-label">Share</span>
