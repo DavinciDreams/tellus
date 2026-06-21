@@ -3359,6 +3359,9 @@ function createTellusWorld(
     }
   };
 
+  const isAssetStoreBackedModel = (thing: GeneratedThing, modelUrl: string): boolean =>
+    Boolean(thing.assetStoreModelId?.trim() || assetStoreIdFromModelUrl(modelUrl));
+
   const showTransientGeneratedLoadFailure = (thing: GeneratedThing, error: unknown) => {
     const oldMesh = generatedMeshes.get(thing.id);
     if (oldMesh?.userData.transientLoadFailedFor === thing.modelUrl) return;
@@ -3380,8 +3383,11 @@ function createTellusWorld(
 
   const scheduleTransientModelRetry = (thingId: string, modelUrl: string) => {
     if (transientModelRetryTimers.has(thingId)) return;
+    const current = thingById(thingId);
+    const assetStoreBacked = current ? isAssetStoreBackedModel(current, modelUrl) : false;
     const attempts = transientModelLoadFailures.get(thingId) ?? 1;
-    const delay = Math.min(30_000, 1_500 * Math.pow(2, Math.max(0, attempts - 1)));
+    const delayCapMs = assetStoreBacked ? 60_000 : 30_000;
+    const delay = Math.min(delayCapMs, 1_500 * Math.pow(2, Math.max(0, attempts - 1)));
     const timer = window.setTimeout(() => {
       transientModelRetryTimers.delete(thingId);
       const current = thingById(thingId);
@@ -3466,7 +3472,11 @@ function createTellusWorld(
           const current = thingById(id);
           console.warn("Remote generated model load failed", error);
           if (!current || current.modelUrl !== modelUrl) return;
-          const definitelyDead = await isDefinitelyDeadModelUrl(modelUrl);
+          const assetStoreBacked = isAssetStoreBackedModel(current, modelUrl);
+          // Asset-store ids are stable Tellus state, and the asset manager resolves superseded ids
+          // through aliases on the model endpoints. A 404/410 can still be transient while conversion,
+          // alias creation, or the deploy catches up, so keep retrying instead of erasing the saved id.
+          const definitelyDead = assetStoreBacked ? false : await isDefinitelyDeadModelUrl(modelUrl);
           if (!current || current.modelUrl !== modelUrl) return;
           if (definitelyDead) {
             current.modelUrl = undefined;
