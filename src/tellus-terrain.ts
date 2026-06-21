@@ -462,11 +462,7 @@ export function terrainVertexColor(
 ): THREE.Color {
   const color = terrainColors[kind].clone();
   if (kind === "flowers") {
-    const fleck = rand(seed * 7 + 2309);
-    if (fleck > 0.92) return new THREE.Color(0xffd36a);
-    if (fleck > 0.84) return new THREE.Color(0xf2a6cc);
-    if (fleck > 0.78) return new THREE.Color(0xc8dfff);
-    color.lerp(new THREE.Color(0x89b84a), 0.35);
+    color.lerp(new THREE.Color(0x5f9438), 0.58);
   } else if (kind === "rock") {
     const pebble = rand(seed * 5 + 7919);
     color.lerp(

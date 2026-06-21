@@ -21,6 +21,7 @@ import {
   tellusWorldChunkUrl,
 } from "./tellus-urls-identity";
 import type { ChunkData } from "./world-protocol";
+import type { TerrainPaintKind } from "./tellus-types";
 
 const key = (cx: number, cz: number) => `${cx},${cz}`;
 
@@ -95,6 +96,7 @@ interface ActiveChunk {
   cx: number;
   cz: number;
   sculptOffsets: number[];
+  paint: number[];
 }
 
 export interface ChunkRenderer {
@@ -112,6 +114,7 @@ export interface ChunkRenderer {
    * with empty sculptOffsets samples 0 (flat base).
    */
   sampleHeight(worldX: number, worldZ: number): number | null;
+  samplePaint(worldX: number, worldZ: number): TerrainPaintKind | null;
   stats(): { active: number; pending: number; failed: number };
   dispose(): void;
 }
@@ -264,6 +267,7 @@ export function createChunkRenderer(
       existing.revision = data.revision;
       existing.lodSegments = lodSegments;
       existing.sculptOffsets = data.sculptOffsets;
+      existing.paint = data.paint;
       return;
     }
     const mesh = new THREE.Mesh(geometry, material);
@@ -278,6 +282,7 @@ export function createChunkRenderer(
       cx: data.cx,
       cz: data.cz,
       sculptOffsets: data.sculptOffsets,
+      paint: data.paint,
     });
   };
 
@@ -343,6 +348,20 @@ export function createChunkRenderer(
     return largeWorldBaseHeight(worldX, worldZ) + sculptOffset;
   };
 
+  const samplePaint = (worldX: number, worldZ: number): TerrainPaintKind | null => {
+    if (disposed) return null;
+    const cx = Math.floor(worldX / CHUNK_SPAN);
+    const cz = Math.floor(worldZ / CHUNK_SPAN);
+    const a = active.get(key(cx, cz));
+    if (!a || a.paint.length === 0) return null;
+    const lx = worldX - cx * CHUNK_SPAN;
+    const lz = worldZ - cz * CHUNK_SPAN;
+    const gx = Math.max(0, Math.min(CHUNK_SEGMENTS, Math.round((lx / CHUNK_SPAN) * CHUNK_SEGMENTS)));
+    const gz = Math.max(0, Math.min(CHUNK_SEGMENTS, Math.round((lz / CHUNK_SPAN) * CHUNK_SEGMENTS)));
+    const code = a.paint[gz * CHUNK_VERTEX_COUNT + gx] ?? 0;
+    return code ? terrainPaintKindFromCode(code) : null;
+  };
+
   const dispose = () => {
     disposed = true;
     for (const ctrl of inflight.values()) ctrl.abort();
@@ -374,6 +393,7 @@ export function createChunkRenderer(
     reloadChunk,
     flush,
     sampleHeight,
+    samplePaint,
     stats: () => ({ active: active.size, pending: inflight.size + ready.size, failed: failedFetches }),
     dispose,
   };

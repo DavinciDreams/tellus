@@ -48,6 +48,8 @@ export function treeTemplateFromSpecies(
     maxBranchDepth: opts.maxBranchDepth,
     maxStems: opts.maxStems,
     maxLeaves: opts.maxLeaves,
+    leafScaleMultiplier: opts.leafScaleMultiplier,
+    blossomScaleMultiplier: opts.blossomScaleMultiplier,
   };
   const generateLeaves = (opts.maxLeaves ?? 1) !== 0;
   const baked = generateBakedTree(species, seed >>> 0, bakeOpts, generateLeaves);
