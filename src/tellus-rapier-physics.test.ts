@@ -28,4 +28,37 @@ describe("Tellus Rapier physics adapter", () => {
       physics.dispose();
     }
   });
+
+  // Regression: a non-finite move vector used to be forwarded straight into the kinematic controller +
+  // world.step(), which panics the Rapier WASM solver with `unreachable` (the terrain-paint crash).
+  // The adapter must now refuse NaN/Inf input and keep the last good position instead of throwing.
+  it("does not panic Rapier when fed NaN/Inf positions", async () => {
+    const physics = await createTellusRapierPhysics();
+    try {
+      const good = { x: 3, y: 1, z: -2 };
+      expect(() =>
+        physics.movePlayer(good, { x: NaN, y: 0, z: 0 }),
+      ).not.toThrow();
+      const a = physics.movePlayer(good, { x: NaN, y: 0, z: 0 });
+      expect(a.position).toEqual(good); // stayed put on bad desired
+
+      expect(() =>
+        physics.movePlayer({ x: Infinity, y: 0, z: 0 }, good),
+      ).not.toThrow();
+
+      expect(() =>
+        physics.movePlayer3D(good, { x: 0, y: NaN, z: 0 }),
+      ).not.toThrow();
+      const b = physics.movePlayer3D(good, { x: 0, y: NaN, z: 0 });
+      expect(b.position).toEqual(good);
+
+      // A normal finite move still works after the rejected ones (controller not poisoned).
+      const ok = physics.movePlayer(good, { x: 3.2, y: 1, z: -2 });
+      expect(Number.isFinite(ok.position.x)).toBe(true);
+      expect(Number.isFinite(ok.position.y)).toBe(true);
+      expect(Number.isFinite(ok.position.z)).toBe(true);
+    } finally {
+      physics.dispose();
+    }
+  });
 });

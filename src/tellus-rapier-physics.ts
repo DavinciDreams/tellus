@@ -71,6 +71,13 @@ const playerFeet = (center: Vec3): Vec3 => ({
   z: center.z,
 });
 
+// A single non-finite component fed into controller.computeColliderMovement poisons the kinematic
+// controller; the next world.step() then hits an `unreachable` panic deep in the Rapier WASM solver
+// (the crash seen while painting terrain). Guard the boundary: any NaN/Inf in a move vector is a bug
+// upstream, but here we refuse to forward it to Rapier and keep the player put instead of crashing.
+const isFiniteVec = (v: Vec3): boolean =>
+  Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+
 export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> {
   await (RAPIER.init as (options?: object) => Promise<void>)({});
   const world = new World({ x: 0, y: -22, z: 0 });
@@ -196,6 +203,15 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
       if (disposed) {
         return { position: desiredFeet, grounded: false, collisions: 0 };
       }
+      // Refuse non-finite input — forwarding NaN/Inf to Rapier panics the WASM solver. Keep the
+      // last good feet position (fromFeet) rather than crashing the whole frame loop.
+      if (!isFiniteVec(fromFeet) || !isFiniteVec(desiredFeet)) {
+        return {
+          position: isFiniteVec(fromFeet) ? fromFeet : { x: 0, y: 0, z: 0 },
+          grounded: false,
+          collisions: 0,
+        };
+      }
       const from = playerCenter(fromFeet);
       const desired = playerCenter(desiredFeet);
       playerCollider.setTranslation(from);
@@ -224,6 +240,15 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
     movePlayer3D(fromFeet, desiredFeet) {
       if (disposed) {
         return { position: desiredFeet, grounded: false, collisions: 0 };
+      }
+      // Same NaN/Inf backstop as movePlayer — a non-finite delta into the controller + world.step()
+      // is the terrain-paint `unreachable` crash.
+      if (!isFiniteVec(fromFeet) || !isFiniteVec(desiredFeet)) {
+        return {
+          position: isFiniteVec(fromFeet) ? fromFeet : { x: 0, y: 0, z: 0 },
+          grounded: false,
+          collisions: 0,
+        };
       }
       const from = playerCenter(fromFeet);
       const desired = playerCenter(desiredFeet);

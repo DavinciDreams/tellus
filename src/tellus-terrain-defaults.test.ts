@@ -3,8 +3,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyWorldTerrainTemplate,
   baseTerrainHeight,
+  groundHeightAt,
+  groundedPosition,
   isIntentionallyElevated,
   isIntentionallyOffsetFromGround,
+  setChunkedFlatGround,
+  setChunkedHeightProvider,
   terrainKind,
 } from "./tellus-terrain";
 import type { GeneratedThing } from "./tellus-types";
@@ -84,5 +88,38 @@ describe("Tellus terrain defaults", () => {
     expect(isIntentionallyElevated(thingAt(ground - 2))).toBe(false);
     expect(isIntentionallyOffsetFromGround(thingAt(ground - 2))).toBe(true);
     expect(isIntentionallyOffsetFromGround(thingAt(ground + 0.1))).toBe(false);
+  });
+});
+
+// Regression: chunked grounding height MUST be finite. It flows into visitorPosition.y and then the
+// Rapier controller; a NaN there panics world.step() (the terrain-paint `unreachable` crash). The
+// height provider returns null for not-yet-loaded chunks (mid-reload during a paint stroke) and can
+// transiently return non-finite values, so groundedPosition/groundHeightAt must never emit NaN.
+describe("chunked grounding is NaN-safe", () => {
+  afterEach(() => {
+    setChunkedHeightProvider(null);
+    setChunkedFlatGround(null);
+  });
+
+  it("falls back to a finite base when the provider returns null (chunk mid-reload)", () => {
+    setChunkedFlatGround(0);
+    setChunkedHeightProvider(() => null);
+    const g = groundedPosition(120, 240);
+    expect(Number.isFinite(g.y)).toBe(true);
+    expect(g.y).toBe(0);
+    expect(groundHeightAt(120, 240)).toBe(0);
+  });
+
+  it("never emits NaN even if the provider itself returns NaN", () => {
+    setChunkedFlatGround(0);
+    setChunkedHeightProvider(() => NaN);
+    expect(Number.isFinite(groundedPosition(5, 5).y)).toBe(true);
+    expect(Number.isFinite(groundHeightAt(5, 5) as number)).toBe(true);
+  });
+
+  it("uses the sculpted height when the provider returns a finite value", () => {
+    setChunkedFlatGround(0);
+    setChunkedHeightProvider(() => 7.5);
+    expect(groundedPosition(5, 5).y).toBe(7.5);
   });
 });

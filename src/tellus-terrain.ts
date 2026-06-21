@@ -109,8 +109,16 @@ export function setChunkedHeightProvider(
 }
 
 // Chunked grounding height: the sampled sculpted height where a chunk is loaded, else the flat base.
+// MUST always return a finite number — this value flows into visitorPosition.y and then into the
+// Rapier character controller; a single NaN/null poisons world.step() and panics the WASM solver
+// (the terrain-paint `unreachable` crash). The provider returns null for not-yet-loaded chunks (e.g.
+// mid-reload during a paint stroke) and can transiently return a non-finite value, and the flat-base
+// fallback is `null` for a tick during chunked setup — so guard every path and default to 0 (the
+// chunk base plane, above SEA_LEVEL) when nothing finite is available.
 function chunkedGroundY(x: number, z: number): number {
-  return chunkedHeightProvider?.(x, z) ?? (chunkedFlatGround as number);
+  const sampled = chunkedHeightProvider?.(x, z);
+  if (sampled != null && Number.isFinite(sampled)) return sampled;
+  return Number.isFinite(chunkedFlatGround) ? (chunkedFlatGround as number) : 0;
 }
 
 /// Learn a chunked world's dimensions from the /chunks manifest, then arm the chunk bounds (renderer
