@@ -269,12 +269,7 @@ const agentChipStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-// TELLUS INFINITY biomes: the server BiomeGrid is a fixed 24×24 grid mapped across the WHOLE world
-// extent (BiomeCellAt: x/side*24). The minimap uses this same fixed size so its biome cells register
-// geographically with the server (deriving it from the cells present would distort a partial grid).
-const BIOME_GRID = 24;
-
-// Bold, legible biome colours for the minimap raster (RGB tuples).
+// Bold, legible terrain colours for the minimap raster (RGB tuples).
 const BIOME_MAP_RGB: Record<string, [number, number, number]> = {
   meadow: [124, 168, 86],
   forest: [40, 102, 54],
@@ -283,7 +278,7 @@ const BIOME_MAP_RGB: Record<string, [number, number, number]> = {
   dirt: [130, 100, 70],
   stone: [142, 144, 136],
   brick: [150, 74, 58],
-  water: [44, 100, 152],
+  water: [52, 114, 104],
   alien: [160, 88, 182],
 };
 
@@ -355,8 +350,9 @@ function createTellusWorld(
     mixer: THREE.AnimationMixer;
     action?: THREE.AnimationAction;
     clipName?: string;
-    mode: "idle" | "move";
+    mode: GeneratedMotionMode;
   };
+  type GeneratedMotionMode = "idle" | "walk" | "run";
   const generatedAnimationMixers = new Map<string, GeneratedAnimationState>();
   // Placed VRM things (auton/Atlantean store models) animate through a real VRM rig — a VRMA idle clip
   // looped by default, advanced (mixer + spring bones) each frame here. Parallel to the plain-GLB
@@ -629,13 +625,7 @@ function createTellusWorld(
   // matter the world scale — bigger worlds stretch the same ~50K-vertex mesh instead of multiplying
   // it (operator: range over thickness; worlds get larger for less).
   const terrainRenderSegments = useWebGPU ? 224 : 144;
-  // PERF/CORRECTNESS: the WebGPU backdrop-water material samples the viewport's own color+depth
-  // texture (viewportSharedTexture/viewportDepthTexture) for refraction WHILE the same render pass
-  // writes that texture — WebGPU forbids this (TextureBinding|RenderAttachment in one sync scope),
-  // which invalidates the frame command buffer every frame → black/agonizingly-slow render. Until the
-  // TSL viewport-backdrop path is restructured (separate copy pass), use the plain non-sampling ocean
-  // on WebGPU too. (Same call as Codex's WebGPU-mirror fallback.) WebGL never had the refractive water.
-  // Historical note above is from the temporary debug fallback; useWebGPU restores the original water.
+  // Rich TSL water on the WebGPU path; WebGL keeps the lightweight fallback material.
   const ocean = createOceanSurface(useWebGPU);
   const archipelago = createDistantArchipelago(useWebGPU);
   let chunkRenderer: ChunkRenderer | null = null;
@@ -664,6 +654,30 @@ function createTellusWorld(
         maxZ: chunkedDims.h * CHUNK_SPAN,
       }
     : undefined;
+  const waterFeatureCenter = (() => {
+    const center = isChunked ? chunkedWorldCenter() : null;
+    if (!center) return { x: POND_CENTER.x, z: POND_CENTER.z };
+    return {
+      x: center.x + CHUNK_SPAN * 0.55,
+      z: center.z - CHUNK_SPAN * 0.35,
+    };
+  })();
+  const waterFeatureRadius = isChunked
+    ? Math.max(18, Math.min(42, CHUNK_SPAN * 0.34))
+    : POND_RADIUS;
+  const waterFeatureContains = (x: number, z: number, pad = 0) => {
+    const dx = x - waterFeatureCenter.x;
+    const dz = z - waterFeatureCenter.z;
+    const radius = waterFeatureRadius + pad;
+    return dx * dx + dz * dz < radius * radius;
+  };
+  const waterFeatureLevel = () => {
+    const ground =
+      groundHeightAt(waterFeatureCenter.x, waterFeatureCenter.z) ??
+      chunkRenderer?.sampleHeight(waterFeatureCenter.x, waterFeatureCenter.z) ??
+      terrainHeight(waterFeatureCenter.x, waterFeatureCenter.z);
+    return ground + 0.55;
+  };
   const grassEnabled = (() => {
     try {
       const pref = window.localStorage.getItem("tellus.grass");
@@ -690,23 +704,21 @@ function createTellusWorld(
         sectorsEnabled: !isChunked,
         grassOnly: isChunked,
         isExcluded: isChunked
-          ? () => false
+          ? (x, z, h) =>
+              waterFeatureContains(x, z, 0.6) &&
+              h < waterFeatureLevel() + 0.35
           : (x, z, h) => {
-              const pdx = x - POND_CENTER.x;
-              const pdz = z - POND_CENTER.z;
               return (
-                pdx * pdx + pdz * pdz < (POND_RADIUS + 0.6) * (POND_RADIUS + 0.6) &&
-                h < pondWaterLevel() + 0.35
+                waterFeatureContains(x, z, 0.6) &&
+                h < waterFeatureLevel() + 0.35
               );
             },
-        pondRing: isChunked
-          ? undefined
-          : {
-              x: POND_CENTER.x,
-              z: POND_CENTER.z,
-              radius: POND_RADIUS,
-              level: pondWaterLevel(),
-            },
+        pondRing: {
+          x: waterFeatureCenter.x,
+          z: waterFeatureCenter.z,
+          radius: waterFeatureRadius,
+          level: waterFeatureLevel(),
+        },
       })
     : {
         update: () => undefined,
@@ -718,10 +730,8 @@ function createTellusWorld(
   const ambientPhysics = createAmbientPhysics({
     groundHeightAt: (x, z) => groundHeightAt(x, z) ?? SEA_LEVEL - 2.6,
     waterLevelAt: (x, z) => {
-      const pdx = x - POND_CENTER.x;
-      const pdz = z - POND_CENTER.z;
-      if (pdx * pdx + pdz * pdz < (POND_RADIUS + 0.4) * (POND_RADIUS + 0.4)) {
-        return pondWaterLevel();
+      if (waterFeatureContains(x, z, 0.4)) {
+        return waterFeatureLevel();
       }
       return SEA_LEVEL;
     },
@@ -770,7 +780,12 @@ function createTellusWorld(
     // Walk the sculpted chunk heightfield where chunks are loaded (flat base elsewhere).
     setChunkedHeightProvider((x, z) => chunkRenderer!.sampleHeight(x, z));
   }
-  const pondWater = createPondWater();
+  const pondWater = createPondWater({
+    center: waterFeatureCenter,
+    radius: waterFeatureRadius,
+    waterLevel: waterFeatureLevel(),
+    animated: useWebGPU,
+  });
   const flowerPatchGroup = new THREE.Group();
   flowerPatchGroup.name = "tellus-flower-patches";
   const flowerSpriteMaterials = createFlowerSpriteMaterials();
@@ -1552,6 +1567,22 @@ function createTellusWorld(
     return message;
   };
 
+  const sampleMapPoint = (x: number, z: number): { height: number; kind: TerrainKind; loaded: boolean } => {
+    if (waterFeatureContains(x, z, 0)) {
+      return { height: waterFeatureLevel(), kind: "water", loaded: true };
+    }
+    if (isChunked) {
+      const height = chunkRenderer?.sampleHeight(x, z);
+      if (height != null && Number.isFinite(height)) {
+        const kind = largeWorldTerrainKind(x, z);
+        return { height, kind: kind === "water" ? "beach" : kind, loaded: true };
+      }
+      return { height: SEA_LEVEL - 8, kind: "water", loaded: false };
+    }
+    const height = terrainHeight(x, z);
+    return { height, kind: terrainKind(x, z, height), loaded: true };
+  };
+
   let worldChatPollTimer: number | undefined;
   const pollWorldChatSnapshot = async () => {
     if (!tellusWorldBackendAvailable || destroyed) return;
@@ -1586,16 +1617,18 @@ function createTellusWorld(
   };
 
   const updatePondSurfacePosition = () => {
-    const waterLevel = pondWaterLevel();
+    const waterLevel = waterFeatureLevel();
     const pondSurface = pondWater.getObjectByName("tellus-pond-surface");
     if (pondSurface) {
+      pondSurface.position.x = waterFeatureCenter.x;
       pondSurface.position.y = waterLevel;
+      pondSurface.position.z = waterFeatureCenter.z;
       pondSurface.rotation.z = 0;
     }
     const ripples = pondWater.getObjectByName("tellus-pond-ripples");
-    if (ripples) ripples.position.y = waterLevel + 0.035;
+    if (ripples) ripples.position.set(waterFeatureCenter.x, waterLevel + 0.035, waterFeatureCenter.z);
     const shore = pondWater.getObjectByName("tellus-pond-shore");
-    if (shore) shore.position.y = waterLevel - 0.035;
+    if (shore) shore.position.set(waterFeatureCenter.x, waterLevel - 0.035, waterFeatureCenter.z);
   };
 
   const refreshFlowerPatches = () => {
@@ -2756,11 +2789,12 @@ function createTellusWorld(
   const selectGeneratedClip = (
     clips: THREE.AnimationClip[],
     thing: GeneratedThing | undefined,
-    mode: "idle" | "move",
+    mode: GeneratedMotionMode,
     vehicle: VehicleMode | null = null,
+    options: { ignoreExplicit?: boolean } = {},
   ): THREE.AnimationClip | undefined => {
     if (clips.length === 0) return undefined;
-    const wanted = thing?.animation?.trim();
+    const wanted = options.ignoreExplicit ? "" : thing?.animation?.trim();
     const wantedClip = wanted
       ? clips.find((c) => c.name === wanted) ??
         clips.find((c) => c.name?.toLowerCase() === wanted.toLowerCase())
@@ -2768,15 +2802,27 @@ function createTellusWorld(
     if (wantedClip) return wantedClip;
     const findAny = (fragments: string[]) =>
       clips.find((clip) => generatedClipNameIncludes(clip, fragments) && !badGeneratedClip(clip));
-    if (mode === "move") {
+    if (mode === "walk" || mode === "run") {
       if (vehicle === "air") {
         const fly = findAny(["fly", "flying", "glide", "hover"]);
         if (fly) return fly;
       }
+      if (vehicle === "water") {
+        const swim = findAny(["swim", "swimming", "paddle", "float"]);
+        if (swim) return swim;
+      }
+      if (mode === "walk") {
+        return (
+          findAny(["walk", "trot"]) ??
+          findAny(["run", "gallop", "canter"]) ??
+          findAny(["fly", "glide", "swim"]) ??
+          findAny(["idle"])
+        );
+      }
       return (
         findAny(["run", "gallop", "canter"]) ??
         findAny(["walk", "trot"]) ??
-        findAny(["fly", "glide"]) ??
+        findAny(["fly", "glide", "swim"]) ??
         findAny(["idle"])
       );
     }
@@ -2786,11 +2832,12 @@ function createTellusWorld(
   const playGeneratedClip = (
     id: string,
     model: THREE.Object3D,
-    mode: "idle" | "move",
+    mode: GeneratedMotionMode,
     vehicle: VehicleMode | null = null,
+    options: { ignoreExplicit?: boolean } = {},
   ) => {
     const clips = generatedModelClips(model);
-    const clip = selectGeneratedClip(clips, thingById(id), mode, vehicle);
+    const clip = selectGeneratedClip(clips, thingById(id), mode, vehicle, options);
     if (!clip) return;
     let state = generatedAnimationMixers.get(id);
     if (!state) {
@@ -2802,7 +2849,7 @@ function createTellusWorld(
     next.reset();
     next.enabled = true;
     next.setEffectiveWeight(1);
-    next.setEffectiveTimeScale(mode === "move" ? 1.15 : 1);
+    next.setEffectiveTimeScale(mode === "run" ? 1.15 : 1);
     if (state.action && state.action !== next) {
       next.play();
       state.action.crossFadeTo(next, 0.18, false);
@@ -2814,8 +2861,22 @@ function createTellusWorld(
     state.mode = mode;
   };
 
+  const updateMountedAnimation = (thing: GeneratedThing, moving: boolean, running = false) => {
+    if (!isMountThing(thing)) return;
+    const mode: GeneratedMotionMode = moving ? (running ? "run" : "walk") : "idle";
+    if (mountedAnimationThingId === thing.id && mountedAnimationMode === mode) return;
+    const model = generatedMeshes.get(thing.id);
+    if (!model || model.userData.loadedModelUrl !== thing.modelUrl) return;
+    playGeneratedClip(thing.id, model, mode, vehicleMode(thing), { ignoreExplicit: true });
+    mountedAnimationThingId = thing.id;
+    mountedAnimationMode = mode;
+  };
+
   const startGeneratedAnimation = (id: string, model: THREE.Object3D) => {
     stopGeneratedAnimation(id);
+    if (mountedAnimationThingId === id) {
+      mountedAnimationMode = undefined;
+    }
     // VRM things animate through their VRM rig (retargeted VRMA clips), not an embedded-clip mixer.
     const vrmRig = model.userData.vrmObjectRig as VrmObjectRig | undefined;
     if (vrmRig) {
@@ -4115,6 +4176,9 @@ function createTellusWorld(
     if (boarded) {
       updateThingMeshPosition(boarded);
       visitorPosition = riderPositionForThing(boarded);
+      mountedAnimationThingId = undefined;
+      mountedAnimationMode = undefined;
+      updateMountedAnimation(boarded, false);
       publishGeneratedThing(boarded);
     }
     addLog({
@@ -4131,6 +4195,9 @@ function createTellusWorld(
     const boat = thingById(sailingThingId);
     sailingThingId = undefined;
     if (boat) {
+      updateMountedAnimation(boat, false);
+      mountedAnimationThingId = undefined;
+      mountedAnimationMode = undefined;
       publishGeneratedThing(boat);
       const mountedMesh = generatedMeshes.get(boat.id);
       if (mountedMesh && mountedMesh.userData.loadedModelUrl === boat.modelUrl && isMountThing(boat)) {
@@ -4738,6 +4805,8 @@ function createTellusWorld(
   // streaming is fast. Resets the instant movement stops. Tunables: grace before ramp, exp base/second,
   // and the multiplier cap. RUN_EXP_BASE^heldS reaches the 6× cap in ~3.5s of sustained running.
   let moveHoldStartMs = 0;
+  let mountedAnimationThingId: string | undefined;
+  let mountedAnimationMode: GeneratedMotionMode | undefined;
   const RUN_GRACE_MS = 2000;
   const RUN_EXP_BASE = 1.7; // exponential growth per second past the grace
   const RUN_MAX_MULT = 6; // top speed = 6× walk
@@ -4888,15 +4957,17 @@ function createTellusWorld(
       if (boat && mountedMesh && mountedMesh.userData.loadedModelUrl === boat.modelUrl && isMountThing(boat)) {
         uninstanceThing(boat.id);
         mountedMesh.visible = true;
+        updateMountedAnimation(boat, false);
       }
       return;
     }
     // Proceed if there's horizontal input, we're mid-air, free-flying, or giving vertical input on a mount.
     if (!hasInput && !playerAirborne && !flying && !(sailingThingId && verticalInput)) return;
     const nowMs = performance.now();
+    const speedMultiplier = runSpeedMultiplier(nowMs);
     if (hasInput) {
       const speed = scaledPlayerSpeed() *
-        runSpeedMultiplier(nowMs) *
+        speedMultiplier *
         (sailingThingId ? MOUNT_SPEED_MULT : 1);
       movement.normalize().multiplyScalar(speed * delta);
     }
@@ -4906,9 +4977,12 @@ function createTellusWorld(
       const boat = thingById(sailingThingId);
       if (!boat) {
         sailingThingId = undefined;
+        mountedAnimationThingId = undefined;
+        mountedAnimationMode = undefined;
         return;
       }
       const mode = vehicleMode(boat);
+      const mountIsRunning = hasInput && speedMultiplier > 1.35;
       if (mode === "air") {
         // Air mount: horizontal via airPosition (keeps world-bounds clamping), vertical via Space/C with a
         // high ceiling — no longer pinned to a fixed +12 altitude.
@@ -4935,6 +5009,7 @@ function createTellusWorld(
         uninstanceThing(boat.id);
         mountedMesh.visible = true;
       }
+      updateMountedAnimation(boat, hasInput || (mode === "air" && verticalInput), mountIsRunning);
       updateThingMeshPosition(boat);
       visitorPosition = riderPositionForThing(boat);
       sendPresenceUpdate();
@@ -5103,7 +5178,7 @@ function createTellusWorld(
     if (ripples) {
       ripples.children.forEach((child, index) => {
         const phase = (now * 0.00028 + index * 0.23) % 1;
-        const scale = POND_RADIUS * (0.22 + phase * 0.72);
+        const scale = waterFeatureRadius * (0.22 + phase * 0.72);
         child.scale.setScalar(scale);
         const material = (child as THREE.Mesh).material;
         if (material instanceof THREE.MeshBasicMaterial) {
@@ -6302,7 +6377,7 @@ function createTellusWorld(
         oceanRadius: OCEAN_RADIUS,
         terrainType: terrainKind(visitorPosition.x, visitorPosition.z, groundHeight),
         terrainHeight: groundHeight,
-        pondCenter: POND_CENTER,
+        pondCenter: { x: waterFeatureCenter.x, y: 0, z: waterFeatureCenter.z },
         chunkedWorldChunks: isChunked ? getChunkedWorldChunks() : null,
         chunkSpan: CHUNK_SPAN,
       });
@@ -6319,7 +6394,7 @@ function createTellusWorld(
         },
         terrainType: mapLocation.terrain.type,
         terrainHeight: groundHeight,
-        distanceToPond: Math.hypot(visitorPosition.x - POND_CENTER.x, visitorPosition.z - POND_CENTER.z),
+        distanceToPond: Math.hypot(visitorPosition.x - waterFeatureCenter.x, visitorPosition.z - waterFeatureCenter.z),
         distanceToSummit: Math.hypot(visitorPosition.x, visitorPosition.z),
         distanceToShore: Math.max(0, WORLD_RADIUS - Math.hypot(visitorPosition.x, visitorPosition.z)),
         nearby: tellusAgent.getNearby(radius),
@@ -6716,7 +6791,7 @@ function createTellusWorld(
         ...portal.target,
         kind: "world",
         worldId: target,
-        spawn: portal.target.spawn ?? { x: 0, y: 0, z: 0 },
+        spawn: undefined,
       },
     });
   };
@@ -6733,7 +6808,7 @@ function createTellusWorld(
       label: (label || target).slice(0, 48),
       position: { x, y, z },
       radius: 2.2,
-      target: { kind: "world", worldId: target, spawn: { x: 0, y: 0, z: 0 } },
+      target: { kind: "world", worldId: target },
       ...(anchor ? { anchorThingId: anchor.id } : {}),
     });
   };
@@ -6784,6 +6859,7 @@ function createTellusWorld(
     setInstantMeshTarget,
     submitVisitorPrompt,
     sendWorldChat,
+    sampleMapPoint,
     snapshot,
     getFps: () => fpsValue,
     setRxEnabled: (on: boolean) => {
@@ -8497,6 +8573,7 @@ function App(): React.ReactElement {
     switchWorld(ps.toWorldId);
     if (ps.spawn) {
       const { x, z } = ps.spawn;
+      if (isChunkedWorldId(ps.toWorldId) && Math.hypot(x, z) < 1) return;
       const arrival = portalArrivalPosition(x, z);
       const t = window.setTimeout(() => worldRef.current?.warpTo(arrival.x, arrival.z), 1400);
       return () => window.clearTimeout(t);
@@ -8941,7 +9018,6 @@ function App(): React.ReactElement {
   // Portals card: foldable + dismissable (was always-on with no close — the worst right-side offender).
   const [portalsPanelOpen, setPortalsPanelOpen] = useState(false);
   const [mapActorList, setMapActorList] = useState<"items" | "players" | "agents" | null>(null);
-  const [mapMode, setMapMode] = useState<"terrain" | "biomes">("biomes");
   const worldMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const { listening, supported, start } = useSpeechInput((text) =>
@@ -9335,31 +9411,38 @@ function App(): React.ReactElement {
   const selectedThingVehicleMode = selectedThing ? vehicleMode(selectedThing) : null;
   const selectedThingIsMount = selectedThing ? isMountThing(selectedThing) : false;
   const mapRadius = OCEAN_RADIUS * 0.42;
-  // The minimap maps world (x,z) → a [0,1] fraction. Classic worlds are origin-centred (0,0 → mid-map);
-  // chunked worlds put origin at a CORNER and span [0, N*96), so they map linearly from 0. The inverse
-  // (mapFracToWorld) powers click-to-warp and MUST mirror the forward map so a click lands where it shows.
+  // The minimap maps world (x,z) -> a [0,1] fraction. Chunked worlds use a local window centered
+  // on the player/spawn so terrain and water features are readable instead of microscopic.
   const chunkedMapDims = isChunkedWorldId(activeWorldId ?? "") ? getChunkedWorldChunks() : null;
-  const mapExtentX = chunkedMapDims ? chunkedMapDims.w * CHUNK_SPAN : mapRadius * 2;
-  const mapExtentZ = chunkedMapDims ? chunkedMapDims.h * CHUNK_SPAN : mapRadius * 2;
-  const mapFracX = (x: number) => (chunkedMapDims ? x / mapExtentX : x / (mapRadius * 2) + 0.5);
-  const mapFracZ = (z: number) => (chunkedMapDims ? z / mapExtentZ : z / (mapRadius * 2) + 0.5);
-  const mapFracToWorld = (fx: number, fz: number): { x: number; z: number } =>
+  const chunkedMapCenter =
     chunkedMapDims
-      ? { x: fx * mapExtentX, z: fz * mapExtentZ }
+      ? snapshot.visitorPosition
+        ? { x: snapshot.visitorPosition.x, z: snapshot.visitorPosition.z }
+        : chunkedWorldCenter() ?? {
+            x: (chunkedMapDims.w * CHUNK_SPAN) / 2,
+            z: (chunkedMapDims.h * CHUNK_SPAN) / 2,
+          }
+      : null;
+  const mapExtentX = chunkedMapDims ? CHUNK_SPAN * 8 : mapRadius * 2;
+  const mapExtentZ = chunkedMapDims ? CHUNK_SPAN * 8 : mapRadius * 2;
+  const mapFracX = (x: number) =>
+    chunkedMapCenter ? (x - (chunkedMapCenter.x - mapExtentX / 2)) / mapExtentX : x / (mapRadius * 2) + 0.5;
+  const mapFracZ = (z: number) =>
+    chunkedMapCenter ? (z - (chunkedMapCenter.z - mapExtentZ / 2)) / mapExtentZ : z / (mapRadius * 2) + 0.5;
+  const mapFracToWorld = (fx: number, fz: number): { x: number; z: number } =>
+    chunkedMapCenter
+      ? {
+          x: chunkedMapCenter.x - mapExtentX / 2 + fx * mapExtentX,
+          z: chunkedMapCenter.z - mapExtentZ / 2 + fz * mapExtentZ,
+        }
       : { x: (fx - 0.5) * mapRadius * 2, z: (fz - 0.5) * mapRadius * 2 };
   const mapPointStyle = (position: Vec3): React.CSSProperties => ({
     left: `${clamp(mapFracX(position.x) * 100, 0, 100)}%`,
     top: `${clamp(mapFracZ(position.z) * 100, 0, 100)}%`,
   });
-  // Paint a real top-down terrain + biome raster onto the minimap backdrop (was a static decorative disc
+  // Paint a real top-down terrain raster onto the minimap backdrop (was a static decorative disc
   // that reflected nothing — wrong for chunked worlds especially). Samples live ground relief through the
-  // SAME mapFracToWorld transform the markers use, so terrain and markers register exactly; overlays the
-  // live biome grid from the snapshot. Cheap (128² samples), throttled to when the map is open + the world
-  // actually changed. Chunked-aware via mapExtent; unexplored chunked area reads as flat sea, which is honest.
-  const mapBiomeKey = (snapshot.biomeCells ?? []).reduce(
-    (a, c) => (a * 31 + (c.biome?.charCodeAt(0) ?? 0) + (c.becoming ? 7 : 0)) | 0,
-    snapshot.biomeCells?.length ?? 0,
-  );
+  // SAME mapFracToWorld transform the markers use, so terrain and markers register exactly.
   // Repaint as the player crosses into a new ~48-unit cell so freshly-streamed chunk relief shows up.
   const mapPlayerCell = snapshot.visitorPosition
     ? `${Math.round(snapshot.visitorPosition.x / 48)}:${Math.round(snapshot.visitorPosition.z / 48)}`
@@ -9376,95 +9459,66 @@ function App(): React.ReactElement {
       canvas.height = N;
       const img = ctx.createImageData(N, N);
       const data = img.data;
-      // Biome grid (live world state). The server BiomeGrid is a fixed 24² mapped across the whole world.
-      const cells = snapshot.biomeCells ?? [];
-      const byCell = new Map(cells.map((c) => [`${c.cx}:${c.cz}`, c]));
-      const biomeWorld = cells.length > 0;
-      // Non-biome worlds only have a terrain view; biome worlds honour the user's toggle.
-      const mode = biomeWorld ? mapMode : "terrain";
       const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
       for (let j = 0; j < N; j++) {
         for (let i = 0; i < N; i++) {
           const fx = (i + 0.5) / N;
           const fz = (j + 0.5) / N;
           const w = mapFracToWorld(fx, fz);
-          const h = groundHeightAt(w.x, w.z);
-          const hasH = h !== null && Number.isFinite(h);
-          const hh = hasH ? (h as number) : SEA_LEVEL;
+          const sample = worldRef.current?.sampleMapPoint(w.x, w.z);
+          const h = sample?.height;
+          const hasH = Boolean(sample?.loaded) && h !== undefined && Number.isFinite(h);
+          const hh = h !== undefined && Number.isFinite(h) ? h : SEA_LEVEL;
+          const terrainSampleKind = sample?.kind ?? "water";
           let r: number, g: number, b: number;
-          if (mode === "biomes") {
-            // Crisp full-world biome overview — the 24² grid mapped across the FULL extent (fixed grid size
-            // so cells register geographically), bold colours, no relief muddying. This is the whole world.
-            const cx = Math.min(BIOME_GRID - 1, Math.max(0, Math.floor(fx * BIOME_GRID)));
-            const cz = Math.min(BIOME_GRID - 1, Math.max(0, Math.floor(fz * BIOME_GRID)));
-            const cell = byCell.get(`${cx}:${cz}`);
-            const base = BIOME_MAP_RGB[cell?.biome ?? "meadow"] ?? BIOME_MAP_RGB.meadow;
-            r = base[0];
-            g = base[1];
-            b = base[2];
-            // a faint relief texture where chunks are loaded — keep the biome colours legible
-            const he = groundHeightAt(w.x + 3, w.z);
-            if (hasH && he !== null && Number.isFinite(he)) {
-              const shade = clamp((hh - he) * 0.06 + 1, 0.9, 1.1);
-              r *= shade;
-              g *= shade;
-              b *= shade;
-            }
-            // cells mid-transition (becoming) glow brighter so you can see evolution fronts
-            if (cell?.becoming) {
-              r = lerp(r, 255, 0.2);
-              g = lerp(g, 255, 0.2);
-              b = lerp(b, 255, 0.2);
-            }
-          } else if (biomeWorld) {
-            // Terrain view on a biome world: biome base + strong relief; flat/unstreamed samples dim +
-            // desaturate so the loaded neighbourhood pops out of the unexplored fog.
-            const cx = Math.min(BIOME_GRID - 1, Math.max(0, Math.floor(fx * BIOME_GRID)));
-            const cz = Math.min(BIOME_GRID - 1, Math.max(0, Math.floor(fz * BIOME_GRID)));
-            const biome = byCell.get(`${cx}:${cz}`)?.biome ?? "meadow";
-            const base = BIOME_MAP_RGB[biome] ?? BIOME_MAP_RGB.meadow;
-            r = base[0];
-            g = base[1];
-            b = base[2];
-            const he = groundHeightAt(w.x + 3, w.z) ?? hh;
-            const hn = groundHeightAt(w.x, w.z + 3) ?? hh;
-            const slope = hh - he + (hh - hn);
-            if (Math.abs(slope) > 1e-4 || hh > SEA_LEVEL + 0.5) {
-              const shade = clamp(slope * 0.16 + 1, 0.7, 1.34);
-              r *= shade;
-              g *= shade;
-              b *= shade;
-              const lift = clamp((hh - SEA_LEVEL) / 18, 0, 1);
-              r = lerp(r, 232, lift * 0.32);
-              g = lerp(g, 232, lift * 0.32);
-              b = lerp(b, 238, lift * 0.32);
-            } else {
-              const avg = (r + g + b) / 3;
-              r = lerp(avg, r, 0.55) * 0.7;
-              g = lerp(avg, g, 0.55) * 0.7;
-              b = lerp(avg, b, 0.7) * 0.7;
-            }
-          } else if (hh <= SEA_LEVEL) {
+          if (terrainSampleKind === "water" || hh <= SEA_LEVEL) {
             const depth = clamp((SEA_LEVEL - hh) / 12, 0, 1);
-            r = lerp(58, 16, depth);
-            g = lerp(108, 38, depth);
-            b = lerp(138, 70, depth);
+            if (!hasH) {
+              r = 24;
+              g = 58;
+              b = 47;
+            } else {
+              r = lerp(56, 18, depth);
+              g = lerp(128, 70, depth);
+              b = lerp(114, 92, depth);
+            }
           } else {
             const t = clamp((hh - SEA_LEVEL) / 16, 0, 1);
-            if (t < 0.5) {
-              const u = t * 2;
-              r = lerp(86, 112, u);
-              g = lerp(132, 98, u);
-              b = lerp(68, 76, u);
+            const base = BIOME_MAP_RGB[terrainSampleKind] ?? BIOME_MAP_RGB.meadow;
+            r = base[0];
+            g = base[1];
+            b = base[2];
+            if (!hasH) {
+              const avg = (r + g + b) / 3;
+              r = lerp(avg, r, 0.4) * 0.45;
+              g = lerp(avg, g, 0.4) * 0.45;
+              b = lerp(avg, b, 0.4) * 0.45;
             } else {
-              const u = (t - 0.5) * 2;
-              r = lerp(112, 226, u);
-              g = lerp(98, 228, u);
-              b = lerp(76, 236, u);
+              const lift = clamp(t, 0, 1);
+              r = lerp(r, 232, lift * 0.22);
+              g = lerp(g, 232, lift * 0.22);
+              b = lerp(b, 238, lift * 0.22);
             }
-            const he = groundHeightAt(w.x + 2, w.z);
-            if (he !== null && Number.isFinite(he)) {
+            const he = worldRef.current?.sampleMapPoint(w.x + 2, w.z).height;
+            const hn = worldRef.current?.sampleMapPoint(w.x, w.z + 2).height;
+            if (hasH && he !== undefined && hn !== undefined && Number.isFinite(he) && Number.isFinite(hn)) {
+              const slope = hh - he + (hh - hn);
               const shade = clamp((hh - he) * 0.12 + 1, 0.78, 1.18);
+              const combinedShade = clamp(shade + slope * 0.08, 0.72, 1.24);
+              r *= combinedShade;
+              g *= combinedShade;
+              b *= combinedShade;
+            }
+          }
+          if (!hasH && terrainSampleKind !== "water") {
+            r *= 0.65;
+            g *= 0.65;
+            b *= 0.65;
+          }
+          if (terrainSampleKind === "water" && hasH) {
+            const he = worldRef.current?.sampleMapPoint(w.x + 2, w.z).height;
+            if (he !== undefined && Number.isFinite(he)) {
+              const shade = clamp((hh - he) * 0.08 + 1, 0.88, 1.12);
               r *= shade;
               g *= shade;
               b *= shade;
@@ -9482,7 +9536,7 @@ function App(): React.ReactElement {
       /* best-effort backdrop; markers still render over it */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [worldMapOpen, activeWorldId, mapExtentX, mapExtentZ, mapBiomeKey, mapPlayerCell, mapMode]);
+  }, [worldMapOpen, activeWorldId, mapExtentX, mapExtentZ, mapPlayerCell]);
   const handleWorldMapClick = (event: React.MouseEvent<HTMLElement>) => {
     // Ignore clicks on the overlaid info panel / status badge — only the map plane warps.
     const target = event.target as HTMLElement;
@@ -10851,6 +10905,7 @@ function App(): React.ReactElement {
               style={{ cursor: "crosshair" }}
               onClick={handleWorldMapClick}
             >
+              <canvas ref={worldMapCanvasRef} className="world-map-terrain" aria-hidden="true" />
               {snapshot.visitorPosition && snapshot.visitorYaw !== undefined && (() => {
                 // View cone: from the player marker, along the facing yaw, reaching the view distance —
                 // shows which way you're looking and how far you can see. forward = (sin yaw, cos yaw) in
@@ -10933,30 +10988,34 @@ function App(): React.ReactElement {
                   />
                 );
               })}
-              {snapshot.generated.map((thing) => (
-                <button
-                  type="button"
-                  key={thing.id}
-                  className={[
-                    "map-marker",
-                    "asset",
-                    thing.id === selectedThing?.id ? "selected" : "",
-                    thing.generationStatus === "queued" ||
-                    thing.generationStatus === "generating"
-                      ? "pending"
-                      : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  style={mapPointStyle(thing.position)}
-                  title={`${thing.kind}: ${thing.prompt}`}
-                  aria-label={`Go to ${thing.kind}: ${thing.prompt}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    worldRef.current?.goToGenerated(thing.id);
-                  }}
-                />
-              ))}
+              {snapshot.generated.map((thing) => {
+                const isAnimatedThing = (worldRef.current?.getGeneratedClipNames(thing.id) ?? []).length > 0;
+                return (
+                  <button
+                    type="button"
+                    key={thing.id}
+                    className={[
+                      "map-marker",
+                      "asset",
+                      isAnimatedThing ? "animated" : "",
+                      thing.id === selectedThing?.id ? "selected" : "",
+                      thing.generationStatus === "queued" ||
+                      thing.generationStatus === "generating"
+                        ? "pending"
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    style={mapPointStyle(thing.position)}
+                    title={`${thing.kind}: ${thing.prompt}`}
+                    aria-label={`Go to ${thing.kind}: ${thing.prompt}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      worldRef.current?.goToGenerated(thing.id);
+                    }}
+                  />
+                );
+              })}
               {pendingGenerated.length > 0 && (
                 <span className="world-map-status">
                   {pendingGenerated.length} building

@@ -281,6 +281,7 @@ export interface TellusWorldApi {
     recipientId?: string,
     recipientName?: string,
   ): WorldChatMessage | null;
+  sampleMapPoint(x: number, z: number): { height: number; kind: TerrainKind; loaded: boolean };
   snapshot(): TellusSnapshot;
   getFps(): number;
   // ── P2P video controls (RX inbound video, TX local camera) ──
