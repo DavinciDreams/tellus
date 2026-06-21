@@ -265,6 +265,23 @@ describe("world protocol validators", () => {
     expect(isWorldAction({ type: "world.portal.delete", visitorId: "visitor-1", portalId: 12 })).toBe(false);
   });
 
+  it("accepts generated interior door portals with scene URLs", () => {
+    const portal = {
+      id: "door-1",
+      worldId: "main",
+      label: "Door",
+      position: { x: 1, y: 2, z: 3 },
+      radius: 2.2,
+      target: {
+        kind: "interior",
+        worldId: "interior-main-room",
+        spawn: { x: 0, y: 0, z: 2 },
+        sceneUrl: "generated://interior-room",
+      },
+    };
+    expect(isWorldAction({ type: "portal.upsert", visitorId: "visitor-1", portal })).toBe(true);
+  });
+
   it("rejects malformed world chat messages", () => {
     const base = {
       id: "chat-1",

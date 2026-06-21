@@ -68,6 +68,7 @@ export interface VegetationOptions {
   sectorsEnabled?: boolean;
   grassOnly?: boolean;
   suppressGrass?: boolean;
+  suppressSmallFlora?: boolean;
   /** Extra exclusion test (the pond bowl) — return true to keep this spot clear. */
   isExcluded: (x: number, z: number, height: number) => boolean;
   /** Pond ring info for reed placement. */
@@ -153,6 +154,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   const { scene, useWebGPU, sampleHeight, samplePaint, isExcluded, pondRing } = options;
   const grassOnly = options.grassOnly ?? false;
   const suppressGrass = options.suppressGrass ?? false;
+  const suppressSmallFlora = options.suppressSmallFlora ?? false;
 
   // World geometry captured at construction (setWorldScale ran before the world was created).
   const minWorldX = options.bounds?.minX ?? -WORLD_RADIUS;
@@ -256,7 +258,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
 
   const chunkTuftCap = suppressGrass ? 0 : grassOnly ? Math.round(MAX_TUFTS * 1.65) : MAX_TUFTS;
   const chunkFlowerCap = grassOnly ? 0 : MAX_FLOWERS;
-  const chunkExtraCap = grassOnly ? 0 : MAX_EXTRAS;
+  const chunkExtraCap = grassOnly || suppressSmallFlora ? 0 : MAX_EXTRAS;
   const chunkVertCap =
     chunkTuftCap * (grassTpl.pos.length / 3) +
     chunkFlowerCap * (flowerTpl.pos.length / 3) +
@@ -415,6 +417,34 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     // Flowers: bright old-style card blooms, placed from a jittered grid so paint strokes fill in
     // predictably instead of depending on a sparse random lottery.
     let flowers = 0;
+    const stampFlowerCluster = (
+      x: number,
+      z: number,
+      h: number,
+      clusterCount: number,
+      basePick: number,
+      baseYaw: number,
+      baseScale: number,
+    ) => {
+      for (let c = 0; c < clusterCount && flowers < chunkFlowerCap; c++) {
+        const angle = baseYaw * Math.PI * 2 + c * 2.399963 + (rng() - 0.5) * 0.5;
+        const radius = c === 0 ? 0 : 0.12 + rng() * 0.2;
+        const fx = x + Math.cos(angle) * radius;
+        const fz = z + Math.sin(angle) * radius;
+        if (!inWorld(fx, fz, 1.2)) continue;
+        const fh = c === 0 ? h : sampleHeight(fx, fz);
+        if (fh < SEA_LEVEL + 0.45 || isExcluded(fx, fz, fh) || slopeAt(fx, fz, fh) > 0.92) continue;
+        const pick = (basePick + rng() * 0.65 + c * 0.17) % 1;
+        const scale = baseScale * (c === 0 ? 1 : 0.72 + rng() * 0.24);
+        tintColor.setHex(FLOWER_PALETTE[Math.floor(pick * FLOWER_PALETTE.length) % FLOWER_PALETTE.length]);
+        if (!stampTemplate(pooled, cur, flowerTpl, fx, fh - 0.015, fz, scale, angle, tintColor, pick * Math.PI * 2, 0.8)) {
+          return false;
+        }
+        flowers++;
+        track(fh, scale);
+      }
+      return true;
+    };
     const flowerStep = 0.95;
     for (
       let gz = flowerStep * 0.5;
@@ -439,10 +469,8 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
         if (roll > accept * (0.78 + TIERS[tier].density * 0.22)) continue;
         const h = sampleHeight(x, z);
         if (h < SEA_LEVEL + 0.45 || isExcluded(x, z, h) || slopeAt(x, z, h) > 0.92) continue;
-        tintColor.setHex(FLOWER_PALETTE[Math.floor(pick * FLOWER_PALETTE.length) % FLOWER_PALETTE.length]);
-        if (!stampTemplate(pooled, cur, flowerTpl, x, h - 0.02, z, 0.58 + pick * 0.38, yawJit * Math.PI * 2, tintColor, pick * Math.PI * 2, 0.8)) break;
-        flowers++;
-        track(h, 1);
+        const clusterCount = paintWeight > 0 ? 3 : pick > 0.78 ? 2 : 1;
+        if (!stampFlowerCluster(x, z, h, clusterCount, pick, yawJit, 0.72 + pick * 0.24)) break;
       }
     }
     // A few extra random blooms keep meadows from feeling perfectly tiled.
@@ -458,10 +486,8 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       if (roll > accept * TIERS[tier].density) continue;
       const h = sampleHeight(x, z);
       if (h < SEA_LEVEL + 0.45 || isExcluded(x, z, h) || slopeAt(x, z, h) > 0.9) continue;
-      tintColor.setHex(FLOWER_PALETTE[Math.floor(pick * FLOWER_PALETTE.length) % FLOWER_PALETTE.length]);
-      if (!stampTemplate(pooled, cur, flowerTpl, x, h - 0.02, z, 0.62 + pick * 0.5, yawJit * Math.PI * 2, tintColor, pick * Math.PI * 2, 0.8)) break;
-      flowers++;
-      track(h, 1);
+      const clusterCount = paint === "flowers" ? 3 : pick > 0.84 ? 2 : 1;
+      if (!stampFlowerCluster(x, z, h, clusterCount, pick, yawJit, 0.68 + pick * 0.28)) break;
     }
     // small flora: bushes / ferns / mushrooms / reeds (waterline + pond ring) / rare crystals
     let extras = 0;

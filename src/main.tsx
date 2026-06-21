@@ -180,6 +180,7 @@ import "./styles.css";
 installSessionFetch();
 
 const PORTAL_ARRIVAL_EXIT_OFFSET = 4.5;
+const GENERATED_INTERIOR_SCENE_URL = "generated://interior-room";
 
 // Per-user embodied-agent status shape returned by the Hyades world agent endpoints (camelCase).
 interface AgentStatus {
@@ -322,6 +323,7 @@ function portalRejectionMessage(reason: string): string {
 function createTellusWorld(
   container: HTMLElement,
   onSnapshot: (snapshot: TellusSnapshot) => void,
+  options: { initialInteriorSceneUrl?: string } = {},
 ): TellusWorldApi {
   let destroyed = false;
   let animationId = 0;
@@ -706,6 +708,7 @@ function createTellusWorld(
         sectorsEnabled: !isChunked,
         grassOnly: false,
         suppressGrass: isChunked && !groundGrassEnabled,
+        suppressSmallFlora: isChunked,
         isExcluded: isChunked
           ? (x, z, h) =>
               waterFeatureContains(x, z, 0.6) &&
@@ -856,6 +859,7 @@ function createTellusWorld(
     // proximity check in animate re-arms it via ensureInteriorStatics() once physics is ready.
     rapierPhysics?.addStaticTrimesh("interior", container);
     addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `Entered interior ${u}` });
+    if (u.startsWith("generated://")) return;
     void loadGltfObject(u)
       .then((obj) => {
         if (destroyed || interiorObject !== container) {
@@ -1334,11 +1338,13 @@ function createTellusWorld(
   // build a 2-level room with stairs; window.__tellusExitInterior() to return outdoors. Strip before ship.
   window.__tellusEnterInterior = () => {
     // A fake-but-non-empty sceneUrl: applyInterior renders the procedural room (generateInteriorRoom)
-    // and Track A bakes its solid meshes into Rapier trimesh statics; the GLB fetch fails gracefully
-    // (caught) so the generated room stands in. window.__tellusExitInterior() to leave.
-    applyInterior("dev://interior-test");
+    // and Track A bakes its solid meshes into Rapier trimesh statics.
+    applyInterior(GENERATED_INTERIOR_SCENE_URL);
   };
   window.__tellusExitInterior = () => exitInterior();
+  if (options.initialInteriorSceneUrl) {
+    applyInterior(options.initialInteriorSceneUrl);
+  }
   // DEV-ONLY perf readout: window.__tellusPerf() → { fps, vegetation: {tier, chunks, trees, grassTris} }.
   window.__tellusPerf = () => ({ fps: fpsValue, vegetation: vegetation.stats() });
 
@@ -2066,7 +2072,7 @@ function createTellusWorld(
         // back to an outdoor world in the same scene) — tear the room + its physics statics down.
         const sceneUrl = (parsed as { sceneUrl?: unknown }).sceneUrl;
         if (typeof sceneUrl === "string" && sceneUrl) applyInterior(sceneUrl);
-        else if (interiorObject) exitInterior();
+        else if (interiorObject && !runtimeConfig.worldId.startsWith("interior-")) exitInterior();
         // Phase 4: a tiles world carries a tileSetUrl → mount the 3D tileset as the render substrate.
         const tileUrl = (parsed as { tileSetUrl?: unknown }).tileSetUrl;
         if (typeof tileUrl === "string" && tileUrl) mountTileset(tileUrl);
@@ -6876,7 +6882,12 @@ function createTellusWorld(
       label: (label || "Door").slice(0, 48),
       position: { x, y, z },
       radius: 2.2,
-      target: { kind: "interior", worldId: interiorId, spawn: { x: 0, y: 0, z: 2 } },
+      target: {
+        kind: "interior",
+        worldId: interiorId,
+        spawn: { x: 0, y: 0, z: 2 },
+        sceneUrl: GENERATED_INTERIOR_SCENE_URL,
+      },
     });
   };
 
@@ -8277,6 +8288,7 @@ function App(): React.ReactElement {
   const [activeWorldId, setActiveWorldId] = useState<string | null>(null);
   const [worlds, setWorlds] = useState<string[]>([]);
   const sharedLocationRef = useRef<{ worldId: string; x: number; z: number; consumed: boolean } | null>(null);
+  const pendingInteriorSceneUrlsRef = useRef<Record<string, string>>({});
   const [newWorldTemplate, setNewWorldTemplate] = useState<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
   );
@@ -8624,6 +8636,9 @@ function App(): React.ReactElement {
   useEffect(() => {
     const ps = snapshot.portalSwitch;
     if (!ps || !ps.toWorldId || ps.toWorldId === activeWorldId) return;
+    if (ps.sceneUrl) {
+      pendingInteriorSceneUrlsRef.current[ps.toWorldId] = ps.sceneUrl;
+    }
     switchWorld(ps.toWorldId);
     if (ps.spawn) {
       const { x, z } = ps.spawn;
@@ -9379,7 +9394,11 @@ function App(): React.ReactElement {
       })
       .then(() => {
         if (cancelled) return;
-        world = createTellusWorld(container, setSnapshot);
+        const initialInteriorSceneUrl = pendingInteriorSceneUrlsRef.current[activeWorldId];
+        if (initialInteriorSceneUrl) {
+          delete pendingInteriorSceneUrlsRef.current[activeWorldId];
+        }
+        world = createTellusWorld(container, setSnapshot, { initialInteriorSceneUrl });
         worldRef.current = world;
         const mountedWorld = world;
         const sharedLocation = sharedLocationRef.current;

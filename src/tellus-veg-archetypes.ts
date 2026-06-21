@@ -235,52 +235,59 @@ export const buildReedTemplate = (): Template => {
 };
 
 export const buildFlowerTemplate = (): Template => {
-  const pos: number[] = [];
-  const col: number[] = [];
-  const sway: number[] = [];
-  const tintable: number[] = [];
-  const idx: number[] = [];
-  const stem = new THREE.Color(0x3d6526);
-  {
-    const base = pos.length / 3;
-    pos.push(-0.03, 0, 0, 0.03, 0, 0, 0.022, 0.66, 0, -0.022, 0.66, 0);
-    for (let i = 0; i < 4; i++) {
-      col.push(stem.r, stem.g, stem.b);
-      tintable.push(0);
-    }
-    sway.push(0, 0, 0.36, 0.36);
-    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-  }
-  const headQuad = (yaw: number) => {
+  const parts: TemplatePart[] = [
+    {
+      geom: new THREE.CylinderGeometry(0.01, 0.017, 0.46, 5),
+      matrix: xform(0, 0.23, 0, 1, 1, 1, 0, 0, 0.08),
+      color: new THREE.Color(0x3d6526),
+      tintable: false,
+      swayFrom: 0.08,
+    },
+    {
+      geom: new THREE.ConeGeometry(0.035, 0.12, 4),
+      matrix: xform(-0.026, 0.24, 0.002, 1, 1, 0.35, -0.8, -0.4, 0.5),
+      color: new THREE.Color(0x557d33),
+      tintable: false,
+      swayFrom: 0.12,
+    },
+  ];
+  const addHead = (yaw: number) => {
     const c = Math.cos(yaw);
     const s = Math.sin(yaw);
-    const base = pos.length / 3;
-    for (const [x, y] of [
-      [-0.13, -0.13],
-      [0.13, -0.13],
-      [0.13, 0.13],
-      [-0.13, 0.13],
-    ]) {
-      pos.push(x * c, 0.74 + y, -x * s);
-      col.push(1, 1, 1);
-      tintable.push(1);
-      sway.push(1);
+    const headY = 0.52;
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const px = Math.cos(a) * 0.055;
+      const py = Math.sin(a) * 0.055;
+      parts.push({
+        geom: new THREE.CircleGeometry(1, 8),
+        matrix: xform(
+          px * c,
+          headY + py,
+          -px * s,
+          0.034,
+          0.052,
+          1,
+          0,
+          0,
+          yaw - a,
+        ),
+        color: new THREE.Color(0xffffff),
+        tintable: true,
+        swayFrom: 0.22,
+      });
     }
-    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    parts.push({
+      geom: new THREE.CircleGeometry(1, 10),
+      matrix: xform(0, headY, 0, 0.032, 0.032, 1, 0, 0, yaw),
+      color: new THREE.Color(0xf4c94c),
+      tintable: false,
+      swayFrom: 0.24,
+    });
   };
-  headQuad(0);
-  headQuad(Math.PI / 2);
-  const count = pos.length / 3;
-  const nrm = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++) nrm[i * 3 + 1] = 1;
-  return {
-    pos: new Float32Array(pos),
-    nrm,
-    col: new Float32Array(col),
-    tintable: new Uint8Array(tintable),
-    sway: new Float32Array(sway),
-    idx: new Uint32Array(idx),
-  };
+  addHead(0);
+  addHead(Math.PI / 2);
+  return buildTemplateFromParts(parts);
 };
 
 export const buildFlowerPatchTemplate = (): Template => {
