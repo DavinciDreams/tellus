@@ -7,6 +7,7 @@ export type AgentId = "johnny" | "mira" | "sol" | "atlas";
 
 export type TerrainKind =
   | "meadow"
+  | "grass"
   | "rock"
   | "snow"
   | "beach"

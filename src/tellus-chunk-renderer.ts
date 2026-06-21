@@ -10,6 +10,7 @@ import {
 } from "./tellus-constants";
 import {
   terrainKind,
+  terrainPaintCode,
   terrainPaintKindFromCode,
   terrainVertexColor,
 } from "./tellus-terrain";
@@ -46,6 +47,8 @@ export function createChunkTerrainGeometry(
 
   const positions: number[] = [];
   const colors: number[] = [];
+  const uvs: number[] = [];
+  const paintCodes: number[] = [];
   const indices: number[] = [];
 
   for (let j = 0; j <= seg; j++) {
@@ -65,6 +68,8 @@ export function createChunkTerrainGeometry(
       const color = terrainVertexColor(resolvedKind, wx, wz, xi * 1009 + zi * 9176);
       positions.push(lx, py, lz);
       colors.push(color.r, color.g, color.b);
+      uvs.push(wx / CHUNK_SPAN, wz / CHUNK_SPAN);
+      paintCodes.push(paintCode);
     }
   }
 
@@ -82,6 +87,8 @@ export function createChunkTerrainGeometry(
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute("tellusPaintCode", new THREE.Float32BufferAttribute(paintCodes, 1));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
@@ -106,6 +113,8 @@ export interface ChunkRenderer {
   setLoadRadius(radius: number): void;
   /** /live chunk.updated -> mark dirty + refetch that chunk (rebuilt in the next flush). */
   reloadChunk(chunkX: number, chunkZ: number): void;
+  /** Optimistic local paint for immediate feedback while the authoritative chunk patch round-trips. */
+  applyLocalPaint(kind: TerrainPaintKind, worldX: number, worldZ: number, radius: number): void;
   /** Rebuild any chunks whose data arrived since last frame — call once/frame next to flushTerrain(). */
   flush(): void;
   /**
@@ -317,6 +326,48 @@ export function createChunkRenderer(
     fetchChunk(chunkX, chunkZ, a?.lodSegments ?? CHUNK_SEGMENTS);
   };
 
+  const applyLocalPaint = (kind: TerrainPaintKind, worldX: number, worldZ: number, radius: number) => {
+    if (disposed) return;
+    const paintCode = terrainPaintCode(kind);
+    const radiusSq = radius * radius;
+    for (const [k, a] of active) {
+      const chunkX0 = a.cx * CHUNK_SPAN;
+      const chunkZ0 = a.cz * CHUNK_SPAN;
+      const nearestX = Math.max(chunkX0, Math.min(chunkX0 + CHUNK_SPAN, worldX));
+      const nearestZ = Math.max(chunkZ0, Math.min(chunkZ0 + CHUNK_SPAN, worldZ));
+      if ((nearestX - worldX) ** 2 + (nearestZ - worldZ) ** 2 > radiusSq) continue;
+      const paint =
+        a.paint.length === CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT
+          ? [...a.paint]
+          : new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
+      let changed = false;
+      for (let zi = 0; zi < CHUNK_VERTEX_COUNT; zi++) {
+        const z = chunkZ0 + (zi / CHUNK_SEGMENTS) * CHUNK_SPAN;
+        for (let xi = 0; xi < CHUNK_VERTEX_COUNT; xi++) {
+          const x = chunkX0 + (xi / CHUNK_SEGMENTS) * CHUNK_SPAN;
+          if ((x - worldX) ** 2 + (z - worldZ) ** 2 > radiusSq) continue;
+          const index = zi * CHUNK_VERTEX_COUNT + xi;
+          if (paint[index] === paintCode) continue;
+          paint[index] = paintCode;
+          changed = true;
+        }
+      }
+      if (!changed) continue;
+      buildOrUpdate(
+        k,
+        {
+          cx: a.cx,
+          cz: a.cz,
+          revision: a.revision,
+          segments: CHUNK_SEGMENTS,
+          sculptOffsets: a.sculptOffsets,
+          paint,
+        },
+        a.lodSegments,
+      );
+    }
+  };
+
   const sampleHeight = (worldX: number, worldZ: number): number | null => {
     if (disposed) return null;
     const cx = Math.floor(worldX / CHUNK_SPAN);
@@ -391,6 +442,7 @@ export function createChunkRenderer(
     update,
     setLoadRadius,
     reloadChunk,
+    applyLocalPaint,
     flush,
     sampleHeight,
     samplePaint,

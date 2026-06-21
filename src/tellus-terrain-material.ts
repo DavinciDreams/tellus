@@ -127,7 +127,22 @@ export interface TerrainMaterialOptions {
     normal?: string;
     roughness?: string;
   };
+  paintTextureUrls?: {
+    stone?: string;
+    brick?: string;
+  };
 }
+
+const DEFAULT_TERRAIN_TEXTURE_URLS: Required<NonNullable<TerrainMaterialOptions["textureUrls"]>> = {
+  albedo: "/terrain-textures/stylized-grass1/albedo.png",
+  normal: "/terrain-textures/stylized-grass1/normal.png",
+  roughness: "/terrain-textures/stylized-grass1/roughness.png",
+};
+
+const DEFAULT_PAINT_TEXTURE_URLS: Required<NonNullable<TerrainMaterialOptions["paintTextureUrls"]>> = {
+  stone: "/terrain-textures/stone-rock064/albedo.png",
+  brick: "/terrain-textures/brick-bricks028/albedo.png",
+};
 
 const terrainTextureLoader = new THREE.TextureLoader();
 const generatedTerrainTextures = new Map<string, THREE.Texture>();
@@ -233,7 +248,7 @@ async function loadTerrainTexture(url: string, repeat: number, colorSpace?: THRE
 }
 
 function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMaterialOptions): void {
-  const repeat = options.textureRepeat ?? 42;
+  const repeat = options.textureRepeat ?? 34;
   const withMaps = material as THREE.MeshStandardMaterial & {
     normalScale?: THREE.Vector2;
   };
@@ -242,13 +257,12 @@ function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMateria
   if (albedo) withMaps.map = prepareRepeatTexture(albedo, repeat, THREE.SRGBColorSpace);
   if (normal) {
     withMaps.normalMap = prepareRepeatTexture(normal, repeat);
-    withMaps.normalScale = new THREE.Vector2(0.16, 0.16);
+    withMaps.normalScale = new THREE.Vector2(0.1, 0.1);
   }
   withMaps.roughness = options.roughness ?? 0.9;
   material.needsUpdate = true;
 
-  const urls = options.textureUrls;
-  if (!urls) return;
+  const urls = options.textureUrls ?? DEFAULT_TERRAIN_TEXTURE_URLS;
   if (urls.albedo) {
     void loadTerrainTexture(urls.albedo, repeat, THREE.SRGBColorSpace)
       .then((texture) => {
@@ -261,7 +275,7 @@ function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMateria
     void loadTerrainTexture(urls.normal, repeat)
       .then((texture) => {
         withMaps.normalMap = texture;
-        withMaps.normalScale = new THREE.Vector2(0.22, 0.22);
+        withMaps.normalScale = new THREE.Vector2(0.13, 0.13);
         material.needsUpdate = true;
       })
       .catch((error) => console.warn("Tellus terrain normal texture failed", error));
@@ -274,6 +288,119 @@ function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMateria
       })
       .catch((error) => console.warn("Tellus terrain roughness texture failed", error));
   }
+}
+
+const WEBGL_MASKED_TERRAIN_MAP_FRAGMENT = `
+#ifdef USE_MAP
+  vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+  #ifdef DECODE_VIDEO_TEXTURE
+    sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
+  #endif
+  float tellusGrassMask = 1.0 - smoothstep(0.18, 0.72, abs(vTellusPaintCode - 9.0));
+  diffuseColor.rgb *= mix(vec3(1.0), sampledDiffuseColor.rgb, tellusGrassMask);
+  diffuseColor.a *= sampledDiffuseColor.a;
+#endif
+`;
+
+const WEBGL_MASKED_TERRAIN_NORMAL_FRAGMENT_MAPS = `
+#ifdef USE_NORMALMAP_OBJECTSPACE
+  vec3 objectNormalMap = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+  float tellusGrassNormalMask = 1.0 - smoothstep(0.18, 0.72, abs(vTellusPaintCode - 9.0));
+  objectNormalMap.xy *= tellusGrassNormalMask;
+  normal = objectNormalMap;
+  #ifdef FLIP_SIDED
+    normal = - normal;
+  #endif
+  #ifdef DOUBLE_SIDED
+    normal = normal * faceDirection;
+  #endif
+  normal = normalize( normalMatrix * normal );
+#elif defined( USE_NORMALMAP_TANGENTSPACE )
+  vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+  float tellusGrassNormalMask = 1.0 - smoothstep(0.18, 0.72, abs(vTellusPaintCode - 9.0));
+  mapN.xy *= normalScale * tellusGrassNormalMask;
+  normal = normalize( tbn * mapN );
+#elif defined( USE_BUMPMAP )
+  normal = perturbNormalArb( - vViewPosition, normal, dHdxy_fwd(), faceDirection );
+#endif
+`;
+
+function applyPaintTextureBlend(material: THREE.MeshStandardMaterial, options: TerrainMaterialOptions): void {
+  const repeat = options.textureRepeat ?? 34;
+  const urls = options.paintTextureUrls ?? DEFAULT_PAINT_TEXTURE_URLS;
+  const paintTextures: {
+    stone: THREE.Texture | null;
+    brick: THREE.Texture | null;
+  } = {
+    stone: material.map,
+    brick: material.map,
+  };
+  const shaders = new Set<THREE.WebGLProgramParametersWithUniforms>();
+
+  const updateShaderUniforms = () => {
+    for (const shader of shaders) {
+      shader.uniforms.tellusStoneAlbedoMap.value = paintTextures.stone ?? material.map;
+      shader.uniforms.tellusBrickAlbedoMap.value = paintTextures.brick ?? material.map;
+    }
+  };
+
+  if (urls.stone) {
+    void loadTerrainTexture(urls.stone, repeat, THREE.SRGBColorSpace)
+      .then((texture) => {
+        paintTextures.stone = texture;
+        updateShaderUniforms();
+      })
+      .catch((error) => console.warn("Tellus terrain stone texture failed", error));
+  }
+  if (urls.brick) {
+    void loadTerrainTexture(urls.brick, repeat, THREE.SRGBColorSpace)
+      .then((texture) => {
+        paintTextures.brick = texture;
+        updateShaderUniforms();
+      })
+      .catch((error) => console.warn("Tellus terrain brick texture failed", error));
+  }
+
+  material.onBeforeCompile = (shader) => {
+    shaders.add(shader);
+    shader.uniforms.tellusStoneAlbedoMap = { value: paintTextures.stone ?? material.map };
+    shader.uniforms.tellusBrickAlbedoMap = { value: paintTextures.brick ?? material.map };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nattribute float tellusPaintCode;\nvarying float vTellusPaintCode;",
+      )
+      .replace(
+        "#include <begin_vertex>",
+        "#include <begin_vertex>\nvTellusPaintCode = tellusPaintCode;",
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nuniform sampler2D tellusStoneAlbedoMap;\nuniform sampler2D tellusBrickAlbedoMap;\nvarying float vTellusPaintCode;",
+      )
+      .replace(
+        "#include <map_fragment>",
+        WEBGL_MASKED_TERRAIN_MAP_FRAGMENT,
+      )
+      .replace(
+        "#include <normal_fragment_maps>",
+        WEBGL_MASKED_TERRAIN_NORMAL_FRAGMENT_MAPS,
+      )
+      .replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+  {
+    float tellusStoneMask = 1.0 - smoothstep(0.18, 0.72, abs(vTellusPaintCode - 7.0));
+    float tellusBrickMask = 1.0 - smoothstep(0.18, 0.72, abs(vTellusPaintCode - 8.0));
+    vec3 tellusStoneColor = texture2D(tellusStoneAlbedoMap, vMapUv).rgb;
+    vec3 tellusBrickColor = texture2D(tellusBrickAlbedoMap, vMapUv).rgb;
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * tellusStoneColor * 1.35, tellusStoneMask);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * tellusBrickColor * 1.25, tellusBrickMask);
+  }`,
+      );
+  };
+  material.customProgramCacheKey = () => "tellus-terrain-paint-texture-blend";
 }
 
 /**
@@ -294,7 +421,17 @@ export function createTerrainMaterial(
     material.roughness = roughness;
     material.metalness = 0;
     material.colorNode = buildDetailColorNode();
-    if (options.pbrDetail !== false) applyTerrainPbrDetail(material, options);
+    return material;
+  }
+
+  if (options.pbrDetail !== false) {
+    const material = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness,
+      metalness: 0,
+    });
+    applyTerrainPbrDetail(material, options);
+    applyPaintTextureBlend(material, options);
     return material;
   }
 
@@ -303,7 +440,6 @@ export function createTerrainMaterial(
     roughness,
     metalness: 0,
   });
-  if (options.pbrDetail !== false) applyTerrainPbrDetail(material, options);
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace(
