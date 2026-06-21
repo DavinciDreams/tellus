@@ -19,6 +19,7 @@ import { extractErrorMessage, readJsonResponse } from "./tellus-utils";
 import { runtimeConfig } from "./tellus-runtime-config";
 import {
   absoluteAssetForgeUrl,
+  assetStoreGameOptimizedModelUrl,
   absoluteTellusApiUrl,
   tellusApiUrl,
   tellusAssetLibraryUrl,
@@ -165,7 +166,13 @@ export async function loadAssetLibraryModels(): Promise<AssetLibraryModel[]> {
       if (typeof entry.id !== "string" || typeof entry.modelUrl !== "string") {
         return null;
       }
-      const modelUrl = entry.modelUrl;
+      const assetStoreModelId =
+        typeof entry.assetStoreModelId === "string" && entry.assetStoreModelId.trim()
+          ? entry.assetStoreModelId.trim()
+          : undefined;
+      const modelUrl = assetStoreModelId
+        ? assetStoreGameOptimizedModelUrl(assetStoreModelId)
+        : entry.modelUrl;
       const prompt =
         typeof entry.prompt === "string" && entry.prompt.trim()
           ? entry.prompt.trim()
@@ -175,6 +182,7 @@ export async function loadAssetLibraryModels(): Promise<AssetLibraryModel[]> {
         name: prompt,
         description: prompt,
         file_format: "glb",
+        assetStoreModelId,
         modelUrl: absoluteTellusApiUrl(modelUrl),
         source: "generated",
       };
@@ -190,7 +198,12 @@ export async function loadAssetLibraryModels(): Promise<AssetLibraryModel[]> {
 }
 
 let generatedAssetManifestCache:
-  | { loadedAt: number; entries: GeneratedAssetManifestEntry[]; byId: Map<string, string> }
+  | {
+      loadedAt: number;
+      entries: GeneratedAssetManifestEntry[];
+      byId: Map<string, string>;
+      assetIdsById: Map<string, string>;
+    }
   | undefined;
 
 export async function generatedAssetManifestEntries(): Promise<GeneratedAssetManifestEntry[]> {
@@ -206,6 +219,7 @@ export async function generatedAssetManifestEntries(): Promise<GeneratedAssetMan
       loadedAt: now,
       entries: [],
       byId: new Map<string, string>(),
+      assetIdsById: new Map<string, string>(),
     };
     return [];
   }
@@ -218,10 +232,21 @@ export async function generatedAssetManifestEntries(): Promise<GeneratedAssetMan
       )
     : [];
   const byId = new Map<string, string>();
+  const assetIdsById = new Map<string, string>();
   for (const entry of entries) {
-    byId.set(entry.id as string, absoluteTellusApiUrl(entry.modelUrl as string));
+    const id = entry.id as string;
+    const assetStoreModelId =
+      typeof entry.assetStoreModelId === "string" && entry.assetStoreModelId.trim()
+        ? entry.assetStoreModelId.trim()
+        : undefined;
+    if (assetStoreModelId) {
+      assetIdsById.set(id, assetStoreModelId);
+      byId.set(id, assetStoreGameOptimizedModelUrl(assetStoreModelId));
+    } else {
+      byId.set(id, absoluteTellusApiUrl(entry.modelUrl as string));
+    }
   }
-  generatedAssetManifestCache = { loadedAt: now, entries, byId };
+  generatedAssetManifestCache = { loadedAt: now, entries, byId, assetIdsById };
   return entries;
 }
 
@@ -229,6 +254,15 @@ export async function generatedAssetManifestModelUrls(): Promise<Map<string, str
   await generatedAssetManifestEntries();
   const byId = generatedAssetManifestCache?.byId ?? new Map<string, string>();
   return byId;
+}
+
+export async function generatedAssetManifestAssetIds(): Promise<Map<string, string>> {
+  await generatedAssetManifestEntries();
+  return generatedAssetManifestCache?.assetIdsById ?? new Map<string, string>();
+}
+
+export function clearGeneratedAssetManifestCacheForTests(): void {
+  generatedAssetManifestCache = undefined;
 }
 
 export async function startPixel3DGeneration(

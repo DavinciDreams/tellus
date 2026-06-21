@@ -122,9 +122,9 @@ import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, Generatio
 import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig } from "./tellus-runtime-config";
-import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, toAssetId } from "./tellus-urls-identity";
+import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, toAssetId } from "./tellus-urls-identity";
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
-import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
+import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial } from "./tellus-terrain-material";
 import { largeWorldTerrainKind } from "./tellus-large-world-terrain";
@@ -2882,6 +2882,7 @@ function createTellusWorld(
     rotationZ: thing.rotationZ,
     scale: thing.scale,
     color: thing.color,
+    assetStoreModelId: thing.assetStoreModelId,
     modelUrl: thing.generationStatus === "failed" ? undefined : thing.modelUrl,
     pipelineId: thing.modelUrl ? undefined : thing.pipelineId,
     generationStatus:
@@ -2896,17 +2897,38 @@ function createTellusWorld(
     updatedAt: new Date().toISOString(),
   });
 
+  const resolveAssetBackedModel = (
+    modelUrl?: string,
+    assetStoreModelId?: string,
+  ): { modelUrl?: string; assetStoreModelId?: string } => {
+    const assetId =
+      assetStoreModelId?.trim() ||
+      (modelUrl ? assetStoreIdFromModelUrl(modelUrl) ?? undefined : undefined);
+    if (assetId) {
+      return {
+        assetStoreModelId: assetId,
+        modelUrl: assetStoreGameOptimizedModelUrl(assetId),
+      };
+    }
+    return {
+      modelUrl: modelUrl
+        ? (sanitizeProceduralModelUrl(modelUrl) ?? absoluteTellusApiUrl(modelUrl))
+        : undefined,
+    };
+  };
+
   const normalizeGeneratedThing = (thing: WorldGeneratedThing): WorldGeneratedThing => {
     // procedural:// URLs are scheme-addressed local builds — absolutizing them (meant for legacy
     // relative GLB paths) would mangle them into "/procedural://…" and break rendering.
-    const modelUrl = thing.generationStatus === "failed"
-      ? undefined
-      : thing.modelUrl
-        ? (sanitizeProceduralModelUrl(thing.modelUrl) ?? absoluteTellusApiUrl(thing.modelUrl))
-        : undefined;
+    const resolved =
+      thing.generationStatus === "failed"
+        ? { modelUrl: undefined, assetStoreModelId: thing.assetStoreModelId }
+        : resolveAssetBackedModel(thing.modelUrl, thing.assetStoreModelId);
+    const modelUrl = resolved.modelUrl;
     const stalePending = isStalePendingGeneratedThing(thing);
     return {
       ...thing,
+      assetStoreModelId: resolved.assetStoreModelId,
       modelUrl,
       pipelineId: modelUrl || stalePending ? undefined : thing.pipelineId,
       generationStatus: modelUrl
@@ -2937,6 +2959,7 @@ function createTellusWorld(
       return;
     }
 
+    existing.assetStoreModelId = normalized.assetStoreModelId ?? existing.assetStoreModelId;
     existing.modelUrl = normalized.modelUrl;
     existing.pipelineId = normalized.modelUrl ? undefined : normalized.pipelineId;
     existing.generationStatus = normalized.modelUrl
@@ -3169,13 +3192,17 @@ function createTellusWorld(
       return;
     }
     pendingManifestReconciliations.add(thing.id);
-    void generatedAssetManifestModelUrls()
-      .then((modelUrls) => {
+    void Promise.all([
+      generatedAssetManifestModelUrls(),
+      generatedAssetManifestAssetIds(),
+    ])
+      .then(([modelUrls, assetIds]) => {
         if (destroyed) return;
         const modelUrl = modelUrls.get(thing.id);
         if (!modelUrl) return;
         const current = thingById(thing.id);
         if (!current || current.modelUrl) return;
+        current.assetStoreModelId = assetIds.get(thing.id) ?? current.assetStoreModelId;
         current.modelUrl = modelUrl;
         current.generationStatus = "ready";
         current.pipelineId = undefined;
@@ -3206,6 +3233,7 @@ function createTellusWorld(
       existing.rotationZ = normalized.rotationZ ?? 0;
       existing.scale = normalized.scale;
       existing.color = normalized.color;
+      existing.assetStoreModelId = normalized.assetStoreModelId ?? existing.assetStoreModelId;
       // animation wire convention (mirrors presence.avatarId): "" = explicit default, a non-empty
       // string = explicit clip, ABSENT = a mid-rollout server stripped the field — keep ours
       // (otherwise our own upsert's echo would wipe a just-picked clip).
@@ -3245,6 +3273,7 @@ function createTellusWorld(
       rotationZ: normalized.rotationZ ?? 0,
       scale: normalized.scale,
       color: normalized.color,
+      assetStoreModelId: normalized.assetStoreModelId,
       modelUrl: normalized.modelUrl,
       pipelineId: normalized.pipelineId,
       generationStatus: normalized.generationStatus,
@@ -3342,7 +3371,14 @@ function createTellusWorld(
               rotationY: angle + Math.PI,
               scale: 1,
               color: kindColor(kind, prompt),
-              modelUrl: absoluteTellusApiUrl(entry.modelUrl),
+              assetStoreModelId:
+                typeof entry.assetStoreModelId === "string" && entry.assetStoreModelId.trim()
+                  ? entry.assetStoreModelId.trim()
+                  : undefined,
+              modelUrl:
+                typeof entry.assetStoreModelId === "string" && entry.assetStoreModelId.trim()
+                  ? assetStoreGameOptimizedModelUrl(entry.assetStoreModelId.trim())
+                  : absoluteTellusApiUrl(entry.modelUrl),
               generationStatus: "ready",
               updatedAt:
                 typeof entry.createdAt === "string"
@@ -3537,6 +3573,7 @@ function createTellusWorld(
       rotationZ: source.rotationZ,
       scale: source.scale,
       color: source.color,
+      assetStoreModelId: source.assetStoreModelId,
       modelUrl: source.modelUrl,
       pipelineId: source.pipelineId,
       generationStatus: source.generationStatus,
@@ -4047,7 +4084,9 @@ function createTellusWorld(
           if (!result.modelUrl) {
             throw new Error(`${providerName} completed without a model URL`);
           }
-          thing.modelUrl = absoluteTellusApiUrl(result.modelUrl);
+          const resolved = resolveAssetBackedModel(result.modelUrl, result.assetStoreModelId);
+          thing.assetStoreModelId = resolved.assetStoreModelId;
+          thing.modelUrl = resolved.modelUrl ?? absoluteTellusApiUrl(result.modelUrl);
           thing.generationStatus = "ready";
           addLog({
             agentId: "world",
@@ -4137,9 +4176,18 @@ function createTellusWorld(
     // quality. The store's game-optimized endpoint safely serves the original GLB when no optimized
     // build exists, so there's no 404 risk and no client-side fallback needed. (MeshoptDecoder is
     // already wired into the GLTF loader.)
+    const assetStoreModelId =
+      model.assetStoreModelId ??
+      (model.source === "asset-library"
+        ? model.id
+        : model.modelUrl
+          ? assetStoreIdFromModelUrl(model.modelUrl) ?? undefined
+          : undefined);
     const modelUrl =
-      model.modelUrl ??
-      tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(model.id)}/game-optimized`);
+      assetStoreModelId
+        ? assetStoreGameOptimizedModelUrl(assetStoreModelId)
+        : model.modelUrl ??
+          tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(model.id)}/game-optimized`);
     const position = chooseLocation({
       prompt,
       creatorId,
@@ -4160,6 +4208,7 @@ function createTellusWorld(
       rotationY: 0,
       scale: 1,
       color: kindColor(kind, prompt),
+      assetStoreModelId,
       modelUrl,
       generationStatus: "ready",
     };
@@ -5974,9 +6023,10 @@ function createTellusWorld(
           const directModel =
             worldThing?.modelUrl
               ? {
-                  id: assetId,
+                  id: worldThing.assetStoreModelId ?? assetId,
                   name: worldThing.prompt,
                   description: worldThing.prompt,
+                  assetStoreModelId: worldThing.assetStoreModelId,
                   modelUrl: worldThing.modelUrl,
                   source: "generated" as const,
                 }
@@ -8398,11 +8448,17 @@ function App(): React.ReactElement {
     return source
       .map((item): WorldGeneratedThing | null => {
         if (isWorldGeneratedThing(item)) {
-          const modelUrl = item.modelUrl
-            ? absoluteTellusApiUrl(item.modelUrl)
-            : undefined;
+          const assetStoreModelId =
+            item.assetStoreModelId ??
+            (item.modelUrl ? assetStoreIdFromModelUrl(item.modelUrl) ?? undefined : undefined);
+          const modelUrl = assetStoreModelId
+            ? assetStoreGameOptimizedModelUrl(assetStoreModelId)
+            : item.modelUrl
+              ? absoluteTellusApiUrl(item.modelUrl)
+              : undefined;
           return {
             ...item,
+            assetStoreModelId,
             modelUrl,
             pipelineId: modelUrl ? undefined : item.pipelineId,
             generationStatus: modelUrl ? "ready" : item.generationStatus,
@@ -8423,9 +8479,20 @@ function App(): React.ReactElement {
           typeof item.kind === "string" ? item.kind : item.prompt,
           "visitor",
         );
-        const modelUrl =
+        const rawModelUrl =
           typeof item.modelUrl === "string"
-            ? absoluteTellusApiUrl(item.modelUrl)
+            ? item.modelUrl
+            : undefined;
+        const assetStoreModelId =
+          typeof item.assetStoreModelId === "string" && item.assetStoreModelId.trim()
+            ? item.assetStoreModelId.trim()
+            : rawModelUrl
+              ? assetStoreIdFromModelUrl(rawModelUrl) ?? undefined
+              : undefined;
+        const modelUrl = assetStoreModelId
+          ? assetStoreGameOptimizedModelUrl(assetStoreModelId)
+          : rawModelUrl
+            ? absoluteTellusApiUrl(rawModelUrl)
             : undefined;
         return {
           id: item.id,
@@ -8454,6 +8521,7 @@ function App(): React.ReactElement {
             typeof item.color === "number" && Number.isFinite(item.color)
               ? item.color
               : kindColor(kind, item.prompt),
+          assetStoreModelId,
           modelUrl,
           pipelineId:
             modelUrl

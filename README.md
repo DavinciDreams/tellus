@@ -152,6 +152,13 @@ to a valid server-side asset-store session cookie, or use
 uploads. `TELLUS_REQUIRE_ASSET_STORE_UPLOAD=true` makes generation fail loudly
 if the object cannot be persisted into the asset store.
 
+Tellus persists the asset store's immutable model id as `assetStoreModelId` on
+placed generated objects. Hyades / gnostr proxy deployments must preserve that
+field unchanged and serve `/api/assets/model/{id}/game-optimized` for it
+(proxied to the 3D Asset Manager's `/api/model/{id}/game-optimized`). `modelUrl`
+is treated as a cached serving hint and may be rewritten from `assetStoreModelId`
+when titles, metadata, optimization state, or proxy route shapes change.
+
 The GLB optimizer registers glTF extensions, removes duplicate/unused data,
 welds geometry, quantizes attributes, and can resize/recompress textures.
 Optional simplification is controlled with `TELLUS_OPTIMIZE_SIMPLIFY_RATIO`

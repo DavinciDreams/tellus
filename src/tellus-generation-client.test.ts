@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  clearGeneratedAssetManifestCacheForTests,
+  generatedAssetManifestAssetIds,
   browseAssetLibrary,
   generatedAssetManifestEntries,
+  generatedAssetManifestModelUrls,
 } from "./tellus-generation-client";
 import { runtimeConfig } from "./tellus-runtime-config";
 
@@ -10,6 +13,7 @@ describe("asset library browsing", () => {
 
   afterEach(() => {
     runtimeConfig.worldApiBase = originalWorldApiBase;
+    clearGeneratedAssetManifestCacheForTests();
     vi.unstubAllGlobals();
   });
 
@@ -73,5 +77,30 @@ describe("asset library browsing", () => {
       "/generated-assets/manifest.json",
       { cache: "no-store" },
     );
+  });
+
+  it("prefers immutable asset-store ids when mapping generated manifest cards", async () => {
+    runtimeConfig.worldApiBase = "https://hyades.example";
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify([
+          {
+            id: "thing-1",
+            prompt: "Lisa Tavern",
+            modelUrl: "/generated-assets/lisa-tavern.glb",
+            assetStoreModelId: "asset-123",
+          },
+        ]),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const entries = await generatedAssetManifestEntries();
+    const modelUrls = await generatedAssetManifestModelUrls();
+    const assetIds = await generatedAssetManifestAssetIds();
+
+    expect(entries[0]).toEqual(expect.objectContaining({ assetStoreModelId: "asset-123" }));
+    expect(modelUrls.get("thing-1")).toBe("https://hyades.example/api/assets/model/asset-123/game-optimized");
+    expect(assetIds.get("thing-1")).toBe("asset-123");
   });
 });
