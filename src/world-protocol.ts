@@ -132,10 +132,6 @@ export type WorldAction =
       avatarScale?: number;
     }
   | {
-      type: "presence.leave";
-      visitorId: string;
-    }
-  | {
       type: "terrain.replace";
       visitorId: string;
       terrain: TellusTerrainState;
@@ -582,7 +578,6 @@ export function isWorldAction(value: unknown): value is WorldAction {
         (typeof value.avatarScale === "number" && Number.isFinite(value.avatarScale)))
     );
   }
-  if (value.type === "presence.leave") return true;
   if (value.type === "terrain.replace") {
     return isTellusTerrainState(value.terrain);
   }

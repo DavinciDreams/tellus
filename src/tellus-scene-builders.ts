@@ -48,12 +48,12 @@ import {
   terrainHeight,
   terrainKind,
   terrainVertexColor,
-  vehicleMode,
 } from "./tellus-terrain";
 import { createGltfLoader, gltfObjectCache } from "./tellus-generation-client";
 import { proxiedGeneratedModelUrl } from "./tellus-urls-identity";
 import { tryLoadVrmObject, VrmObjectRig } from "./tellus-vrm-avatar";
 import { createTerrainMaterial } from "./tellus-terrain-material";
+import { worldThingTargetHeight } from "./tellus-world-object-profile";
 
 const SKYBOX_MODEL_VERTICAL_OFFSETS: Record<string, number> = {
   "/skybox/free_-_skybox_basic_sky.glb": -30,
@@ -830,57 +830,7 @@ export async function loadSkyboxModel(primaryUrl = runtimeConfig.skyboxUrl): Pro
 }
 
 export function assetTargetHeight(thing: GeneratedThing): number {
-  const lower = thing.prompt.toLowerCase();
-  const variation = clamp(thing.scale, 0.25, 12);
-  // A mirror is a fixed ~2.5m standing pane — keep it human-scale regardless of the generic-object
-  // heuristic below (its modelUrl is procedural://mirror; the prompt is "Mirror").
-  if (lower === "mirror") return clamp(2.5 * variation, 1.2, 12);
-  // Procedural-nature scatter (from the Terrain panel) — the generic-object fallback made grass,
-  // ferns and mushrooms all ~1.35m (tree-ish), so a grass tuft stood as tall as a birch. Give each
-  // small plant a realistic ground height keyed on its label. Trees still fall through to the
-  // kind === "tree" branch below (4.2m).
-  const PROC_PLANT_HEIGHTS: Record<string, number> = {
-    "grass tuft": 0.32,
-    fern: 0.55,
-    reeds: 1.1,
-    bush: 0.85,
-    mushroom: 0.28,
-    flower: 0.45,
-  };
-  if (PROC_PLANT_HEIGHTS[lower] !== undefined) {
-    return clamp(PROC_PLANT_HEIGHTS[lower] * variation, 0.12, 24);
-  }
-  const mode = vehicleMode(thing);
-  if (mode === "air") return clamp(4.8 * variation, 1.6, 54);
-  if (mode === "water") return clamp(1.45 * variation, 0.45, 18);
-  if (mode === "ground") return clamp(2.05 * variation, 0.65, 24);
-  if (thing.kind === "tree") return clamp(4.2 * variation, 0.8, 52);
-  if (
-    lower.includes("hut") ||
-    lower.includes("house") ||
-    lower.includes("cottage") ||
-    lower.includes("cabin") ||
-    lower.includes("workshop") ||
-    lower.includes("building")
-  ) {
-    return clamp(3.6 * variation, 0.9, 48);
-  }
-  if (lower.includes("tower")) return clamp(5.2 * variation, 1.2, 64);
-  if (
-    lower.includes("bridge") ||
-    lower.includes("dock") ||
-    lower.includes("pier") ||
-    lower.includes("path") ||
-    lower.includes("road") ||
-    thing.kind === "path"
-  ) {
-    return clamp(0.42 * variation, 0.12, 8);
-  }
-  if (thing.kind === "animal") return clamp(1.55 * variation, 0.45, 24);
-  if (thing.kind === "flower") return clamp(0.58 * variation, 0.16, 9);
-  if (thing.kind === "stone") return clamp(1.0 * variation, 0.25, 18);
-  if (thing.kind === "shrine") return clamp(2.2 * variation, 0.55, 32);
-  return clamp(1.35 * variation, 0.35, 24);
+  return worldThingTargetHeight(thing);
 }
 
 export async function loadGeneratedModel(

@@ -148,6 +148,13 @@ import {
 } from "./tellus-asset-reuse";
 import { actorKindForVisitorId, friendlyVisitorName } from "./tellus-visitor-names";
 import {
+  buildWorldThingRuntimeProfile,
+  defaultScaleForRealisticKind,
+  normalizeWorldThingAssetIdentity,
+  seatPositionForWorldThing,
+  type WorldThingRuntimeProfile,
+} from "./tellus-world-object-profile";
+import {
   DAY_NIGHT_MODE_OPTIONS,
   LIGHTING_MOOD_OPTIONS,
   LIGHTING_MOOD_PROFILES,
@@ -329,7 +336,13 @@ function createTellusWorld(
   const worldBiomeCells = new Map<string, WorldBiomeCell>();
   const seenWorldChatIds = new Set<string>();
   const generatedMeshes = new Map<string, THREE.Object3D>();
-  const generatedAnimationMixers = new Map<string, THREE.AnimationMixer>();
+  type GeneratedAnimationState = {
+    mixer: THREE.AnimationMixer;
+    action?: THREE.AnimationAction;
+    clipName?: string;
+    mode: "idle" | "move";
+  };
+  const generatedAnimationMixers = new Map<string, GeneratedAnimationState>();
   // Placed VRM things (auton/Atlantean store models) animate through a real VRM rig — a VRMA idle clip
   // looped by default, advanced (mixer + spring bones) each frame here. Parallel to the plain-GLB
   // mixers above; a thing is in exactly one of the two maps.
@@ -609,6 +622,8 @@ function createTellusWorld(
   // on WebGPU too. (Same call as Codex's WebGPU-mirror fallback.) WebGL never had the refractive water.
   const ocean = createOceanSurface(false);
   const archipelago = createDistantArchipelago(useWebGPU);
+  let chunkRenderer: ChunkRenderer | null = null;
+  let lastActiveChunkCount = -1; // re-ground placed assets when the active chunk set changes
   // Ambient procedural vegetation (wind-swayed grass/flowers streamed around the player + island-wide
   // trees/rocks) and the lightweight physics world (thrown things, player jump/obstacles). Both are
   // deterministic from the synced terrain state — no protocol changes.
@@ -640,7 +655,7 @@ function createTellusWorld(
         scene,
         useWebGPU,
         sampleHeight: isChunked
-          ? (x, z) => groundHeightAt(x, z) ?? 0
+          ? (x, z) => chunkRenderer?.sampleHeight(x, z) ?? SEA_LEVEL - 100
           : terrainHeight,
         samplePaint: isChunked
           ? (x, z) => {
@@ -703,8 +718,6 @@ function createTellusWorld(
     .catch((error) => {
       console.warn("Tellus Rapier physics unavailable", error);
     });
-  let chunkRenderer: ChunkRenderer | null = null;
-  let lastActiveChunkCount = -1; // re-ground placed assets when the active chunk set changes
   const terrain = new THREE.Mesh(
     createTerrainGeometry(terrainRenderSegments),
     createTerrainMaterial(useWebGPU, { roughness: 0.88 }),
@@ -1351,13 +1364,55 @@ function createTellusWorld(
   // (every WS patch, every transform-drag frame); each onSnapshot is a deep-cloned snapshot + a React
   // re-render, so collapsing them to a single flush in animate() removes the per-frame clone/render storm.
   let publishPending = false;
+  let lastSnapshotFlushAt = 0;
+  let lastSnapshotSignature = "";
+  const MIN_SNAPSHOT_FLUSH_MS = 250;
+  const snapshotSignature = (s: TellusSnapshot): string => {
+    const pos = s.visitorPosition ?? { x: 0, y: 0, z: 0 };
+    const generatedSig = s.generated
+      .map((thing) =>
+        [
+          thing.id,
+          thing.generationStatus ?? "",
+          Math.round(thing.position.x * 2),
+          Math.round(thing.position.y * 2),
+          Math.round(thing.position.z * 2),
+          Math.round((thing.rotationY ?? 0) * 20),
+        ].join(":"),
+      )
+      .join("|");
+    return [
+      Math.round(pos.x * 2),
+      Math.round(pos.y * 2),
+      Math.round(pos.z * 2),
+      Math.round((s.visitorYaw ?? 0) * 20),
+      s.selectedThingId ?? "",
+      s.sailingThingId ?? "",
+      s.logs.length,
+      s.worldChat.length,
+      s.remoteVisitors.length,
+      s.portals?.length ?? 0,
+      s.portalSwitch
+        ? `${s.portalSwitch.toWorldId}:${s.portalSwitch.spawn?.x ?? 0}:${s.portalSwitch.spawn?.z ?? 0}`
+        : "",
+      generatedSig,
+    ].join(";");
+  };
   const publish = () => {
     publishPending = true;
   };
   const flushPublish = () => {
     if (!publishPending) return;
+    const nowMs = performance.now();
+    const force = pendingPortalSwitch !== null;
+    if (!force && nowMs - lastSnapshotFlushAt < MIN_SNAPSHOT_FLUSH_MS) return;
     publishPending = false;
-    onSnapshot(snapshot());
+    const nextSnapshot = snapshot();
+    const signature = snapshotSignature(nextSnapshot);
+    if (!force && signature === lastSnapshotSignature) return;
+    lastSnapshotFlushAt = nowMs;
+    lastSnapshotSignature = signature;
+    onSnapshot(nextSnapshot);
     // The world.portal.entered signal is one-shot — the snapshot captured it by value, so clear it now so it
     // doesn't re-fire the React world-switch effect on the next publish.
     pendingPortalSwitch = null;
@@ -1879,24 +1934,6 @@ function createTellusWorld(
     }));
   };
 
-  const sendPresenceLeave = (keepalive = false) => {
-    const frame = { type: "presence.leave", visitorId };
-    if (worldSocket?.readyState === WebSocket.OPEN) {
-      try {
-        worldSocket.send(JSON.stringify(frame));
-      } catch {
-        /* socket race */
-      }
-    }
-    if (!keepalive || !tellusWorldBackendAvailable) return;
-    void fetch(tellusWorldHttpUrl("action"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(frame),
-      keepalive: true,
-    }).catch(() => undefined);
-  };
-
   const publishTerrainStateNow = () => {
     if (!tellusWorldBackendAvailable || worldSocket?.readyState !== WebSocket.OPEN) return;
     worldSocket.send(JSON.stringify({
@@ -2318,6 +2355,7 @@ function createTellusWorld(
   // A thing is a *candidate* for folding if its loaded static GLB is mounted (sharedGltf + matching
   // loadedModelUrl) and it isn't animated. Selection/duplicate-count gating is applied separately.
   const isInstanceCandidate = (thing: GeneratedThing): boolean => {
+    if (thing.id === sailingThingId) return false;
     if (!thing.modelUrl || thing.generationStatus !== "ready") return false;
     const mesh = generatedMeshes.get(thing.id);
     if (!mesh) return false;
@@ -2558,8 +2596,11 @@ function createTellusWorld(
       const candidates = generated.filter(
         (t) => t.modelUrl === modelUrl && isInstanceCandidate(t),
       );
-      // Foldable = candidate AND not currently selected.
-      const foldable = candidates.filter((t) => t.id !== selectedThingId);
+      // Foldable = candidate AND not currently selected/ridden. A ridden thing
+      // must stay as its own mesh so rider positioning and movement can update it directly.
+      const foldable = candidates.filter(
+        (t) => t.id !== selectedThingId && t.id !== sailingThingId,
+      );
 
       if (foldable.length < 2) {
         // Below threshold → pop everyone in this group back out (regular meshes), drop the pool.
@@ -2618,10 +2659,13 @@ function createTellusWorld(
     const urls = new Set<string>();
     const prev = previousSelectedId ? thingById(previousSelectedId) : undefined;
     const next = nextSelectedId ? thingById(nextSelectedId) : undefined;
+    const ridden = sailingThingId ? thingById(sailingThingId) : undefined;
     if (prev?.modelUrl) urls.add(prev.modelUrl);
     if (next?.modelUrl) urls.add(next.modelUrl);
-    // A selected thing is never instanced; pop it out first so its regular mesh is live before any re-fold.
+    if (ridden?.modelUrl) urls.add(ridden.modelUrl);
+    // A selected/ridden thing is never instanced; pop it out first so its regular mesh is live before any re-fold.
     if (nextSelectedId) uninstanceThing(nextSelectedId);
+    if (sailingThingId) uninstanceThing(sailingThingId);
     for (const url of urls) reevaluateInstanceGroup(url);
   };
 
@@ -2634,7 +2678,7 @@ function createTellusWorld(
     }
     const mixer = generatedAnimationMixers.get(id);
     if (!mixer) return;
-    mixer.stopAllAction();
+    mixer.mixer.stopAllAction();
     generatedAnimationMixers.delete(id);
   };
 
@@ -2656,6 +2700,85 @@ function createTellusWorld(
     return generatedModelClips(mesh).map((clip) => clip.name);
   };
 
+  const generatedClipNameIncludes = (clip: THREE.AnimationClip, fragments: string[]) => {
+    const name = (clip.name ?? "").toLowerCase();
+    return fragments.some((fragment) => name.includes(fragment));
+  };
+
+  const badGeneratedClip = (clip: THREE.AnimationClip) =>
+    generatedClipNameIncludes(clip, [
+      "rest",
+      "t-pose",
+      "tpose",
+      "death",
+      "die",
+      "attack",
+      "bite",
+      "kick",
+      "hitreact",
+    ]);
+
+  const selectGeneratedClip = (
+    clips: THREE.AnimationClip[],
+    thing: GeneratedThing | undefined,
+    mode: "idle" | "move",
+    vehicle: VehicleMode | null = null,
+  ): THREE.AnimationClip | undefined => {
+    if (clips.length === 0) return undefined;
+    const wanted = thing?.animation?.trim();
+    const wantedClip = wanted
+      ? clips.find((c) => c.name === wanted) ??
+        clips.find((c) => c.name?.toLowerCase() === wanted.toLowerCase())
+      : undefined;
+    if (wantedClip) return wantedClip;
+    const findAny = (fragments: string[]) =>
+      clips.find((clip) => generatedClipNameIncludes(clip, fragments) && !badGeneratedClip(clip));
+    if (mode === "move") {
+      if (vehicle === "air") {
+        const fly = findAny(["fly", "flying", "glide", "hover"]);
+        if (fly) return fly;
+      }
+      return (
+        findAny(["run", "gallop", "canter"]) ??
+        findAny(["walk", "trot"]) ??
+        findAny(["fly", "glide"]) ??
+        findAny(["idle"])
+      );
+    }
+    return findAny(["idle"]) ?? findAny(["stand"]) ?? findAny(["walk"]) ?? clips.find((c) => !badGeneratedClip(c)) ?? clips[0];
+  };
+
+  const playGeneratedClip = (
+    id: string,
+    model: THREE.Object3D,
+    mode: "idle" | "move",
+    vehicle: VehicleMode | null = null,
+  ) => {
+    const clips = generatedModelClips(model);
+    const clip = selectGeneratedClip(clips, thingById(id), mode, vehicle);
+    if (!clip) return;
+    let state = generatedAnimationMixers.get(id);
+    if (!state) {
+      state = { mixer: new THREE.AnimationMixer(model), mode };
+      generatedAnimationMixers.set(id, state);
+    }
+    if (state.clipName === clip.name && state.mode === mode && state.action) return;
+    const next = state.mixer.clipAction(clip);
+    next.reset();
+    next.enabled = true;
+    next.setEffectiveWeight(1);
+    next.setEffectiveTimeScale(mode === "move" ? 1.15 : 1);
+    if (state.action && state.action !== next) {
+      next.play();
+      state.action.crossFadeTo(next, 0.18, false);
+    } else {
+      next.play();
+    }
+    state.action = next;
+    state.clipName = clip.name;
+    state.mode = mode;
+  };
+
   const startGeneratedAnimation = (id: string, model: THREE.Object3D) => {
     stopGeneratedAnimation(id);
     // VRM things animate through their VRM rig (retargeted VRMA clips), not an embedded-clip mixer.
@@ -2672,25 +2795,9 @@ function createTellusWorld(
     // EVERYTHING at once — every clip fighting over the same bones each frame, which rendered as
     // glitchy "blinking". An explicit per-thing pick (`thing.animation`, synced over
     // generated.upsert) wins; otherwise prefer an idle/walk loop; avoid one-shot/pose clips.
-    const wanted = thingById(id)?.animation?.trim();
-    const wantedClip = wanted
-      ? clips.find((c) => c.name === wanted) ??
-        clips.find((c) => c.name?.toLowerCase() === wanted.toLowerCase())
-      : undefined;
-    const find = (frag: string) => clips.find((c) => c.name?.toLowerCase().includes(frag));
-    const bad = (c: THREE.AnimationClip) => {
-      const n = (c.name ?? "").toLowerCase();
-      return (
-        n.includes("rest") || n.includes("t-pose") || n.includes("tpose") ||
-        n.includes("death") || n.includes("die") || n.includes("attack") || n.includes("bite")
-      );
-    };
     // Missing/renamed picks fall back to the heuristic rather than freezing the model.
-    const clip =
-      wantedClip ?? find("idle") ?? find("walk") ?? clips.find((c) => !bad(c)) ?? clips[0];
-    const mixer = new THREE.AnimationMixer(model);
-    mixer.clipAction(clip).play();
-    generatedAnimationMixers.set(id, mixer);
+    const thing = thingById(id);
+    playGeneratedClip(id, model, "idle", thing ? vehicleMode(thing) : null);
   };
 
   // If a thing is currently folded into a pool (a non-selected instanced thing moved — rare), re-copy its
@@ -2818,9 +2925,21 @@ function createTellusWorld(
   const isVisiblyOffsetFromLiveGround = (thing: GeneratedThing): boolean => {
     const offset = liveGroundOffsetFrom(thing);
     return offset !== null
-      ? Math.abs(offset) > 0.35
+      ? Math.abs(offset) > 0.05
       : isIntentionallyOffsetFromGround(thing);
   };
+
+  const runtimeProfileForThing = (
+    thing: GeneratedThing,
+    options: { mounted?: boolean; includeRenderedGround?: boolean } = {},
+  ): WorldThingRuntimeProfile =>
+    buildWorldThingRuntimeProfile(thing, {
+      dimensions: thingFootprint(thing) ?? undefined,
+      groundY: options.includeRenderedGround
+        ? footprintGroundY(thing)
+        : groundHeightAt(thing.position.x, thing.position.z),
+      mounted: options.mounted,
+    });
 
   const updateThingMeshPosition = (thing: GeneratedThing) => {
     const mesh = generatedMeshes.get(thing.id);
@@ -2952,18 +3071,11 @@ function createTellusWorld(
     modelUrl?: string,
     assetStoreModelId?: string,
   ): { modelUrl?: string; assetStoreModelId?: string } => {
-    const assetId =
-      assetStoreModelId?.trim() ||
-      (modelUrl ? assetStoreIdFromModelUrl(modelUrl) ?? undefined : undefined);
-    if (assetId) {
-      return {
-        assetStoreModelId: assetId,
-        modelUrl: assetStoreGameOptimizedModelUrl(assetId),
-      };
-    }
+    const identity = normalizeWorldThingAssetIdentity(modelUrl, assetStoreModelId);
     return {
-      modelUrl: modelUrl
-        ? (sanitizeProceduralModelUrl(modelUrl) ?? absoluteTellusApiUrl(modelUrl))
+      assetStoreModelId: identity.assetStoreModelId,
+      modelUrl: identity.modelUrl
+        ? (sanitizeProceduralModelUrl(identity.modelUrl) ?? absoluteTellusApiUrl(identity.modelUrl))
         : undefined,
     };
   };
@@ -3013,6 +3125,45 @@ function createTellusWorld(
     existing.generationStatus = normalized.modelUrl
       ? "ready"
       : normalized.generationStatus;
+  };
+
+  const failedPromptRelinkAttempts = new Set<string>();
+  const normalizedAssetName = (value: string): string =>
+    value.trim().replace(/\s+/g, " ").toLowerCase();
+  const reconcileFailedAssetStorePrompt = (thing: GeneratedThing) => {
+    if (thing.modelUrl || thing.generationStatus !== "failed") return;
+    const prompt = thing.prompt.trim();
+    if (!prompt || failedPromptRelinkAttempts.has(thing.id)) return;
+    failedPromptRelinkAttempts.add(thing.id);
+    void browseAssetLibrary(prompt, 1, "name", 8)
+      .then((result) => {
+        if (destroyed) return;
+        const current = thingById(thing.id);
+        if (!current || current.modelUrl || current.generationStatus !== "failed") return;
+        const exact = result.models.filter(
+          (model) => normalizedAssetName(model.name) === normalizedAssetName(prompt),
+        );
+        if (exact.length !== 1) return;
+        const match = exact[0];
+        const assetStoreModelId = match.assetStoreModelId ?? match.id;
+        current.assetStoreModelId = assetStoreModelId;
+        current.modelUrl = assetStoreGameOptimizedModelUrl(assetStoreModelId);
+        current.pipelineId = undefined;
+        current.generationStatus = "ready";
+        ensureGeneratedVisual(current);
+        publishGeneratedThing(current);
+        loadRemoteGeneratedModel(current);
+        addLog({
+          agentId: "world",
+          agentName: "Tellus",
+          tool: "interact",
+          text: `Relinked ${current.kind}: ${current.prompt} to asset-store model ${assetStoreModelId}.`,
+        });
+        publish();
+      })
+      .catch((error) => {
+        console.warn("Failed asset prompt relink skipped", error);
+      });
   };
 
   const generatedPlacementStorageKey = () =>
@@ -3330,15 +3481,18 @@ function createTellusWorld(
     const normalized = normalizeGeneratedThing(remote);
     const existing = thingById(normalized.id);
     if (existing) {
+      const locallyRidden = existing.id === sailingThingId;
       existing.kind = normalized.kind as GeneratedKind;
       existing.prompt = normalized.prompt;
       existing.creatorId = normalized.creatorId as AgentId | "visitor";
       existing.ownerUserId = normalized.ownerUserId;
-      existing.position = { ...normalized.position };
-      existing.rotationX = normalized.rotationX ?? 0;
-      existing.rotationY = normalized.rotationY;
-      existing.rotationZ = normalized.rotationZ ?? 0;
-      existing.scale = normalized.scale;
+      if (!locallyRidden) {
+        existing.position = { ...normalized.position };
+        existing.rotationX = normalized.rotationX ?? 0;
+        existing.rotationY = normalized.rotationY;
+        existing.rotationZ = normalized.rotationZ ?? 0;
+        existing.scale = normalized.scale;
+      }
       existing.color = normalized.color;
       existing.assetStoreModelId = normalized.assetStoreModelId ?? existing.assetStoreModelId;
       // animation wire convention (mirrors presence.avatarId): "" = explicit default, a non-empty
@@ -3363,6 +3517,7 @@ function createTellusWorld(
       }
       loadRemoteGeneratedModel(existing);
       reconcileRemoteGeneratedManifest(existing);
+      reconcileFailedAssetStorePrompt(existing);
       if (healedPending) {
         publishGeneratedThing(existing);
       }
@@ -3396,6 +3551,7 @@ function createTellusWorld(
     updateThingMeshPosition(thing);
     loadRemoteGeneratedModel(thing);
     reconcileRemoteGeneratedManifest(thing);
+    reconcileFailedAssetStorePrompt(thing);
     if (healedPending) {
       publishGeneratedThing(thing);
     }
@@ -3580,11 +3736,11 @@ function createTellusWorld(
       distance > 0.001
         ? { x: thing.position.x / distance, z: thing.position.z / distance }
         : { x: 1, z: 0 };
-    visitorPosition = groundedPosition(
-      thing.position.x - offset.x * 3.2,
-      thing.position.z - offset.z * 3.2,
-      visitorPosition,
-    );
+    const targetX = thing.position.x - offset.x * 3.2;
+    const targetZ = thing.position.z - offset.z * 3.2;
+    if (!moveMountedUnitTo(targetX, targetZ)) {
+      visitorPosition = groundedPosition(targetX, targetZ, visitorPosition);
+    }
     updateSelectionIndicator();
     syncTransformControls();
     sendPresenceUpdate(true);
@@ -3608,10 +3764,28 @@ function createTellusWorld(
     portalSpawnGuard = true;
   };
 
+  const moveMountedUnitTo = (x: number, z: number): boolean => {
+    if (!sailingThingId) return false;
+    const mount = thingById(sailingThingId);
+    if (!mount) {
+      sailingThingId = undefined;
+      return false;
+    }
+    const arrival = clearVisitorSpawnPosition(x, z);
+    mount.position = movedVehiclePosition(mount, arrival.x, arrival.z, mount.position);
+    updateThingMeshPosition(mount);
+    visitorPosition = riderPositionForThing(mount);
+    publishGeneratedThing(mount);
+    syncAnchoredPortalsForThing(mount);
+    return true;
+  };
+
   const warpTo = (x: number, z: number) => {
     // clearVisitorSpawnPosition nudges off other players AND off the nearest portal so you don't land
     // on top of someone or inside a trigger volume.
-    visitorPosition = clearVisitorSpawnPosition(x, z);
+    if (!moveMountedUnitTo(x, z)) {
+      visitorPosition = clearVisitorSpawnPosition(x, z);
+    }
     playerAirborne = false;
     playerVy = 0;
     moveHoldStartMs = 0;
@@ -3890,8 +4064,13 @@ function createTellusWorld(
     if (!thing || !mode) return;
     const previousSelectedId = selectedThingId;
     sailingThingId = id;
-    selectedThingId = id;
+    selectedThingId = undefined;
+    draggingThingId = null;
+    setMoveMode(null);
+    uninstanceThing(id);
     reevaluateInstancingForSelection(previousSelectedId, selectedThingId);
+    updateSelectionIndicator();
+    syncTransformControls();
     if (mode === "water" && waterBlockedByLand(thing.position)) {
       moveGeneratedToWater(id);
     } else if (mode === "air") {
@@ -3917,6 +4096,12 @@ function createTellusWorld(
     const boat = thingById(sailingThingId);
     sailingThingId = undefined;
     if (boat) {
+      publishGeneratedThing(boat);
+      const mountedMesh = generatedMeshes.get(boat.id);
+      if (mountedMesh && mountedMesh.userData.loadedModelUrl === boat.modelUrl && isMountThing(boat)) {
+        uninstanceThing(boat.id);
+        mountedMesh.visible = true;
+      }
       const mode = vehicleMode(boat);
       const nearbyIsland = nearestDistantIsland(
         boat.position.x,
@@ -3940,6 +4125,20 @@ function createTellusWorld(
           boat.position.z,
           visitorPosition,
         );
+      } else if (mode === "ground") {
+        const footprint = thingFootprint(boat);
+        const stepAway = Math.max(1.8, (footprint?.radius ?? 0.8) + 0.8);
+        const candidates = [
+          boat.rotationY + Math.PI / 2,
+          boat.rotationY - Math.PI / 2,
+          boat.rotationY + Math.PI,
+          boat.rotationY,
+        ];
+        const angle = candidates.find((candidate) => Number.isFinite(candidate)) ?? boat.rotationY;
+        visitorPosition = clearVisitorSpawnPosition(
+          boat.position.x + Math.sin(angle) * stepAway,
+          boat.position.z + Math.cos(angle) * stepAway,
+        );
       } else if (shoreDirection.lengthSq() > 0.001) {
         shoreDirection.normalize();
         visitorPosition = groundedPosition(
@@ -3955,6 +4154,7 @@ function createTellusWorld(
       tool: "interact",
       text: "stepped back onto Tellus.",
     });
+    sendPresenceUpdate(true);
     publish();
   };
 
@@ -4026,7 +4226,7 @@ function createTellusWorld(
         request.ownerUserId ?? (request.creatorId === "visitor" ? userId : undefined),
       position,
       rotationY: 0,
-      scale: request.scale ?? 0.75 + rand(tick + generated.length) * 0.8,
+      scale: request.scale ?? defaultScaleForRealisticKind(kind, request.prompt),
       color: kindColor(kind, request.prompt),
       generationStatus: "local",
     };
@@ -4288,6 +4488,7 @@ function createTellusWorld(
       creatorId?: AgentId | "visitor";
       ownerUserId?: string;
       location?: GenerateRequest["location"];
+      scale?: number;
     } = {},
   ): GeneratedThing => {
     const prompt = model.description?.trim() || model.name;
@@ -4327,7 +4528,7 @@ function createTellusWorld(
       ownerUserId: opts.ownerUserId ?? (creatorId === "visitor" ? userId : undefined),
       position,
       rotationY: 0,
-      scale: 1,
+      scale: opts.scale ?? defaultScaleForRealisticKind(kind, prompt),
       color: kindColor(kind, prompt),
       assetStoreModelId,
       modelUrl,
@@ -4366,16 +4567,16 @@ function createTellusWorld(
         publish();
       })
       .catch((error) => {
-        thing.generationStatus = "failed";
-        ensureGeneratedVisual(thing);
+        transientModelLoadFailures.set(thing.id, (transientModelLoadFailures.get(thing.id) ?? 0) + 1);
+        showTransientGeneratedLoadFailure(thing, error);
+        scheduleTransientModelRetry(thing.id, modelUrl);
         syncTransformControls();
         publish();
-        publishGeneratedThing(thing);
         addLog({
           agentId: "world",
           agentName: "Tellus",
           tool: "generate",
-          text: `Library asset failed to load: ${
+          text: `Library asset load will retry: ${
             error instanceof Error ? error.message : "unknown error"
           }`,
         });
@@ -4505,6 +4706,7 @@ function createTellusWorld(
   const RUN_GRACE_MS = 2000;
   const RUN_EXP_BASE = 1.7; // exponential growth per second past the grace
   const RUN_MAX_MULT = 6; // top speed = 6× walk
+  const MOUNT_SPEED_MULT = 4.2;
   const runSpeedMultiplier = (nowMs: number): number => {
     if (moveHoldStartMs === 0) return 1;
     const heldS = (nowMs - moveHoldStartMs - RUN_GRACE_MS) / 1000;
@@ -4514,37 +4716,54 @@ function createTellusWorld(
   let obstacleCache: ObstacleCircle[] = [];
   let obstacleCacheAt = 0;
   let rapierSolidsCacheAt = 0;
+  const riderOffsetCache = new Map<string, Vec3>();
   const riderPositionForThing = (thing: GeneratedThing): Vec3 => {
     const mesh = generatedMeshes.get(thing.id);
     if (mesh) {
-      const box = measureModelBounds(mesh);
-      if (!box.isEmpty() && Number.isFinite(box.max.y)) {
-        return {
-          x: thing.position.x,
-          y: Math.max(thing.position.y, box.max.y) + 0.08,
-          z: thing.position.z,
-        };
+      const key = `${thing.id}:${thing.modelUrl ?? ""}:${thing.scale.toFixed(2)}`;
+      let offset = riderOffsetCache.get(key);
+      if (!offset) {
+        const box = measureModelBounds(mesh);
+        if (!box.isEmpty() && Number.isFinite(box.max.y)) {
+          const center = box.getCenter(new THREE.Vector3());
+          offset = {
+            x: center.x - thing.position.x,
+            y: 0,
+            z: center.z - thing.position.z,
+          };
+          riderOffsetCache.set(key, offset);
+          if (riderOffsetCache.size > 200) riderOffsetCache.clear();
+        }
+      }
+      if (offset) {
+        return seatPositionForWorldThing(
+          thing,
+          runtimeProfileForThing(thing, { mounted: true }),
+          offset,
+        );
       }
     }
-    return {
-      x: thing.position.x,
-      y: thing.position.y + Math.max(0.4, assetTargetHeight(thing)) + 0.08,
-      z: thing.position.z,
-    };
+    return seatPositionForWorldThing(thing, runtimeProfileForThing(thing, { mounted: true }));
   };
   const solidForThing = (thing: GeneratedThing): RapierSolid | null => {
     if (thing.id === sailingThingId || ambientPhysics.has(thing.id)) return null;
     if (thing.id === draggingThingId) return null;
-    const fp = thingFootprint(thing);
-    if (!fp || fp.height < 1.4 || fp.radius < 0.55) return null;
+    const profile = runtimeProfileForThing(thing);
+    if (
+      !profile.dimensions ||
+      profile.dimensions.height < 1.4 ||
+      profile.dimensions.radius < 0.55
+    ) {
+      return null;
+    }
     if (thing.position.y > visitorPosition.y + 2.2) return null;
     return {
       id: thing.id,
       x: thing.position.x,
       y: thing.position.y,
       z: thing.position.z,
-      radius: clamp(fp.radius * 0.72, 0.45, 4.2),
-      height: clamp(fp.height, 0.8, 18),
+      radius: profile.collisionRadius,
+      height: profile.collisionHeight,
     };
   };
   const syncRapierSolids = (force = false) => {
@@ -4628,9 +4847,24 @@ function createTellusWorld(
     } else {
       moveHoldStartMs = 0;
     }
+    if (!hasInput && !playerAirborne && !flying && sailingThingId && !verticalInput) {
+      const boat = thingById(sailingThingId);
+      const mountedMesh = boat ? generatedMeshes.get(boat.id) : undefined;
+      if (boat && mountedMesh && mountedMesh.userData.loadedModelUrl === boat.modelUrl && isMountThing(boat)) {
+        uninstanceThing(boat.id);
+        mountedMesh.visible = true;
+      }
+      return;
+    }
     // Proceed if there's horizontal input, we're mid-air, free-flying, or giving vertical input on a mount.
     if (!hasInput && !playerAirborne && !flying && !(sailingThingId && verticalInput)) return;
-    if (hasInput) movement.normalize().multiplyScalar(scaledPlayerSpeed() * runSpeedMultiplier(performance.now()) * delta);
+    const nowMs = performance.now();
+    if (hasInput) {
+      const speed = scaledPlayerSpeed() *
+        runSpeedMultiplier(nowMs) *
+        (sailingThingId ? MOUNT_SPEED_MULT : 1);
+      movement.normalize().multiplyScalar(speed * delta);
+    }
     if (sailingThingId) {
       playerAirborne = false;
       playerVy = 0;
@@ -4639,7 +4873,8 @@ function createTellusWorld(
         sailingThingId = undefined;
         return;
       }
-      if (vehicleMode(boat) === "air") {
+      const mode = vehicleMode(boat);
+      if (mode === "air") {
         // Air mount: horizontal via airPosition (keeps world-bounds clamping), vertical via Space/C with a
         // high ceiling — no longer pinned to a fixed +12 altitude.
         const horiz = airPosition(boat.position.x + movement.x, boat.position.z + movement.z);
@@ -4660,11 +4895,14 @@ function createTellusWorld(
       if (movement.lengthSq() > 0.001) {
         boat.rotationY = Math.atan2(movement.x, movement.z);
       }
+      const mountedMesh = generatedMeshes.get(boat.id);
+      if (mountedMesh && mountedMesh.userData.loadedModelUrl === boat.modelUrl && isMountThing(boat)) {
+        uninstanceThing(boat.id);
+        mountedMesh.visible = true;
+      }
       updateThingMeshPosition(boat);
       visitorPosition = riderPositionForThing(boat);
-      publishGeneratedThing(boat);
       sendPresenceUpdate();
-      publish();
       return;
     }
     // Free-fly (on foot): no gravity; move horizontally + ascend/descend, clamped above ground to the ceiling.
@@ -5399,8 +5637,8 @@ function createTellusWorld(
       camera.updateMatrixWorld();
       tilesRenderer.update(); // stream the 3D tileset against the current camera
     }
-    for (const mixer of generatedAnimationMixers.values()) {
-      mixer.update(delta);
+    for (const state of generatedAnimationMixers.values()) {
+      state.mixer.update(delta);
     }
     // Placed VRM things: advance the mixer + VRM spring bones (a static idle still needs spring-bone
     // settle; a looping VRMA clip plays here).
@@ -5451,9 +5689,31 @@ function createTellusWorld(
       const activeChunks = chunkRenderer.stats().active;
       if (activeChunks !== lastActiveChunkCount) {
         lastActiveChunkCount = activeChunks;
+        vegetation.notifyTerrainChanged();
+        const mounted = sailingThingId ? thingById(sailingThingId) : undefined;
+        if (mounted && !isFreeMovingVehicle(mounted) && !isVisiblyOffsetFromLiveGround(mounted)) {
+          groundThingToRenderedSurface(mounted);
+          updateThingMeshPosition(mounted);
+          visitorPosition = riderPositionForThing(mounted);
+          publishGeneratedThing(mounted);
+          sendPresenceUpdate(true);
+        }
         for (const thing of generated) {
           if (isFreeMovingVehicle(thing) || isVisiblyOffsetFromLiveGround(thing)) continue;
           updateThingMeshPosition(thing);
+        }
+      }
+    }
+    if (sailingThingId) {
+      const mounted = thingById(sailingThingId);
+      if (mounted && !isFreeMovingVehicle(mounted)) {
+        const liveGround = footprintGroundY(mounted);
+        if (liveGround !== null && Number.isFinite(liveGround) && liveGround > mounted.position.y + 0.05) {
+          mounted.position = { ...mounted.position, y: liveGround };
+          updateThingMeshPosition(mounted);
+          visitorPosition = riderPositionForThing(mounted);
+          publishGeneratedThing(mounted);
+          sendPresenceUpdate(true);
         }
       }
     }
@@ -5471,11 +5731,11 @@ function createTellusWorld(
         sendPresenceUpdate();
       }
     }
-    // Keep the minimap view-cone live while turning in place (~10fps, only on a real yaw change).
-    if (Math.abs(yaw - lastConeYaw) > 0.02 && now - lastConePublishMs > 100) {
+    // Keep the minimap view-cone from driving React during camera-only motion. Presence still carries yaw-ish
+    // movement updates when the player actually moves; a future minimap overlay can subscribe outside React.
+    if (Math.abs(yaw - lastConeYaw) > 0.02 && now - lastConePublishMs > 1000) {
       lastConeYaw = yaw;
       lastConePublishMs = now;
-      publish();
     }
     flushPublish();
     if (now - lastPresencePruneAt > 5_000) {
@@ -5593,7 +5853,6 @@ function createTellusWorld(
   };
   const handlePageHide = () => {
     persistPageStateNow();
-    sendPresenceLeave(true);
   };
   const handleVisibilityChange = () => {
     if (document.visibilityState === "hidden") {
@@ -6554,6 +6813,7 @@ function createTellusWorld(
     setMoveMode,
     getAmbientStats: () => ({
       vegetation: vegetation.stats(),
+      chunkTerrain: chunkRenderer?.stats() ?? null,
       physicsBodies: ambientPhysics.activeCount(),
       rapierSolids: rapierPhysics?.stats().solids ?? 0,
     }),
@@ -6622,7 +6882,6 @@ function createTellusWorld(
       if (worldSocketReconnectTimer !== undefined) {
         window.clearTimeout(worldSocketReconnectTimer);
       }
-      sendPresenceLeave(false);
       worldSocket?.close();
       if (tilesRenderer) {
         scene.remove(tilesRenderer.group);
@@ -8628,7 +8887,7 @@ function App(): React.ReactElement {
   const [worldMenuOpen, setWorldMenuOpen] = useState(false);
   const [worldMapOpen, setWorldMapOpen] = useState(true);
   // Portals card: foldable + dismissable (was always-on with no close — the worst right-side offender).
-  const [portalsPanelOpen, setPortalsPanelOpen] = useState(true);
+  const [portalsPanelOpen, setPortalsPanelOpen] = useState(false);
   const [mapActorList, setMapActorList] = useState<"items" | "players" | "agents" | null>(null);
   const [mapMode, setMapMode] = useState<"terrain" | "biomes">("biomes");
   const worldMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -8959,6 +9218,34 @@ function App(): React.ReactElement {
     [snapshot.generated, snapshot.selectedThingId],
   );
   const activeSelectedThing = snapshot.selectedThingId ? selectedThing : null;
+  const selectedRuntimeProfile = activeSelectedThing
+    ? buildWorldThingRuntimeProfile(activeSelectedThing, {
+        groundY: groundHeightAt(activeSelectedThing.position.x, activeSelectedThing.position.z),
+      })
+    : null;
+  const debugGeneratedStats = useMemo(() => {
+    let ready = 0;
+    let pending = 0;
+    let failed = 0;
+    let missingIdentity = 0;
+    let assetStoreBacked = 0;
+    for (const thing of snapshot.generated) {
+      if (thing.generationStatus === "failed") failed += 1;
+      else if (thing.generationStatus === "queued" || thing.generationStatus === "generating") pending += 1;
+      else if (thing.generationStatus === "ready" || thing.modelUrl) ready += 1;
+      const identity = normalizeWorldThingAssetIdentity(thing.modelUrl, thing.assetStoreModelId);
+      if (identity.source === "asset-store") assetStoreBacked += 1;
+      if (identity.source === "missing") missingIdentity += 1;
+    }
+    return {
+      total: snapshot.generated.length,
+      ready,
+      pending,
+      failed,
+      missingIdentity,
+      assetStoreBacked,
+    };
+  }, [snapshot.generated]);
   // Embedded clip names of the selected thing's LOADED model ([] until the GLB mounts — the world
   // publishes a snapshot when the model lands, so this re-renders with the clip list).
   const selectedClipNames = activeSelectedThing
@@ -9269,6 +9556,92 @@ function App(): React.ReactElement {
     }
   };
 
+  const debugPanel = showFps ? (
+    <div className="debug-stats-panel" aria-label="Tellus debug stats">
+      <div className="debug-stats-grid">
+        <span>FPS</span>
+        <strong>{fps}</strong>
+        <span>Items</span>
+        <strong>{debugGeneratedStats.total}</strong>
+        <span>Ready</span>
+        <strong>{debugGeneratedStats.ready}</strong>
+        <span>Pending</span>
+        <strong>{debugGeneratedStats.pending}</strong>
+        <span>Failed</span>
+        <strong>{debugGeneratedStats.failed}</strong>
+        <span>Missing ID</span>
+        <strong>{debugGeneratedStats.missingIdentity}</strong>
+        <span>Store IDs</span>
+        <strong>{debugGeneratedStats.assetStoreBacked}</strong>
+        <span>Players</span>
+        <strong>{remotePlayers.length}</strong>
+        <span>Agents</span>
+        <strong>{remoteAgents.length}</strong>
+      </div>
+      {ambientStats && (
+        <div className="debug-stats-row">
+          veg T{ambientStats.vegetation.tier} · {ambientStats.vegetation.chunks} chunks ·{" "}
+          {Math.round(ambientStats.vegetation.grassIndices / 3)} grass tris ·{" "}
+          {ambientStats.vegetation.trees} trees · physics {ambientStats.physicsBodies} · rapier{" "}
+          {ambientStats.rapierSolids}
+        </div>
+      )}
+      {ambientStats?.chunkTerrain && (
+        <div className="debug-stats-row">
+          terrain chunks {ambientStats.chunkTerrain.active} active ·{" "}
+          {ambientStats.chunkTerrain.pending} pending · {ambientStats.chunkTerrain.failed} failed
+        </div>
+      )}
+      {isChunkedWorldId(activeWorldId ?? "") && (() => {
+        const side = 2 * chunkLoadRadius + 1;
+        return (
+          <div className="debug-chunk-control">
+            <div>
+              <span>Draw distance</span>
+              <strong>{side}×{side} chunks</strong>
+            </div>
+            <input
+              type="range"
+              aria-label="Chunk load radius"
+              data-testid="chunk-load-radius-slider"
+              min={CHUNK_LOAD_RADIUS_MIN}
+              max={CHUNK_LOAD_RADIUS_MAX}
+              step={1}
+              value={chunkLoadRadius}
+              onChange={(event) => onChunkLoadRadius(Number(event.target.value))}
+            />
+          </div>
+        );
+      })()}
+      <div className="debug-stats-row">
+        P2P {p2pStats?.tx ? "TX on" : "TX off"} ·{" "}
+        {(p2pStats?.rx ?? rxEnabled) ? "RX on" : "RX off"} · {p2pStats?.rxStreams ?? 0}/16 streams
+      </div>
+      {selectedRuntimeProfile && activeSelectedThing && (
+        <div className="debug-object-profile">
+          <strong>{activeSelectedThing.prompt}</strong>
+          <span>{selectedRuntimeProfile.controllerKind} · {selectedRuntimeProfile.placementMode}</span>
+          <span>
+            asset {selectedRuntimeProfile.asset.source} · {selectedRuntimeProfile.asset.stableKey}
+          </span>
+          <span>
+            h {selectedRuntimeProfile.targetHeight.toFixed(2)} · seat{" "}
+            {selectedRuntimeProfile.seatHeight.toFixed(2)} · scale {activeSelectedThing.scale.toFixed(2)}
+          </span>
+          {selectedRuntimeProfile.groundOffset !== undefined && (
+            <span>ground offset {selectedRuntimeProfile.groundOffset.toFixed(2)}</span>
+          )}
+        </div>
+      )}
+      {(p2pStats?.peers ?? []).slice(0, 4).map((peer) => (
+        <div key={peer.id} className="debug-stats-row">
+          {peer.id.slice(0, 6)} {peer.state} · {Math.round(peer.kbps)} kbps
+        </div>
+      ))}
+      <div className="debug-stats-hint">triple-click logo or press ` to hide</div>
+    </div>
+  ) : null;
+
   useEffect(() => {
     const textarea = promptRef.current;
     if (!textarea) return;
@@ -9467,36 +9840,7 @@ function App(): React.ReactElement {
               <span>Tellus</span>
               <small>World Weaver</small>
             </div>
-            {showFps && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "100%",
-                  left: 0,
-                  marginTop: 4,
-                  padding: "3px 9px",
-                  borderRadius: 6,
-                  background: "rgba(0,0,0,0.72)",
-                  color: "#7ec850",
-                  font: "600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace",
-                  whiteSpace: "nowrap",
-                  pointerEvents: "none",
-                  zIndex: 40,
-                }}
-              >
-                <div>{fps} FPS</div>
-                {ambientStats && (
-                  <div style={{ marginTop: 2, color: "#b8e08a" }}>
-                    veg T{ambientStats.vegetation.tier} · {ambientStats.vegetation.chunks}ch ·{" "}
-                    {Math.round(ambientStats.vegetation.grassIndices / 3)}tri ·{" "}
-                    {ambientStats.vegetation.trees}🌲 · {ambientStats.physicsBodies}⚙
-                  </div>
-                )}
-                <div style={{ marginTop: 2, color: "#9ad0ff", fontSize: 10 }}>
-                  press ` to hide
-                </div>
-              </div>
-            )}
+            {debugPanel}
             <div className="brand-hud-actions">
               <AuthControls />
               <details className="world-help">
@@ -9551,43 +9895,7 @@ function App(): React.ReactElement {
               <span>Tellus</span>
               <small>World Weaver</small>
             </div>
-            {showFps && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "100%",
-                  left: 0,
-                  marginTop: 4,
-                  padding: "2px 8px",
-                  borderRadius: 6,
-                  background: "rgba(0,0,0,0.6)",
-                  color: "#7ec850",
-                  font: "600 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace",
-                  whiteSpace: "nowrap",
-                  pointerEvents: "none",
-                  zIndex: 20,
-                }}
-              >
-                <div>{fps} FPS</div>
-                {ambientStats && (
-                  <div style={{ marginTop: 3, color: "#b8e08a" }}>
-                    veg T{ambientStats.vegetation.tier} · {ambientStats.vegetation.chunks}ch ·{" "}
-                    {Math.round(ambientStats.vegetation.grassIndices / 3)}tri ·{" "}
-                    {ambientStats.vegetation.trees}🌲 · {ambientStats.physicsBodies}⚙
-                  </div>
-                )}
-                <div style={{ marginTop: 3, color: "#9ad0ff" }}>
-                  P2P {p2pStats?.tx ? "TX●" : "tx○"} {p2pStats?.rx ?? rxEnabled ? "RX●" : "rx○"} ·{" "}
-                  {p2pStats?.rxStreams ?? 0}/16 streams
-                </div>
-                {(p2pStats?.peers ?? []).map((peer) => (
-                  <div key={peer.id} style={{ color: "#c8c8c8" }}>
-                    {peer.id.slice(0, 6)} {peer.state}
-                    {peer.haveRemoteVideo ? " 📺" : ""} {Math.round(peer.kbps)}kbps
-                  </div>
-                ))}
-              </div>
-            )}
+            {debugPanel}
           </div>
           <div
             className="world-switcher"
@@ -10395,25 +10703,6 @@ function App(): React.ReactElement {
               style={{ cursor: "crosshair" }}
               onClick={handleWorldMapClick}
             >
-              <canvas className="world-map-terrain" ref={worldMapCanvasRef} aria-hidden="true" />
-              {snapshot.biomeCells && snapshot.biomeCells.length > 0 && (
-                <div className="world-map-mode" role="group" aria-label="Map mode">
-                  {(["terrain", "biomes"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      className={mapMode === m ? "active" : ""}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setMapMode(m);
-                      }}
-                      title={m === "biomes" ? "Whole-world biome overview (live)" : "Local terrain relief"}
-                    >
-                      {m === "biomes" ? "Biomes" : "Terrain"}
-                    </button>
-                  ))}
-                </div>
-              )}
               {snapshot.visitorPosition && snapshot.visitorYaw !== undefined && (() => {
                 // View cone: from the player marker, along the facing yaw, reaching the view distance —
                 // shows which way you're looking and how far you can see. forward = (sin yaw, cos yaw) in
@@ -10673,63 +10962,33 @@ function App(): React.ReactElement {
               const cell = chunked
                 ? `chunk ${Math.floor(pos.x / CHUNK_SPAN)},${Math.floor(pos.z / CHUNK_SPAN)} · `
                 : "";
+              const locationText = `${worldDisplayName(currentWorldId)} · ${cell}(${wx}, ${wz})`;
               return (
-                <div className="world-pos-readout" title="Your location — copy to share">
-                  {cell}({wx}, {wz})
-                </div>
-              );
-            })()}
-            {isChunkedWorldId(activeWorldId ?? "") && (() => {
-              // Chunk-load radius slider: how many chunk-rings stream around you. Higher = more draw
-              // distance (and more cost). Loaded chunks = (2r+1)² (a (2r+1)×(2r+1) square centred on you).
-              const side = 2 * chunkLoadRadius + 1;
-              return (
-                <div
-                  className="chunk-load-radius"
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 4,
-                    marginTop: 8,
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    background: "rgba(12,16,22,0.55)",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    color: "#dfe7d8",
-                    font: "500 12px/1.4 system-ui, sans-serif",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 8,
+                <div className="world-map-action-bar" aria-label="Map actions">
+                  <button
+                    type="button"
+                    title="Copy your world location"
+                    onClick={() => {
+                      const text = `${currentWorldId} ${cell}(${wx}, ${wz})`;
+                      void navigator.clipboard?.writeText(text).catch(() => undefined);
                     }}
                   >
-                    <span style={{ fontWeight: 600 }}>Draw distance</span>
-                    <span data-testid="chunk-load-radius-label" style={{ opacity: 0.8 }}>
-                      Chunks: {side}×{side} ({side * side})
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    aria-label="Chunk load radius"
-                    data-testid="chunk-load-radius-slider"
-                    min={CHUNK_LOAD_RADIUS_MIN}
-                    max={CHUNK_LOAD_RADIUS_MAX}
-                    step={1}
-                    value={chunkLoadRadius}
-                    onChange={(event) => onChunkLoadRadius(Number(event.target.value))}
-                    style={{ width: "100%" }}
-                  />
-                  <span style={{ fontSize: 10, opacity: 0.55 }}>
-                    higher = farther view · more chunks loaded (more cost)
-                  </span>
+                    <span className="world-info-label">Share</span>
+                    <span className="world-info-value">{locationText}</span>
+                  </button>
+                  <button
+                    type="button"
+                    title="Open portal menu"
+                    className={portalsPanelOpen ? "active" : undefined}
+                    onClick={() => setPortalsPanelOpen((open) => !open)}
+                  >
+                    <span className="world-info-label">Portal</span>
+                    <span className="world-info-value">{snapshot.portals?.length ?? 0}</span>
+                  </button>
                 </div>
               );
             })()}
-        {(() => {
+        {portalsPanelOpen && (() => {
           const portalBtn = {
             display: "block",
             width: "100%",
@@ -10745,23 +11004,9 @@ function App(): React.ReactElement {
           };
           return (
             <aside
-              className={`portal-panel hud-card${portalsPanelOpen ? "" : " is-collapsed"}`}
+              className="portal-panel hud-card"
               aria-label="Portals"
             >
-              <button
-                type="button"
-                className="hud-card-header"
-                aria-expanded={portalsPanelOpen}
-                onClick={() => setPortalsPanelOpen((open) => !open)}
-                title={portalsPanelOpen ? "Collapse portals" : "Expand portals"}
-              >
-                <span className="hud-card-caret">{portalsPanelOpen ? "▾" : "▸"}</span>
-                <span className="hud-card-title">Portals</span>
-                {(snapshot.portals?.length ?? 0) > 0 && (
-                  <span className="hud-card-badge">{snapshot.portals?.length}</span>
-                )}
-              </button>
-              {portalsPanelOpen && (
               <div className="hud-card-body">
               {(snapshot.portals ?? []).map((p) => {
                 const targetChoices = portalTargetOptions.includes(p.target.worldId)
@@ -10860,7 +11105,6 @@ function App(): React.ReactElement {
                 </div>
               )}
               </div>
-              )}
             </aside>
           );
         })()}
@@ -10878,7 +11122,7 @@ function App(): React.ReactElement {
             <span>Dismount</span>
           </button>
         )}
-        {activeSelectedThing && (
+        {activeSelectedThing && !snapshot.sailingThingId && (
           <div className="selected-transform-hud" aria-label="Selected asset controls">
             <div className="selected-transform-label">
               <Box size={15} />

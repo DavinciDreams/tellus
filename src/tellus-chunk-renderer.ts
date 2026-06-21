@@ -112,7 +112,7 @@ export interface ChunkRenderer {
    * with empty sculptOffsets samples 0 (flat base).
    */
   sampleHeight(worldX: number, worldZ: number): number | null;
-  stats(): { active: number; pending: number };
+  stats(): { active: number; pending: number; failed: number };
   dispose(): void;
 }
 
@@ -140,9 +140,11 @@ export function createChunkRenderer(
   const inflight = new Map<string, AbortController>();
   const ready = new Map<string, ChunkData>(); // fetched data awaiting build/rebuild in flush()
   const lodOf = new Map<string, number>(); // intended lod for a pending fetch
+  const retryAt = new Map<string, number>(); // failed fetches; retried while the chunk remains wanted
   let centerCx = NaN;
   let centerCz = NaN;
   let disposed = false;
+  let failedFetches = 0;
   // Runtime-tunable load ring (the chunk slider). loadRadius = chunks fetched around the centre ((2r+1)²);
   // keepRadius = loadRadius + 1 for the same evict hysteresis the CHUNK_LOAD/KEEP constants had (2 → 3).
   let loadRadius = CHUNK_LOAD_RADIUS;
@@ -158,19 +160,35 @@ export function createChunkRenderer(
     return CHUNK_SEGMENTS;
   };
 
+  const scheduleRetry = (k: string) => {
+    retryAt.set(k, Date.now() + 2_000);
+  };
+
   const fetchChunk = (cx: number, cz: number, lodSegments: number) => {
     const k = key(cx, cz);
+    retryAt.delete(k);
     inflight.get(k)?.abort();
     const ctrl = new AbortController();
     inflight.set(k, ctrl);
     lodOf.set(k, lodSegments);
     fetch(tellusWorldChunkUrl(cx, cz), { cache: "no-store", signal: ctrl.signal })
-      .then((r) => (r.ok ? (r.json() as Promise<ChunkData>) : null))
+      .then((r) => {
+        if (r.ok) return r.json() as Promise<ChunkData>;
+        failedFetches++;
+        scheduleRetry(k);
+        return null;
+      })
       .then((data) => {
         if (disposed || ctrl.signal.aborted || !data) return;
         ready.set(k, data); // built in flush()
       })
-      .catch(() => undefined)
+      .catch((error) => {
+        if (!ctrl.signal.aborted) {
+          failedFetches++;
+          scheduleRetry(k);
+          console.warn(`Tellus chunk fetch failed ${cx},${cz}`, error);
+        }
+      })
       .finally(() => {
         if (inflight.get(k) === ctrl) inflight.delete(k);
       });
@@ -181,6 +199,7 @@ export function createChunkRenderer(
     inflight.delete(k);
     ready.delete(k);
     lodOf.delete(k);
+    retryAt.delete(k);
     const a = active.get(k);
     if (a) {
       group.remove(a.mesh);
@@ -193,7 +212,15 @@ export function createChunkRenderer(
     if (disposed) return;
     const cx = Math.floor(worldX / CHUNK_SPAN);
     const cz = Math.floor(worldZ / CHUNK_SPAN);
-    if (cx === centerCx && cz === centerCz) return; // only re-evaluate on chunk-cell change
+    const now = Date.now();
+    const hasDueRetry = [...retryAt].some(([k, at]) => {
+      if (at > now) return false;
+      const parts = k.split(",");
+      const kcx = Number(parts[0]);
+      const kcz = Number(parts[1]);
+      return Math.max(Math.abs(kcx - cx), Math.abs(kcz - cz)) <= loadRadius;
+    });
+    if (cx === centerCx && cz === centerCz && !hasDueRetry) return; // re-evaluate on cell change or due retry
     centerCx = cx;
     centerCz = cz;
 
@@ -211,6 +238,8 @@ export function createChunkRenderer(
         const a = active.get(k);
         if (a && a.lodSegments === lod) continue; // already at right detail
         if (inflight.has(k) && lodOf.get(k) === lod) continue;
+        const retry = retryAt.get(k);
+        if (retry !== undefined && retry > now) continue;
         fetchChunk(tcx, tcz, lod);
       }
     }
@@ -218,7 +247,7 @@ export function createChunkRenderer(
     // Evict anything beyond the keep radius (Chebyshev distance). Scan ready.keys() too: a chunk whose
     // fetch already resolved sits in `ready` (not active, not inflight) and would otherwise leak — the next
     // flush() would build it as an orphan mesh outside the keep window.
-    for (const k of [...active.keys(), ...inflight.keys(), ...ready.keys()]) {
+    for (const k of [...active.keys(), ...inflight.keys(), ...ready.keys(), ...retryAt.keys()]) {
       const parts = k.split(",");
       const kcx = Number(parts[0]);
       const kcz = Number(parts[1]);
@@ -345,7 +374,7 @@ export function createChunkRenderer(
     reloadChunk,
     flush,
     sampleHeight,
-    stats: () => ({ active: active.size, pending: inflight.size + ready.size }),
+    stats: () => ({ active: active.size, pending: inflight.size + ready.size, failed: failedFetches }),
     dispose,
   };
 }

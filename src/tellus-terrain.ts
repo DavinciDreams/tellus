@@ -27,11 +27,9 @@ import {
   setClassicPondShape,
   terrainColors,
   terrainPaintKinds,
-  waterMountTerms,
-  airMountTerms,
-  groundMountTerms,
 } from "./tellus-constants";
-import { clamp, rand, isRecord, promptIncludesAny } from "./tellus-utils";
+import { clamp, rand, isRecord } from "./tellus-utils";
+import { worldThingVehicleMode } from "./tellus-world-object-profile";
 import { runtimeConfig } from "./tellus-runtime-config";
 import {
   tellusApiUrl,
@@ -828,43 +826,7 @@ export function distantIslandShorePosition(spec: DistantIslandSpec, x: number, z
 }
 
 export function vehicleMode(thing: GeneratedThing): VehicleMode | null {
-  const lower = thing.prompt.toLowerCase();
-  if (
-    thing.kind === "balloon" ||
-    promptIncludesAny(lower, airMountTerms) ||
-    lower.includes("balloon") ||
-    lower.includes("airship") ||
-    lower.includes("zeppelin") ||
-    lower.includes("glider") ||
-    lower.includes("flying") ||
-    lower.includes("air boat")
-  ) {
-    return "air";
-  }
-  if (
-    promptIncludesAny(lower, waterMountTerms) ||
-    lower.includes("boat") ||
-    lower.includes("ship") ||
-    lower.includes("sail") ||
-    lower.includes("canoe") ||
-    lower.includes("raft") ||
-    lower.includes("skiff") ||
-    lower.includes("dinghy")
-  ) {
-    return "water";
-  }
-  if (
-    promptIncludesAny(lower, groundMountTerms) ||
-    lower.includes("vehicle") ||
-    lower.includes("cart") ||
-    lower.includes("wagon") ||
-    lower.includes("carriage") ||
-    lower.includes("car ") ||
-    lower.includes("truck")
-  ) {
-    return "ground";
-  }
-  return null;
+  return worldThingVehicleMode(thing);
 }
 
 export function isMountThing(thing: GeneratedThing): boolean {
@@ -902,7 +864,22 @@ export function movedVehiclePosition(
   const mode = vehicleMode(thing);
   if (mode === "air") return airPosition(x, z);
   if (mode === "water") return waterVehiclePosition(x, z, fallback);
-  return groundedPosition(x, z, fallback);
+  const position = groundedPosition(x, z, fallback);
+  if (
+    fallback &&
+    position.x === fallback.x &&
+    position.y === fallback.y &&
+    position.z === fallback.z &&
+    (x !== fallback.x || z !== fallback.z)
+  ) {
+    return { ...fallback, x, z };
+  }
+  if (!fallback) return position;
+  const previousGround = groundHeightAt(fallback.x, fallback.z);
+  if (previousGround === null || !Number.isFinite(previousGround)) return position;
+  const manualOffset = fallback.y - previousGround;
+  if (manualOffset <= 0.05) return position;
+  return { ...position, y: position.y + manualOffset };
 }
 
 export function baseTerrainHeight(x: number, z: number): number {

@@ -7,6 +7,7 @@ import {
   groundedPosition,
   isIntentionallyElevated,
   isIntentionallyOffsetFromGround,
+  movedVehiclePosition,
   setChunkedFlatGround,
   setChunkedHeightProvider,
   terrainKind,
@@ -45,9 +46,19 @@ function thingAt(y: number): GeneratedThing {
   };
 }
 
+function mountAt(y: number): GeneratedThing {
+  return {
+    ...thingAt(y),
+    kind: "animal",
+    prompt: "rideable horse mount",
+  };
+}
+
 describe("Tellus terrain defaults", () => {
   afterEach(() => {
     applyWorldTerrainTemplate("tellus");
+    setChunkedHeightProvider(null);
+    setChunkedFlatGround(null);
   });
 
   it("adds varied procedural relief to the default island", () => {
@@ -88,6 +99,23 @@ describe("Tellus terrain defaults", () => {
     expect(isIntentionallyElevated(thingAt(ground - 2))).toBe(false);
     expect(isIntentionallyOffsetFromGround(thingAt(ground - 2))).toBe(true);
     expect(isIntentionallyOffsetFromGround(thingAt(ground + 0.1))).toBe(false);
+  });
+
+  it("preserves manual height offsets when moving ground mounts", () => {
+    setChunkedFlatGround(3);
+    const lifted = movedVehiclePosition(mountAt(5), 12, 18, { x: 0, y: 5, z: 0 });
+    expect(lifted.y).toBe(5);
+
+    const grounded = movedVehiclePosition(mountAt(3), 12, 18, { x: 0, y: 3, z: 0 });
+    expect(grounded.y).toBe(3);
+  });
+
+  it("keeps ground mounts moving when terrain height cannot resolve the next spot", () => {
+    const next = movedVehiclePosition(mountAt(6), 3200, 3210, { x: 3075, y: 6, z: 3075 });
+
+    expect(next.x).toBe(3200);
+    expect(next.z).toBe(3210);
+    expect(next.y).toBe(6);
   });
 });
 

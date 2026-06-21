@@ -157,10 +157,6 @@ describe("world protocol validators", () => {
     expect(isWorldAction({ ...base, avatarId: 7 })).toBe(false);
   });
 
-  it("accepts explicit presence leave actions", () => {
-    expect(isWorldAction({ type: "presence.leave", visitorId: "visitor-1" })).toBe(true);
-  });
-
   it("rejects generation requests without prompts", () => {
     expect(
       isWorldAction({
