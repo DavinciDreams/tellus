@@ -123,6 +123,7 @@ const TIERS = [
 
 const GRASS_BY_PAINT: Record<string, { accept: number; tint: number; tall: number }> = {
   meadow: { accept: 0.92, tint: 0x77ab40, tall: 1.0 },
+  grass: { accept: 0.92, tint: 0x76b33f, tall: 1.0 },
   flowers: { accept: 0.85, tint: 0x86b148, tall: 0.92 },
   dirt: { accept: 0.3, tint: 0x9a9a52, tall: 0.7 },
   beach: { accept: 0.1, tint: 0xb9c46a, tall: 0.55 },
@@ -545,7 +546,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   let sectorColliders: TreeCollider[] = [];
 
   const pickTree = (paint: TerrainPaintKind | null, h: number, r1: number, r2: number): { tpl: Template; scale: number } | null => {
-    const meadowish = paint === "meadow" || paint === null || paint === "flowers";
+    const meadowish = paint === "meadow" || paint === "grass" || paint === null || paint === "flowers";
     if (paint === "beach") {
       if (r1 > 0.16) return null;
       return { tpl: treeTpls.palm, scale: 5.5 + r2 * 3 };

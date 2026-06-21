@@ -12001,6 +12001,14 @@ function App(): React.ReactElement {
             </button>
             <button
               type="button"
+              className="terrain-swatch grass"
+              onClick={() => worldRef.current?.sculptTerrain("grass")}
+            >
+              <span className="terrain-swatch-preview" />
+              <span>Grass</span>
+            </button>
+            <button
+              type="button"
               className="terrain-swatch beach"
               onClick={() => worldRef.current?.sculptTerrain("beach")}
             >

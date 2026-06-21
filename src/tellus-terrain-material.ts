@@ -101,6 +101,47 @@ float tellusFractal(vec3 x){
 }
 `;
 
+const WEBGL_GRASS_MASK = `
+float tellusTerrainGrassMask(vec3 c){
+  vec3 grassColor = vec3(0.4549, 0.7216, 0.2275);
+  float d = distance(c, grassColor);
+  return 1.0 - smoothstep(0.025, 0.105, d);
+}
+`;
+
+const WEBGL_MASKED_MAP_FRAGMENT = `
+#ifdef USE_MAP
+  vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+  #ifdef DECODE_VIDEO_TEXTURE
+    sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
+  #endif
+  float tellusGrassMask = tellusTerrainGrassMask(vColor.rgb);
+  diffuseColor.rgb *= mix(vec3(1.0), sampledDiffuseColor.rgb, tellusGrassMask);
+  diffuseColor.a *= sampledDiffuseColor.a;
+#endif
+`;
+
+const WEBGL_MASKED_NORMAL_FRAGMENT_MAPS = `
+#ifdef USE_NORMALMAP_OBJECTSPACE
+  vec3 objectNormalMap = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+  objectNormalMap.xy *= tellusTerrainGrassMask(vColor.rgb);
+  normal = objectNormalMap;
+  #ifdef FLIP_SIDED
+    normal = - normal;
+  #endif
+  #ifdef DOUBLE_SIDED
+    normal = normal * faceDirection;
+  #endif
+  normal = normalize( normalMatrix * normal );
+#elif defined( USE_NORMALMAP_TANGENTSPACE )
+  vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+  mapN.xy *= normalScale * tellusTerrainGrassMask(vColor.rgb);
+  normal = normalize( tbn * mapN );
+#elif defined( USE_BUMPMAP )
+  normal = perturbNormalArb( - vViewPosition, normal, dHdxy_fwd(), faceDirection );
+#endif
+`;
+
 function webglColorPatch(): string {
   const d = DETAIL;
   return `
@@ -317,7 +358,15 @@ export function createTerrainMaterial(
     shader.fragmentShader = shader.fragmentShader
       .replace(
         "#include <common>",
-        `#include <common>\n${WEBGL_VARYING}\n${WEBGL_NOISE}`,
+        `#include <common>\n${WEBGL_VARYING}\n${WEBGL_NOISE}\n${WEBGL_GRASS_MASK}`,
+      )
+      .replace(
+        "#include <map_fragment>",
+        WEBGL_MASKED_MAP_FRAGMENT,
+      )
+      .replace(
+        "#include <normal_fragment_maps>",
+        WEBGL_MASKED_NORMAL_FRAGMENT_MAPS,
       )
       .replace(
         "#include <color_fragment>",

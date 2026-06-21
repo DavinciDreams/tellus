@@ -1,5 +1,6 @@
 export type TerrainPaintKind =
   | "meadow"
+  | "grass"
   | "rock"
   | "snow"
   | "beach"

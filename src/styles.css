@@ -3131,6 +3131,14 @@ button.terrain-scatter-tile {
     linear-gradient(135deg, #4f8f2f, #78b840);
 }
 
+.terrain-swatch.grass .terrain-swatch-preview {
+  background:
+    linear-gradient(78deg, transparent 0 43%, rgb(235 255 198 / 50%) 44% 46%, transparent 47%) 0 0 / 10px 100%,
+    linear-gradient(108deg, transparent 0 41%, rgb(39 102 28 / 45%) 42% 44%, transparent 45%) 0 0 / 14px 100%,
+    radial-gradient(circle at 66% 38%, rgb(172 226 93 / 66%) 0 8%, transparent 9%),
+    linear-gradient(135deg, #5fa22e, #83c945);
+}
+
 .terrain-swatch.beach .terrain-swatch-preview {
   background:
     radial-gradient(circle at 26% 66%, rgb(255 248 211 / 70%) 0 7%, transparent 8%),

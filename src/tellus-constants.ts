@@ -156,6 +156,7 @@ export const instantMeshTargetLabels: Record<InstantMeshTarget, string> = {
 };
 export const terrainColors: Record<TerrainKind, THREE.Color> = {
   meadow: new THREE.Color(0x5fa22e),
+  grass: new THREE.Color(0x74b83a),
   rock: new THREE.Color(0x6f7467),
   snow: new THREE.Color(0xd4e7e2),
   beach: new THREE.Color(0xf6dcbd),
@@ -175,6 +176,7 @@ export const terrainPaintKinds = [
   "flowers",
   "stone",
   "brick",
+  "grass",
 ] as const satisfies readonly TerrainPaintKind[];
 
 export const waterMountTerms = [
