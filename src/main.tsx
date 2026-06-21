@@ -8298,8 +8298,14 @@ function App(): React.ReactElement {
     }
   };
 
+  const fallbackWorldDisplayName = (worldId: string): string => {
+    const chunkedMatch = /^chunked-\d+-(.+)$/i.exec(worldId.trim());
+    if (chunkedMatch?.[1]) return chunkedMatch[1];
+    return worldId;
+  };
+
   const worldDisplayName = (worldId: string): string =>
-    loadLocalWorldProfiles()[worldId]?.displayName?.trim() || worldId;
+    loadLocalWorldProfiles()[worldId]?.displayName?.trim() || fallbackWorldDisplayName(worldId);
 
   const worldOptionLabel = (worldId: string): string => {
     const displayName = worldDisplayName(worldId);
