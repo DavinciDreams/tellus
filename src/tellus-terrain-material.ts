@@ -2,13 +2,17 @@ import * as THREE from "three";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import { ktx2Loader } from "./tellus-generation-client";
 import {
+  attribute,
   color,
+  float,
   mix,
   mx_fractal_noise_float,
   mx_noise_float,
   normalWorld,
   positionWorld,
   smoothstep,
+  texture,
+  uv,
   vertexColor,
 } from "three/tsl";
 
@@ -39,7 +43,10 @@ const DETAIL = {
 } as const;
 
 /** WebGPU path: a TSL node graph that tints the vertex color with procedural detail. */
-function buildDetailColorNode() {
+function buildDetailColorNode(
+  paintTextures?: { stone: THREE.Texture; brick: THREE.Texture },
+  textureRepeat = 34,
+) {
   const wp = positionWorld;
 
   // Fractal mottling — two octaves at different scales summed into a roughly [-1,1] signal.
@@ -64,7 +71,20 @@ function buildDetailColorNode() {
   // Apply: base vertex color, lifted/darkened by grain, darkened by slope, then cool-tinted up high.
   const base = vertexColor();
   const litColor = base.mul(grain.add(1).sub(slopeDark));
-  return mix(litColor, litColor.add(coolTint), heightT);
+  let detailed = mix(litColor, litColor.add(coolTint), heightT);
+
+  if (paintTextures) {
+    const paintCode = float(attribute("tellusPaintCode", "float"));
+    const tiledUv = uv().mul(textureRepeat);
+    const stoneMask = smoothstep(0.18, 0.72, paintCode.sub(7).abs()).oneMinus();
+    const brickMask = smoothstep(0.18, 0.72, paintCode.sub(8).abs()).oneMinus();
+    const stoneColor = texture(paintTextures.stone, tiledUv).rgb;
+    const brickColor = texture(paintTextures.brick, tiledUv).rgb;
+    detailed = mix(detailed, detailed.mul(stoneColor).mul(1.35), stoneMask);
+    detailed = mix(detailed, detailed.mul(brickColor).mul(1.25), brickMask);
+  }
+
+  return detailed;
 }
 
 /** GLSL injected into MeshStandardMaterial for the WebGL fallback — mirrors buildDetailColorNode(). */
@@ -240,11 +260,70 @@ function makeTerrainNormalTexture(): THREE.Texture | null {
   return texture;
 }
 
+function makePaintAlbedoTexture(kind: "stone" | "brick"): THREE.Texture {
+  const cached = generatedTerrainTextures.get(`paint-${kind}`);
+  if (cached) return cached;
+  if (typeof document === "undefined") return new THREE.Texture();
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    const empty = new THREE.CanvasTexture(canvas);
+    generatedTerrainTextures.set(`paint-${kind}`, empty);
+    return empty;
+  }
+  const image = ctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const n = seededNoise(x * 0.18 + (kind === "brick" ? 11 : 3), y * 0.18 - 7);
+      const n2 = seededNoise(x * 0.72 - 5, y * 0.72 + 19);
+      const mortar = kind === "brick" && (((x + Math.floor(y / 28) * 22) % 64) < 4 || y % 28 < 4);
+      const chip = kind === "stone" && n2 > 0.78;
+      const i = (y * size + x) * 4;
+      if (kind === "brick") {
+        image.data[i] = mortar ? 146 : 150 + Math.round(n * 34);
+        image.data[i + 1] = mortar ? 132 : 74 + Math.round(n * 18);
+        image.data[i + 2] = mortar ? 118 : 58 + Math.round(n * 12);
+      } else {
+        const base = chip ? 150 : 110 + Math.round(n * 46);
+        image.data[i] = base + 6;
+        image.data[i + 1] = base + 4;
+        image.data[i + 2] = base;
+      }
+      image.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  generatedTerrainTextures.set(`paint-${kind}`, texture);
+  return texture;
+}
+
 async function loadTerrainTexture(url: string, repeat: number, colorSpace?: THREE.ColorSpace): Promise<THREE.Texture> {
   const texture = url.toLowerCase().endsWith(".ktx2")
     ? await ktx2Loader.loadAsync(url)
     : await terrainTextureLoader.loadAsync(url);
   return prepareRepeatTexture(texture, repeat, colorSpace);
+}
+
+function loadIntoTerrainTexture(
+  target: THREE.Texture,
+  url: string | undefined,
+  repeat: number,
+  colorSpace?: THREE.ColorSpace,
+  label = "texture",
+): void {
+  if (!url) return;
+  void loadTerrainTexture(url, repeat, colorSpace)
+    .then((texture) => {
+      target.copy(texture);
+      prepareRepeatTexture(target, repeat, colorSpace);
+      target.needsUpdate = true;
+      texture.dispose();
+    })
+    .catch((error) => console.warn(`Tellus terrain ${label} texture failed`, error));
 }
 
 function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMaterialOptions): void {
@@ -416,11 +495,19 @@ export function createTerrainMaterial(
   const roughness = options.roughness ?? 0.9;
 
   if (useWebGPU) {
+    const repeat = options.textureRepeat ?? 34;
+    const urls = options.paintTextureUrls ?? DEFAULT_PAINT_TEXTURE_URLS;
+    const paintTextures = {
+      stone: prepareRepeatTexture(makePaintAlbedoTexture("stone"), repeat, THREE.SRGBColorSpace),
+      brick: prepareRepeatTexture(makePaintAlbedoTexture("brick"), repeat, THREE.SRGBColorSpace),
+    };
+    loadIntoTerrainTexture(paintTextures.stone, urls.stone, repeat, THREE.SRGBColorSpace, "stone");
+    loadIntoTerrainTexture(paintTextures.brick, urls.brick, repeat, THREE.SRGBColorSpace, "brick");
     const material = new MeshStandardNodeMaterial();
     material.vertexColors = true;
     material.roughness = roughness;
     material.metalness = 0;
-    material.colorNode = buildDetailColorNode();
+    material.colorNode = buildDetailColorNode(paintTextures, repeat);
     return material;
   }
 
