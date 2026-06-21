@@ -4,8 +4,8 @@ import { runtimeConfig } from "./tellus-runtime-config";
 
 // The Hyades 3D backend hands back a raw asset-store URL (no CORS header); loading it cross-origin
 // from the Tellus origin fails silently, so a freshly-generated model never renders until it's
-// re-added from the asset library. proxiedGeneratedModelUrl routes such URLs through the same-origin
-// /api/assets proxy (CORS-safe + game-optimized) while leaving every other URL shape untouched.
+// re-added from the asset library. proxiedGeneratedModelUrl routes such URLs through the configured
+// world API asset proxy (CORS-safe + game-optimized) while leaving every other URL shape untouched.
 describe("proxiedGeneratedModelUrl", () => {
   const originalBase = runtimeConfig.worldApiBase;
   afterEach(() => {
@@ -15,7 +15,7 @@ describe("proxiedGeneratedModelUrl", () => {
   it("rewrites a raw asset-store /api/view URL to the same-origin game-optimized proxy", () => {
     runtimeConfig.worldApiBase = "https://tellus.example";
     expect(proxiedGeneratedModelUrl("https://3d.flobots.xyz/api/view/abc123")).toBe(
-      "/api/assets/model/abc123/game-optimized",
+      "https://tellus.example/api/assets/model/abc123/game-optimized",
     );
   });
 
@@ -27,14 +27,22 @@ describe("proxiedGeneratedModelUrl", () => {
   });
 
   it("leaves an already-proxied /api/assets URL unchanged", () => {
+    runtimeConfig.worldApiBase = "https://tellus.example";
     const url = "https://tellus.example/api/assets/model/abc/game-optimized";
     expect(proxiedGeneratedModelUrl(url)).toBe(url);
+  });
+
+  it("routes stored relative asset proxy URLs through the configured world API", () => {
+    runtimeConfig.worldApiBase = "https://hyades.gnostr.cloud";
+    expect(proxiedGeneratedModelUrl("/api/assets/model/abc/game-optimized")).toBe(
+      "https://hyades.gnostr.cloud/api/assets/model/abc/game-optimized",
+    );
   });
 
   it("rewrites stale world-api /api/view URLs through the asset proxy", () => {
     runtimeConfig.worldApiBase = "https://hyades.gnostr.cloud";
     expect(proxiedGeneratedModelUrl("https://hyades.gnostr.cloud/api/view/asset-1")).toBe(
-      "/api/assets/model/asset-1/game-optimized",
+      "https://hyades.gnostr.cloud/api/assets/model/asset-1/game-optimized",
     );
   });
 
