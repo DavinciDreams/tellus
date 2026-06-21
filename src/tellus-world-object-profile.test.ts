@@ -3,6 +3,7 @@ import {
   buildWorldThingRuntimeProfile,
   defaultScaleForRealisticKind,
   normalizeWorldThingAssetIdentity,
+  STANDARD_HUMANOID_HEIGHT,
   worldThingTargetHeight,
 } from "./tellus-world-object-profile";
 import type { GeneratedThing } from "./tellus-types";
@@ -36,9 +37,25 @@ describe("world object runtime profile", () => {
 
   it("keeps tiny flora short and buildings larger than the avatar", () => {
     expect(worldThingTargetHeight(thing({ kind: "flower", prompt: "yellow wildflower" }))).toBeLessThan(1);
-    expect(worldThingTargetHeight(thing({ kind: "tree", prompt: "magic tree" }))).toBeGreaterThan(3);
-    expect(worldThingTargetHeight(thing({ prompt: "tavern building" }))).toBeGreaterThan(3);
+    expect(worldThingTargetHeight(thing({ kind: "tree", prompt: "magic tree" }))).toBeGreaterThan(
+      STANDARD_HUMANOID_HEIGHT,
+    );
+    expect(worldThingTargetHeight(thing({ prompt: "tavern building" }))).toBeGreaterThan(
+      STANDARD_HUMANOID_HEIGHT,
+    );
     expect(defaultScaleForRealisticKind("object", "tavern building")).toBeGreaterThan(1);
+  });
+
+  it("normalizes humanoid generated assets to the standard avatar ruler", () => {
+    expect(worldThingTargetHeight(thing({ prompt: "friendly humanoid villager" }))).toBeCloseTo(
+      STANDARD_HUMANOID_HEIGHT,
+    );
+    expect(worldThingTargetHeight(thing({ prompt: "tiny human NPC", scale: 0.5 }))).toBeCloseTo(
+      STANDARD_HUMANOID_HEIGHT * 0.5,
+    );
+    expect(worldThingTargetHeight(thing({ kind: "tree", prompt: "japanese maple" }))).toBeGreaterThan(
+      STANDARD_HUMANOID_HEIGHT * 2,
+    );
   });
 
   it("classifies placement and mount controller from one shared contract", () => {

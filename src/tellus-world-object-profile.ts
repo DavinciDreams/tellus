@@ -4,6 +4,32 @@ import { airMountTerms, groundMountTerms, waterMountTerms } from "./tellus-const
 import { assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl } from "./tellus-urls-identity";
 import { clamp, promptIncludesAny } from "./tellus-utils";
 
+// Tellus world units are meters-ish. This is the canonical ruler for authored/generated scale:
+// humanoids fit to this height, and world-object categories are sized as ratios from it.
+export const STANDARD_HUMANOID_HEIGHT = 1.8;
+
+const AVATAR_HEIGHT_RATIOS = {
+  mirror: 1.39,
+  grassTuft: 0.18,
+  fern: 0.31,
+  reeds: 0.61,
+  bush: 0.47,
+  mushroom: 0.16,
+  proceduralFlower: 0.25,
+  airMount: 2.67,
+  waterMount: 0.81,
+  groundMount: 1.14,
+  tree: 2.33,
+  building: 2.0,
+  tower: 2.89,
+  path: 0.23,
+  animal: 0.86,
+  flower: 0.32,
+  stone: 0.56,
+  shrine: 1.22,
+  object: 0.75,
+} as const;
+
 export type WorldThingPlacementMode =
   | "grounded"
   | "elevated"
@@ -112,36 +138,59 @@ export function worldThingVehicleMode(thing: Pick<GeneratedThing, "kind" | "prom
   return null;
 }
 
+function avatarHeight(ratio: number): number {
+  return STANDARD_HUMANOID_HEIGHT * ratio;
+}
+
+function isHumanoidPrompt(lower: string): boolean {
+  return (
+    lower.includes("humanoid") ||
+    lower.includes("human") ||
+    lower.includes("person") ||
+    lower.includes("people") ||
+    lower.includes("npc") ||
+    lower.includes("villager") ||
+    lower.includes("character") ||
+    lower.includes("shopkeeper") ||
+    lower.includes("wizard") ||
+    lower.includes("knight") ||
+    lower.includes("guard") ||
+    lower.includes("avatar") ||
+    lower.includes("robot")
+  );
+}
+
 export function worldThingTargetHeight(thing: Pick<GeneratedThing, "kind" | "prompt" | "scale">): number {
   const lower = thing.prompt.toLowerCase();
   const variation = clamp(thing.scale, 0.25, 12);
-  if (lower === "mirror") return clamp(2.5 * variation, 1.2, 12);
+  if (lower === "mirror") return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.mirror) * variation, 1.2, 12);
 
   const proceduralPlantHeights: Record<string, number> = {
-    "grass tuft": 0.32,
-    fern: 0.55,
-    reeds: 1.1,
-    bush: 0.85,
-    mushroom: 0.28,
-    flower: 0.45,
+    "grass tuft": avatarHeight(AVATAR_HEIGHT_RATIOS.grassTuft),
+    fern: avatarHeight(AVATAR_HEIGHT_RATIOS.fern),
+    reeds: avatarHeight(AVATAR_HEIGHT_RATIOS.reeds),
+    bush: avatarHeight(AVATAR_HEIGHT_RATIOS.bush),
+    mushroom: avatarHeight(AVATAR_HEIGHT_RATIOS.mushroom),
+    flower: avatarHeight(AVATAR_HEIGHT_RATIOS.proceduralFlower),
   };
   if (proceduralPlantHeights[lower] !== undefined) {
     return clamp(proceduralPlantHeights[lower] * variation, 0.12, 24);
   }
 
   const mode = worldThingVehicleMode(thing);
-  if (mode === "air") return clamp(4.8 * variation, 1.6, 54);
-  if (mode === "water") return clamp(1.45 * variation, 0.45, 18);
-  if (mode === "ground") return clamp(2.05 * variation, 0.65, 24);
-  if (thing.kind === "tree") return clamp(4.2 * variation, 0.8, 52);
-  if (isBuildingPrompt(lower)) return clamp(3.6 * variation, 0.9, 48);
-  if (lower.includes("tower")) return clamp(5.2 * variation, 1.2, 64);
-  if (isFlatPathPrompt(lower) || thing.kind === "path") return clamp(0.42 * variation, 0.12, 8);
-  if (thing.kind === "animal") return clamp(1.55 * variation, 0.45, 24);
-  if (thing.kind === "flower") return clamp(0.58 * variation, 0.16, 9);
-  if (thing.kind === "stone") return clamp(1.0 * variation, 0.25, 18);
-  if (thing.kind === "shrine") return clamp(2.2 * variation, 0.55, 32);
-  return clamp(1.35 * variation, 0.35, 24);
+  if (mode === "air") return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.airMount) * variation, 1.6, 54);
+  if (mode === "water") return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.waterMount) * variation, 0.45, 18);
+  if (mode === "ground") return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.groundMount) * variation, 0.65, 24);
+  if (isHumanoidPrompt(lower)) return clamp(STANDARD_HUMANOID_HEIGHT * variation, 0.8, 24);
+  if (thing.kind === "tree") return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.tree) * variation, 0.8, 52);
+  if (isBuildingPrompt(lower)) return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.building) * variation, 0.9, 48);
+  if (lower.includes("tower")) return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.tower) * variation, 1.2, 64);
+  if (isFlatPathPrompt(lower) || thing.kind === "path") return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.path) * variation, 0.12, 8);
+  if (thing.kind === "animal") return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.animal) * variation, 0.45, 24);
+  if (thing.kind === "flower") return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.flower) * variation, 0.16, 9);
+  if (thing.kind === "stone") return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.stone) * variation, 0.25, 18);
+  if (thing.kind === "shrine") return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.shrine) * variation, 0.55, 32);
+  return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.object) * variation, 0.35, 24);
 }
 
 export function defaultScaleForRealisticKind(kind: GeneratedKind, prompt: string): number {
