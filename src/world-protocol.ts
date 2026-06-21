@@ -43,6 +43,8 @@ export interface WorldPresence {
   lastSeenAt: string;
 }
 
+export const PRESENCE_DISPLAY_TTL_MS = 120_000;
+
 export interface GenerationJobRequest {
   prompt: string;
   creatorId: string;
@@ -128,6 +130,10 @@ export type WorldAction =
       avatarId?: string;
       /** Avatar size multiplier broadcast with presence; server clamps [0.1, 8], ≤0 clears. */
       avatarScale?: number;
+    }
+  | {
+      type: "presence.leave";
+      visitorId: string;
     }
   | {
       type: "terrain.replace";
@@ -482,19 +488,60 @@ export function biomeCellsFromSnapshot(parsed: unknown): WorldBiomeCell[] | null
 export function dedupePresenceForDisplay(
   presence: WorldPresence[],
   myOwnerUserId: string | null,
+  nowMs = Date.now(),
+  myVisitorId?: string | null,
 ): WorldPresence[] {
+  const livePresence = presence.filter((r) => isLivePresence(r, nowMs));
   const isAgent = (v: string) => v.startsWith("agent:");
   const newestByOwner = new Map<string, WorldPresence>();
-  for (const r of presence) {
+  for (const r of livePresence) {
     if (isAgent(r.visitorId) || !r.ownerUserId) continue;
     const cur = newestByOwner.get(r.ownerUserId);
     if (!cur || (r.lastSeenAt ?? "") > (cur.lastSeenAt ?? "")) newestByOwner.set(r.ownerUserId, r);
   }
-  return presence.filter((r) => {
+  return livePresence.filter((r) => {
+    if (myVisitorId && r.visitorId === myVisitorId) return false;
     if (isAgent(r.visitorId) || !r.ownerUserId) return true; // agents + anonymous: keep every slot
     if (myOwnerUserId && r.ownerUserId === myOwnerUserId) return false; // my own other tabs/sockets
     return newestByOwner.get(r.ownerUserId)?.visitorId === r.visitorId; // one slot per other account
   });
+}
+
+export function isLivePresence(presence: WorldPresence, nowMs = Date.now()): boolean {
+  const lastSeenMs = Date.parse(presence.lastSeenAt);
+  if (!Number.isFinite(lastSeenMs)) return true;
+  return lastSeenMs >= nowMs - PRESENCE_DISPLAY_TTL_MS;
+}
+
+const generatedCloneKey = (thing: Pick<WorldGeneratedThing, "kind" | "prompt">): string =>
+  `${thing.kind.trim().toLowerCase()}\u0000${thing.prompt.trim().toLowerCase()}`;
+
+export function repairGeneratedCloneModelLinks(
+  things: WorldGeneratedThing[],
+  existing: WorldGeneratedThing[] = [],
+): { things: WorldGeneratedThing[]; repairedIds: string[] } {
+  const donors = new Map<string, WorldGeneratedThing>();
+  for (const thing of [...existing, ...things]) {
+    if (!thing.modelUrl || thing.generationStatus !== "ready") continue;
+    const key = generatedCloneKey(thing);
+    if (!donors.has(key)) donors.set(key, thing);
+  }
+  const repairedIds: string[] = [];
+  const repairedThings = things.map((thing) => {
+    if (thing.modelUrl || thing.generationStatus !== "failed") return thing;
+    const donor = donors.get(generatedCloneKey(thing));
+    if (!donor?.modelUrl) return thing;
+    repairedIds.push(thing.id);
+    return {
+      ...thing,
+      assetStoreModelId: thing.assetStoreModelId ?? donor.assetStoreModelId,
+      modelUrl: donor.modelUrl,
+      pipelineId: undefined,
+      generationStatus: "ready" as const,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  return { things: repairedThings, repairedIds };
 }
 
 /** A world.portal.entered patch — the signal to switch the client to the target world. */
@@ -535,6 +582,7 @@ export function isWorldAction(value: unknown): value is WorldAction {
         (typeof value.avatarScale === "number" && Number.isFinite(value.avatarScale)))
     );
   }
+  if (value.type === "presence.leave") return true;
   if (value.type === "terrain.replace") {
     return isTellusTerrainState(value.terrain);
   }

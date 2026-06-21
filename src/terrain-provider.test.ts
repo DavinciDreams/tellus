@@ -8,8 +8,8 @@ import {
 } from "./tellus-terrain-provider";
 import { groundHeightAt, terrainKind } from "./tellus-terrain";
 
-// TELLUS INFINITY Phase 0/1 gate: the provider boundary must be a PURE DELEGATE — classic/chunked grounding
-// is byte-identical to the existing math. If this drifts, agent grounding diverges from rendering.
+// TELLUS INFINITY Phase 0/1 gate: compatibility/chunked grounding must be pure delegates. If this
+// drifts, agent grounding diverges from rendering.
 describe("TerrainProvider parity + selection", () => {
   it("ClassicTerrainProvider.sampleHeight == groundHeightAt over a grid", () => {
     const p = new ClassicTerrainProvider();
@@ -20,7 +20,7 @@ describe("TerrainProvider parity + selection", () => {
     }
   });
 
-  it("ClassicTerrainProvider.terrainKind == classic terrainKind over a grid", () => {
+  it("ClassicTerrainProvider.terrainKind == terrainKind over a grid", () => {
     const p = new ClassicTerrainProvider();
     for (let x = -30; x <= 30; x += 10) {
       for (let z = -30; z <= 30; z += 10) {
@@ -53,18 +53,18 @@ describe("TerrainProvider parity + selection", () => {
     expect(inferSubstrate("tiles-osm-sf")).toBe("tiles");
     expect(inferSubstrate("interior-main-tavern")).toBe("interior");
     expect(inferSubstrate("evoflow-coral-canyon")).toBe("evoflow");
-    expect(inferSubstrate("main")).toBe("classic");
+    expect(inferSubstrate("main")).toBe("chunked");
   });
 
   it("selectTerrainProvider honors explicit kind then prefix, chunked/tiles need a renderer", () => {
     const fake = { sampleHeight: (x: number) => (x > 0 ? 2 : null) };
-    expect(selectTerrainProvider("main", null).kind).toBe("classic");
+    expect(selectTerrainProvider("main", null, { chunkRenderer: fake }).kind).toBe("chunked");
     expect(selectTerrainProvider("chunked-5", null, { chunkRenderer: fake }).kind).toBe("chunked");
-    // chunked id but no renderer → safe classic fallback (never throws)
+    // chunked id but no renderer → compatibility fallback (never throws)
     expect(selectTerrainProvider("chunked-5", "chunked").kind).toBe("classic");
     // explicit kind wins over prefix
     expect(selectTerrainProvider("main", "chunked", { chunkRenderer: fake }).kind).toBe("chunked");
-    // tiles world grounds on the chunk-baked heightfield (gameplay substrate); no renderer → classic fallback.
+    // tiles world grounds on the chunk-baked heightfield (gameplay substrate); no renderer → compatibility fallback.
     const tiles = selectTerrainProvider("tiles-sf", "tiles", { chunkRenderer: fake });
     expect(tiles.kind).toBe("tiles");
     expect(tiles.sampleHeight(5, 0)).toBe(2);

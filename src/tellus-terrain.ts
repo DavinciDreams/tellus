@@ -89,9 +89,9 @@ export function onTerrainTemplateLoaded(callback: (() => void) | null): void {
 }
 
 // Chunked worlds have NO radial island — they're a flat tiled plane (chunk base y=0) + per-chunk
-// sculpts. When set (non-null), grounding ignores the classic origin-centred island math and returns
+// sculpts. When set (non-null), grounding ignores the legacy origin-centred island math and returns
 // this flat base, so the player stands ON the chunk terrain (y=0 is above SEA_LEVEL=-3.35) at the
-// world centre instead of sinking into the origin ocean. Null = classic single-grid world.
+// world centre instead of sinking into the origin ocean. Null = legacy single-grid compatibility world.
 // (Walking the sculpted height is a later refinement; alpha walks the flat base.)
 let chunkedFlatGround: number | null = null;
 export function setChunkedFlatGround(y: number | null): void {
@@ -122,7 +122,7 @@ function chunkedGroundY(x: number, z: number): number {
 }
 
 /// Learn a chunked world's dimensions from the /chunks manifest, then arm the chunk bounds (renderer
-/// upper-clamp + spawn-centring) and flat grounding. For a classic world it clears both. Best-effort:
+/// upper-clamp + spawn-centring) and flat grounding. For non-chunked special worlds it clears both. Best-effort:
 /// a manifest miss still streams (no upper clamp) and still grounds flat.
 export async function loadChunkedWorldBounds(): Promise<void> {
   if (!runtimeConfig.worldId.startsWith("chunked-")) {
@@ -906,7 +906,7 @@ export function movedVehiclePosition(
 }
 
 export function baseTerrainHeight(x: number, z: number): number {
-  // Classic-space transform: the feature math always runs at the classic 72-radius scale, so on a
+  // Legacy-space transform: the feature math always runs at the original 72-radius scale, so on a
   // scaled-up world the mountain/ridge/pond stretch with the island (heights unchanged). The Hyades
   // server's terrain port applies the IDENTICAL transform — keep the two in lockstep.
   const cx = x / WORLD_SCALE;

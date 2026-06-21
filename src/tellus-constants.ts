@@ -9,13 +9,8 @@ import type {
 } from "./tellus-types";
 
 // ── World scale ──────────────────────────────────────────────────────────────────────────────────
-// Worlds can be BIGGER than the classic island. The scale derives from the world's NAME (a pure
-// convention, so every client — and the Hyades server's bit-faithful terrain port — agrees with no
-// protocol change): `large-*`/`big-*`/`xl-*` → 3×, `mega-*`/`giant-*` → 5×. The 97×97 terrain grid is
-// kept and STRETCHED over the bigger radius (coarser sculpt resolution per metre, identical sync
-// payloads), and the terrain feature math runs in "classic space" (coords ÷ scale) so the base island
-// shapes scale up with the world. setWorldScale() must run BEFORE the world is created/loaded; size
-// constants below are exported as `let` so ES-module live bindings propagate updated values.
+// Legacy island constants remain for compatibility helpers and old terrain math, but normal outdoor
+// worlds route through chunked ids now. New world size is encoded in `chunked-<n>-<slug>`.
 export const CLASSIC_WORLD_RADIUS = 72;
 export let WORLD_SCALE = 1;
 export let WORLD_RADIUS = 72;
@@ -34,10 +29,6 @@ export function worldScaleForId(worldId: string): number {
   const id = worldId.toLowerCase();
   if (/^(mega|giant)[-_]/.test(id)) return 5;
   if (/^(large|big|xl)[-_]/.test(id)) return 3;
-  // Default worlds are 2× the classic island (144 radius, 4× area) — operator wanted BIG as the
-  // baseline. `classic-*` opts back into the original 72-radius island. Mirrored in the server's
-  // TellusWorldScale — keep in lockstep.
-  if (/^classic[-_]/.test(id)) return 1;
   return 2;
 }
 
@@ -77,8 +68,8 @@ export const TERRAIN_VERTEX_COUNT = TERRAIN_SEGMENTS + 1;
 export const TERRAIN_SCULPT_RADIUS = 6.2;
 export const TERRAIN_SCULPT_STEP = 0.72;
 
-// Chunked-world tiling (worldId starts with "chunked-"). INDEPENDENT of the classic
-// single-grid TERRAIN_SEGMENTS — a chunk is its own 64-seg / 65-vtx square tile.
+// Chunked-world tiling (worldId starts with "chunked-"). INDEPENDENT of the legacy
+// single-grid TERRAIN_SEGMENTS; a chunk is its own 64-seg / 65-vtx square tile.
 export const CHUNK_SEGMENTS = 64;
 export const CHUNK_VERTEX_COUNT = CHUNK_SEGMENTS + 1; // 65 -> 4225 verts
 export const CHUNK_SPAN = 96; // world-units per chunk side
@@ -90,6 +81,26 @@ export const CHUNK_LOD_FAR_SEGMENTS = 16; // distant chunks decimate 64 -> 16 (s
 
 export function isChunkedWorldId(worldId: string): boolean {
   return worldId.startsWith("chunked-");
+}
+
+export function canonicalWorldId(worldId: string): string {
+  const trimmed = worldId.trim();
+  if (!trimmed) return trimmed;
+  if (
+    trimmed.startsWith("chunked-") ||
+    trimmed.startsWith("tiles-") ||
+    trimmed.startsWith("interior-") ||
+    trimmed.startsWith("evoflow-")
+  ) {
+    return trimmed;
+  }
+  const slug = trimmed
+    .toLowerCase()
+    .replace(/^classic[-_]/, "")
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return `chunked-64-${slug || "world"}`;
 }
 
 // World dimensions (in chunks) learned from the /chunks manifest on chunked-world load. Lets the
@@ -199,4 +210,3 @@ export const groundMountTerms = [
   "mount",
   "rideable",
 ];
-

@@ -110,6 +110,8 @@ import {
   biomeCellsFromWorldPatch,
   biomeCellsFromSnapshot,
   dedupePresenceForDisplay,
+  isLivePresence,
+  repairGeneratedCloneModelLinks,
   type WorldBiomeCell,
   isTellusTerrainState,
   isWorldGeneratedThing,
@@ -120,7 +122,7 @@ import {
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood } from "./tellus-types";
-import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
+import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig } from "./tellus-runtime-config";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, toAssetId } from "./tellus-urls-identity";
@@ -355,6 +357,8 @@ function createTellusWorld(
   const skyboxTintMaterials = new Set<THREE.MeshBasicMaterial>();
   const pendingGenerationControllers = new Map<string, AbortController>();
   const pendingManifestReconciliations = new Set<string>();
+  const transientModelLoadFailures = new Map<string, number>();
+  const transientModelRetryTimers = new Map<string, number>();
   const keys = new Set<string>();
   let selectedThingId: string | undefined;
   let sailingThingId: string | undefined;
@@ -376,6 +380,7 @@ function createTellusWorld(
   // animate(); rigs are disposed on remote prune and on destroy.
   const avatarRigs = new Map<string, AvatarRig>();
   let lastPresenceSentAt = 0;
+  let lastPresencePruneAt = 0;
 
   // ── P2P video mesh (WebRTC, RX-on/TX-off by default) ──────────────────────
   // The mesh is the sole owner of all RTCPeerConnections; it lives outside the render loop and
@@ -761,8 +766,8 @@ function createTellusWorld(
     interiorSceneUrl = u;
     for (const m of [ocean, archipelago, terrain, pondWater, flowerPatchGroup]) m.visible = false;
     setChunkedFlatGround(0); // ground the player on the room floor (no heightfield inside)
-    // The procedural room is centered at the origin, but a non-chunked world defaults the player to an
-    // off-origin island spot — so drop them INTO the room (origin, flat floor) on entry.
+    // The procedural room is centered at the origin; drop the player INTO the room (origin, flat floor)
+    // on entry instead of preserving an outdoor spawn point.
     visitorPosition.x = 0;
     visitorPosition.y = 0;
     visitorPosition.z = 0;
@@ -1101,7 +1106,7 @@ function createTellusWorld(
 
   const visitor = createVisitorMesh(useWebGPU);
   // Chunked worlds place origin at a CORNER, so spawn at the world centre (from the manifest bounds)
-  // to land in the middle of the tiled plane; classic worlds keep the island-disc spawn.
+  // to land in the middle of the tiled plane; non-chunked special worlds use the compatibility spawn.
   const chunkedCenter = chunkedWorldCenter();
   let visitorPosition = chunkedCenter
     ? groundedPosition(chunkedCenter.x, chunkedCenter.z)
@@ -1709,10 +1714,47 @@ function createTellusWorld(
     publish();
   };
 
+  const removeRemoteVisitor = (remoteId: string) => {
+    const mesh = remoteVisitorMeshes.get(remoteId);
+    if (!mesh) {
+      remoteVisitors.delete(remoteId);
+      pendingPeerStreams.delete(remoteId);
+      return;
+    }
+    // Detach + dispose the TV video (texture/<video>) BEFORE removing the avatar.
+    setPeerVideo(remoteId, null);
+    pendingPeerStreams.delete(remoteId);
+    avatarRigs.get(remoteId)?.dispose();
+    avatarRigs.delete(remoteId);
+    appliedAvatarIds.delete(remoteId);
+    avatarApplyTokens.delete(remoteId); // also invalidates any in-flight avatar load for them
+    scene.remove(mesh);
+    remoteVisitorMeshes.delete(remoteId);
+    remoteVisitors.delete(remoteId);
+  };
+
+  const pruneStaleRemotePresence = (nowMs = Date.now()) => {
+    let changed = false;
+    for (const [remoteId, presence] of remoteVisitors) {
+      if (isLivePresence(presence, nowMs)) continue;
+      removeRemoteVisitor(remoteId);
+      changed = true;
+    }
+    if (!changed) return;
+    feedP2pPresence(Array.from(remoteVisitorMeshes.keys()));
+    publish();
+  };
+
   const applyRemotePresence = (presenceRaw: WorldPresence[]) => {
     // One logged-in account = one player: collapse a human's several live connections (stale tabs /
     // reconnects, each a distinct visitorId under the same ownerUserId) and drop my own other connections.
-    const presence = dedupePresenceForDisplay(presenceRaw, userId?.trim() || null);
+    // Anonymous sessions have no ownerUserId, so stale timestamp filtering is the safety net there.
+    const presence = dedupePresenceForDisplay(
+      presenceRaw,
+      userId?.trim() || null,
+      Date.now(),
+      visitorId,
+    );
     const activeRemoteIds = new Set<string>();
     for (const remote of presence) {
       if (remote.visitorId === visitorId || !remote.position) continue;
@@ -1768,18 +1810,9 @@ function createTellusWorld(
         .get(remote.visitorId)
         ?.notePresenceUpdate(position.x, position.y, position.z, performance.now());
     }
-    for (const [remoteId, mesh] of remoteVisitorMeshes) {
+    for (const remoteId of remoteVisitorMeshes.keys()) {
       if (activeRemoteIds.has(remoteId)) continue;
-      // Detach + dispose the TV video (texture/<video>) BEFORE removing the avatar.
-      setPeerVideo(remoteId, null);
-      pendingPeerStreams.delete(remoteId);
-      avatarRigs.get(remoteId)?.dispose();
-      avatarRigs.delete(remoteId);
-      appliedAvatarIds.delete(remoteId);
-      avatarApplyTokens.delete(remoteId); // also invalidates any in-flight avatar load for them
-      scene.remove(mesh);
-      remoteVisitorMeshes.delete(remoteId);
-      remoteVisitors.delete(remoteId);
+      removeRemoteVisitor(remoteId);
     }
     // Feed the live roster to the mesh (drives connect/disconnect of PCs).
     feedP2pPresence(Array.from(activeRemoteIds));
@@ -1844,6 +1877,24 @@ function createTellusWorld(
       // the lerped current — receivers ease toward it themselves.
       avatarScale: localAvatarScale,
     }));
+  };
+
+  const sendPresenceLeave = (keepalive = false) => {
+    const frame = { type: "presence.leave", visitorId };
+    if (worldSocket?.readyState === WebSocket.OPEN) {
+      try {
+        worldSocket.send(JSON.stringify(frame));
+      } catch {
+        /* socket race */
+      }
+    }
+    if (!keepalive || !tellusWorldBackendAvailable) return;
+    void fetch(tellusWorldHttpUrl("action"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(frame),
+      keepalive: true,
+    }).catch(() => undefined);
   };
 
   const publishTerrainStateNow = () => {
@@ -2130,7 +2181,7 @@ function createTellusWorld(
     } else {
       const targetHeight = terrainHeight(center.x, center.z);
       // The central brush radius scales with the world so it covers the same grid cells as the
-      // classic brush — keeps the math identical to the server's classic-space sculpt port.
+      // legacy brush — keeps the math identical to the server's compatibility sculpt port.
       const brushRadius = TERRAIN_SCULPT_RADIUS * WORLD_SCALE * (paintCode ? 0.68 : 1);
       for (let zIndex = 0; zIndex <= TERRAIN_SEGMENTS; zIndex++) {
         const z = (zIndex / TERRAIN_SEGMENTS - 0.5) * WORLD_RADIUS * 2;
@@ -2193,9 +2244,9 @@ function createTellusWorld(
     publish();
   };
 
-  // Chunked worlds hold NO inline classic grid — terrain lives in per-chunk grains. So a sculpt must go to
+  // Chunked worlds hold NO inline terrain grid — terrain lives in per-chunk grains. So a sculpt must go to
   // the SERVER as a terrain.sculpt action (world grain → owning chunk grain(s) → chunk.updated patch →
-  // chunkRenderer.reloadChunk), NOT edit the hidden 97² classic grid the way classic worlds do.
+  // chunkRenderer.reloadChunk), not edit the compatibility 97² grid.
   const sendChunkedSculpt = (mode: TerrainEditMode, center: Vec3) => {
     if (!tellusWorldBackendAvailable) return;
     const action = {
@@ -2791,9 +2842,9 @@ function createTellusWorld(
     // commands set the authoritative y and call us to repaint; mutating here would fight them).
     // PERF: isVisiblyOffsetFromLiveGround + footprintGroundY each do ~9 terrain RAYCASTS (+ a Box3
     // bounds traversal). They're ONLY needed to gate the chunked-world live reground below, so compute
-    // them ONLY when isChunked. On classic worlds this whole block was raycasting 9× per asset on every
+    // them ONLY when isChunked. On legacy worlds this whole block was raycasting 9× per asset on every
     // updateThingMeshPosition (incl. once per asset during the load storm) and being thrown away — the
-    // cause of the multi-second load freeze with many assets. Skip it entirely on classic worlds.
+    // cause of the multi-second load freeze with many assets. Skip it entirely outside chunked worlds.
     const liveGround =
       isChunked && !isVisiblyOffsetFromLiveGround(thing) ? footprintGroundY(thing) : null;
     const placeAt =
@@ -3048,6 +3099,51 @@ function createTellusWorld(
     }
   };
 
+  const isDefinitelyDeadModelUrl = async (url: string): Promise<boolean> => {
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Range: "bytes=0-0" },
+        cache: "no-store",
+      });
+      return res.status === 404 || res.status === 410;
+    } catch {
+      return false;
+    }
+  };
+
+  const showTransientGeneratedLoadFailure = (thing: GeneratedThing, error: unknown) => {
+    const oldMesh = generatedMeshes.get(thing.id);
+    if (oldMesh?.userData.transientLoadFailedFor === thing.modelUrl) return;
+    if (oldMesh) {
+      uninstanceThing(thing.id);
+      stopGeneratedAnimation(thing.id);
+      scene.remove(oldMesh);
+      disposeObject(oldMesh);
+    }
+    const failedMesh = createGeneratedMesh({ ...thing, generationStatus: "failed" });
+    failedMesh.userData.transientLoadFailedFor = thing.modelUrl;
+    failedMesh.userData.transientLoadError =
+      error instanceof Error ? error.message : String(error);
+    generatedMeshes.set(thing.id, failedMesh);
+    scene.add(failedMesh);
+    syncTransformControls();
+    updateThingMeshPosition(thing);
+  };
+
+  const scheduleTransientModelRetry = (thingId: string, modelUrl: string) => {
+    if (transientModelRetryTimers.has(thingId)) return;
+    const attempts = transientModelLoadFailures.get(thingId) ?? 1;
+    const delay = Math.min(30_000, 1_500 * Math.pow(2, Math.max(0, attempts - 1)));
+    const timer = window.setTimeout(() => {
+      transientModelRetryTimers.delete(thingId);
+      const current = thingById(thingId);
+      if (!current || current.modelUrl !== modelUrl || current.generationStatus !== "ready") return;
+      loadRemoteGeneratedModel(current);
+    }, delay);
+    transientModelRetryTimers.set(thingId, timer);
+  };
+
   const sortWorldModelLoadQueue = () => {
     worldModelLoadQueue.sort((a, b) => {
       if (selectedThingId === a) return -1;
@@ -3098,6 +3194,12 @@ function createTellusWorld(
             disposeObject(model);
             return;
           }
+          transientModelLoadFailures.delete(id);
+          const retryTimer = transientModelRetryTimers.get(id);
+          if (retryTimer !== undefined) {
+            window.clearTimeout(retryTimer);
+            transientModelRetryTimers.delete(id);
+          }
           const oldMesh = generatedMeshes.get(id);
           if (oldMesh) {
             uninstanceThing(id); // free any instance slot the old mesh held before we swap it out
@@ -3113,15 +3215,23 @@ function createTellusWorld(
           reevaluateInstanceGroup(modelUrl);
           publish();
         })
-        .catch((error) => {
+        .catch(async (error) => {
           const current = thingById(id);
           console.warn("Remote generated model load failed", error);
           if (!current || current.modelUrl !== modelUrl) return;
-          current.modelUrl = undefined;
-          current.generationStatus = "failed";
-          current.pipelineId = undefined;
-          ensureGeneratedVisual(current);
-          publishGeneratedThing(current);
+          const definitelyDead = await isDefinitelyDeadModelUrl(modelUrl);
+          if (!current || current.modelUrl !== modelUrl) return;
+          if (definitelyDead) {
+            current.modelUrl = undefined;
+            current.generationStatus = "failed";
+            current.pipelineId = undefined;
+            ensureGeneratedVisual(current);
+            publishGeneratedThing(current);
+          } else {
+            transientModelLoadFailures.set(id, (transientModelLoadFailures.get(id) ?? 0) + 1);
+            showTransientGeneratedLoadFailure(current, error);
+            scheduleTransientModelRetry(id, modelUrl);
+          }
           publish();
         })
         .finally(() => {
@@ -3292,8 +3402,16 @@ function createTellusWorld(
   };
 
   const applyRemoteGeneratedThings = (remoteThings: WorldGeneratedThing[]) => {
-    for (const remote of remoteThings) {
+    const repaired = repairGeneratedCloneModelLinks(
+      remoteThings,
+      generated.map((thing) => worldGeneratedThing(thing)),
+    );
+    for (const remote of repaired.things) {
       applyRemoteGeneratedThing(remote);
+    }
+    for (const id of repaired.repairedIds) {
+      const thing = thingById(id);
+      if (thing) publishGeneratedThing(thing);
     }
     saveGeneratedPlacementSnapshot();
     publish();
@@ -3397,6 +3515,12 @@ function createTellusWorld(
     if (index === -1) return;
     const [removed] = generated.splice(index, 1);
     const removedModelUrl = removed?.modelUrl;
+    const retryTimer = transientModelRetryTimers.get(id);
+    if (retryTimer !== undefined) {
+      window.clearTimeout(retryTimer);
+      transientModelRetryTimers.delete(id);
+    }
+    transientModelLoadFailures.delete(id);
     const mesh = generatedMeshes.get(id);
     if (mesh) {
       uninstanceThing(id); // free the instance slot before the mesh goes away
@@ -5354,6 +5478,10 @@ function createTellusWorld(
       publish();
     }
     flushPublish();
+    if (now - lastPresencePruneAt > 5_000) {
+      lastPresencePruneAt = now;
+      pruneStaleRemotePresence(Date.now());
+    }
     vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
     ambientPhysics.step(delta);
     try {
@@ -5459,13 +5587,17 @@ function createTellusWorld(
   };
   const handleKeyUp = (event: KeyboardEvent) =>
     keys.delete(event.key.toLowerCase());
-  const handlePageHide = () => {
+  const persistPageStateNow = () => {
     publishTerrainStateNow();
     saveTellusStateNow();
   };
+  const handlePageHide = () => {
+    persistPageStateNow();
+    sendPresenceLeave(true);
+  };
   const handleVisibilityChange = () => {
     if (document.visibilityState === "hidden") {
-      handlePageHide();
+      persistPageStateNow();
     }
   };
   const handlePointerDown = (event: PointerEvent) => {
@@ -6397,7 +6529,7 @@ function createTellusWorld(
     getAvatarScale: () => localAvatarScale,
     setCameraMode,
     getCameraMode: () => cameraMode,
-    // Chunked-world draw distance: rings of chunks loaded around the player (no-op on classic worlds).
+    // Chunked-world draw distance: rings of chunks loaded around the player.
     setChunkLoadRadius: (radius: number) => {
       chunkRenderer?.setLoadRadius(radius);
     },
@@ -6458,6 +6590,11 @@ function createTellusWorld(
       for (const id of generatedAnimationMixers.keys()) {
         stopGeneratedAnimation(id);
       }
+      for (const timer of transientModelRetryTimers.values()) {
+        window.clearTimeout(timer);
+      }
+      transientModelRetryTimers.clear();
+      transientModelLoadFailures.clear();
       // Dispose placed VRM rigs (own mixer + skinned scene buffers) and clear the live-mirror slots.
       for (const rig of generatedVrmRigs.values()) {
         rig.dispose();
@@ -6485,6 +6622,7 @@ function createTellusWorld(
       if (worldSocketReconnectTimer !== undefined) {
         window.clearTimeout(worldSocketReconnectTimer);
       }
+      sendPresenceLeave(false);
       worldSocket?.close();
       if (tilesRenderer) {
         scene.remove(tilesRenderer.group);
@@ -7740,8 +7878,6 @@ function App(): React.ReactElement {
   const [newWorldName, setNewWorldName] = useState("");
   const [newWorldPanelOpen, setNewWorldPanelOpen] = useState(false);
   const [newWorldPrivate, setNewWorldPrivate] = useState(false);
-  // Chunked-only: new worlds are always chunked (the classic/non-chunked render path is retired).
-  const [newWorldChunked, setNewWorldChunked] = useState(true);
   const [newWorldChunkSize, setNewWorldChunkSize] = useState(8);
   const [currentWorldTemplate, setCurrentWorldTemplate] = useState<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
@@ -7775,7 +7911,6 @@ function App(): React.ReactElement {
   const NEW_WORLD_SKYBOX_KEY = "tellus.newWorldSkyboxUrl";
   const NEW_WORLD_NAME_KEY = "tellus.newWorldName";
   const NEW_WORLD_PRIVATE_KEY = "tellus.newWorldPrivate";
-  const NEW_WORLD_CHUNKED_KEY = "tellus.newWorldChunked";
   const NEW_WORLD_CHUNK_SIZE_KEY = "tellus.newWorldChunkSize";
   const defaultWorldTemplateRef = useRef<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
@@ -7993,8 +8128,9 @@ function App(): React.ReactElement {
     }
   };
   const rememberWorld = (id: string) => {
+    const worldId = canonicalWorldId(id);
     try {
-      const next = [...new Set([...loadKnownWorlds(), id])];
+      const next = [...new Set([...loadKnownWorlds().map(canonicalWorldId), worldId])];
       window.localStorage.setItem(KNOWN_WORLDS_KEY, JSON.stringify(next));
     } catch {
       /* ignore */
@@ -8014,12 +8150,13 @@ function App(): React.ReactElement {
       if (Array.isArray(list)) {
         server = list
           .map((w) => {
-            if (typeof w === "string") return w;
+            if (typeof w === "string") return canonicalWorldId(w);
             const world = w as { worldId?: string };
             if (typeof world.worldId === "string" && world.worldId.length > 0) {
+              const worldId = canonicalWorldId(world.worldId);
               const profile = parseWorldRenderProfile(w);
-              if (profile.displayName) rememberWorldProfile(world.worldId, profile);
-              return world.worldId;
+              if (profile.displayName) rememberWorldProfile(worldId, profile);
+              return worldId;
             }
             return undefined;
           })
@@ -8028,19 +8165,20 @@ function App(): React.ReactElement {
     } catch {
       /* offline / no index — fall back to local */
     }
-    const cur = current ?? activeWorldId ?? runtimeConfig.worldId;
-    setWorlds([...new Set([...server, ...loadKnownWorlds(), ...(cur ? [cur] : [])])].sort());
+    const cur = canonicalWorldId(current ?? activeWorldId ?? runtimeConfig.worldId);
+    setWorlds([...new Set([...server, ...loadKnownWorlds().map(canonicalWorldId), ...(cur ? [cur] : [])])].sort());
   };
   const switchWorld = (id: string) => {
-    if (!id || id === activeWorldId) return;
-    rememberWorld(id);
+    const next = canonicalWorldId(id);
+    if (!next || next === activeWorldId) return;
+    rememberWorld(next);
     try {
-      window.localStorage.setItem(ACTIVE_WORLD_KEY, id);
+      window.localStorage.setItem(ACTIVE_WORLD_KEY, next);
     } catch {
       /* ignore */
     }
-    setActiveWorldId(id);
-    void refreshWorldList(id);
+    setActiveWorldId(next);
+    void refreshWorldList(next);
   };
   const portalArrivalPosition = (x: number, z: number) => {
     const len = Math.hypot(x, z);
@@ -8145,15 +8283,12 @@ function App(): React.ReactElement {
       setNewWorldPanelOpen(true);
       return;
     }
-    let id = sanitized;
-    if (newWorldChunked) {
-      const size = Math.min(64, Math.max(1, Math.round(newWorldChunkSize) || 1));
-      // Server parses N from "chunked-<n>-<name>"; keep the name suffix non-empty.
-      const namePart = sanitized.startsWith("chunked-")
-        ? sanitized.replace(/^chunked-(?:\d+-)?/, "")
-        : sanitized;
-      id = `chunked-${size}-${namePart || "world"}`;
-    }
+    const size = Math.min(64, Math.max(1, Math.round(newWorldChunkSize) || 1));
+    // Server parses N from "chunked-<n>-<name>"; keep the name suffix non-empty.
+    const namePart = sanitized.startsWith("chunked-")
+      ? sanitized.replace(/^chunked-(?:\d+-)?/, "")
+      : sanitized;
+    const id = `chunked-${size}-${namePart || "world"}`;
     if (!id) return;
     const pickedTemplate = parseWorldTemplateId(
       newWorldTemplate,
@@ -8688,7 +8823,6 @@ function App(): React.ReactElement {
           const savedSkyboxUrl = window.localStorage.getItem(NEW_WORLD_SKYBOX_KEY);
           const savedWorldName = window.localStorage.getItem(NEW_WORLD_NAME_KEY);
           const savedPrivate = window.localStorage.getItem(NEW_WORLD_PRIVATE_KEY);
-          const savedChunked = window.localStorage.getItem(NEW_WORLD_CHUNKED_KEY);
           const savedChunkSize = window.localStorage.getItem(NEW_WORLD_CHUNK_SIZE_KEY);
           setNewWorldTemplate(
             parseWorldTemplateId(savedTemplate, defaultWorldTemplateRef.current),
@@ -8700,7 +8834,6 @@ function App(): React.ReactElement {
           );
           setNewWorldName(savedWorldName ?? "");
           setNewWorldPrivate(savedPrivate === "1");
-          void savedChunked;
           if (savedChunkSize) {
             const parsed = Math.round(Number(savedChunkSize));
             if (Number.isFinite(parsed)) {
@@ -8714,15 +8847,14 @@ function App(): React.ReactElement {
           );
           setNewWorldName("");
           setNewWorldPrivate(false);
-          setNewWorldChunked(true);
           setNewWorldChunkSize(8);
         }
-        const configDefault = runtimeConfig.worldId; // typically "main" — always keep it reachable
+        const configDefault = canonicalWorldId(runtimeConfig.worldId);
         rememberWorld(configDefault);
         let initial = configDefault;
         try {
           const saved = window.localStorage.getItem(ACTIVE_WORLD_KEY);
-          if (saved && saved.trim()) initial = saved.trim();
+          if (saved && saved.trim()) initial = canonicalWorldId(saved);
         } catch {
           /* ignore */
         }
@@ -8750,12 +8882,11 @@ function App(): React.ReactElement {
       window.localStorage.setItem(NEW_WORLD_SKYBOX_KEY, newWorldSkyboxUrl);
       window.localStorage.setItem(NEW_WORLD_NAME_KEY, newWorldName);
       window.localStorage.setItem(NEW_WORLD_PRIVATE_KEY, newWorldPrivate ? "1" : "0");
-      window.localStorage.setItem(NEW_WORLD_CHUNKED_KEY, newWorldChunked ? "1" : "0");
       window.localStorage.setItem(NEW_WORLD_CHUNK_SIZE_KEY, String(newWorldChunkSize));
     } catch {
       /* ignore */
     }
-  }, [newWorldTemplate, newWorldSkyboxUrl, newWorldName, newWorldPrivate, newWorldChunked, newWorldChunkSize]);
+  }, [newWorldTemplate, newWorldSkyboxUrl, newWorldName, newWorldPrivate, newWorldChunkSize]);
 
   useEffect(() => {
     return () => {
@@ -8797,7 +8928,7 @@ function App(): React.ReactElement {
         rebuildDistantIslandSpecs();
         await loadTellusState().catch(() => undefined);
         // Chunked worlds: learn bounds (renderer edge-clamp) + arm centre-spawn/flat-grounding BEFORE
-        // the world view mounts. Clears both for classic worlds, so switching back is clean.
+        // the world view mounts. Clears both for non-chunked special worlds, so switching back is clean.
         await loadChunkedWorldBounds().catch(() => undefined);
       })
       .then(() => {
@@ -10534,7 +10665,7 @@ function App(): React.ReactElement {
             </section>
             {snapshot.visitorPosition && (() => {
               // Position readout: where you are, so you can tell others. Chunked worlds also show the
-              // chunk cell (origin at a corner, CHUNK_SPAN units/chunk); classic worlds just world coords.
+              // chunk cell (origin at a corner, CHUNK_SPAN units/chunk); other worlds just show coords.
               const pos = snapshot.visitorPosition;
               const wx = Math.round(pos.x);
               const wz = Math.round(pos.z);
