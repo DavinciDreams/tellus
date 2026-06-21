@@ -62,6 +62,8 @@ export interface WorldGeneratedThing {
   rotationZ?: number;
   scale: number;
   color: number;
+  /** Immutable 3D Asset Manager model id. modelUrl is a cached/resolved fetch URL. */
+  assetStoreModelId?: string;
   modelUrl?: string;
   pipelineId?: string;
   generationStatus?: "local" | "queued" | "generating" | "ready" | "failed";
@@ -318,6 +320,7 @@ export function isWorldGeneratedThing(value: unknown): value is WorldGeneratedTh
     return false;
   }
   return (
+    (value.assetStoreModelId === undefined || typeof value.assetStoreModelId === "string") &&
     (value.modelUrl === undefined || typeof value.modelUrl === "string") &&
     (value.pipelineId === undefined || typeof value.pipelineId === "string") &&
     (value.animation === undefined || typeof value.animation === "string") &&

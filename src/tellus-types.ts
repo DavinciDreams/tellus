@@ -148,6 +148,8 @@ export interface GeneratedThing {
   rotationZ?: number;
   scale: number;
   color: number;
+  /** Immutable 3D Asset Manager model id. modelUrl is only a cached serving hint. */
+  assetStoreModelId?: string;
   modelUrl?: string;
   pipelineId?: string;
   generationStatus?: "local" | "queued" | "generating" | "ready" | "failed";
@@ -163,6 +165,8 @@ export interface AssetLibraryModel {
   file_format?: string;
   file_size?: number;
   download_count?: number;
+  /** Immutable 3D Asset Manager model id, when this card maps to a store asset. */
+  assetStoreModelId?: string;
   modelUrl?: string;
   source?: "asset-library" | "generated";
   /** Store browse-card extras (3D Asset Manager /models/browse). */
@@ -384,6 +388,9 @@ export interface DirectGenerationResponse {
   jobId: string;
   status?: "queued" | "generating" | "completed" | "failed";
   modelUrl?: string;
+  assetStoreModelId?: string;
+  assetStoreModelUrl?: string;
+  assetStoreDownloadUrl?: string;
   provider: string;
   rawModelUrl?: string;
   storedModelUrl?: string;
@@ -401,6 +408,9 @@ export interface GeneratedAssetManifestEntry {
   kind?: string;
   createdAt?: string;
   modelUrl?: string;
+  assetStoreModelId?: string;
+  assetStoreModelUrl?: string;
+  assetStoreDownloadUrl?: string;
 }
 
 export type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;

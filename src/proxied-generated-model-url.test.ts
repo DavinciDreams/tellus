@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { proxiedGeneratedModelUrl } from "./tellus-urls-identity";
+import { assetStoreIdFromModelUrl, proxiedGeneratedModelUrl } from "./tellus-urls-identity";
 import { runtimeConfig } from "./tellus-runtime-config";
 
 // The Hyades 3D backend hands back a raw asset-store URL (no CORS header); loading it cross-origin
@@ -15,7 +15,7 @@ describe("proxiedGeneratedModelUrl", () => {
   it("rewrites a raw asset-store /api/view URL to the same-origin game-optimized proxy", () => {
     runtimeConfig.worldApiBase = "https://tellus.example";
     expect(proxiedGeneratedModelUrl("https://3d.flobots.xyz/api/view/abc123")).toBe(
-      "https://tellus.example/api/assets/model/abc123/game-optimized",
+      "/api/assets/model/abc123/game-optimized",
     );
   });
 
@@ -34,7 +34,7 @@ describe("proxiedGeneratedModelUrl", () => {
   it("rewrites stale world-api /api/view URLs through the asset proxy", () => {
     runtimeConfig.worldApiBase = "https://hyades.gnostr.cloud";
     expect(proxiedGeneratedModelUrl("https://hyades.gnostr.cloud/api/view/asset-1")).toBe(
-      "https://hyades.gnostr.cloud/api/assets/model/asset-1/game-optimized",
+      "/api/assets/model/asset-1/game-optimized",
     );
   });
 
@@ -55,5 +55,14 @@ describe("proxiedGeneratedModelUrl", () => {
   it("leaves non-asset-store API model URLs unchanged", () => {
     const url = "https://sketchfab.example/api/model/abc123";
     expect(proxiedGeneratedModelUrl(url)).toBe(url);
+  });
+
+  it("extracts immutable asset ids from raw and proxied model URLs", () => {
+    expect(assetStoreIdFromModelUrl("https://3d.flobots.xyz/api/view/abc123?viewer=2")).toBe(
+      "abc123",
+    );
+    expect(assetStoreIdFromModelUrl("/api/assets/model/xyz/game-optimized")).toBe("xyz");
+    expect(assetStoreIdFromModelUrl("/__hyades/api/assets/model/dev-proxy/game-optimized")).toBe("dev-proxy");
+    expect(assetStoreIdFromModelUrl("/generated-assets/local.glb")).toBeNull();
   });
 });
