@@ -8308,8 +8308,7 @@ function App(): React.ReactElement {
     loadLocalWorldProfiles()[worldId]?.displayName?.trim() || fallbackWorldDisplayName(worldId);
 
   const worldOptionLabel = (worldId: string): string => {
-    const displayName = worldDisplayName(worldId);
-    return displayName === worldId ? worldId : `${displayName} (${worldId})`;
+    return worldDisplayName(worldId);
   };
 
   const slugForWorldName = (name: string): string =>
@@ -11101,7 +11100,7 @@ function App(): React.ReactElement {
                     }}
                   >
                     <span className="world-info-label">Share</span>
-                    <span className="world-info-value">{locationText}</span>
+                    <span className="world-info-value">{`${worldDisplayName(currentWorldId)} - (${wx}, ${wz})`}</span>
                   </button>
                   <button
                     type="button"
