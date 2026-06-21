@@ -3055,21 +3055,58 @@ textarea::placeholder {
 }
 
 .terrain-scatter-tile {
+  position: relative;
   display: grid;
-  gap: 2px;
-  justify-items: center;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 3px;
   min-width: 0;
   border: 1px solid var(--hud-border-soft);
   border-radius: 6px;
   background: rgb(0 0 0 / 18%);
   color: var(--hud-text);
-  cursor: pointer;
-  padding: 5px 2px;
+  padding: 3px;
+  overflow: hidden;
 }
 
-.terrain-scatter-tile:hover {
+.terrain-scatter-tile:hover,
+.terrain-scatter-tile:focus-within {
   border-color: var(--hud-border);
   background: var(--hud-bg-soft);
+}
+
+button.terrain-scatter-tile {
+  cursor: pointer;
+}
+
+.terrain-scatter-place,
+.terrain-scatter-burst {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.terrain-scatter-place {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  padding: 2px 0 0;
+}
+
+.terrain-scatter-burst {
+  display: grid;
+  place-items: center;
+  min-height: 19px;
+  border: 1px solid rgb(255 232 132 / 28%);
+  border-radius: 4px;
+  color: var(--hud-gold-bright);
+  background: rgb(255 232 132 / 8%);
+}
+
+.terrain-scatter-place:hover .terrain-scatter-label,
+.terrain-scatter-burst:hover {
+  color: #fff6b7;
 }
 
 .terrain-scatter-emoji {

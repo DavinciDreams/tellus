@@ -630,13 +630,13 @@ function createTellusWorld(
   const archipelago = createDistantArchipelago(useWebGPU);
   let chunkRenderer: ChunkRenderer | null = null;
   let lastActiveChunkCount = -1; // re-ground placed assets when the active chunk set changes
-  // Ambient procedural vegetation (wind-swayed grass/flowers streamed around the player + island-wide
+  // Ambient procedural vegetation (wind-swayed flowers/flora streamed around the player + island-wide
   // trees/rocks) and the lightweight physics world (thrown things, player jump/obstacles). Both are
   // deterministic from the synced terrain state — no protocol changes.
   //
-  // Classic-world vegetation remains opt-in via localStorage "tellus.grass"="1"; chunked worlds
-  // enable the lighter near-player grass layer by default, with "tellus.grass"="0" as an escape hatch.
-  // When off, a no-op stub stands in so every call site stays branch-free.
+  // Chunked worlds keep 3D flowers/reeds/small flora on by default, but suppress the hair-like grass
+  // layer unless localStorage "tellus.grass"="1". "tellus.grass"="0" disables this vegetation pass.
+  // Classic-world vegetation remains opt-in via "tellus.grass"="1".
   const isChunked = isChunkedWorldId(runtimeConfig.worldId);
   const chunkedDims = isChunked ? getChunkedWorldChunks() : null;
   const chunkedCenterForWorld = isChunked ? chunkedWorldCenter() : null;
@@ -678,16 +678,16 @@ function createTellusWorld(
       terrainHeight(waterFeatureCenter.x, waterFeatureCenter.z);
     return ground + 0.55;
   };
-  const grassEnabled = (() => {
+  const vegetationPreference = (() => {
     try {
-      const pref = window.localStorage.getItem("tellus.grass");
-      if (pref !== null) return pref === "1";
-      return isChunked;
+      return window.localStorage.getItem("tellus.grass");
     } catch {
-      return isChunked;
+      return null;
     }
   })();
-  const vegetation = grassEnabled
+  const vegetationEnabled = vegetationPreference !== "0" && (isChunked || vegetationPreference === "1");
+  const groundGrassEnabled = vegetationPreference === "1";
+  const vegetation = vegetationEnabled
     ? createVegetation({
         scene,
         useWebGPU,
@@ -696,13 +696,16 @@ function createTellusWorld(
           : terrainHeight,
         samplePaint: isChunked
           ? (x, z) => {
+              const painted = chunkRenderer?.samplePaint(x, z);
+              if (painted) return painted;
               const kind = largeWorldTerrainKind(x, z);
               return kind === "water" ? null : kind;
             }
           : centralTerrainPaintAt,
         bounds: chunkedVegetationBounds,
         sectorsEnabled: !isChunked,
-        grassOnly: isChunked,
+        grassOnly: false,
+        suppressGrass: isChunked && !groundGrassEnabled,
         isExcluded: isChunked
           ? (x, z, h) =>
               waterFeatureContains(x, z, 0.6) &&
@@ -1633,6 +1636,7 @@ function createTellusWorld(
 
   const refreshFlowerPatches = () => {
     flowerPatchGroup.clear();
+    if (isChunked) return;
     const flowerCode = terrainPaintCode("flowers");
     let flowerCount = 0;
     for (
@@ -1660,7 +1664,7 @@ function createTellusWorld(
           flowerSpriteMaterials[flowerCount % flowerSpriteMaterials.length],
         );
         sprite.position.set(x, terrainHeight(x, z) + 0.16, z);
-        const scale = 0.52 + rand(seed + 409) * 0.32;
+        const scale = 0.34 + rand(seed + 409) * 0.2;
         sprite.scale.set(scale, scale, scale);
         sprite.renderOrder = 2;
         flowerPatchGroup.add(sprite);
@@ -2329,11 +2333,13 @@ function createTellusWorld(
       updatePondSurfacePosition();
     }
 
-    visitorPosition = groundedPosition(visitorPosition.x, visitorPosition.z, visitorPosition);
-    for (const thing of generated) {
-      if (!isFreeMovingVehicle(thing) && !isIntentionallyOffsetFromGround(thing)) {
-        groundThingToRenderedSurface(thing);
-        updateThingMeshPosition(thing);
+    if (!paintCode) {
+      visitorPosition = groundedPosition(visitorPosition.x, visitorPosition.z, visitorPosition);
+      for (const thing of generated) {
+        if (!isFreeMovingVehicle(thing) && !isIntentionallyOffsetFromGround(thing)) {
+          groundThingToRenderedSurface(thing);
+          updateThingMeshPosition(thing);
+        }
       }
     }
     addLog({
@@ -4682,8 +4688,55 @@ function createTellusWorld(
             error instanceof Error ? error.message : "unknown error"
           }`,
         });
-      });
+    });
     return thing;
+  };
+
+  const scatterProceduralAsset = (archetypeId: string, count?: number): GeneratedThing[] => {
+    const arch = PROCEDURAL_CATALOG.find((item) => item.id === archetypeId);
+    if (!arch) return [];
+    const rng = Math.random;
+    const isTree = arch.kind === "tree";
+    const total = clamp(
+      Math.round(count ?? (isTree ? 5 : arch.kind === "flower" ? 14 : 10)),
+      1,
+      isTree ? 9 : 24,
+    );
+    const radius = isTree ? 24 : 12;
+    const placed: GeneratedThing[] = [];
+    for (let i = 0; i < total; i++) {
+      const seed = (rng() * 0xffffffff) >>> 0;
+      const angle = rng() * Math.PI * 2;
+      const distance = (isTree ? 7 : 3) + Math.sqrt(rng()) * radius;
+      const location = {
+        x: visitorPosition.x + Math.sin(angle) * distance,
+        y: 0,
+        z: visitorPosition.z + Math.cos(angle) * distance,
+      };
+      placed.push(
+        addLibraryAsset(
+          {
+            id: `proc-${arch.id}-${seed.toString(16)}`,
+            name: arch.label,
+            description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
+            modelUrl: makeProceduralModelUrl(arch.id, seed),
+            source: "generated",
+          },
+          {
+            location,
+            scale: defaultScaleForRealisticKind(arch.kind, arch.label) * (0.82 + rng() * 0.42),
+          },
+        ),
+      );
+    }
+    addLog({
+      agentId: "visitor",
+      agentName: "Visitor",
+      tool: "generate",
+      text: `scattered ${placed.length} ${arch.label}`,
+    });
+    publish();
+    return placed;
   };
 
   const interact = (request: InteractRequest): TellusLog => {
@@ -6835,6 +6888,7 @@ function createTellusWorld(
     createDoorHere,
     generate,
     addLibraryAsset,
+    scatterProceduralAsset,
     interact,
     selectGenerated,
     goToGenerated,
@@ -12052,26 +12106,36 @@ function App(): React.ReactElement {
           <div className="terrain-subtitle with-rule">Scatter</div>
           <div className="terrain-scatter-grid">
             {PROCEDURAL_CATALOG.map((arch) => (
-              <button
-                key={arch.id}
-                type="button"
-                className="terrain-scatter-tile"
-                title={`${arch.label} — tap again for a new variation`}
-                aria-label={arch.label}
-                onClick={() => {
-                  const seed = (Math.random() * 0xffffffff) >>> 0;
-                  worldRef.current?.addLibraryAsset({
-                    id: `proc-${arch.id}-${seed.toString(16)}`,
-                    name: arch.label,
-                    description: arch.label,
-                    modelUrl: makeProceduralModelUrl(arch.id, seed),
-                    source: "generated",
-                  });
-                }}
-              >
-                <span className="terrain-scatter-emoji" aria-hidden="true">{arch.emoji}</span>
-                <span className="terrain-scatter-label">{arch.label}</span>
-              </button>
+              <div key={arch.id} className="terrain-scatter-tile">
+                <button
+                  type="button"
+                  className="terrain-scatter-place"
+                  title={`${arch.label} — tap again for a new variation`}
+                  aria-label={arch.label}
+                  onClick={() => {
+                    const seed = (Math.random() * 0xffffffff) >>> 0;
+                    worldRef.current?.addLibraryAsset({
+                      id: `proc-${arch.id}-${seed.toString(16)}`,
+                      name: arch.label,
+                      description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
+                      modelUrl: makeProceduralModelUrl(arch.id, seed),
+                      source: "generated",
+                    });
+                  }}
+                >
+                  <span className="terrain-scatter-emoji" aria-hidden="true">{arch.emoji}</span>
+                  <span className="terrain-scatter-label">{arch.label}</span>
+                </button>
+                <button
+                  type="button"
+                  className="terrain-scatter-burst"
+                  title={`Scatter ${arch.label}`}
+                  aria-label={`Scatter ${arch.label}`}
+                  onClick={() => worldRef.current?.scatterProceduralAsset(arch.id)}
+                >
+                  <Sprout size={13} />
+                </button>
+              </div>
             ))}
             <button
               type="button"

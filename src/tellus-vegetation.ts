@@ -67,6 +67,7 @@ export interface VegetationOptions {
   bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
   sectorsEnabled?: boolean;
   grassOnly?: boolean;
+  suppressGrass?: boolean;
   /** Extra exclusion test (the pond bowl) — return true to keep this spot clear. */
   isExcluded: (x: number, z: number, height: number) => boolean;
   /** Pond ring info for reed placement. */
@@ -98,7 +99,7 @@ export interface VegetationSystem {
 const CHUNK = 12;
 const SECTOR = 72;
 const MAX_TUFTS = 320;
-const MAX_FLOWERS = 48;
+const MAX_FLOWERS = 180;
 const MAX_EXTRAS = 24;
 const TUFT_CANDIDATES = 460;
 
@@ -151,6 +152,7 @@ interface ActiveChunk {
 export function createVegetation(options: VegetationOptions): VegetationSystem {
   const { scene, useWebGPU, sampleHeight, samplePaint, isExcluded, pondRing } = options;
   const grassOnly = options.grassOnly ?? false;
+  const suppressGrass = options.suppressGrass ?? false;
 
   // World geometry captured at construction (setWorldScale ran before the world was created).
   const minWorldX = options.bounds?.minX ?? -WORLD_RADIUS;
@@ -252,7 +254,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   group.name = "tellus-vegetation";
   scene.add(group);
 
-  const chunkTuftCap = grassOnly ? Math.round(MAX_TUFTS * 1.65) : MAX_TUFTS;
+  const chunkTuftCap = suppressGrass ? 0 : grassOnly ? Math.round(MAX_TUFTS * 1.65) : MAX_TUFTS;
   const chunkFlowerCap = grassOnly ? 0 : MAX_FLOWERS;
   const chunkExtraCap = grassOnly ? 0 : MAX_EXTRAS;
   const chunkVertCap =
@@ -260,7 +262,9 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     chunkFlowerCap * (flowerTpl.pos.length / 3) +
     chunkExtraCap * 200;
   const chunkIdxCap =
-    chunkTuftCap * grassTpl.idx.length + chunkFlowerCap * flowerTpl.idx.length + chunkExtraCap * 320;
+    chunkTuftCap * grassTpl.idx.length +
+    chunkFlowerCap * flowerTpl.idx.length +
+    chunkExtraCap * 320;
 
   const makePooled = (vertCap: number, idxCap: number, material: THREE.Material): PooledMesh => {
     const geometry = new THREE.BufferGeometry();
@@ -344,6 +348,28 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   };
 
   const tintColor = new THREE.Color();
+  const flowerPaintWeight = (x: number, z: number): number => {
+    if (samplePaint(x, z) === "flowers") return 1;
+    const near = 0.9;
+    if (
+      samplePaint(x + near, z) === "flowers" ||
+      samplePaint(x - near, z) === "flowers" ||
+      samplePaint(x, z + near) === "flowers" ||
+      samplePaint(x, z - near) === "flowers"
+    ) {
+      return 0.72;
+    }
+    const far = 1.8;
+    if (
+      samplePaint(x + far, z + far) === "flowers" ||
+      samplePaint(x - far, z + far) === "flowers" ||
+      samplePaint(x + far, z - far) === "flowers" ||
+      samplePaint(x - far, z - far) === "flowers"
+    ) {
+      return 0.38;
+    }
+    return 0;
+  };
 
   // ── Chunk build: grass + flowers + small flora ──
   const buildChunk = (chunk: ActiveChunk) => {
@@ -386,8 +412,41 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       placed++;
       track(h, scale);
     }
-    // flowers
-    for (let i = 0; i < chunkFlowerCap * 2; i++) {
+    // Flowers: bright old-style card blooms, placed from a jittered grid so paint strokes fill in
+    // predictably instead of depending on a sparse random lottery.
+    let flowers = 0;
+    const flowerStep = 0.95;
+    for (
+      let gz = flowerStep * 0.5;
+      gz < CHUNK && flowers < chunkFlowerCap;
+      gz += flowerStep
+    ) {
+      for (
+        let gx = flowerStep * 0.5;
+        gx < CHUNK && flowers < chunkFlowerCap;
+        gx += flowerStep
+      ) {
+        const jitter = flowerStep * 0.42;
+        const x = ox + gx + (rng() - 0.5) * jitter;
+        const z = oz + gz + (rng() - 0.5) * jitter;
+        const pick = rng();
+        const roll = rng();
+        const yawJit = rng();
+        if (!inWorld(x, z, 1.2)) continue;
+        const paintWeight = flowerPaintWeight(x, z);
+        const paint = paintWeight > 0 ? "flowers" : samplePaint(x, z);
+        const accept = paintWeight > 0 ? 0.98 * paintWeight : paint === "meadow" || paint === null ? 0.012 : 0;
+        if (roll > accept * (0.78 + TIERS[tier].density * 0.22)) continue;
+        const h = sampleHeight(x, z);
+        if (h < SEA_LEVEL + 0.45 || isExcluded(x, z, h) || slopeAt(x, z, h) > 0.92) continue;
+        tintColor.setHex(FLOWER_PALETTE[Math.floor(pick * FLOWER_PALETTE.length) % FLOWER_PALETTE.length]);
+        if (!stampTemplate(pooled, cur, flowerTpl, x, h - 0.02, z, 0.58 + pick * 0.38, yawJit * Math.PI * 2, tintColor, pick * Math.PI * 2, 0.8)) break;
+        flowers++;
+        track(h, 1);
+      }
+    }
+    // A few extra random blooms keep meadows from feeling perfectly tiled.
+    for (let i = 0; i < chunkFlowerCap && flowers < chunkFlowerCap; i++) {
       const x = ox + rng() * CHUNK;
       const z = oz + rng() * CHUNK;
       const roll = rng();
@@ -395,12 +454,13 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       const yawJit = rng();
       if (!inWorld(x, z, 1.2)) continue;
       const paint = samplePaint(x, z);
-      const accept = paint === "flowers" ? 0.5 : paint === "meadow" || paint === null ? 0.055 : 0;
+      const accept = paint === "flowers" ? 0.5 : paint === "meadow" || paint === null ? 0.025 : 0;
       if (roll > accept * TIERS[tier].density) continue;
       const h = sampleHeight(x, z);
       if (h < SEA_LEVEL + 0.45 || isExcluded(x, z, h) || slopeAt(x, z, h) > 0.9) continue;
       tintColor.setHex(FLOWER_PALETTE[Math.floor(pick * FLOWER_PALETTE.length) % FLOWER_PALETTE.length]);
       if (!stampTemplate(pooled, cur, flowerTpl, x, h - 0.02, z, 0.62 + pick * 0.5, yawJit * Math.PI * 2, tintColor, pick * Math.PI * 2, 0.8)) break;
+      flowers++;
       track(h, 1);
     }
     // small flora: bushes / ferns / mushrooms / reeds (waterline + pond ring) / rare crystals

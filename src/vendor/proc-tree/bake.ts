@@ -52,6 +52,8 @@ const DEFAULTS: Required<BakeOptions> = {
   maxBranchDepth: Infinity,
   maxStems: 2000,
   maxLeaves: 50000,
+  leafScaleMultiplier: 1,
+  blossomScaleMultiplier: 1,
 };
 
 function transformVec3(v: THREE.Vector3): THREE.Vector3 {
@@ -328,16 +330,18 @@ export function bakeTree(tree: TreeData, options: BakeOptions = {}): BakedTree {
     const gScale = tree.treeScale / params.gScale;
     const leafShape = getLeafShape(params.leafShape);
     const blossomShape = getBlossomShape(params.blossomShape);
+    const leafScaleMultiplier = opts.leafScaleMultiplier ?? 1;
+    const blossomScaleMultiplier = opts.blossomScaleMultiplier ?? leafScaleMultiplier;
     const leafVerts = scaleShape(
       leafShape.vertices,
       gScale,
-      params.leafScale,
+      params.leafScale * leafScaleMultiplier,
       params.leafScaleX,
     );
     const blossomVerts = scaleShape(
       blossomShape.vertices,
       gScale,
-      params.blossomScale || params.leafScale,
+      (params.blossomScale || params.leafScale) * blossomScaleMultiplier,
       1,
     );
     for (const leaf of leaves) {

@@ -252,6 +252,7 @@ export interface TellusWorldApi {
   createDoorHere(label?: string): void;
   generate(request: GenerateRequest): GeneratedThing;
   addLibraryAsset(model: AssetLibraryModel): GeneratedThing;
+  scatterProceduralAsset(archetypeId: string, count?: number): GeneratedThing[];
   interact(request: InteractRequest): TellusLog;
   selectGenerated(id?: string): void;
   goToGenerated(id: string): void;

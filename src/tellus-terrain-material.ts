@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { MeshStandardNodeMaterial } from "three/webgpu";
+import { ktx2Loader } from "./tellus-generation-client";
 import {
   color,
   mix,
@@ -27,10 +28,10 @@ import {
 //
 // Tuning knobs are centralised so both paths stay in lockstep.
 const DETAIL = {
-  macroScale: 0.085, // world-space frequency of the broad mottling
-  microScale: 0.95, // fine grain frequency
-  macroStrength: 0.14, // how much the macro noise darkens/lightens (±)
-  microStrength: 0.06,
+  macroScale: 0.11, // world-space frequency of the broad mottling
+  microScale: 1.35, // fine grain frequency
+  macroStrength: 0.18, // how much the macro noise darkens/lightens (±)
+  microStrength: 0.075,
   slopeStrength: 0.35, // max darkening on vertical faces
   heightLift: 0.05, // cool tint added per unit of height above the lift band
   heightStart: 4.0, // height where the cool lift begins
@@ -119,6 +120,160 @@ function webglColorPatch(): string {
 
 export interface TerrainMaterialOptions {
   roughness?: number;
+  pbrDetail?: boolean;
+  textureRepeat?: number;
+  textureUrls?: {
+    albedo?: string;
+    normal?: string;
+    roughness?: string;
+  };
+}
+
+const terrainTextureLoader = new THREE.TextureLoader();
+const generatedTerrainTextures = new Map<string, THREE.Texture>();
+
+function prepareRepeatTexture(
+  texture: THREE.Texture,
+  repeat: number,
+  colorSpace?: THREE.ColorSpace,
+): THREE.Texture {
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeat, repeat);
+  texture.anisotropy = 4;
+  if (colorSpace) texture.colorSpace = colorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function seededNoise(x: number, y: number): number {
+  const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+  return n - Math.floor(n);
+}
+
+function makeTerrainAlbedoTexture(): THREE.Texture | null {
+  if (typeof document === "undefined") return null;
+  const cached = generatedTerrainTextures.get("albedo");
+  if (cached) return cached;
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  const image = ctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const n1 = seededNoise(x * 0.08, y * 0.08);
+      const n2 = seededNoise(x * 0.31 + 17, y * 0.31 - 9);
+      const blade = Math.max(0, 1 - Math.abs(((x * 0.22 + y * 0.045 + n1 * 3) % 8) - 4) / 4);
+      const value = 202 + Math.round(n1 * 22 + n2 * 18 + blade * 12);
+      const greenLift = Math.round(blade * 10 + n2 * 5);
+      const i = (y * size + x) * 4;
+      image.data[i] = Math.max(165, Math.min(245, value - 4));
+      image.data[i + 1] = Math.max(170, Math.min(255, value + greenLift));
+      image.data[i + 2] = Math.max(155, Math.min(240, value - 8));
+      image.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  generatedTerrainTextures.set("albedo", texture);
+  return texture;
+}
+
+function makeTerrainNormalTexture(): THREE.Texture | null {
+  if (typeof document === "undefined") return null;
+  const cached = generatedTerrainTextures.get("normal");
+  if (cached) return cached;
+  const size = 256;
+  const height = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const n1 = seededNoise(x * 0.08, y * 0.08);
+      const n2 = seededNoise(x * 0.32 + 41, y * 0.32 + 13);
+      const blade = Math.max(0, 1 - Math.abs(((x * 0.22 + y * 0.045 + n1 * 3) % 8) - 4) / 4);
+      height[y * size + x] = n1 * 0.45 + n2 * 0.25 + blade * 0.65;
+    }
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  const image = ctx.createImageData(size, size);
+  const at = (x: number, y: number) =>
+    height[((y + size) % size) * size + ((x + size) % size)] ?? 0;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = at(x + 1, y) - at(x - 1, y);
+      const dy = at(x, y + 1) - at(x, y - 1);
+      const nx = -dx * 1.8;
+      const ny = -dy * 1.8;
+      const nz = 1;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      const i = (y * size + x) * 4;
+      image.data[i] = Math.round((nx / len * 0.5 + 0.5) * 255);
+      image.data[i + 1] = Math.round((ny / len * 0.5 + 0.5) * 255);
+      image.data[i + 2] = Math.round((nz / len * 0.5 + 0.5) * 255);
+      image.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  generatedTerrainTextures.set("normal", texture);
+  return texture;
+}
+
+async function loadTerrainTexture(url: string, repeat: number, colorSpace?: THREE.ColorSpace): Promise<THREE.Texture> {
+  const texture = url.toLowerCase().endsWith(".ktx2")
+    ? await ktx2Loader.loadAsync(url)
+    : await terrainTextureLoader.loadAsync(url);
+  return prepareRepeatTexture(texture, repeat, colorSpace);
+}
+
+function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMaterialOptions): void {
+  const repeat = options.textureRepeat ?? 42;
+  const withMaps = material as THREE.MeshStandardMaterial & {
+    normalScale?: THREE.Vector2;
+  };
+  const albedo = makeTerrainAlbedoTexture();
+  const normal = makeTerrainNormalTexture();
+  if (albedo) withMaps.map = prepareRepeatTexture(albedo, repeat, THREE.SRGBColorSpace);
+  if (normal) {
+    withMaps.normalMap = prepareRepeatTexture(normal, repeat);
+    withMaps.normalScale = new THREE.Vector2(0.16, 0.16);
+  }
+  withMaps.roughness = options.roughness ?? 0.9;
+  material.needsUpdate = true;
+
+  const urls = options.textureUrls;
+  if (!urls) return;
+  if (urls.albedo) {
+    void loadTerrainTexture(urls.albedo, repeat, THREE.SRGBColorSpace)
+      .then((texture) => {
+        withMaps.map = texture;
+        material.needsUpdate = true;
+      })
+      .catch((error) => console.warn("Tellus terrain albedo texture failed", error));
+  }
+  if (urls.normal) {
+    void loadTerrainTexture(urls.normal, repeat)
+      .then((texture) => {
+        withMaps.normalMap = texture;
+        withMaps.normalScale = new THREE.Vector2(0.22, 0.22);
+        material.needsUpdate = true;
+      })
+      .catch((error) => console.warn("Tellus terrain normal texture failed", error));
+  }
+  if (urls.roughness) {
+    void loadTerrainTexture(urls.roughness, repeat)
+      .then((texture) => {
+        withMaps.roughnessMap = texture;
+        material.needsUpdate = true;
+      })
+      .catch((error) => console.warn("Tellus terrain roughness texture failed", error));
+  }
 }
 
 /**
@@ -139,6 +294,7 @@ export function createTerrainMaterial(
     material.roughness = roughness;
     material.metalness = 0;
     material.colorNode = buildDetailColorNode();
+    if (options.pbrDetail !== false) applyTerrainPbrDetail(material, options);
     return material;
   }
 
@@ -147,6 +303,7 @@ export function createTerrainMaterial(
     roughness,
     metalness: 0,
   });
+  if (options.pbrDetail !== false) applyTerrainPbrDetail(material, options);
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace(

@@ -146,7 +146,10 @@ export function worldThingTargetHeight(thing: Pick<GeneratedThing, "kind" | "pro
 
 export function defaultScaleForRealisticKind(kind: GeneratedKind, prompt: string): number {
   const lower = prompt.toLowerCase();
-  if (kind === "tree") return 1;
+  if (kind === "tree") {
+    if (lower.includes("oak") || lower.includes("broadleaf")) return 1.45;
+    return 1;
+  }
   if (kind === "animal") return 1;
   if (kind === "flower") return lower.includes("pot") || lower.includes("planter") ? 1.2 : 0.85;
   if (kind === "path") return 1;

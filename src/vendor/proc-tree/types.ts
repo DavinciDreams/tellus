@@ -189,4 +189,8 @@ export type BakeOptions = {
   maxStems?: number;
   /** Maximum leaves to bake. */
   maxLeaves?: number;
+  /** Multiplier applied to each leaf card before baking. */
+  leafScaleMultiplier?: number;
+  /** Multiplier applied to blossom cards before baking. Defaults to leafScaleMultiplier. */
+  blossomScaleMultiplier?: number;
 };
