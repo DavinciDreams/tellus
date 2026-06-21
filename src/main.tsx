@@ -635,7 +635,8 @@ function createTellusWorld(
   // which invalidates the frame command buffer every frame → black/agonizingly-slow render. Until the
   // TSL viewport-backdrop path is restructured (separate copy pass), use the plain non-sampling ocean
   // on WebGPU too. (Same call as Codex's WebGPU-mirror fallback.) WebGL never had the refractive water.
-  const ocean = createOceanSurface(false);
+  // Historical note above is from the temporary debug fallback; useWebGPU restores the original water.
+  const ocean = createOceanSurface(useWebGPU);
   const archipelago = createDistantArchipelago(useWebGPU);
   let chunkRenderer: ChunkRenderer | null = null;
   let lastActiveChunkCount = -1; // re-ground placed assets when the active chunk set changes
@@ -648,6 +649,13 @@ function createTellusWorld(
   // When off, a no-op stub stands in so every call site stays branch-free.
   const isChunked = isChunkedWorldId(runtimeConfig.worldId);
   const chunkedDims = isChunked ? getChunkedWorldChunks() : null;
+  const chunkedCenterForWorld = isChunked ? chunkedWorldCenter() : null;
+  if (chunkedCenterForWorld) {
+    ocean.position.x = chunkedCenterForWorld.x;
+    ocean.position.z = chunkedCenterForWorld.z;
+    archipelago.position.x = chunkedCenterForWorld.x;
+    archipelago.position.z = chunkedCenterForWorld.z;
+  }
   const chunkedVegetationBounds = chunkedDims
     ? {
         minX: 0,
@@ -766,6 +774,11 @@ function createTellusWorld(
   const flowerPatchGroup = new THREE.Group();
   flowerPatchGroup.name = "tellus-flower-patches";
   const flowerSpriteMaterials = createFlowerSpriteMaterials();
+  const floatingRim = createFloatingRim();
+  if (isChunked) {
+    floatingRim.visible = false;
+    pondWater.visible = false;
+  }
   scene.add(
     fallbackSky,
     ocean,
@@ -773,7 +786,7 @@ function createTellusWorld(
     terrain,
     pondWater,
     flowerPatchGroup,
-    createFloatingRim(),
+    floatingRim,
   );
 
   // TELLUS INFINITY (Phase 3) interiors: when the world snapshot carries a sceneUrl, this world is an INTERIOR
