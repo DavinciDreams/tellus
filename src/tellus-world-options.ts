@@ -180,10 +180,14 @@ export const LIGHTING_MOOD_PROFILES: Record<LightingMood, LightingMoodProfile> =
 
 const LEGACY_BASIC_SKY_URL = "/skybox/free_-_skybox_basic_sky/scene.gltf";
 const BASIC_SKY_URL = "/skybox/free_-_skybox_basic_sky.glb";
+const CLOUD_SKY_GLB_URL = "/skybox/free_-_skybox_in_the_cloud.glb";
+const CLOUD_SKY_URL = "/skybox/free_-_skybox_in_the_cloud/scene.gltf";
 
 export function normalizeSkyboxUrl(url: string): string {
   const trimmed = url.trim();
-  return trimmed === LEGACY_BASIC_SKY_URL ? BASIC_SKY_URL : trimmed;
+  if (trimmed === LEGACY_BASIC_SKY_URL) return BASIC_SKY_URL;
+  if (trimmed === CLOUD_SKY_GLB_URL) return CLOUD_SKY_URL;
+  return trimmed;
 }
 
 export function parseDayNightMode(value: unknown, fallback: DayNightMode = "cycle"): DayNightMode {

@@ -5174,13 +5174,13 @@ function createTellusWorld(
     );
   };
 
-  const setSkyboxUrl = async (url: string): Promise<void> => {
+  const setSkyboxUrl = async (url: string): Promise<string | null> => {
     const requestedUrl = url.trim();
-    if (requestedUrl && requestedUrl === activeSkyboxUrl) return;
+    if (requestedUrl && requestedUrl === activeSkyboxUrl) return activeSkyboxUrl;
 
     const seq = ++skyboxLoadSeq;
     const skyboxResult = await loadSkyboxModel(requestedUrl);
-    if (!skyboxResult || destroyed || seq !== skyboxLoadSeq) return;
+    if (!skyboxResult || destroyed || seq !== skyboxLoadSeq) return null;
 
     if (fallbackSky.parent) {
       scene.remove(fallbackSky);
@@ -5213,6 +5213,7 @@ function createTellusWorld(
       tool: "interact",
       text: `Loaded external skybox: ${skyboxResult.url}`,
     });
+    return skyboxResult.url;
   };
 
   const daylightBackground = new THREE.Color(0xa7c3ef);
@@ -8666,7 +8667,18 @@ function App(): React.ReactElement {
     if (activeWorldId) {
       rememberWorldProfile(activeWorldId, { skyboxUrl: next });
     }
-    void worldRef.current?.setSkyboxUrl(next).catch((error) => {
+    void worldRef.current?.setSkyboxUrl(next).then((loadedUrl) => {
+      if (!loadedUrl) return;
+      const normalizedLoadedUrl = normalizeSkyboxUrl(loadedUrl);
+      if (normalizedLoadedUrl !== next) {
+        setCurrentWorldSkyboxUrl(normalizedLoadedUrl);
+        setNewWorldSkyboxUrl(normalizedLoadedUrl);
+        runtimeConfig.skyboxUrl = normalizedLoadedUrl;
+        if (activeWorldId) {
+          rememberWorldProfile(activeWorldId, { skyboxUrl: normalizedLoadedUrl });
+        }
+      }
+    }).catch((error) => {
       console.warn("Tellus skybox update failed", error);
     });
     if (runtimeConfig.worldApiBase && activeWorldId) {
@@ -9265,7 +9277,17 @@ function App(): React.ReactElement {
   useEffect(() => {
     if (!activeWorldId || !currentWorldSkyboxUrl) return;
     runtimeConfig.skyboxUrl = currentWorldSkyboxUrl;
-    void worldRef.current?.setSkyboxUrl(currentWorldSkyboxUrl).catch((error) => {
+    void worldRef.current?.setSkyboxUrl(currentWorldSkyboxUrl).then((loadedUrl) => {
+      if (!loadedUrl) return;
+      const normalizedLoadedUrl = normalizeSkyboxUrl(loadedUrl);
+      if (normalizedLoadedUrl !== currentWorldSkyboxUrl) {
+        setCurrentWorldSkyboxUrl(normalizedLoadedUrl);
+        runtimeConfig.skyboxUrl = normalizedLoadedUrl;
+        if (activeWorldId) {
+          rememberWorldProfile(activeWorldId, { skyboxUrl: normalizedLoadedUrl });
+        }
+      }
+    }).catch((error) => {
       console.warn("Tellus skybox update failed", error);
     });
   }, [activeWorldId, currentWorldSkyboxUrl]);

@@ -269,7 +269,7 @@ export interface TellusWorldApi {
   disembark(): void;
   sculptTerrain(mode: TerrainEditMode): void;
   importGeneratedThings(things: WorldGeneratedThing[]): void;
-  setSkyboxUrl(url: string): Promise<void>;
+  setSkyboxUrl(url: string): Promise<string | null>;
   setGenerationProvider(provider: GenerationProvider): void;
   setPlayerGenerationProvider(provider: RoleGenerationProvider): void;
   setAgentGenerationProvider(provider: RoleGenerationProvider): void;

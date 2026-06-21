@@ -13,6 +13,9 @@ describe("world option helpers", () => {
     expect(normalizeSkyboxUrl("/skybox/free_-_skybox_basic_sky/scene.gltf")).toBe(
       "/skybox/free_-_skybox_basic_sky.glb",
     );
+    expect(normalizeSkyboxUrl("/skybox/free_-_skybox_in_the_cloud.glb")).toBe(
+      "/skybox/free_-_skybox_in_the_cloud/scene.gltf",
+    );
   });
 
   it("parses day-night and lighting options with fallbacks", () => {

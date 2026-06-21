@@ -814,12 +814,7 @@ export async function loadSkyboxModel(primaryUrl = runtimeConfig.skyboxUrl): Pro
 
   for (const url of urls) {
     try {
-      const startedAt = Date.now();
       const model = await loadGltfObject(url);
-      if (textureErrorSince(startedAt)) {
-        gltfObjectCache.delete(url);
-        continue;
-      }
       return { model: prepareSkyboxModel(model, url), url };
     } catch {
       continue;
