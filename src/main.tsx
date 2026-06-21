@@ -7635,7 +7635,7 @@ function App(): React.ReactElement {
         {agentSettingsOpen && (
           <div className="agent-tab-settings">
             <span style={{ fontSize: 10, opacity: 0.6 }} title="Each world has its own agent — its memories live in that world.">
-              in “{agentStatus?.worldId || activeWorldId || runtimeConfig.worldId}”
+              in “{worldDisplayName(canonicalWorldId(agentStatus?.worldId || activeWorldId || runtimeConfig.worldId))}”
             </span>
             {!agentStatus?.offlinePersistence && <PremiumUpsellChip />}
             <button
@@ -8359,6 +8359,7 @@ function App(): React.ReactElement {
         );
         if (response.ok) {
           profile = parseWorldRenderProfile(await response.json());
+          rememberWorldProfile(worldId, profile);
         }
       } catch {
         /* no world metadata endpoint (or offline) */
@@ -9929,7 +9930,7 @@ function App(): React.ReactElement {
                         <div
                           key={target.visitorId}
                           className={`mini-chat-contact ${worldChatDmTarget?.visitorId === target.visitorId ? "active" : ""}`}
-                          title={`${target.name} in ${target.worldId}`}
+                          title={`${target.name} in ${worldDisplayName(target.worldId)}`}
                         >
                           <button
                             type="button"
@@ -9938,7 +9939,7 @@ function App(): React.ReactElement {
                           >
                             <span className="presence-dot online" aria-hidden="true" />
                             <span>{target.name}</span>
-                            <small>{target.currentWorld ? "here" : target.worldId}</small>
+                            <small>{target.currentWorld ? "here" : worldDisplayName(target.worldId)}</small>
                           </button>
                           <button
                             type="button"
@@ -10889,8 +10890,8 @@ function App(): React.ReactElement {
                     key={portal.id}
                     className="map-marker portal"
                     style={mapPointStyle(position)}
-                    title={portal.label || `Portal to ${portal.target.worldId}`}
-                    aria-label={portal.label || `Portal to ${portal.target.worldId}`}
+                    title={portal.label || `Portal to ${worldDisplayName(portal.target.worldId)}`}
+                    aria-label={portal.label || `Portal to ${worldDisplayName(portal.target.worldId)}`}
                     onClick={(event) => {
                       event.stopPropagation();
                       worldRef.current?.warpTo(position.x, position.z);
@@ -10942,7 +10943,7 @@ function App(): React.ReactElement {
                   {!activeWorldId && <option value="">main</option>}
                   {worlds.map((worldId) => (
                     <option key={worldId} value={worldId}>
-                      {worldId}
+                      {worldOptionLabel(worldId)}
                     </option>
                   ))}
                 </select>
@@ -11127,8 +11128,8 @@ function App(): React.ReactElement {
                   : [p.target.worldId, ...portalTargetOptions].filter(Boolean);
                 return (
                   <article key={p.id} className="portal-panel-row">
-                    <button type="button" title={`Enter ${p.label || p.target.worldId} (${p.target.kind})`} onClick={() => worldRef.current?.enterPortal(p.id)} style={portalBtn}>
-                      {"->"} {p.label || p.target.worldId} <small style={{ opacity: 0.6 }}>{p.target.kind}</small>
+                    <button type="button" title={`Enter ${p.label || worldDisplayName(p.target.worldId)} (${p.target.kind})`} onClick={() => worldRef.current?.enterPortal(p.id)} style={portalBtn}>
+                      {"->"} {p.label || worldDisplayName(p.target.worldId)} <small style={{ opacity: 0.6 }}>{p.target.kind}</small>
                     </button>
                     <div className="portal-panel-row-actions">
                       <select
@@ -11140,7 +11141,7 @@ function App(): React.ReactElement {
                       >
                         {targetChoices.map((worldId) => (
                           <option key={worldId} value={worldId}>
-                            {worldId}
+                            {worldOptionLabel(worldId)}
                           </option>
                         ))}
                       </select>
@@ -11149,7 +11150,7 @@ function App(): React.ReactElement {
                         title="Delete portal"
                         aria-label={`Delete ${p.label || p.id}`}
                         onClick={() => {
-                          const ok = window.confirm(`Delete portal ${p.label || p.target.worldId}?`);
+                          const ok = window.confirm(`Delete portal ${p.label || worldDisplayName(p.target.worldId)}?`);
                           if (ok) worldRef.current?.deletePortal(p.id);
                         }}
                       >
@@ -11174,7 +11175,7 @@ function App(): React.ReactElement {
                 disabled={!portalTargetWorldId}
                 onClick={() => {
                   const target = portalTargetWorldId.trim();
-                  if (target) worldRef.current?.createPortalHere(target, `${currentWorldId} to ${target} portal`);
+                  if (target) worldRef.current?.createPortalHere(target, `${worldDisplayName(currentWorldId)} to ${worldDisplayName(target)} portal`);
                 }}
                 style={{
                   ...portalBtn,
@@ -11207,7 +11208,7 @@ function App(): React.ReactElement {
                 ) : (
                   portalTargetOptions.map((worldId) => (
                     <option key={worldId} value={worldId}>
-                      {currentWorldId} to {worldId}
+                      {worldDisplayName(currentWorldId)} to {worldDisplayName(worldId)}
                     </option>
                   ))
                 )}
