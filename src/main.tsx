@@ -16,6 +16,7 @@ import {
   Minus,
   Mountain,
   PawPrint,
+  Pencil,
   PersonStanding,
   Plus,
   RotateCcw,
@@ -135,6 +136,7 @@ import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
 import { buildAgentMapLocation, resolveAgentMoveTarget } from "./tellus-agent-location";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseWorldTemplateId, templateForWorldId } from "./tellus-world-templates";
+import { evoflowTerrainSourceFor } from "./tellus-evoflow-terrains";
 import {
   ASSET_SURFACE_CONTEXTS,
   inferAssetSurfaceContexts,
@@ -7740,10 +7742,9 @@ function App(): React.ReactElement {
     normalizeSkyboxUrl(runtimeConfig.skyboxUrl) ||
       defaultSkyboxUrlForTemplate(parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus")),
   );
+  const [newWorldName, setNewWorldName] = useState("");
+  const [newWorldPanelOpen, setNewWorldPanelOpen] = useState(false);
   const [newWorldPrivate, setNewWorldPrivate] = useState(false);
-  // Chunked worlds tile a flat plane into NxN chunk grains (server parses N from the id
-  // "chunked-<n>-<name>"). Expose it as a first-class kind+size picker so the operator never
-  // has to hand-type the naming convention.
   // Chunked-only: new worlds are always chunked (the classic/non-chunked render path is retired).
   const [newWorldChunked, setNewWorldChunked] = useState(true);
   const [newWorldChunkSize, setNewWorldChunkSize] = useState(8);
@@ -7777,6 +7778,7 @@ function App(): React.ReactElement {
   const ACTIVE_WORLD_KEY = "tellus.activeWorldId";
   const NEW_WORLD_TEMPLATE_KEY = "tellus.newWorldTemplate";
   const NEW_WORLD_SKYBOX_KEY = "tellus.newWorldSkyboxUrl";
+  const NEW_WORLD_NAME_KEY = "tellus.newWorldName";
   const NEW_WORLD_PRIVATE_KEY = "tellus.newWorldPrivate";
   const NEW_WORLD_CHUNKED_KEY = "tellus.newWorldChunked";
   const NEW_WORLD_CHUNK_SIZE_KEY = "tellus.newWorldChunkSize";
@@ -7787,6 +7789,7 @@ function App(): React.ReactElement {
   const defaultLandShapeRef = useRef<LandShapeOverrides | undefined>(runtimeConfig.landShape);
 
   interface WorldRenderProfile {
+    displayName?: string;
     worldTemplate?: WorldTemplateId;
     skyboxUrl?: string;
     landShape?: LandShapeOverrides;
@@ -7805,6 +7808,14 @@ function App(): React.ReactElement {
         : typeof value.world_template === "string" && value.world_template.trim()
           ? parseWorldTemplateId(value.world_template)
           : undefined;
+    const displayName =
+      typeof value.displayName === "string" && value.displayName.trim()
+        ? value.displayName.trim()
+        : typeof value.display_name === "string" && value.display_name.trim()
+          ? value.display_name.trim()
+          : typeof value.name === "string" && value.name.trim()
+            ? value.name.trim()
+            : undefined;
     const skyboxUrl =
       typeof value.skyboxUrl === "string" && value.skyboxUrl.trim()
         ? normalizeSkyboxUrl(value.skyboxUrl)
@@ -7842,6 +7853,7 @@ function App(): React.ReactElement {
         ? undefined
         : parseLightingMood(lightingMoodValue, runtimeConfig.lightingMood);
     return {
+      displayName,
       worldTemplate,
       skyboxUrl,
       landShape,
@@ -7875,6 +7887,50 @@ function App(): React.ReactElement {
       window.localStorage.setItem(WORLD_PROFILES_KEY, JSON.stringify(profiles));
     } catch {
       /* ignore */
+    }
+  };
+
+  const worldDisplayName = (worldId: string): string =>
+    loadLocalWorldProfiles()[worldId]?.displayName?.trim() || worldId;
+
+  const worldOptionLabel = (worldId: string): string => {
+    const displayName = worldDisplayName(worldId);
+    return displayName === worldId ? worldId : `${displayName} (${worldId})`;
+  };
+
+  const slugForWorldName = (name: string): string =>
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48);
+
+  const templatePreviewUrl = (template: WorldTemplateId): string | undefined =>
+    evoflowTerrainSourceFor(template)?.previewUrl;
+
+  const renameActiveWorld = () => {
+    const id = activeWorldId ?? runtimeConfig.worldId;
+    if (!id) return;
+    const currentName = worldDisplayName(id);
+    const next = window.prompt("World name:", currentName === id ? "" : currentName);
+    if (next === null) return;
+    const displayName = next.trim().slice(0, 64);
+    rememberWorldProfile(id, { displayName: displayName || undefined });
+    setWorldRenderRevision((revision) => revision + 1);
+    showWorldNote(displayName ? `Renamed world to "${displayName}"` : "World name cleared");
+    if (runtimeConfig.worldApiBase) {
+      void fetch(
+        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(id)}?userId=${encodeURIComponent(tellusUserId())}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: displayName || id,
+            displayName: displayName || undefined,
+          }),
+        },
+      ).catch(() => undefined);
     }
   };
 
@@ -7962,7 +8018,16 @@ function App(): React.ReactElement {
         : (data as { worlds?: unknown })?.worlds;
       if (Array.isArray(list)) {
         server = list
-          .map((w) => (typeof w === "string" ? w : (w as { worldId?: string })?.worldId))
+          .map((w) => {
+            if (typeof w === "string") return w;
+            const world = w as { worldId?: string };
+            if (typeof world.worldId === "string" && world.worldId.length > 0) {
+              const profile = parseWorldRenderProfile(w);
+              if (profile.displayName) rememberWorldProfile(world.worldId, profile);
+              return world.worldId;
+            }
+            return undefined;
+          })
           .filter((x): x is string => typeof x === "string" && x.length > 0);
       }
     } catch {
@@ -8078,20 +8143,13 @@ function App(): React.ReactElement {
     }
   };
   const createNewWorld = () => {
-    const raw = window.prompt(
-      newWorldChunked
-        ? "New chunked world name (letters, numbers, dashes):"
-        : "New world id (letters, numbers, dashes):",
-      "",
-    );
-    if (!raw) return;
-    const sanitized = raw
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 48);
-    if (!sanitized) return;
+    const displayName = newWorldName.trim().slice(0, 64);
+    const sanitized = slugForWorldName(displayName);
+    if (!displayName || !sanitized) {
+      showWorldNote("Name the new world first", 3200);
+      setNewWorldPanelOpen(true);
+      return;
+    }
     let id = sanitized;
     if (newWorldChunked) {
       const size = Math.min(64, Math.max(1, Math.round(newWorldChunkSize) || 1));
@@ -8111,6 +8169,7 @@ function App(): React.ReactElement {
     );
     const makePrivate = newWorldPrivate;
     rememberWorldProfile(id, {
+      displayName,
       worldTemplate: pickedTemplate,
       skyboxUrl: pickedSkybox,
       isPublic: !makePrivate,
@@ -8119,7 +8178,11 @@ function App(): React.ReactElement {
       dayNightStart: runtimeConfig.dayNightStart,
       lightingMood: currentLightingMood,
     });
-    const enter = () => switchWorld(id);
+    const enter = () => {
+      setNewWorldPanelOpen(false);
+      setNewWorldName("");
+      switchWorld(id);
+    };
     if (runtimeConfig.worldApiBase) {
       // Seed metadata up front so template + skybox are world-specific before first entry.
       void fetch(
@@ -8128,6 +8191,8 @@ function App(): React.ReactElement {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            name: displayName,
+            displayName,
             isPublic: !makePrivate,
             worldTemplate: pickedTemplate,
             skyboxUrl: pickedSkybox,
@@ -8148,6 +8213,8 @@ function App(): React.ReactElement {
     setNewWorldTemplate(currentWorldTemplate);
     setNewWorldSkyboxUrl(currentWorldSkyboxUrl);
     setNewWorldPrivate(currentWorldPrivate);
+    setNewWorldName(`Copy of ${worldDisplayName(activeWorldId ?? runtimeConfig.worldId)}`.slice(0, 64));
+    setNewWorldPanelOpen(true);
     if (worldCreateNoteTimerRef.current !== undefined) {
       window.clearTimeout(worldCreateNoteTimerRef.current);
     }
@@ -8624,6 +8691,7 @@ function App(): React.ReactElement {
         try {
           const savedTemplate = window.localStorage.getItem(NEW_WORLD_TEMPLATE_KEY);
           const savedSkyboxUrl = window.localStorage.getItem(NEW_WORLD_SKYBOX_KEY);
+          const savedWorldName = window.localStorage.getItem(NEW_WORLD_NAME_KEY);
           const savedPrivate = window.localStorage.getItem(NEW_WORLD_PRIVATE_KEY);
           const savedChunked = window.localStorage.getItem(NEW_WORLD_CHUNKED_KEY);
           const savedChunkSize = window.localStorage.getItem(NEW_WORLD_CHUNK_SIZE_KEY);
@@ -8635,9 +8703,9 @@ function App(): React.ReactElement {
               defaultSkyboxUrlRef.current ||
               defaultSkyboxUrlForTemplate(defaultWorldTemplateRef.current),
           );
+          setNewWorldName(savedWorldName ?? "");
           setNewWorldPrivate(savedPrivate === "1");
-          // Chunked-only: ignore any persisted "classic" choice; new worlds are always chunked.
-          setNewWorldChunked(true);
+          void savedChunked;
           if (savedChunkSize) {
             const parsed = Math.round(Number(savedChunkSize));
             if (Number.isFinite(parsed)) {
@@ -8649,6 +8717,7 @@ function App(): React.ReactElement {
           setNewWorldSkyboxUrl(
             defaultSkyboxUrlRef.current || defaultSkyboxUrlForTemplate(defaultWorldTemplateRef.current),
           );
+          setNewWorldName("");
           setNewWorldPrivate(false);
           setNewWorldChunked(true);
           setNewWorldChunkSize(8);
@@ -8684,13 +8753,14 @@ function App(): React.ReactElement {
     try {
       window.localStorage.setItem(NEW_WORLD_TEMPLATE_KEY, newWorldTemplate);
       window.localStorage.setItem(NEW_WORLD_SKYBOX_KEY, newWorldSkyboxUrl);
+      window.localStorage.setItem(NEW_WORLD_NAME_KEY, newWorldName);
       window.localStorage.setItem(NEW_WORLD_PRIVATE_KEY, newWorldPrivate ? "1" : "0");
       window.localStorage.setItem(NEW_WORLD_CHUNKED_KEY, newWorldChunked ? "1" : "0");
       window.localStorage.setItem(NEW_WORLD_CHUNK_SIZE_KEY, String(newWorldChunkSize));
     } catch {
       /* ignore */
     }
-  }, [newWorldTemplate, newWorldSkyboxUrl, newWorldPrivate, newWorldChunked, newWorldChunkSize]);
+  }, [newWorldTemplate, newWorldSkyboxUrl, newWorldName, newWorldPrivate, newWorldChunked, newWorldChunkSize]);
 
   useEffect(() => {
     return () => {
@@ -9403,28 +9473,19 @@ function App(): React.ReactElement {
               pointerEvents: "auto",
             }}
           >
-            <div style={{ display: "grid", gap: 2 }}>
-              <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>World</span>
-              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <div className="world-control-group world-picker-group">
+              <span>World</span>
+              <div className="world-picker-row">
                 <select
                   aria-label="Active world"
                   title="Switch world"
                   value={activeWorldId ?? ""}
                   onChange={(e) => switchWorld(e.target.value)}
-                  style={{
-                    background: "rgba(0,0,0,0.5)",
-                    color: "#dfe7d8",
-                    border: "1px solid rgba(255,255,255,0.18)",
-                    borderRadius: 8,
-                    padding: "4px 8px",
-                    font: "600 12px/1.2 ui-sans-serif, system-ui",
-                    maxWidth: 180,
-                  }}
                 >
                   {!activeWorldId && <option value="">…</option>}
                   {worlds.map((w) => (
                     <option key={w} value={w}>
-                      {w}
+                      {worldOptionLabel(w)}
                     </option>
                   ))}
                 </select>
@@ -9446,93 +9507,38 @@ function App(): React.ReactElement {
                         onBlur={() => {
                           if (pendingDeleteWorld === target) disarmDeleteWorld();
                         }}
-                        style={{
-                          background: armed ? "rgba(190,40,40,0.85)" : "rgba(0,0,0,0.5)",
-                          color: armed ? "#fff" : "#e88",
-                          border: `1px solid ${armed ? "rgba(255,120,120,0.7)" : "rgba(255,255,255,0.18)"}`,
-                          borderRadius: 8,
-                          padding: "4px 8px",
-                          font: "700 12px/1.2 ui-sans-serif, system-ui",
-                          cursor: deletingWorld ? "default" : "pointer",
-                          opacity: deletingWorld ? 0.6 : 1,
-                          whiteSpace: "nowrap",
-                        }}
+                        className={`world-icon-button ${armed ? "danger armed" : "danger"}`}
                       >
-                        {deletingWorld ? "…" : armed ? "Confirm?" : "🗑"}
+                        {deletingWorld ? "…" : armed ? "Confirm" : <Trash2 size={14} />}
                       </button>
                     );
                   })()}
               </div>
             </div>
-            {/* Chunked-only: classic island worlds are retired, so there is no kind to choose.
-                Show a static "Chunked" label instead of a one-option dropdown. */}
-            <div style={{ display: "grid", gap: 2 }}>
-              <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>Kind</span>
-              <span
-                aria-label="New world kind"
-                title="Worlds are large flat tiled (chunked) planes"
-                style={{
-                  background: "rgba(0,0,0,0.35)",
-                  color: "#dfe7d8",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 8,
-                  padding: "4px 8px",
-                  font: "600 12px/1.2 ui-sans-serif, system-ui",
-                  maxWidth: 120,
-                }}
+            <div className="world-control-group world-name-edit-group">
+              <span>Name</span>
+              <button
+                type="button"
+                className="world-name-edit-button"
+                title="Rename world"
+                aria-label="Rename world"
+                onClick={renameActiveWorld}
               >
-                Chunked
-              </span>
+                <span>{worldDisplayName(activeWorldId ?? runtimeConfig.worldId)}</span>
+                <Pencil size={14} />
+              </button>
             </div>
-            {newWorldChunked && (
-              <div style={{ display: "grid", gap: 2 }}>
-                <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>Size (NxN)</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={64}
-                  step={1}
-                  aria-label="New chunked world size"
-                  title="Chunks per side (1-64); the world is this many chunks square"
-                  value={newWorldChunkSize}
-                  onChange={(e) => {
-                    const parsed = Math.round(Number(e.target.value));
-                    if (Number.isFinite(parsed)) {
-                      setNewWorldChunkSize(Math.min(64, Math.max(1, parsed)));
-                    }
-                  }}
-                  style={{
-                    background: "rgba(0,0,0,0.5)",
-                    color: "#dfe7d8",
-                    border: "1px solid rgba(255,255,255,0.18)",
-                    borderRadius: 8,
-                    padding: "4px 8px",
-                    font: "600 12px/1.2 ui-sans-serif, system-ui",
-                    width: 70,
-                  }}
-                />
-              </div>
-            )}
-            <div style={{ display: "grid", gap: 2 }}>
-                <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>Terrain</span>
-                <select
-                  aria-label="Active world terrain"
-                  title="Terrain template for the active world and newly created worlds"
-                  value={currentWorldTemplate}
-                  onChange={(e) =>
-                    updateActiveWorldTemplate(
-                      parseWorldTemplateId(e.target.value, defaultWorldTemplateRef.current),
-                    )
-                  }
-                style={{
-                  background: "rgba(0,0,0,0.5)",
-                  color: "#dfe7d8",
-                  border: "1px solid rgba(255,255,255,0.18)",
-                  borderRadius: 8,
-                  padding: "4px 8px",
-                  font: "600 12px/1.2 ui-sans-serif, system-ui",
-                  maxWidth: 150,
-                }}
+            <div className="world-control-group">
+              <span>Terrain</span>
+              <select
+                aria-label="Active world terrain"
+                title="Change terrain template for the active world"
+                value={currentWorldTemplate}
+                onChange={(e) =>
+                  updateActiveWorldTemplate(
+                    parseWorldTemplateId(e.target.value, defaultWorldTemplateRef.current),
+                  )
+                }
               >
                 {WORLD_TEMPLATE_OPTIONS.map((option) => (
                   <option key={option.id} value={option.id}>
@@ -9541,22 +9547,13 @@ function App(): React.ReactElement {
                 ))}
               </select>
             </div>
-            <div style={{ display: "grid", gap: 2 }}>
-              <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>Sky</span>
+            <div className="world-control-group">
+              <span>Sky</span>
               <select
                 aria-label="World skybox"
-                title="Skybox for the active world and newly created worlds"
-                value={newWorldSkyboxUrl}
+                title="Change skybox for the active world"
+                value={currentWorldSkyboxUrl}
                 onChange={(e) => updateActiveWorldSkybox(e.target.value)}
-                style={{
-                  background: "rgba(0,0,0,0.5)",
-                  color: "#dfe7d8",
-                  border: "1px solid rgba(255,255,255,0.18)",
-                  borderRadius: 8,
-                  padding: "4px 8px",
-                  font: "600 12px/1.2 ui-sans-serif, system-ui",
-                  maxWidth: 150,
-                }}
               >
                 {SKYBOX_OPTIONS.map((option) => (
                   <option key={option.url} value={option.url}>
@@ -9626,73 +9623,125 @@ function App(): React.ReactElement {
                 </select>
               </label>
             </div>
-            <div style={{ display: "grid", gap: 2 }}>
-              <span style={{ fontSize: 10, opacity: 0.72, color: "#dfe7d8" }}>Visibility</span>
-              <select
-                aria-label="New world visibility"
-                title="Visibility for newly created worlds"
-                value={newWorldPrivate ? "private" : "public"}
-                onChange={(e) => setNewWorldPrivate(e.target.value === "private")}
-                style={{
-                  background: "rgba(0,0,0,0.5)",
-                  color: "#dfe7d8",
-                  border: "1px solid rgba(255,255,255,0.18)",
-                  borderRadius: 8,
-                  padding: "4px 8px",
-                  font: "600 12px/1.2 ui-sans-serif, system-ui",
-                  maxWidth: 120,
-                }}
-              >
-                <option value="public">Public</option>
-                <option value="private">Private</option>
-              </select>
-            </div>
             <button
               type="button"
-              title="Copy template + visibility from the current world"
+              className="world-action-button"
+              title="Start a new world using the active world's settings"
               onClick={copyCurrentWorldSettings}
-              style={{
-                background: "rgba(0,0,0,0.5)",
-                color: "#dfe7d8",
-                border: "1px solid rgba(255,255,255,0.18)",
-                borderRadius: 8,
-                padding: "4px 8px",
-                font: "600 12px/1.2 ui-sans-serif, system-ui",
-                cursor: "pointer",
-              }}
             >
               Duplicate
             </button>
             <button
               type="button"
-              title={`Create a new ${newWorldPrivate ? "private" : "public"} ${
-                newWorldChunked ? `chunked ${newWorldChunkSize}x${newWorldChunkSize} world` : `world (${newWorldTemplate})`
-              }`}
-              onClick={createNewWorld}
-              style={{
-                background: "rgba(0,0,0,0.5)",
-                color: "#7ec850",
-                border: "1px solid rgba(255,255,255,0.18)",
-                borderRadius: 8,
-                padding: "4px 9px",
-                font: "700 12px/1.2 ui-sans-serif, system-ui",
-                cursor: "pointer",
-              }}
+              className="world-action-button primary"
+              title="Open new world setup"
+              onClick={() => setNewWorldPanelOpen((open) => !open)}
             >
-              ＋ New
+              <Plus size={14} /> New
             </button>
             {worldCreateNote && (
-              <span
-                style={{
-                  marginLeft: 2,
-                  fontSize: 10,
-                  color: "#9ad0ff",
-                  opacity: 0.86,
-                  whiteSpace: "nowrap",
-                }}
-              >
+              <span className="world-create-note">
                 {worldCreateNote}
               </span>
+            )}
+            {newWorldPanelOpen && (
+              <div className="world-create-panel" aria-label="New world setup">
+                <div className="world-create-title">
+                  <span>New World</span>
+                  <button
+                    type="button"
+                    className="world-icon-button"
+                    title="Close new world setup"
+                    aria-label="Close new world setup"
+                    onClick={() => setNewWorldPanelOpen(false)}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <label className="world-field world-name-field">
+                  <span>Name</span>
+                  <input
+                    type="text"
+                    value={newWorldName}
+                    placeholder="Lisa Tavern"
+                    maxLength={64}
+                    onChange={(e) => setNewWorldName(e.target.value)}
+                  />
+                </label>
+                <div className="world-template-grid" aria-label="Terrain templates">
+                  {WORLD_TEMPLATE_OPTIONS.map((option) => {
+                    const previewUrl = templatePreviewUrl(option.id);
+                    const selected = newWorldTemplate === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className={`world-template-tile ${selected ? "selected" : ""}`}
+                        title={option.label}
+                        onClick={() => {
+                          const next = parseWorldTemplateId(option.id, defaultWorldTemplateRef.current);
+                          setNewWorldTemplate(next);
+                          setNewWorldSkyboxUrl(defaultSkyboxUrlForTemplate(next));
+                        }}
+                      >
+                        {previewUrl ? (
+                          <img src={previewUrl} alt="" />
+                        ) : (
+                          <span className={`world-template-swatch template-${option.id}`} />
+                        )}
+                        <span>{option.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="world-create-fields">
+                  <label className="world-field">
+                    <span>Sky</span>
+                    <select
+                      aria-label="New world skybox"
+                      value={newWorldSkyboxUrl}
+                      onChange={(e) => setNewWorldSkyboxUrl(e.target.value)}
+                    >
+                      {SKYBOX_OPTIONS.map((option) => (
+                        <option key={option.url} value={option.url}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="world-field compact">
+                    <span>Size</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={64}
+                      step={1}
+                      aria-label="New world chunk size"
+                      value={newWorldChunkSize}
+                      onChange={(e) => {
+                        const parsed = Math.round(Number(e.target.value));
+                        if (Number.isFinite(parsed)) {
+                          setNewWorldChunkSize(Math.min(64, Math.max(1, parsed)));
+                        }
+                      }}
+                    />
+                  </label>
+                  <label className="world-field compact">
+                    <span>Visibility</span>
+                    <select
+                      aria-label="New world visibility"
+                      value={newWorldPrivate ? "private" : "public"}
+                      onChange={(e) => setNewWorldPrivate(e.target.value === "private")}
+                    >
+                      <option value="public">Public</option>
+                      <option value="private">Private</option>
+                    </select>
+                  </label>
+                  <button type="button" className="world-action-button primary create" onClick={createNewWorld}>
+                    Create
+                  </button>
+                </div>
+              </div>
             )}
           </div>
           <div className="top-right-cluster">
