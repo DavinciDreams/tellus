@@ -157,7 +157,11 @@ placed generated objects. Hyades / gnostr proxy deployments must preserve that
 field unchanged and serve `/api/assets/model/{id}/game-optimized` for it
 (proxied to the 3D Asset Manager's `/api/model/{id}/game-optimized`). `modelUrl`
 is treated as a cached serving hint and may be rewritten from `assetStoreModelId`
-when titles, metadata, optimization state, or proxy route shapes change.
+when titles, metadata, optimization state, or proxy route shapes change. The
+3D Asset Manager must resolve superseded ids on consumer load endpoints
+(`/api/model`, `/api/view`, `/api/download`, thumbnails/previews, VRM variants)
+via its alias table; Tellus treats 404/410 responses for asset-store-backed
+models as transient and keeps retrying instead of erasing the saved id.
 
 The GLB optimizer registers glTF extensions, removes duplicate/unused data,
 welds geometry, quantizes attributes, and can resize/recompress textures.

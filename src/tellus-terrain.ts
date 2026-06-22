@@ -107,8 +107,8 @@ export function setChunkedHeightProvider(
   chunkedHeightProvider = fn;
 }
 
-// Chunked grounding height: the sampled sculpted height where a chunk is loaded, else the same
-// template-aware base-height sampler used to render chunk vertices.
+// Chunked grounding height: the sampled sculpted height where a chunk is loaded, else the flat
+// chunk base.
 // MUST always return a finite number — this value flows into visitorPosition.y and then into the
 // Rapier character controller; a single NaN/null poisons world.step() and panics the WASM solver
 // (the terrain-paint `unreachable` crash). The provider returns null for not-yet-loaded chunks (e.g.
@@ -118,8 +118,6 @@ export function setChunkedHeightProvider(
 function chunkedGroundY(x: number, z: number): number {
   const sampled = chunkedHeightProvider?.(x, z);
   if (sampled != null && Number.isFinite(sampled)) return sampled;
-  const base = largeWorldBaseHeight(x, z);
-  if (Number.isFinite(base)) return base;
   return Number.isFinite(chunkedFlatGround) ? (chunkedFlatGround as number) : 0;
 }
 
