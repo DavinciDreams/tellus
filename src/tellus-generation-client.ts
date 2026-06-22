@@ -25,6 +25,7 @@ import {
   tellusAssetLibraryUrl,
   toAssetId,
 } from "./tellus-urls-identity";
+import { normalizeAnimationIntent, type AnimationActorKind, type AssetAnimationMetadata } from "./tellus-animation-intents";
 
 export const gltfObjectCache = new Map<string, Promise<THREE.Object3D>>();
 export const dracoLoader = new DRACOLoader().setDecoderPath(
@@ -89,6 +90,98 @@ export interface AssetBrowseResult {
 
 export type AssetBrowseSort = "newest" | "oldest" | "downloads" | "name";
 
+const stringField = (record: Record<string, unknown>, ...keys: string[]): string | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+};
+
+const numberField = (record: Record<string, unknown>, ...keys: string[]): number | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+};
+
+const booleanField = (record: Record<string, unknown>, ...keys: string[]): boolean | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "boolean") return value;
+  }
+  return undefined;
+};
+
+const stringArrayField = (record: Record<string, unknown>, ...keys: string[]): string[] | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) {
+      const strings = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+      if (strings.length > 0) return strings.map((item) => item.trim());
+    }
+  }
+  return undefined;
+};
+
+const parseAnimationMetadata = (raw: unknown): AssetAnimationMetadata | null => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const name = stringField(record, "name", "clipName", "clip_name", "animation", "animationName");
+  if (!name) return null;
+  const actorKindRaw = stringField(record, "actorKind", "actor_kind");
+  const actorKind = (
+    actorKindRaw && ["avatar", "agent", "animal", "mount", "vehicle", "object"].includes(actorKindRaw)
+      ? actorKindRaw
+      : undefined
+  ) as AnimationActorKind | undefined;
+  const intents = stringArrayField(record, "intents", "intent_tags", "intentTags")
+    ?.map((intent) => normalizeAnimationIntent(intent))
+    .filter((intent): intent is NonNullable<typeof intent> => intent !== null);
+  const qualityRaw = record.quality;
+  const quality =
+    qualityRaw && typeof qualityRaw === "object" && !Array.isArray(qualityRaw)
+      ? {
+          score: numberField(qualityRaw as Record<string, unknown>, "score"),
+          issues: stringArrayField(qualityRaw as Record<string, unknown>, "issues"),
+        }
+      : undefined;
+  return {
+    id: stringField(record, "id", "clipId", "clip_id"),
+    assetId: stringField(record, "assetId", "asset_id", "modelId", "model_id"),
+    name,
+    aliases: stringArrayField(record, "aliases", "tags", "keywords"),
+    format: stringField(record, "format", "fileFormat", "file_format"),
+    actorKind,
+    skeletonProfile: stringField(record, "skeletonProfile", "skeleton_profile"),
+    intents,
+    category: stringField(record, "category"),
+    loop: booleanField(record, "loop", "loops", "isLoop", "is_loop"),
+    durationSeconds: numberField(record, "durationSeconds", "duration_seconds", "duration"),
+    rootMotion: stringField(record, "rootMotion", "root_motion"),
+    speedMetersPerSecond: numberField(record, "speedMetersPerSecond", "speed_meters_per_second", "speed"),
+    direction: stringField(record, "direction"),
+    gait: stringField(record, "gait"),
+    quality,
+    searchText: stringField(record, "searchText", "search_text"),
+  };
+};
+
+const parseAnimationMetadataList = (record: Record<string, unknown>): AssetAnimationMetadata[] | undefined => {
+  const raw =
+    record.animationClips ??
+    record.animation_clips ??
+    record.animations ??
+    record.animation_metadata ??
+    record.animationMetadata;
+  if (!Array.isArray(raw)) return undefined;
+  const clips = raw
+    .map(parseAnimationMetadata)
+    .filter((clip): clip is AssetAnimationMetadata => clip !== null);
+  return clips.length > 0 ? clips : undefined;
+};
+
 export async function browseAssetLibrary(
   search: string,
   page: number,
@@ -128,6 +221,7 @@ export async function browseAssetLibrary(
       // Cards omitting it (older store builds) are treated as viewable to avoid hiding everything.
       viewable: m.viewable !== false,
       tags: Array.isArray(m.tags) ? m.tags.filter((t): t is string => typeof t === "string") : undefined,
+      animationClips: parseAnimationMetadataList(m),
       source: "asset-library" as const,
     }))
     // Keep the catalog in sync with what the store can actually serve: drop cards the store can't
@@ -157,6 +251,7 @@ export async function loadAssetLibraryModels(): Promise<AssetLibraryModel[]> {
                 typeof model.id === "string" && typeof model.name === "string",
             )
             .map((model) => ({ ...model, source: "asset-library" as const }))
+            .map((model) => ({ ...model, animationClips: parseAnimationMetadataList(model as unknown as Record<string, unknown>) }))
         : [];
     })(),
     generatedAssetManifestEntries().catch(() => []),

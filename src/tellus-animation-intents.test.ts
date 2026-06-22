@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  animationMetadataHasBlockingIssue,
   inferAnimationIntentFromText,
   normalizeAnimationIntent,
   selectAnimationClipByIntent,
@@ -36,6 +37,43 @@ describe("tellus animation intents", () => {
 
     expect(selectAnimationClipByIntent(clips, "flap", { actor: "animal" })?.name).toBe("Bird_Wing_Flap");
     expect(selectAnimationClipByIntent(clips, "fly", { actor: "animal" })?.name).toBe("Bird_Flying_Loop");
+  });
+
+  it("prefers enriched metadata over weak clip names", () => {
+    const clips = [
+      { name: "Take 001" },
+      { name: "AnimatedClip" },
+    ];
+    const metadata = new Map([
+      ["Take 001", { name: "Take 001", intents: ["idle" as const] }],
+      ["AnimatedClip", { name: "AnimatedClip", intents: ["run" as const], aliases: ["horse gallop"] }],
+    ]);
+
+    expect(
+      selectAnimationClipByIntent(clips, "run", {
+        actor: "mount",
+        metadataForClip: (clip) => metadata.get(clip.name),
+      })?.name,
+    ).toBe("AnimatedClip");
+  });
+
+  it("can reject clips marked with blocking quality issues", () => {
+    const clips = [
+      { name: "Horse_Gallop_Bad" },
+      { name: "Horse_Trot" },
+    ];
+    const metadata = new Map([
+      ["Horse_Gallop_Bad", { name: "Horse_Gallop_Bad", intents: ["run" as const], quality: { issues: ["bad-loop"] } }],
+      ["Horse_Trot", { name: "Horse_Trot", intents: ["walk" as const] }],
+    ]);
+
+    expect(
+      selectAnimationClipByIntent(clips, "run", {
+        actor: "mount",
+        metadataForClip: (clip) => metadata.get(clip.name),
+        reject: (clip) => animationMetadataHasBlockingIssue(metadata.get(clip.name)),
+      })?.name,
+    ).toBe("Horse_Trot");
   });
 
   it("infers intents from conversational text", () => {

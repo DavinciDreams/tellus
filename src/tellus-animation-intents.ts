@@ -31,6 +31,31 @@ export interface NamedAnimationClip {
   name?: string;
 }
 
+export interface AnimationQualityMetadata {
+  score?: number;
+  issues?: string[];
+}
+
+export interface AssetAnimationMetadata {
+  id?: string;
+  assetId?: string;
+  name: string;
+  aliases?: string[];
+  format?: string;
+  actorKind?: AnimationActorKind;
+  skeletonProfile?: string;
+  intents?: AnimationIntent[];
+  category?: string;
+  loop?: boolean;
+  durationSeconds?: number;
+  rootMotion?: "in-place" | "root-motion" | "mixed" | "unknown" | string;
+  speedMetersPerSecond?: number;
+  direction?: string;
+  gait?: string;
+  quality?: AnimationQualityMetadata;
+  searchText?: string;
+}
+
 const intentAliases: Record<string, AnimationIntent> = {
   idle: "idle",
   rest: "idle",
@@ -160,17 +185,55 @@ export function animationClipNameMatches(name: string | undefined, terms: readon
   return terms.some((term) => normalized.includes(term));
 }
 
+function animationMetadataSearchText(metadata: AssetAnimationMetadata): string {
+  return [
+    metadata.name,
+    ...(metadata.aliases ?? []),
+    ...(metadata.intents ?? []),
+    metadata.category,
+    metadata.actorKind,
+    metadata.skeletonProfile,
+    metadata.gait,
+    metadata.direction,
+    metadata.searchText,
+  ]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .join(" ")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+}
+
+export function animationMetadataMatchesIntent(
+  metadata: AssetAnimationMetadata | undefined,
+  intent: AnimationIntent,
+): boolean {
+  if (!metadata) return false;
+  if (metadata.intents?.includes(intent)) return true;
+  const searchText = animationMetadataSearchText(metadata);
+  return animationIntentTerms(intent).some((term) => searchText.includes(term));
+}
+
+export function animationMetadataHasBlockingIssue(metadata: AssetAnimationMetadata | undefined): boolean {
+  const issues = metadata?.quality?.issues ?? [];
+  return issues.some((issue) => /bad-loop|wrong-scale|broken|corrupt|failed|no-motion|foot-sliding/i.test(issue));
+}
+
 export function selectAnimationClipByIntent<T extends NamedAnimationClip>(
   clips: readonly T[],
   intent: AnimationIntent,
   options: {
     actor?: AnimationActorKind;
+    metadataForClip?: (clip: T) => AssetAnimationMetadata | undefined;
     reject?: (clip: T) => boolean;
   } = {},
 ): T | undefined {
   const usable = clips.filter((clip) => !options.reject?.(clip));
   if (usable.length === 0) return undefined;
   for (const candidateIntent of animationIntentSequence(intent, options.actor)) {
+    const metadataMatch = usable.find((clip) =>
+      animationMetadataMatchesIntent(options.metadataForClip?.(clip), candidateIntent),
+    );
+    if (metadataMatch) return metadataMatch;
     const terms = animationIntentTerms(candidateIntent);
     const match = usable.find((clip) => animationClipNameMatches(clip.name, terms));
     if (match) return match;

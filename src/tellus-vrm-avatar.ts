@@ -22,6 +22,11 @@ import {
   type VRMAnimation,
 } from "@pixiv/three-vrm-animation";
 import { runtimeConfig } from "./tellus-runtime-config";
+import {
+  animationMetadataHasBlockingIssue,
+  normalizeAnimationIntent,
+  type AssetAnimationMetadata,
+} from "./tellus-animation-intents";
 
 // ── Asset-store ids (the ONLY thing to touch when new avatars/clips land) ──────────────────────
 // All are plain GETs on the header-free /api/assets proxy (no session header on purpose).
@@ -365,6 +370,7 @@ export interface VrmaCatalogEntry {
   url: string;
   /** Optional provenance ("mixamo", "uploaded", …) the store may attach. */
   source?: string;
+  metadata?: AssetAnimationMetadata;
 }
 
 // name (lowercased) → entry. Seeded from the built-in clips so the rig works before /api/vrma exists.
@@ -417,6 +423,79 @@ function vrmaCategoryForName(name: string): VrmaCategoryId {
   if (/pose|kneel|lay|lying|crouch|stand|look|sitting|lean/.test(n)) return "pose";
   return "other";
 }
+
+const vrmaCategoryFromEntry = (entry: VrmaCatalogEntry): VrmaCategoryId => {
+  const category = entry.metadata?.category?.trim().toLowerCase();
+  if (
+    category === "core" ||
+    category === "gesture" ||
+    category === "dance" ||
+    category === "action" ||
+    category === "sport" ||
+    category === "locomotion" ||
+    category === "pose" ||
+    category === "other"
+  ) {
+    return category;
+  }
+  const intents = entry.metadata?.intents ?? [];
+  if (intents.includes("dance")) return "dance";
+  if (intents.some((intent) => intent === "walk" || intent === "run" || intent === "fly" || intent === "swim")) {
+    return "locomotion";
+  }
+  if (intents.some((intent) => intent === "throw" || intent === "attack")) return "action";
+  if (intents.some((intent) => intent === "sit" || intent === "stand" || intent === "idle")) return "pose";
+  if (intents.includes("wave")) return "gesture";
+  return vrmaCategoryForName(entry.name);
+};
+
+const stringArrayFromUnknown = (value: unknown): string[] | undefined =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
+    : undefined;
+
+const numberFromUnknown = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+const stringFromUnknown = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
+
+const parseVrmaAnimationMetadata = (
+  c: Record<string, unknown>,
+  name: string,
+  id: string,
+): AssetAnimationMetadata => {
+  const intents = stringArrayFromUnknown(c.intents ?? c.intent_tags ?? c.intentTags)
+    ?.map((intent) => normalizeAnimationIntent(intent))
+    .filter((intent): intent is NonNullable<typeof intent> => intent !== null);
+  const qualityRaw = c.quality;
+  const quality =
+    qualityRaw && typeof qualityRaw === "object" && !Array.isArray(qualityRaw)
+      ? {
+          score: numberFromUnknown((qualityRaw as Record<string, unknown>).score),
+          issues: stringArrayFromUnknown((qualityRaw as Record<string, unknown>).issues),
+        }
+      : undefined;
+  return {
+    id,
+    assetId: stringFromUnknown(c.assetId ?? c.asset_id ?? c.modelId ?? c.model_id) ?? id,
+    name,
+    aliases: stringArrayFromUnknown(c.aliases ?? c.tags ?? c.keywords),
+    format: stringFromUnknown(c.format ?? c.fileFormat ?? c.file_format) ?? "vrma",
+    actorKind: "avatar",
+    skeletonProfile: stringFromUnknown(c.skeletonProfile ?? c.skeleton_profile) ?? "vrm-humanoid",
+    intents,
+    category: stringFromUnknown(c.category),
+    loop: typeof c.loop === "boolean" ? c.loop : typeof c.loops === "boolean" ? c.loops : undefined,
+    durationSeconds: numberFromUnknown(c.durationSeconds ?? c.duration_seconds ?? c.duration),
+    rootMotion: stringFromUnknown(c.rootMotion ?? c.root_motion),
+    speedMetersPerSecond: numberFromUnknown(c.speedMetersPerSecond ?? c.speed_meters_per_second ?? c.speed),
+    direction: stringFromUnknown(c.direction),
+    gait: stringFromUnknown(c.gait),
+    quality,
+    searchText: stringFromUnknown(c.searchText ?? c.search_text),
+  };
+};
 
 const builtinVrmaCatalog = (): Map<string, VrmaCatalogEntry> => {
   const map = new Map<string, VrmaCatalogEntry>();
@@ -487,6 +566,7 @@ export function loadVrmaCatalog(): Promise<Map<string, VrmaCatalogEntry>> {
           name,
           url,
           source: typeof c.source === "string" ? c.source : "store",
+          metadata: parseVrmaAnimationMetadata(c, name, id || name),
         });
       }
     } catch {
@@ -547,6 +627,7 @@ export function recommendedEmoteClipNamesSync(limit = 14): string[] {
   const seen = new Set<string>();
   const add = (entry: VrmaCatalogEntry | undefined) => {
     if (!entry || selected.length >= limit) return;
+    if (animationMetadataHasBlockingIssue(entry.metadata)) return;
     const key = entry.name.trim().toLowerCase();
     if (!key || seen.has(key)) return;
     seen.add(key);
@@ -558,7 +639,7 @@ export function recommendedEmoteClipNamesSync(limit = 14): string[] {
   for (const category of ["core", "gesture", "dance", "locomotion"] as const) {
     for (const entry of entries) {
       if (selected.length >= limit) break;
-      if (vrmaCategoryForName(entry.name) === category) add(entry);
+      if (!animationMetadataHasBlockingIssue(entry.metadata) && vrmaCategoryFromEntry(entry) === category) add(entry);
     }
   }
   return selected;
@@ -566,7 +647,7 @@ export function recommendedEmoteClipNamesSync(limit = 14): string[] {
 
 export function emoteClipNamesByCategorySync(category: VrmaCategoryId, limit = 50): string[] {
   return vrmaEntriesSync()
-    .filter((entry) => vrmaCategoryForName(entry.name) === category)
+    .filter((entry) => !animationMetadataHasBlockingIssue(entry.metadata) && vrmaCategoryFromEntry(entry) === category)
     .slice(0, limit)
     .map((entry) => entry.name);
 }
@@ -574,7 +655,8 @@ export function emoteClipNamesByCategorySync(category: VrmaCategoryId, limit = 5
 export function vrmaCategorySummarySync(): VrmaCategorySummary[] {
   const buckets = new Map<VrmaCategoryId, string[]>();
   for (const entry of vrmaEntriesSync()) {
-    const category = vrmaCategoryForName(entry.name);
+    if (animationMetadataHasBlockingIssue(entry.metadata)) continue;
+    const category = vrmaCategoryFromEntry(entry);
     const list = buckets.get(category) ?? [];
     list.push(entry.name);
     buckets.set(category, list);
@@ -1132,7 +1214,13 @@ function mountVrmOnAvatar(group: THREE.Group, vrm: VRM): void {
     const headPos = head.getWorldPosition(new THREE.Vector3());
     group.worldToLocal(headPos);
     return headPos.y;
-  });
+    });
+}
+
+export function vrmaMetadataForNameSync(name: string): AssetAnimationMetadata | undefined {
+  const wanted = name.trim().toLowerCase();
+  if (!wanted) return undefined;
+  return vrmaEntriesSync().find((entry) => entry.name.trim().toLowerCase() === wanted)?.metadata;
 }
 
 /**

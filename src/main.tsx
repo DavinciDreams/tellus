@@ -84,6 +84,7 @@ import {
   restoreProceduralAvatar,
   setAvatarUserScale,
   tickAvatarScale,
+  vrmaMetadataForNameSync,
   vrmaCategorySummarySync,
   type VrmaCategoryId,
   VrmObjectRig,
@@ -174,9 +175,11 @@ import {
 } from "./tellus-world-options";
 import { AssetTile, AvatarTile } from "./tellus-picker-tiles";
 import {
+  animationMetadataHasBlockingIssue,
   inferAnimationIntentFromText,
   normalizeAnimationIntent,
   selectAnimationClipByIntent,
+  type AssetAnimationMetadata,
   type AnimationActorKind,
   type AnimationIntent,
 } from "./tellus-animation-intents";
@@ -2101,7 +2104,11 @@ function createTellusWorld(
     const matched = selectAnimationClipByIntent(
       candidates.map((name) => ({ name })),
       intent,
-      { actor: "avatar" },
+      {
+        actor: "avatar",
+        metadataForClip: (clip) => vrmaMetadataForNameSync(clip.name),
+        reject: (clip) => animationMetadataHasBlockingIssue(vrmaMetadataForNameSync(clip.name)),
+      },
     );
     return matched?.name ?? exact ?? raw;
   };
@@ -2875,6 +2882,16 @@ function createTellusWorld(
       "hitreact",
     ]);
 
+  const metadataForGeneratedClip = (
+    thing: GeneratedThing | undefined,
+    clipName: string | undefined,
+  ): AssetAnimationMetadata | undefined => {
+    if (!thing?.animationClips || !clipName) return undefined;
+    const wanted = clipName.trim().toLowerCase();
+    if (!wanted) return undefined;
+    return thing.animationClips.find((entry) => entry.name.trim().toLowerCase() === wanted);
+  };
+
   const animationActorKindForThing = (
     thing: GeneratedThing | undefined,
     vehicle: VehicleMode | null = null,
@@ -2912,7 +2929,9 @@ function createTellusWorld(
     return (
       selectAnimationClipByIntent(clips, effectiveMode, {
         actor: animationActorKindForThing(thing, vehicle),
-        reject: badGeneratedClip,
+        metadataForClip: (clip) => metadataForGeneratedClip(thing, clip.name),
+        reject: (clip) =>
+          badGeneratedClip(clip) || animationMetadataHasBlockingIssue(metadataForGeneratedClip(thing, clip.name)),
       }) ?? clips.find((c) => !badGeneratedClip(c)) ?? clips[0]
     );
   };
@@ -3297,6 +3316,7 @@ function createTellusWorld(
     // "" = explicit "default" (mirrors presence.avatarId): a mid-rollout server that doesn't know
     // the field yet echoes it back ABSENT, and absent must mean "keep what you have", not "clear".
     animation: thing.animation ?? "",
+    animationClips: thing.animationClips,
     updatedAt: new Date().toISOString(),
   });
 
@@ -3747,6 +3767,9 @@ function createTellusWorld(
           : normalized.animation || undefined;
       const animationChanged = (existing.animation ?? "") !== (nextAnimation ?? "");
       existing.animation = nextAnimation;
+      if (normalized.animationClips !== undefined) {
+        existing.animationClips = normalized.animationClips;
+      }
       applyGenerationState(existing, normalized);
       ensureGeneratedVisual(existing);
       updateThingMeshPosition(existing);
@@ -3783,6 +3806,7 @@ function createTellusWorld(
       pipelineId: normalized.pipelineId,
       generationStatus: normalized.generationStatus,
       animation: normalized.animation || undefined, // "" (explicit default) → unset internally
+      animationClips: normalized.animationClips,
     };
     generated.push(thing);
     const mesh = shouldShowGenerationSwirl(thing)
@@ -4782,6 +4806,7 @@ function createTellusWorld(
       assetStoreModelId,
       modelUrl,
       generationStatus: "ready",
+      animationClips: model.animationClips,
     };
     generated.push(thing);
     const mesh = createGenerationSwirl(thing);
@@ -9367,6 +9392,9 @@ function App(): React.ReactElement {
                   item.generationStatus === "failed"
                 ? item.generationStatus
                 : "ready",
+          animationClips: Array.isArray(item.animationClips)
+            ? (item.animationClips as AssetAnimationMetadata[])
+            : undefined,
           updatedAt:
             typeof item.updatedAt === "string"
               ? item.updatedAt

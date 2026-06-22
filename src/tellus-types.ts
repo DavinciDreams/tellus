@@ -1,5 +1,6 @@
 import type { createRoot } from "react-dom/client";
 import type * as THREE from "three";
+import type { AssetAnimationMetadata } from "./tellus-animation-intents";
 import type { MeshStats } from "./webrtc-mesh";
 import type { WorldChatChannel, WorldChatMessage, WorldGeneratedThing, WorldPresence, WorldPortal, PortalEntered, WorldBiomeCell } from "./world-protocol";
 
@@ -156,6 +157,9 @@ export interface GeneratedThing {
   /** Embedded clip name to loop on the loaded model ("" / absent = the default idle-ish
    * heuristic pick). Synced over generated.upsert; missing clips fall back to the heuristic. */
   animation?: string;
+  /** Optional asset-store enrichment for embedded/retargetable clips. Missing during backfill is OK:
+   * runtime falls back to clip-name heuristics. */
+  animationClips?: AssetAnimationMetadata[];
 }
 
 export interface AssetLibraryModel {
@@ -175,6 +179,7 @@ export interface AssetLibraryModel {
   /** Store reports the model can actually be rendered/served (conversion done, a view URL exists). */
   viewable?: boolean;
   tags?: string[];
+  animationClips?: AssetAnimationMetadata[];
 }
 
 export interface AssetLibraryResponse {

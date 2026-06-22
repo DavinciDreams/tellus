@@ -1,3 +1,5 @@
+import type { AssetAnimationMetadata } from "./tellus-animation-intents";
+
 export type TerrainPaintKind =
   | "meadow"
   | "rock"
@@ -72,6 +74,8 @@ export interface WorldGeneratedThing {
   /** Embedded animation clip to loop on the placed model ("" / absent = the default
    * idle-ish heuristic pick). Rides generated.upsert + snapshot/patches like any other field. */
   animation?: string;
+  /** Optional asset-store enrichment for clip intent/category search. Older gateways omit it. */
+  animationClips?: AssetAnimationMetadata[];
   updatedAt: string;
 }
 
