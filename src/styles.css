@@ -490,6 +490,37 @@ textarea::placeholder {
   background: linear-gradient(135deg, #7aa0a7 0%, #445b55 38%, #d9e0cf 66%, #f4a463 100%);
 }
 
+.world-template-swatch.template-fantasy-garden {
+  background: radial-gradient(circle at 28% 28%, #f8d9ff 0 12%, transparent 13%),
+    radial-gradient(circle at 72% 36%, #9df4d8 0 10%, transparent 11%),
+    linear-gradient(135deg, #2f5b5d 0%, #6e8a46 42%, #c5a8ff 68%, #25324f 100%);
+}
+
+.world-template-swatch.template-realistic-cove {
+  background: linear-gradient(135deg, #a9d4e7 0%, #477b5a 44%, #d7c38a 66%, #1f5f83 100%);
+}
+
+.world-template-swatch.template-flight-range {
+  background: linear-gradient(135deg, #c9edff 0%, #74a85e 38%, #91b969 63%, #4b95c8 100%);
+}
+
+.world-template-swatch.template-low-poly-meadow {
+  background: linear-gradient(135deg, #9bd35b 0 24%, #5c963f 24% 46%, #d8c36f 46% 62%, #73b3db 62% 100%);
+}
+
+.world-template-swatch.template-cartoon-hills {
+  background: radial-gradient(circle at 22% 66%, #ffd36f 0 12%, transparent 13%),
+    linear-gradient(135deg, #79c7ff 0%, #89c858 42%, #f3b1d1 70%, #4f9e6e 100%);
+}
+
+.world-template-swatch.template-interior-studio {
+  background: linear-gradient(135deg, #20252a 0%, #8b8f93 34%, #d7d1bf 64%, #f4efe4 100%);
+}
+
+.world-template-swatch.template-grand-hall-shell {
+  background: linear-gradient(135deg, #12172b 0%, #4b3e63 32%, #9c8457 62%, #e9d7a8 100%);
+}
+
 .world-template-label {
   color: var(--hud-gold-bright);
   font-size: 12px;

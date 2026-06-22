@@ -9,6 +9,13 @@ const TEMPLATE_IDS = new Set<WorldTemplateId>([
   "wide-island",
   "lowlands",
   "ridge",
+  "fantasy-garden",
+  "realistic-cove",
+  "flight-range",
+  "low-poly-meadow",
+  "cartoon-hills",
+  "interior-studio",
+  "grand-hall-shell",
   "evoflow-coral-canyon",
   "evoflow-coral-canyon-child",
   "evoflow-spires",
@@ -101,6 +108,146 @@ const TEMPLATE_PRESETS: Record<
         terraceFrequency: 0.86,
       },
       baseOffset: -0.7,
+    },
+  },
+  "fantasy-garden": {
+    defaultSkyboxUrl: "/skybox/tellus-aurora-sky/scene.gltf",
+    landShape: {
+      mountain: { height: 9, radius: 29, exponent: 1.75 },
+      shoulder: { x: -18, z: 18, radius: 240, height: 3.8 },
+      southernRise: { x: 22, z: -18, radius: 230, height: 3.2 },
+      ridge: { sinScale: 0.42, cosScale: 0.34, diagonalScale: 0.22 },
+      shore: { startRatio: 0.77, widthRatio: 0.23, drop: 4.7 },
+      pond: { x: -6, z: 10, radius: 15.5, depth: 1.45, falloff: 210 },
+      detail: {
+        amplitude: 0.8,
+        scale: 0.026,
+        warp: 7.5,
+        ridgeAmplitude: 0.36,
+        terraceAmplitude: 0.08,
+        terraceFrequency: 0.38,
+      },
+      baseOffset: -0.95,
+    },
+  },
+  "realistic-cove": {
+    defaultSkyboxUrl: "/skybox/tellus-blue-clouds/scene.gltf",
+    landShape: {
+      mountain: { height: 6.8, radius: 46, exponent: 1.42 },
+      shoulder: { x: -24, z: 14, radius: 360, height: 2.7 },
+      southernRise: { x: 18, z: -26, radius: 340, height: 2.2 },
+      ridge: { sinScale: 0.24, cosScale: 0.2, diagonalScale: 0.12 },
+      shore: { startRatio: 0.82, widthRatio: 0.18, drop: 3.6 },
+      pond: { x: 12, z: -8, radius: 10.8, depth: 1.55, falloff: 145 },
+      detail: {
+        amplitude: 0.58,
+        scale: 0.021,
+        warp: 5.2,
+        ridgeAmplitude: 0.18,
+        terraceAmplitude: 0.04,
+        terraceFrequency: 0.32,
+      },
+      baseOffset: -1.1,
+    },
+  },
+  "flight-range": {
+    defaultSkyboxUrl: "/skybox/free_-_skybox_in_the_cloud/scene.gltf",
+    landShape: {
+      mountain: { height: 10, radius: 66, exponent: 1.18 },
+      shoulder: { x: -40, z: 24, radius: 620, height: 3.4 },
+      southernRise: { x: 42, z: -30, radius: 600, height: 2.9 },
+      ridge: { sinScale: 0.16, cosScale: 0.14, diagonalScale: 0.08 },
+      shore: { startRatio: 0.88, widthRatio: 0.12, drop: 3.2 },
+      pond: { x: -22, z: 20, radius: 18, depth: 1.25, falloff: 290 },
+      detail: {
+        amplitude: 0.38,
+        scale: 0.016,
+        warp: 4.2,
+        ridgeAmplitude: 0.12,
+        terraceAmplitude: 0.03,
+        terraceFrequency: 0.22,
+      },
+      baseOffset: -1.2,
+    },
+  },
+  "low-poly-meadow": {
+    defaultSkyboxUrl: "/skybox/free_-_skybox_basic_sky.glb",
+    landShape: {
+      mountain: { height: 8.5, radius: 38, exponent: 1.35 },
+      shoulder: { x: -26, z: 8, radius: 310, height: 3.1 },
+      southernRise: { x: 20, z: -24, radius: 285, height: 2.6 },
+      ridge: { sinScale: 0.28, cosScale: 0.22, diagonalScale: 0.12 },
+      shore: { startRatio: 0.78, widthRatio: 0.22, drop: 4.2 },
+      pond: { x: -16, z: -12, radius: 9.2, depth: 1.8, falloff: 96 },
+      detail: {
+        amplitude: 0.32,
+        scale: 0.018,
+        warp: 2.2,
+        ridgeAmplitude: 0.1,
+        terraceAmplitude: 0.28,
+        terraceFrequency: 1.1,
+      },
+      baseOffset: -1,
+    },
+  },
+  "cartoon-hills": {
+    defaultSkyboxUrl: "/skybox/tellus-blue-clouds/scene.gltf",
+    landShape: {
+      mountain: { height: 11.5, radius: 36, exponent: 1.25 },
+      shoulder: { x: -30, z: 18, radius: 335, height: 4.2 },
+      southernRise: { x: 32, z: -18, radius: 320, height: 3.8 },
+      ridge: { sinScale: 0.34, cosScale: 0.3, diagonalScale: 0.18 },
+      shore: { startRatio: 0.79, widthRatio: 0.21, drop: 4.8 },
+      pond: { x: 14, z: 18, radius: 10.5, depth: 1.5, falloff: 130 },
+      detail: {
+        amplitude: 0.52,
+        scale: 0.018,
+        warp: 3.4,
+        ridgeAmplitude: 0.16,
+        terraceAmplitude: 0.06,
+        terraceFrequency: 0.3,
+      },
+      baseOffset: -0.9,
+    },
+  },
+  "interior-studio": {
+    defaultSkyboxUrl: "/skybox/free_-_skybox_basic_sky.glb",
+    landShape: {
+      mountain: { height: 1.8, radius: 90, exponent: 1.1 },
+      shoulder: { x: 0, z: 0, radius: 620, height: 1.1 },
+      southernRise: { x: 0, z: 0, radius: 620, height: 0.7 },
+      ridge: { sinScale: 0.04, cosScale: 0.03, diagonalScale: 0.02 },
+      shore: { startRatio: 0.54, widthRatio: 0.46, drop: 8.5 },
+      pond: { x: 0, z: 0, radius: 0.1, depth: 0, falloff: 1 },
+      detail: {
+        amplitude: 0.05,
+        scale: 0.01,
+        warp: 0.8,
+        ridgeAmplitude: 0.02,
+        terraceAmplitude: 0,
+        terraceFrequency: 0.1,
+      },
+      baseOffset: 0,
+    },
+  },
+  "grand-hall-shell": {
+    defaultSkyboxUrl: "/skybox/tellus-starry-night/scene.gltf",
+    landShape: {
+      mountain: { height: 2.4, radius: 110, exponent: 1.08 },
+      shoulder: { x: 0, z: 0, radius: 720, height: 1.4 },
+      southernRise: { x: 0, z: -12, radius: 660, height: 1.1 },
+      ridge: { sinScale: 0.05, cosScale: 0.04, diagonalScale: 0.02 },
+      shore: { startRatio: 0.58, widthRatio: 0.42, drop: 8 },
+      pond: { x: 0, z: 0, radius: 0.1, depth: 0, falloff: 1 },
+      detail: {
+        amplitude: 0.08,
+        scale: 0.012,
+        warp: 1,
+        ridgeAmplitude: 0.03,
+        terraceAmplitude: 0.02,
+        terraceFrequency: 0.18,
+      },
+      baseOffset: -0.05,
     },
   },
   "evoflow-coral-canyon": {
@@ -268,6 +415,13 @@ export function templateForWorldId(
 ): WorldTemplateId {
   const id = worldId.trim().toLowerCase();
   if (id.includes("ridge") || id.includes("mountain")) return "ridge";
+  if (id.includes("fantasy") || id.includes("garden")) return "fantasy-garden";
+  if (id.includes("realistic") || id.includes("cove")) return "realistic-cove";
+  if (id.includes("flight") || id.includes("simulator") || id.includes("range")) return "flight-range";
+  if (id.includes("low-poly") || id.includes("lowpoly")) return "low-poly-meadow";
+  if (id.includes("cartoon") || id.includes("toon")) return "cartoon-hills";
+  if (id.includes("grand-hall") || id.includes("hall")) return "grand-hall-shell";
+  if (id.includes("interior") || id.includes("studio") || id.includes("room")) return "interior-studio";
   if (id.includes("evoflow") || id.includes("coral") || id.includes("canyon")) {
     return "evoflow-coral-canyon";
   }
