@@ -69,6 +69,9 @@ export interface VegetationOptions {
   grassOnly?: boolean;
   suppressGrass?: boolean;
   suppressSmallFlora?: boolean;
+  maxFlowersPerChunk?: number;
+  initialTier?: number;
+  maxTier?: number;
   /** Extra exclusion test (the pond bowl) — return true to keep this spot clear. */
   isExcluded: (x: number, z: number, height: number) => boolean;
   /** Pond ring info for reed placement. */
@@ -155,6 +158,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   const grassOnly = options.grassOnly ?? false;
   const suppressGrass = options.suppressGrass ?? false;
   const suppressSmallFlora = options.suppressSmallFlora ?? false;
+  const maxFlowersPerChunk = Math.max(0, Math.floor(options.maxFlowersPerChunk ?? MAX_FLOWERS));
 
   // World geometry captured at construction (setWorldScale ran before the world was created).
   const minWorldX = options.bounds?.minX ?? -WORLD_RADIUS;
@@ -257,7 +261,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   scene.add(group);
 
   const chunkTuftCap = suppressGrass ? 0 : grassOnly ? Math.round(MAX_TUFTS * 1.65) : MAX_TUFTS;
-  const chunkFlowerCap = grassOnly ? 0 : MAX_FLOWERS;
+  const chunkFlowerCap = grassOnly ? 0 : maxFlowersPerChunk;
   const chunkExtraCap = grassOnly || suppressSmallFlora ? 0 : MAX_EXTRAS;
   const chunkVertCap =
     chunkTuftCap * (grassTpl.pos.length / 3) +
@@ -325,8 +329,8 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
 
   const active = new Map<string, ActiveChunk>();
   let terrainRev = 1;
-  let tier = useWebGPU ? 5 : 1;
-  const maxTier = useWebGPU ? 7 : 2;
+  let tier = Math.min(options.initialTier ?? (useWebGPU ? 5 : 1), TIERS.length - 1);
+  const maxTier = Math.min(options.maxTier ?? (useWebGPU ? 7 : 2), TIERS.length - 1);
   let tierGoodSince = 0;
   let tierLowSince = 0;
   let lastTierDropAt = 0;

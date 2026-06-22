@@ -3,6 +3,15 @@ import { Reflector } from "three/examples/jsm/objects/Reflector.js";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import { reflector } from "three/tsl";
 import { buildProceduralObject, proceduralArchetype } from "./tellus-veg-archetypes";
+import {
+  buildProceduralBuildingModel,
+  normalizeBuildingLighting,
+  normalizeBuildingMaterial,
+  proceduralBuildingArchetype,
+  type BuildingLightingStyle,
+  type BuildingMaterialStyle,
+  type ProceduralBuildingType,
+} from "./tellus-proc-buildings";
 
 // ── procedural:// placeable assets ────────────────────────────────────────────────────────────────
 // A GeneratedThing whose modelUrl is `procedural://<archetype>?seed=N` renders a locally built
@@ -26,22 +35,69 @@ export const sanitizeProceduralModelUrl = (url: string | undefined | null): stri
 export const makeProceduralModelUrl = (archetypeId: string, seed: number): string =>
   `${PROCEDURAL_URL_PREFIX}${archetypeId}?seed=${seed >>> 0}`;
 
+export const makeProceduralBuildingModelUrl = (
+  archetypeId: string,
+  seed: number,
+  options: {
+    material?: BuildingMaterialStyle;
+    lighting?: BuildingLightingStyle;
+    roof?: boolean;
+  } = {},
+): string => {
+  const params = new URLSearchParams({ seed: String(seed >>> 0) });
+  if (options.material && options.material !== "auto") params.set("material", options.material);
+  if (options.lighting && options.lighting !== "warm") params.set("lighting", options.lighting);
+  if (options.roof === false) params.set("roof", "0");
+  return `${PROCEDURAL_URL_PREFIX}${archetypeId}?${params.toString()}`;
+};
+
 export const MIRROR_ARCHETYPE_ID = "mirror";
 
 export const parseProceduralModelUrl = (
   url: string,
-): { archetypeId: string; seed: number } | null => {
+): {
+  archetypeId: string;
+  seed: number;
+  building?: {
+    recipeId: ProceduralBuildingType;
+    material?: BuildingMaterialStyle;
+    lighting?: BuildingLightingStyle;
+    roof?: boolean;
+  };
+} | null => {
   if (!isProceduralModelUrl(url)) return null;
   const rest = url.slice(PROCEDURAL_URL_PREFIX.length);
   const q = rest.indexOf("?");
   const archetypeId = (q >= 0 ? rest.slice(0, q) : rest).toLowerCase();
+  const building = proceduralBuildingArchetype(archetypeId);
   // The mirror isn't a vegetation archetype (it builds a Reflector, not a template) — accept it here
   // so it rides the same procedural:// place/sync/clone pipeline.
-  if (archetypeId !== MIRROR_ARCHETYPE_ID && !proceduralArchetype(archetypeId)) return null;
+  if (archetypeId !== MIRROR_ARCHETYPE_ID && !building && !proceduralArchetype(archetypeId)) return null;
   let seed = 1;
+  let material: BuildingMaterialStyle | undefined;
+  let lighting: BuildingLightingStyle | undefined;
+  let roof: boolean | undefined;
   if (q >= 0) {
-    const m = /(?:^|[?&])seed=(\d+)/.exec(rest.slice(q));
-    if (m) seed = Number(m[1]) >>> 0;
+    const params = new URLSearchParams(rest.slice(q + 1));
+    const m = params.get("seed");
+    if (m) seed = Number(m) >>> 0;
+    material = normalizeBuildingMaterial(params.get("material"));
+    lighting = normalizeBuildingLighting(params.get("lighting"));
+    const roofParam = params.get("roof");
+    if (roofParam === "0" || roofParam === "false") roof = false;
+    if (roofParam === "1" || roofParam === "true") roof = true;
+  }
+  if (building) {
+    return {
+      archetypeId,
+      seed,
+      building: {
+        recipeId: building.id,
+        material,
+        lighting,
+        roof,
+      },
+    };
   }
   return { archetypeId, seed };
 };
@@ -63,7 +119,9 @@ export const buildProceduralModel = (
   }
   let proto = prototypeCache.get(url);
   if (!proto) {
-    const built = buildProceduralObject(parsed.archetypeId, parsed.seed);
+    const built = parsed.building
+      ? buildProceduralBuildingModel(parsed.building.recipeId, parsed.seed, parsed.building)
+      : buildProceduralObject(parsed.archetypeId, parsed.seed);
     if (!built) return null;
     proto = built;
     prototypeCache.set(url, proto);

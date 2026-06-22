@@ -112,10 +112,40 @@ export function worldThingVehicleMode(thing: Pick<GeneratedThing, "kind" | "prom
   return null;
 }
 
-export function worldThingTargetHeight(thing: Pick<GeneratedThing, "kind" | "prompt" | "scale">): number {
+const proceduralBuildingBaseHeights: Record<string, number> = {
+  "simple-house": 5.2,
+  "long-house": 5.4,
+  inn: 8.2,
+  bank: 7.6,
+  store: 5.4,
+  smithy: 4.8,
+  mansion: 9.4,
+  manor: 9.8,
+  keep: 13,
+  fortress: 12,
+  castle: 17,
+  church: 10,
+  cathedral: 18,
+  chapel: 7,
+  "guild-hall": 8.6,
+  "town-hall": 9.2,
+};
+
+function proceduralBuildingRecipeId(modelUrl?: string): string | null {
+  const match = /^procedural:\/\/building-([^?]+)/.exec(modelUrl ?? "");
+  return match?.[1] ?? null;
+}
+
+export function worldThingTargetHeight(
+  thing: Pick<GeneratedThing, "kind" | "prompt" | "scale" | "modelUrl">,
+): number {
   const lower = thing.prompt.toLowerCase();
   const variation = clamp(thing.scale, 0.25, 12);
   if (lower === "mirror") return clamp(2.5 * variation, 1.2, 12);
+  const buildingRecipeId = proceduralBuildingRecipeId(thing.modelUrl);
+  if (buildingRecipeId) {
+    return clamp((proceduralBuildingBaseHeights[buildingRecipeId] ?? 7.2) * variation, 2.4, 64);
+  }
 
   const proceduralPlantHeights: Record<string, number> = {
     "grass tuft": 0.32,
@@ -193,7 +223,10 @@ export function buildWorldThingRuntimeProfile(
           : "static";
   const targetHeight = worldThingTargetHeight(thing);
   const height = options.dimensions?.height ?? targetHeight;
-  const radius = options.dimensions?.radius ?? Math.max(0.2, targetHeight * 0.28);
+  const buildingRecipeId = proceduralBuildingRecipeId(thing.modelUrl);
+  const radius =
+    options.dimensions?.radius ??
+    Math.max(0.2, targetHeight * (buildingRecipeId ? 0.42 : 0.28));
   return {
     id: thing.id,
     placementMode,
@@ -204,8 +237,10 @@ export function buildWorldThingRuntimeProfile(
     groundOffset,
     hasManualGroundOffset,
     seatHeight: seatHeightForThing(thing, height),
-    collisionRadius: clamp(radius * 0.72, 0.45, 4.2),
-    collisionHeight: clamp(height, 0.8, 18),
+    collisionRadius: buildingRecipeId
+      ? clamp(radius * 0.82, 1.2, 14)
+      : clamp(radius * 0.72, 0.45, 4.2),
+    collisionHeight: buildingRecipeId ? clamp(height, 1.8, 36) : clamp(height, 0.8, 18),
   };
 }
 

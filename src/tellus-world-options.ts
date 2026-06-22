@@ -7,7 +7,12 @@ import { runtimeConfig } from "./tellus-runtime-config";
 import type { DayNightMode, LightingMood, WorldTemplateId } from "./tellus-types";
 import { boundedNumber } from "./tellus-utils";
 
-export const WORLD_TEMPLATE_OPTIONS: Array<{ id: WorldTemplateId; label: string }> = [
+export type WorldTemplateOption = {
+  id: WorldTemplateId;
+  label: string;
+};
+
+export const WORLD_TEMPLATE_OPTIONS: WorldTemplateOption[] = [
   { id: "tellus", label: "Tellus" },
   { id: "wide-island", label: "Wide Island" },
   { id: "lowlands", label: "Lowlands" },
@@ -21,6 +26,79 @@ export const WORLD_TEMPLATE_OPTIONS: Array<{ id: WorldTemplateId; label: string 
   { id: "evoflow-basalt-teeth", label: "Evoflow Basalt Teeth" },
   { id: "evoflow-coral-fold", label: "Evoflow Coral Fold" },
 ];
+
+export type WorldCreationTemplate = WorldTemplateOption & {
+  tagline: string;
+  defaultSkyboxUrl: string;
+  defaultLightingMood: LightingMood;
+  defaultDayNightMode: DayNightMode;
+  defaultChunkSize: number;
+  previewUrl?: string;
+};
+
+export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
+  {
+    id: "tellus",
+    label: "Main Island",
+    tagline: "Classic Tellus island, ocean, pond, mountain, and room to build.",
+    defaultSkyboxUrl: "/skybox/tellus-blue-clouds/scene.gltf",
+    defaultLightingMood: "natural",
+    defaultDayNightMode: "cycle",
+    defaultChunkSize: 64,
+  },
+  {
+    id: "lowlands",
+    label: "Meadow Garden",
+    tagline: "Soft low hills for gardens, cottages, paths, and small parks.",
+    defaultSkyboxUrl: "/skybox/free_-_skybox_basic_sky.glb",
+    defaultLightingMood: "bright-build",
+    defaultDayNightMode: "day",
+    defaultChunkSize: 16,
+  },
+  {
+    id: "wide-island",
+    label: "Wide Archipelago",
+    tagline: "Open shoreline, broad terrain, and calmer slopes for larger layouts.",
+    defaultSkyboxUrl: "/skybox/free_-_skybox_in_the_cloud/scene.gltf",
+    defaultLightingMood: "soft-warm",
+    defaultDayNightMode: "golden",
+    defaultChunkSize: 32,
+  },
+  {
+    id: "ridge",
+    label: "Ridge Retreat",
+    tagline: "A sculptural island with dramatic height for towers and overlooks.",
+    defaultSkyboxUrl: "/skybox/skybox_skydays_3.glb",
+    defaultLightingMood: "dramatic-sunset",
+    defaultDayNightMode: "golden",
+    defaultChunkSize: 24,
+  },
+  {
+    id: "evoflow-coral-canyon",
+    label: "Coral Canyon",
+    tagline: "Evoflow terrain with a strange canyon silhouette and fantasy mood.",
+    defaultSkyboxUrl: "/skybox/tellus-alien-rings/scene.gltf",
+    defaultLightingMood: "cool-dream",
+    defaultDayNightMode: "cycle",
+    defaultChunkSize: 24,
+  },
+  {
+    id: "evoflow-glass-ridge",
+    label: "Glass Ridge",
+    tagline: "A crystalline Evoflow variant for alien gardens and moonlit builds.",
+    defaultSkyboxUrl: "/skybox/tellus-aurora-sky/scene.gltf",
+    defaultLightingMood: "moonlit",
+    defaultDayNightMode: "night",
+    defaultChunkSize: 24,
+  },
+];
+
+const CURATED_TEMPLATE_IDS = new Set<WorldTemplateId>(
+  WORLD_CREATION_TEMPLATES.map((template) => template.id),
+);
+
+export const ADVANCED_WORLD_TEMPLATE_OPTIONS: WorldTemplateOption[] =
+  WORLD_TEMPLATE_OPTIONS.filter((option) => !CURATED_TEMPLATE_IDS.has(option.id));
 
 export const SKYBOX_OPTIONS: Array<{ url: string; label: string }> = [
   { url: "/skybox/free_-_skybox_in_the_cloud/scene.gltf", label: "Cloud Dome" },

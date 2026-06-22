@@ -39,7 +39,16 @@ import { TilesRenderer } from "3d-tiles-renderer";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { createVegetation } from "./tellus-vegetation";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
-import { makeProceduralModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, MAX_LIVE_MIRRORS, liveMirrorCount, resetLiveMirrors } from "./tellus-procedural-assets";
+import { makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, MAX_LIVE_MIRRORS, liveMirrorCount, resetLiveMirrors } from "./tellus-procedural-assets";
+import {
+  BUILDING_LIGHTING_OPTIONS,
+  BUILDING_MATERIAL_OPTIONS,
+  PROCEDURAL_BUILDING_CATALOG,
+  makeProceduralBuildingArchetypeId,
+  type BuildingLightingStyle,
+  type BuildingMaterialStyle,
+  type ProceduralBuildingType,
+} from "./tellus-proc-buildings";
 import { createAmbientPhysics, resolveObstacles, type ObstacleCircle } from "./tellus-physics";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
@@ -163,6 +172,8 @@ import {
   LIGHTING_MOOD_OPTIONS,
   LIGHTING_MOOD_PROFILES,
   SKYBOX_OPTIONS,
+  ADVANCED_WORLD_TEMPLATE_OPTIONS,
+  WORLD_CREATION_TEMPLATES,
   WORLD_TEMPLATE_OPTIONS,
   liveDayNightPhase,
   normalizeDayNightCycleMs,
@@ -709,6 +720,9 @@ function createTellusWorld(
         grassOnly: false,
         suppressGrass: isChunked && !groundGrassEnabled,
         suppressSmallFlora: isChunked,
+        maxFlowersPerChunk: isChunked ? 36 : undefined,
+        initialTier: isChunked ? 1 : undefined,
+        maxTier: isChunked ? 2 : undefined,
         isExcluded: isChunked
           ? (x, z, h) =>
               waterFeatureContains(x, z, 0.6) &&
@@ -3929,6 +3943,7 @@ function createTellusWorld(
   const moveGenerated = (id: string, dx: number, dz: number) => {
     const thing = thingById(id);
     if (!thing) return;
+    const preserveCurrentY = draggingThingId === id;
     const oldGroundY = groundHeightAt(thing.position.x, thing.position.z);
     const manualHeightOffset =
       oldGroundY !== null && Number.isFinite(oldGroundY)
@@ -3942,12 +3957,18 @@ function createTellusWorld(
             thing.position.z + dz,
             thing.position,
           )
+        : preserveCurrentY
+          ? {
+              x: thing.position.x + dx,
+              y: thing.position.y,
+              z: thing.position.z + dz,
+            }
         : groundedPosition(
             thing.position.x + dx,
             thing.position.z + dz,
             thing.position,
           );
-    if (!isVehicleThing(thing) && sailingThingId !== id && manualHeightOffset > 0) {
+    if (!preserveCurrentY && !isVehicleThing(thing) && sailingThingId !== id && manualHeightOffset > 0) {
       const newGroundY = groundHeightAt(position.x, position.z);
       if (newGroundY !== null && Number.isFinite(newGroundY)) {
         position.y = newGroundY + manualHeightOffset;
@@ -4945,9 +4966,18 @@ function createTellusWorld(
     if (!force && nowMs - rapierSolidsCacheAt < 500) return;
     rapierSolidsCacheAt = nowMs;
     const solids: RapierSolid[] = [];
+    const maxSolidDistanceSq = 96 * 96;
     for (const thing of generated) {
+      if (
+        (thing.position.x - visitorPosition.x) ** 2 +
+          (thing.position.z - visitorPosition.z) ** 2 >
+        maxSolidDistanceSq
+      ) {
+        continue;
+      }
       const solid = solidForThing(thing);
       if (solid) solids.push(solid);
+      if (solids.length >= 96) break;
     }
     rapierPhysics.syncSolids(solids);
   };
@@ -4966,12 +4996,16 @@ function createTellusWorld(
         if (!fp || fp.height < 1.4 || fp.radius < 0.55) continue;
         // only solid when the player can actually run into it (not lifted into the sky)
         if (thing.position.y > visitorPosition.y + 2.2) continue;
+        const isProceduralBuilding =
+          Boolean(parseProceduralModelUrl(thing.modelUrl ?? "")?.building);
         list.push({
           x: thing.position.x,
           z: thing.position.z,
           // Solid radius scales with the model's footprint (capped so huge props stay passable
           // around the edges); the 0.7 factor lets you brush past rather than bumping a fat box.
-          r: clamp(fp.radius * 0.7, 0.55, 2.6),
+          r: isProceduralBuilding
+            ? clamp(fp.radius * 0.82, 1.2, 14)
+            : clamp(fp.radius * 0.7, 0.55, 2.6),
         });
       }
       obstacleCache = list;
@@ -7188,8 +7222,8 @@ function App(): React.ReactElement {
     remoteVisitors: [],
   });
   const [prompt, setPrompt] = useState("");
-  // Live Tellus account (null when logged out). The world-delete control is gated on the admin role
-  // (server-side ITellusAccountGrain role === "admin"); the server re-checks via RequireAdminAsync.
+  // Live Tellus account (null when logged out). World deletion is ultimately
+  // server-gated; the world list carries can_delete for owners/admins.
   const account = useTellusAuth();
   const isAdmin = (account?.role ?? "").toLowerCase() === "admin";
   const [worldChatInput, setWorldChatInput] = useState("");
@@ -8310,6 +8344,13 @@ function App(): React.ReactElement {
   const [newWorldPanelOpen, setNewWorldPanelOpen] = useState(false);
   const [newWorldPrivate, setNewWorldPrivate] = useState(false);
   const [newWorldChunkSize, setNewWorldChunkSize] = useState(8);
+  const [newWorldDayNightMode, setNewWorldDayNightMode] = useState<DayNightMode>(
+    runtimeConfig.dayNightMode,
+  );
+  const [newWorldLightingMood, setNewWorldLightingMood] = useState<LightingMood>(
+    runtimeConfig.lightingMood,
+  );
+  const [advancedWorldTemplatesOpen, setAdvancedWorldTemplatesOpen] = useState(false);
   const [currentWorldTemplate, setCurrentWorldTemplate] = useState<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
   );
@@ -8343,6 +8384,8 @@ function App(): React.ReactElement {
   const NEW_WORLD_NAME_KEY = "tellus.newWorldName";
   const NEW_WORLD_PRIVATE_KEY = "tellus.newWorldPrivate";
   const NEW_WORLD_CHUNK_SIZE_KEY = "tellus.newWorldChunkSize";
+  const NEW_WORLD_DAY_NIGHT_MODE_KEY = "tellus.newWorldDayNightMode";
+  const NEW_WORLD_LIGHTING_MOOD_KEY = "tellus.newWorldLightingMood";
   const defaultWorldTemplateRef = useRef<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
   );
@@ -8355,6 +8398,8 @@ function App(): React.ReactElement {
     skyboxUrl?: string;
     landShape?: LandShapeOverrides;
     isPublic?: boolean;
+    canDelete?: boolean;
+    deleteReason?: string;
     dayNightMode?: DayNightMode;
     dayNightCycleMs?: number;
     dayNightStart?: number;
@@ -8392,6 +8437,18 @@ function App(): React.ReactElement {
         : typeof value.is_public === "boolean"
           ? value.is_public
           : undefined;
+    const canDelete =
+      typeof value.canDelete === "boolean"
+        ? value.canDelete
+        : typeof value.can_delete === "boolean"
+          ? value.can_delete
+          : undefined;
+    const deleteReason =
+      typeof value.deleteReason === "string" && value.deleteReason.trim()
+        ? value.deleteReason.trim()
+        : typeof value.delete_reason === "string" && value.delete_reason.trim()
+          ? value.delete_reason.trim()
+          : undefined;
     const dayNightModeValue = value.dayNightMode ?? value.day_night_mode;
     const dayNightMode =
       dayNightModeValue === undefined
@@ -8419,6 +8476,8 @@ function App(): React.ReactElement {
       skyboxUrl,
       landShape,
       isPublic,
+      canDelete,
+      deleteReason,
       dayNightMode,
       dayNightCycleMs,
       dayNightStart,
@@ -8464,6 +8523,11 @@ function App(): React.ReactElement {
     return worldDisplayName(worldId);
   };
 
+  const canDeleteWorld = (worldId: string): boolean => {
+    const profile = loadLocalWorldProfiles()[canonicalWorldId(worldId)] ?? {};
+    return Boolean(profile.canDelete || isAdmin);
+  };
+
   const slugForWorldName = (name: string): string =>
     name
       .trim()
@@ -8474,6 +8538,23 @@ function App(): React.ReactElement {
 
   const templatePreviewUrl = (template: WorldTemplateId): string | undefined =>
     evoflowTerrainSourceFor(template)?.previewUrl;
+
+  const selectedCreationTemplate = (): (typeof WORLD_CREATION_TEMPLATES)[number] | undefined =>
+    WORLD_CREATION_TEMPLATES.find((template) => template.id === newWorldTemplate);
+
+  const applyNewWorldTemplate = (template: WorldTemplateId) => {
+    const next = parseWorldTemplateId(template, defaultWorldTemplateRef.current);
+    const preset = WORLD_CREATION_TEMPLATES.find((option) => option.id === next);
+    setNewWorldTemplate(next);
+    setNewWorldSkyboxUrl(
+      normalizeSkyboxUrl(preset?.defaultSkyboxUrl || defaultSkyboxUrlForTemplate(next)),
+    );
+    if (preset) {
+      setNewWorldLightingMood(preset.defaultLightingMood);
+      setNewWorldDayNightMode(preset.defaultDayNightMode);
+      setNewWorldChunkSize(preset.defaultChunkSize);
+    }
+  };
 
   const renameActiveWorld = () => {
     const id = activeWorldId ?? runtimeConfig.worldId;
@@ -8569,6 +8650,22 @@ function App(): React.ReactElement {
     try {
       const next = [...new Set([...loadKnownWorlds().map(canonicalWorldId), worldId])];
       window.localStorage.setItem(KNOWN_WORLDS_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+  const forgetWorld = (id: string) => {
+    const worldId = canonicalWorldId(id);
+    try {
+      const next = loadKnownWorlds().map(canonicalWorldId).filter((known) => known !== worldId);
+      window.localStorage.setItem(KNOWN_WORLDS_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+    try {
+      const profiles = loadLocalWorldProfiles();
+      delete profiles[worldId];
+      window.localStorage.setItem(WORLD_PROFILES_KEY, JSON.stringify(profiles));
     } catch {
       /* ignore */
     }
@@ -8677,10 +8774,14 @@ function App(): React.ReactElement {
     }
     setPendingDeleteWorld(null);
   };
-  // Admin-only: DELETE {worldApiBase}/admin/tellus/worlds/{worldId}. That route is NOT under /api/,
-  // so installSessionFetch() does NOT auto-attach the session header — we set X-Tellus-Session here.
+  // Confirmed delete against the world API. The server allows admins to delete
+  // any world and owners to delete only private owned worlds.
   const deleteWorld = async (id: string) => {
     if (!id || deletingWorld) return;
+    if (!canDeleteWorld(id)) {
+      showWorldNote("Delete not allowed for this world", 4000);
+      return;
+    }
     if (pendingDeleteWorld !== id) {
       // First click: arm the confirm (auto-disarms after a short window).
       if (pendingDeleteTimerRef.current !== undefined) {
@@ -8695,22 +8796,38 @@ function App(): React.ReactElement {
     }
     // Second click: confirmed.
     disarmDeleteWorld();
+    const label = worldDisplayName(id);
+    const confirmed = window.confirm(
+      `Permanently delete "${label}"?\n\nThis removes the saved world from the template/world picker and cannot be undone.`,
+    );
+    if (!confirmed) return;
     const token = getSession()?.token;
-    if (!token) {
-      showWorldNote("Delete failed: not signed in");
-      return;
-    }
     setDeletingWorld(true);
     try {
       const res = await fetch(
-        `${runtimeConfig.worldApiBase}/admin/tellus/worlds/${encodeURIComponent(id)}`,
-        { method: "DELETE", headers: { [SESSION_HEADER]: token } },
+        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(id)}?userId=${encodeURIComponent(tellusUserId())}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { [SESSION_HEADER]: token } : {}),
+          },
+          body: JSON.stringify({ confirm: id }),
+        },
       );
       if (!res.ok) {
-        const detail = res.status === 403 ? "not authorized (admin only)" : `HTTP ${res.status}`;
+        let detail = "";
+        try {
+          const body = (await res.json()) as { detail?: string; error?: string };
+          detail = body.detail || body.error || "";
+        } catch {
+          /* ignore */
+        }
+        detail ||= res.status === 403 ? "not authorized" : `HTTP ${res.status}`;
         showWorldNote(`Delete failed: ${detail}`, 4000);
         return;
       }
+      forgetWorld(id);
       // If the deleted world was active, get the user out of it before it vanishes from the list.
       if (id === (activeWorldId ?? runtimeConfig.worldId)) {
         const fallback =
@@ -8759,10 +8876,10 @@ function App(): React.ReactElement {
       worldTemplate: pickedTemplate,
       skyboxUrl: pickedSkybox,
       isPublic: !makePrivate,
-      dayNightMode: currentDayNightMode,
+      dayNightMode: newWorldDayNightMode,
       dayNightCycleMs: currentDayNightCycleMs,
       dayNightStart: runtimeConfig.dayNightStart,
-      lightingMood: currentLightingMood,
+      lightingMood: newWorldLightingMood,
     });
     const enter = () => {
       setNewWorldPanelOpen(false);
@@ -8782,10 +8899,10 @@ function App(): React.ReactElement {
             isPublic: !makePrivate,
             worldTemplate: pickedTemplate,
             skyboxUrl: pickedSkybox,
-            dayNightMode: currentDayNightMode,
+            dayNightMode: newWorldDayNightMode,
             dayNightCycleMs: currentDayNightCycleMs,
             dayNightStart: runtimeConfig.dayNightStart,
-            lightingMood: currentLightingMood,
+            lightingMood: newWorldLightingMood,
           }),
         },
       )
@@ -8799,6 +8916,8 @@ function App(): React.ReactElement {
     setNewWorldTemplate(currentWorldTemplate);
     setNewWorldSkyboxUrl(currentWorldSkyboxUrl);
     setNewWorldPrivate(currentWorldPrivate);
+    setNewWorldDayNightMode(currentDayNightMode);
+    setNewWorldLightingMood(currentLightingMood);
     setNewWorldName(`Copy of ${worldDisplayName(activeWorldId ?? runtimeConfig.worldId)}`.slice(0, 64));
     setNewWorldPanelOpen(true);
     if (worldCreateNoteTimerRef.current !== undefined) {
@@ -8920,6 +9039,10 @@ function App(): React.ReactElement {
   const [assetBrowseTotal, setAssetBrowseTotal] = useState(0);
   const [assetBrowseLoading, setAssetBrowseLoading] = useState(false);
   const [assetBrowseSort, setAssetBrowseSort] = useState<AssetBrowseSort>("newest");
+  const [procBuildingType, setProcBuildingType] = useState<ProceduralBuildingType>("simple-house");
+  const [procBuildingMaterial, setProcBuildingMaterial] = useState<BuildingMaterialStyle>("auto");
+  const [procBuildingLighting, setProcBuildingLighting] = useState<BuildingLightingStyle>("warm");
+  const [procBuildingRoof, setProcBuildingRoof] = useState(true);
   // Map each browse tab to the store's REAL asset_category (flora / fauna / building). The store
   // categorizes animals under "fauna" (not "animal"), so use the precise category filter rather than
   // a fuzzy free-text search. A user-typed search overrides the category seed.
@@ -8931,6 +9054,27 @@ function App(): React.ReactElement {
         : assetPanelTab === "building"
           ? "building"
           : "";
+  const selectedProcBuilding =
+    PROCEDURAL_BUILDING_CATALOG.find((item) => item.id === procBuildingType) ??
+    PROCEDURAL_BUILDING_CATALOG[0];
+  const placeProceduralBuilding = useCallback(() => {
+    const seed = (Math.random() * 0xffffffff) >>> 0;
+    const archetypeId = makeProceduralBuildingArchetypeId(selectedProcBuilding.id);
+    worldRef.current?.addLibraryAsset(
+      {
+        id: `proc-${archetypeId}-${seed.toString(16)}`,
+        name: selectedProcBuilding.label,
+        description: `${selectedProcBuilding.label} procedural building`,
+        modelUrl: makeProceduralBuildingModelUrl(archetypeId, seed, {
+          material: procBuildingMaterial,
+          lighting: procBuildingLighting,
+          roof: procBuildingRoof,
+        }),
+        source: "generated",
+      },
+      { scale: 1 },
+    );
+  }, [procBuildingLighting, procBuildingMaterial, procBuildingRoof, selectedProcBuilding]);
   const assetBrowseQuery = assetSearch.trim();
   const assetBrowseSeq = useRef(0);
   const [assetReuseSuggestions, setAssetReuseSuggestions] = useState<AssetReuseCandidate[]>([]);
@@ -9293,6 +9437,8 @@ function App(): React.ReactElement {
           const savedWorldName = window.localStorage.getItem(NEW_WORLD_NAME_KEY);
           const savedPrivate = window.localStorage.getItem(NEW_WORLD_PRIVATE_KEY);
           const savedChunkSize = window.localStorage.getItem(NEW_WORLD_CHUNK_SIZE_KEY);
+          const savedDayNightMode = window.localStorage.getItem(NEW_WORLD_DAY_NIGHT_MODE_KEY);
+          const savedLightingMood = window.localStorage.getItem(NEW_WORLD_LIGHTING_MOOD_KEY);
           setNewWorldTemplate(
             parseWorldTemplateId(savedTemplate, defaultWorldTemplateRef.current),
           );
@@ -9303,6 +9449,8 @@ function App(): React.ReactElement {
           );
           setNewWorldName(savedWorldName ?? "");
           setNewWorldPrivate(savedPrivate === "1");
+          setNewWorldDayNightMode(parseDayNightMode(savedDayNightMode, runtimeConfig.dayNightMode));
+          setNewWorldLightingMood(parseLightingMood(savedLightingMood, runtimeConfig.lightingMood));
           if (savedChunkSize) {
             const parsed = Math.round(Number(savedChunkSize));
             if (Number.isFinite(parsed)) {
@@ -9317,6 +9465,8 @@ function App(): React.ReactElement {
           setNewWorldName("");
           setNewWorldPrivate(false);
           setNewWorldChunkSize(8);
+          setNewWorldDayNightMode(runtimeConfig.dayNightMode);
+          setNewWorldLightingMood(runtimeConfig.lightingMood);
         }
         const sharedLocation = parseSharedLocation();
         sharedLocationRef.current = sharedLocation;
@@ -9354,10 +9504,20 @@ function App(): React.ReactElement {
       window.localStorage.setItem(NEW_WORLD_NAME_KEY, newWorldName);
       window.localStorage.setItem(NEW_WORLD_PRIVATE_KEY, newWorldPrivate ? "1" : "0");
       window.localStorage.setItem(NEW_WORLD_CHUNK_SIZE_KEY, String(newWorldChunkSize));
+      window.localStorage.setItem(NEW_WORLD_DAY_NIGHT_MODE_KEY, newWorldDayNightMode);
+      window.localStorage.setItem(NEW_WORLD_LIGHTING_MOOD_KEY, newWorldLightingMood);
     } catch {
       /* ignore */
     }
-  }, [newWorldTemplate, newWorldSkyboxUrl, newWorldName, newWorldPrivate, newWorldChunkSize]);
+  }, [
+    newWorldTemplate,
+    newWorldSkyboxUrl,
+    newWorldName,
+    newWorldPrivate,
+    newWorldChunkSize,
+    newWorldDayNightMode,
+    newWorldLightingMood,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -10332,7 +10492,7 @@ function App(): React.ReactElement {
                     </option>
                   ))}
                 </select>
-                {isAdmin && activeWorldId &&
+                {activeWorldId && canDeleteWorld(activeWorldId) &&
                   (() => {
                     const target = activeWorldId;
                     const armed = pendingDeleteWorld === target;
@@ -10343,7 +10503,7 @@ function App(): React.ReactElement {
                         title={
                           armed
                             ? `Click again to permanently delete "${target}"`
-                            : `Delete world "${target}" (admin)`
+                            : `Delete world "${target}"`
                         }
                         disabled={deletingWorld}
                         onClick={() => void deleteWorld(target)}
@@ -10511,9 +10671,9 @@ function App(): React.ReactElement {
                     onChange={(e) => setNewWorldName(e.target.value)}
                   />
                 </label>
-                <div className="world-template-grid" aria-label="Terrain templates">
-                  {WORLD_TEMPLATE_OPTIONS.map((option) => {
-                    const previewUrl = templatePreviewUrl(option.id);
+                <div className="world-template-grid" aria-label="World templates">
+                  {WORLD_CREATION_TEMPLATES.map((option) => {
+                    const previewUrl = option.previewUrl || templatePreviewUrl(option.id);
                     const selected = newWorldTemplate === option.id;
                     return (
                       <button
@@ -10521,22 +10681,60 @@ function App(): React.ReactElement {
                         type="button"
                         className={`world-template-tile ${selected ? "selected" : ""}`}
                         title={option.label}
-                        onClick={() => {
-                          const next = parseWorldTemplateId(option.id, defaultWorldTemplateRef.current);
-                          setNewWorldTemplate(next);
-                          setNewWorldSkyboxUrl(defaultSkyboxUrlForTemplate(next));
-                        }}
+                        onClick={() => applyNewWorldTemplate(option.id)}
                       >
                         {previewUrl ? (
                           <img src={previewUrl} alt="" />
                         ) : (
                           <span className={`world-template-swatch template-${option.id}`} />
                         )}
-                        <span>{option.label}</span>
+                        <span className="world-template-label">{option.label}</span>
+                        <small>{option.tagline}</small>
                       </button>
                     );
                   })}
                 </div>
+                <div className="world-template-summary">
+                  <span>{selectedCreationTemplate()?.label ?? worldTemplateLabel(newWorldTemplate)}</span>
+                  <small>
+                    {skyboxLabel(newWorldSkyboxUrl)} -{" "}
+                    {LIGHTING_MOOD_OPTIONS.find((option) => option.id === newWorldLightingMood)?.label ??
+                      newWorldLightingMood} - {DAY_NIGHT_MODE_OPTIONS.find((option) => option.id === newWorldDayNightMode)?.label ??
+                      newWorldDayNightMode}
+                  </small>
+                </div>
+                {ADVANCED_WORLD_TEMPLATE_OPTIONS.length > 0 && (
+                  <details
+                    className="world-advanced-templates"
+                    open={advancedWorldTemplatesOpen}
+                    onToggle={(event) =>
+                      setAdvancedWorldTemplatesOpen((event.currentTarget as HTMLDetailsElement).open)
+                    }
+                  >
+                    <summary>Advanced terrain</summary>
+                    <div className="world-advanced-template-grid">
+                      {ADVANCED_WORLD_TEMPLATE_OPTIONS.map((option) => {
+                        const previewUrl = templatePreviewUrl(option.id);
+                        const selected = newWorldTemplate === option.id;
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            className={`world-advanced-template ${selected ? "selected" : ""}`}
+                            onClick={() => applyNewWorldTemplate(option.id)}
+                          >
+                            {previewUrl ? (
+                              <img src={previewUrl} alt="" />
+                            ) : (
+                              <span className={`world-template-swatch template-${option.id}`} />
+                            )}
+                            <span>{option.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </details>
+                )}
                 <div className="world-create-fields">
                   <label className="world-field">
                     <span>Sky</span>
@@ -10547,6 +10745,38 @@ function App(): React.ReactElement {
                     >
                       {SKYBOX_OPTIONS.map((option) => (
                         <option key={option.url} value={option.url}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="world-field compact">
+                    <span>Time</span>
+                    <select
+                      aria-label="New world time"
+                      value={newWorldDayNightMode}
+                      onChange={(e) =>
+                        setNewWorldDayNightMode(parseDayNightMode(e.target.value, newWorldDayNightMode))
+                      }
+                    >
+                      {DAY_NIGHT_MODE_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="world-field">
+                    <span>Mood</span>
+                    <select
+                      aria-label="New world lighting mood"
+                      value={newWorldLightingMood}
+                      onChange={(e) =>
+                        setNewWorldLightingMood(parseLightingMood(e.target.value, newWorldLightingMood))
+                      }
+                    >
+                      {LIGHTING_MOOD_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>
                           {option.label}
                         </option>
                       ))}
@@ -11852,6 +12082,75 @@ function App(): React.ReactElement {
             )}
             {(assetPanelTab === "animal" || assetPanelTab === "building" || assetPanelTab === "flora") && (
               <div className="inventory-list asset-list">
+                {assetPanelTab === "building" && (
+                  <section className="asset-proc-panel" aria-label="Procedural buildings">
+                    <div className="asset-proc-heading">
+                      <Building2 size={14} />
+                      <span>Procedural</span>
+                    </div>
+                    <label className="asset-proc-field">
+                      <span>Preset</span>
+                      <select
+                        value={procBuildingType}
+                        onChange={(event) =>
+                          setProcBuildingType(event.target.value as ProceduralBuildingType)
+                        }
+                      >
+                        {PROCEDURAL_BUILDING_CATALOG.map((recipe) => (
+                          <option key={recipe.id} value={recipe.id}>
+                            {recipe.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="asset-proc-row">
+                      <label className="asset-proc-field">
+                        <span>Material</span>
+                        <select
+                          value={procBuildingMaterial}
+                          onChange={(event) =>
+                            setProcBuildingMaterial(event.target.value as BuildingMaterialStyle)
+                          }
+                        >
+                          {BUILDING_MATERIAL_OPTIONS.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="asset-proc-field">
+                        <span>Light</span>
+                        <select
+                          value={procBuildingLighting}
+                          onChange={(event) =>
+                            setProcBuildingLighting(event.target.value as BuildingLightingStyle)
+                          }
+                        >
+                          {BUILDING_LIGHTING_OPTIONS.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <div className="asset-proc-actions">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={procBuildingRoof}
+                          onChange={(event) => setProcBuildingRoof(event.target.checked)}
+                        />
+                        <span>Roof</span>
+                      </label>
+                      <button type="button" onClick={placeProceduralBuilding}>
+                        <Plus size={14} />
+                        <span>Place</span>
+                      </button>
+                    </div>
+                  </section>
+                )}
                 <label className="asset-search-field">
                   <Search size={14} aria-hidden="true" />
                   <input
