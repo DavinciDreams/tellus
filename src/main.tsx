@@ -1261,6 +1261,12 @@ function createTellusWorld(
     }
     return { live, glass, liveCap: MAX_LIVE_MIRRORS, trackedLive: liveMirrorCount() };
   };
+  window.__tellusWorldDebug = () => ({
+    worldId: runtimeConfig.worldId,
+    runtimeTemplate: parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
+    runtimeSkyboxUrl: runtimeConfig.skyboxUrl,
+    chunkedWorldChunks: getChunkedWorldChunks(),
+  });
   const countSkinnedMeshes = (root: THREE.Object3D | undefined): number => {
     if (!root) return 0;
     let n = 0;
@@ -7110,6 +7116,7 @@ function createTellusWorld(
         tilesRenderer = null;
       }
       delete window.__tellusAvatarDebug;
+      delete window.__tellusWorldDebug;
       delete window.__tellusViewDebug;
       delete window.__tellusThingsDebug;
       delete window.__tellusMirrorDebug;

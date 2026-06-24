@@ -17,11 +17,13 @@ import {
   largeWorldBaseHeight,
   largeWorldTerrainKind,
 } from "./tellus-large-world-terrain";
+import { runtimeConfig } from "./tellus-runtime-config";
+import { parseWorldTemplateId } from "./tellus-world-templates";
 import {
   tellusWorldChunkUrl,
 } from "./tellus-urls-identity";
 import type { ChunkData } from "./world-protocol";
-import type { TerrainPaintKind } from "./tellus-types";
+import type { TerrainPaintKind, WorldTemplateId } from "./tellus-types";
 
 const key = (cx: number, cz: number) => `${cx},${cz}`;
 
@@ -91,6 +93,7 @@ interface ActiveChunk {
   mesh: THREE.Mesh;
   revision: number;
   lodSegments: number;
+  template: WorldTemplateId;
   // Raw sculpt offsets (65x65, row-major z*65+x; [] when flat) kept so grounding can sample the
   // actual heightfield where the chunk is loaded. cx/cz live on mesh.position but cached here too.
   cx: number;
@@ -259,6 +262,7 @@ export function createChunkRenderer(
   };
 
   const buildOrUpdate = (k: string, data: ChunkData, lodSegments: number) => {
+    const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
     const geometry = createChunkTerrainGeometry(data, lodSegments);
     const existing = active.get(k);
     if (existing) {
@@ -266,6 +270,7 @@ export function createChunkRenderer(
       existing.mesh.geometry = geometry;
       existing.revision = data.revision;
       existing.lodSegments = lodSegments;
+      existing.template = template;
       existing.sculptOffsets = data.sculptOffsets;
       existing.paint = data.paint;
       return;
@@ -279,6 +284,7 @@ export function createChunkRenderer(
       mesh,
       revision: data.revision,
       lodSegments,
+      template,
       cx: data.cx,
       cz: data.cz,
       sculptOffsets: data.sculptOffsets,
@@ -300,9 +306,16 @@ export function createChunkRenderer(
       }
       const lod = lodOf.get(k) ?? CHUNK_SEGMENTS;
       const existing = active.get(k);
-      // Skip rebuild if revision AND lod are unchanged (manifest revision-delta no-op).
-      if (existing && existing.revision === data.revision && existing.lodSegments === lod)
+      const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
+      // Skip rebuild if revision, LOD, and terrain template are unchanged (manifest revision-delta no-op).
+      if (
+        existing &&
+        existing.revision === data.revision &&
+        existing.lodSegments === lod &&
+        existing.template === template
+      ) {
         continue;
+      }
       buildOrUpdate(k, data, lod);
     }
     ready.clear();

@@ -481,6 +481,12 @@ declare global {
     __tellusEnterInterior?: () => void;
     __tellusExitInterior?: () => void;
     __tellusPerf?: () => { fps: number; vegetation: unknown };
+    __tellusWorldDebug?: () => {
+      worldId: string;
+      runtimeTemplate: WorldTemplateId;
+      runtimeSkyboxUrl?: string;
+      chunkedWorldChunks: { w: number; h: number } | null;
+    };
     // Diagnostics for the rigged-VRM avatar upgrade (consumed by smoke tests / the console).
     __tellusAvatarDebug?: () => {
       localVisitorId: string;
