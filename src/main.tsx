@@ -150,7 +150,7 @@ import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
 import { buildAgentMapLocation, resolveAgentMoveTarget } from "./tellus-agent-location";
-import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, templateForWorldId } from "./tellus-world-templates";
+import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, shouldIgnoreDefaultTellusTemplate, templateForWorldId } from "./tellus-world-templates";
 import { evoflowTerrainSourceFor } from "./tellus-evoflow-terrains";
 import {
   ASSET_SURFACE_CONTEXTS,
@@ -8628,11 +8628,17 @@ function App(): React.ReactElement {
         /* no world metadata endpoint (or offline) */
       }
     }
-    let template = localProfile.worldTemplate ?? profile.worldTemplate ?? templateFallback;
+    const localTemplate = shouldIgnoreDefaultTellusTemplate(localProfile.worldTemplate, templateFallback)
+      ? undefined
+      : localProfile.worldTemplate;
+    const remoteTemplate = shouldIgnoreDefaultTellusTemplate(profile.worldTemplate, templateFallback)
+      ? undefined
+      : profile.worldTemplate;
+    let template = localTemplate ?? remoteTemplate ?? templateFallback;
     if (templateFallback === "flight-range" && template === "tellus") {
       template = templateFallback;
     }
-    if (templateFallback !== "tellus" && profile.worldTemplate === undefined && localProfile.worldTemplate === undefined) {
+    if (templateFallback !== "tellus" && remoteTemplate === undefined && localTemplate === undefined) {
       template = templateFallback;
     }
     const templateSkyboxUrl = normalizeSkyboxUrl(defaultSkyboxUrlForTemplate(template));
@@ -8660,7 +8666,10 @@ function App(): React.ReactElement {
     ) {
       skyboxUrl = fallbackSkyboxUrl;
     }
-    const landShape = localProfile.landShape ?? profile.landShape ?? defaultLandShapeRef.current;
+    const landShape =
+      localTemplate === undefined && remoteTemplate === undefined && templateFallback !== "tellus"
+        ? undefined
+        : localProfile.landShape ?? profile.landShape ?? defaultLandShapeRef.current;
     return {
       template,
       skyboxUrl,

@@ -453,6 +453,13 @@ export function templateForWorldId(
   return fallback;
 }
 
+export function shouldIgnoreDefaultTellusTemplate(
+  template: WorldTemplateId | undefined,
+  fallback: WorldTemplateId,
+): boolean {
+  return template === "tellus" && fallback !== "tellus";
+}
+
 export function parseLandShapeOverrides(value: unknown): LandShapeOverrides | undefined {
   if (!isRecord(value)) return undefined;
 

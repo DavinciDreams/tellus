@@ -4,6 +4,7 @@ import {
   parseOptionalWorldTemplateId,
   parseWorldTemplateId,
   resolveLandShapeConfig,
+  shouldIgnoreDefaultTellusTemplate,
   templateForWorldId,
 } from "./tellus-world-templates";
 import { WORLD_CREATION_TEMPLATES } from "./tellus-world-options";
@@ -49,5 +50,14 @@ describe("world terrain templates", () => {
 
     expect(defaultSkyboxUrlForTemplate(aurora)).toBe("/skybox/tellus-aurora-sky/scene.gltf");
     expect(defaultSkyboxUrlForTemplate(basalt)).toBe("/skybox/tellus-storm-ocean/scene.gltf");
+  });
+
+  it("ignores stale Tellus defaults when a world id implies another template", () => {
+    const inferred = templateForWorldId("chunked-64-aurora-test");
+
+    expect(inferred).toBe("evoflow-glass-ridge");
+    expect(shouldIgnoreDefaultTellusTemplate("tellus", inferred)).toBe(true);
+    expect(shouldIgnoreDefaultTellusTemplate("lowlands", inferred)).toBe(false);
+    expect(shouldIgnoreDefaultTellusTemplate("tellus", "tellus")).toBe(false);
   });
 });
