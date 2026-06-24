@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildGrassTemplate, buildHairGrassTemplate } from "./tellus-veg-archetypes";
+import {
+  buildConiferTemplate,
+  buildGrassTemplate,
+  buildHairGrassTemplate,
+  buildPineTemplate,
+  proceduralArchetype,
+} from "./tellus-veg-archetypes";
 
 describe("vegetation archetypes", () => {
   it("builds hair grass as many narrower strands than the default tuft", () => {
@@ -10,6 +16,18 @@ describe("vegetation archetypes", () => {
     expect(hairGrass.idx.length).toBeGreaterThan(defaultGrass.idx.length);
     expect(maxBladeWidth(hairGrass)).toBeLessThan(maxBladeWidth(defaultGrass) * 0.4);
     expect(hairGrass.pos.every(Number.isFinite)).toBe(true);
+  });
+
+  it("builds fuller conifer species for ambient and procedural placement", () => {
+    const conifer = buildConiferTemplate();
+    const pine = buildPineTemplate();
+
+    expect(conifer.pos.length).toBeGreaterThan(0);
+    expect(pine.pos.length).toBeGreaterThan(0);
+    expect(conifer.pos.every(Number.isFinite)).toBe(true);
+    expect(pine.pos.every(Number.isFinite)).toBe(true);
+    expect(proceduralArchetype("conifer")?.kind).toBe("tree");
+    expect(proceduralArchetype("pine")?.kind).toBe("tree");
   });
 });
 

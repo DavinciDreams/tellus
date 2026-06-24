@@ -98,6 +98,12 @@ on a hard failure. Many tools return a small JSON "patch" describing what change
 - args: `prompt` (e.g. `"a small fox"`), `near` ∈ `agent | mountain | pond` (default `agent`).
 - A placeholder appears immediately; the real model arrives asynchronously a little later.
 
+**Procedural plants and scatter** — if `tools/list` exposes these tools on your server:
+- `list_procedural_assets` returns built-in plants, trees, rocks, flowers, crystals, and other procedural archetypes.
+- `place_procedural_asset` places one archetype near you. Args: `archetypeId`, optional `near`, `scale`, `seed`.
+- `scatter_procedural_asset` places a small natural cluster. Args: `archetypeId`, optional `count`.
+- Prefer these over text generation for trees, flowers, rocks, and terrain dressing; they are instant and reusable.
+
 **`move_asset`** — nudge an existing thing you can see.
 - args: `targetId` (an `id` from `observe`), `dx` (±4), `dz` (±4).
 

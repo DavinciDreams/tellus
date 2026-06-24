@@ -4750,6 +4750,8 @@ function createTellusWorld(
     if (!arch) return [];
     const rng = Math.random;
     const isTree = arch.kind === "tree";
+    const proceduralScale = (variation = 1) =>
+      defaultScaleForRealisticKind(arch.kind, arch.label) * (isTree ? 1.48 : 1) * variation;
     const total = clamp(
       Math.round(count ?? (isTree ? 5 : arch.kind === "flower" ? 14 : 10)),
       1,
@@ -4777,7 +4779,7 @@ function createTellusWorld(
           },
           {
             location,
-            scale: defaultScaleForRealisticKind(arch.kind, arch.label) * (0.82 + rng() * 0.42),
+            scale: proceduralScale(0.82 + rng() * 0.42),
           },
         ),
       );
@@ -6527,7 +6529,7 @@ function createTellusWorld(
         })),
         chat: nearbyWorldChat(radius),
         nearbyChat: nearbyWorldChat(radius, "nearby"),
-        verbs: ["moveSelf", "findReusableAssets", "placeReusableAsset", "generate", "sayChat", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "playAnimation", "listAnimations", "listAvatars", "setAvatar", "setAvatarScale"],
+        verbs: ["moveSelf", "findReusableAssets", "placeReusableAsset", "listProceduralAssets", "placeProceduralAsset", "scatterProceduralAsset", "generate", "sayChat", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "playAnimation", "listAnimations", "listAvatars", "setAvatar", "setAvatarScale"],
         // A small default vocabulary for embodied agents. The full VRMA feed is available by category
         // through listAnimations so agents don't have to reason over hundreds of near-duplicate clips.
         animations: recommendedEmoteClipNamesSync(),
@@ -6559,6 +6561,14 @@ function createTellusWorld(
         kind: entry.kind,
         source: entry.source ?? "built-in",
         selected: entry.id === localAvatarId,
+      }));
+    },
+    listProceduralAssets() {
+      return PROCEDURAL_CATALOG.map((entry) => ({
+        id: entry.id,
+        label: entry.label,
+        kind: entry.kind,
+        scatterable: true,
       }));
     },
     getChat(opts: { radius?: number; channel?: WorldChatChannel; recipientId?: string } = {}) {
@@ -6674,6 +6684,44 @@ function createTellusWorld(
             location: nearToLocation(a.near),
           });
           return { ok: true, id: thing.id, reused: model.id, name: model.name };
+        }
+        case "listProceduralAssets":
+          return { ok: true, assets: tellusAgent.listProceduralAssets() };
+        case "placeProceduralAsset": {
+          const archetypeId = typeof a.archetypeId === "string" ? a.archetypeId : typeof a.id === "string" ? a.id : "";
+          const arch = PROCEDURAL_CATALOG.find((item) => item.id === archetypeId);
+          if (!arch) return { ok: false, error: "placeProceduralAsset requires a valid archetypeId" };
+          const seed = typeof a.seed === "number" && Number.isFinite(a.seed)
+            ? a.seed >>> 0
+            : (Math.random() * 0xffffffff) >>> 0;
+          const thing = addLibraryAsset(
+            {
+              id: `proc-${arch.id}-${seed.toString(16)}`,
+              name: arch.label,
+              description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
+              modelUrl: makeProceduralModelUrl(arch.id, seed),
+              source: "generated",
+            },
+            {
+              creatorId: visitorId as GenerateRequest["creatorId"],
+              location: nearToLocation(a.near),
+              scale: typeof a.scale === "number"
+                ? a.scale
+                : defaultScaleForRealisticKind(arch.kind, arch.label) * (arch.kind === "tree" ? 1.48 : 1),
+            },
+          );
+          return { ok: true, id: thing.id, archetypeId: arch.id, label: arch.label };
+        }
+        case "scatterProceduralAsset": {
+          const archetypeId = typeof a.archetypeId === "string" ? a.archetypeId : typeof a.id === "string" ? a.id : "";
+          const placed = scatterProceduralAsset(archetypeId, typeof a.count === "number" ? a.count : undefined);
+          if (!placed.length) return { ok: false, error: "scatterProceduralAsset requires a valid archetypeId" };
+          return {
+            ok: true,
+            archetypeId,
+            count: placed.length,
+            ids: placed.map((thing) => thing.id),
+          };
         }
         case "generate": {
           if (typeof a.prompt !== "string" || !a.prompt.trim()) return { ok: false, error: "generate requires a prompt" };
@@ -12516,6 +12564,8 @@ function App(): React.ReactElement {
                       description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
                       modelUrl: makeProceduralModelUrl(arch.id, seed),
                       source: "generated",
+                    }, {
+                      scale: defaultScaleForRealisticKind(arch.kind, arch.label) * (arch.kind === "tree" ? 1.48 : 1),
                     });
                   }}
                 >

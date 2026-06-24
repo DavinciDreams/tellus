@@ -448,7 +448,7 @@ export const buildConiferTemplate = (): Template =>
   treeTemplateFromSpecies("douglasFir", AMBIENT_SEED.conifer, {
     ...AMBIENT_BUDGET,
     ...CONIFER_COLORS,
-    leafScaleMultiplier: 1.8,
+    leafScaleMultiplier: 2.35,
     swayFrom: 0.2,
   });
 
@@ -464,7 +464,7 @@ export const buildPineTemplate = (): Template =>
   treeTemplateFromSpecies("balsamFir", AMBIENT_SEED.pine, {
     ...AMBIENT_BUDGET,
     ...PINE_COLORS,
-    leafScaleMultiplier: 2.1,
+    leafScaleMultiplier: 2.75,
     swayFrom: 0.4,
   });
 
@@ -641,9 +641,9 @@ const proceduralTree = (
 });
 
 export const PROCEDURAL_CATALOG: ProceduralArchetype[] = [
-  { id: "conifer", label: "Conifer tree", emoji: "🌲", kind: "tree", build: (seed) => treeTemplateFromSpecies("douglasFir", seed, scatterBudget({ ...CONIFER_COLORS, leafScaleMultiplier: 1.9, swayFrom: 0.2 })), palette: [0xffffff, 0xeaffe0, 0xd8f0c8, 0xfff2cf] },
+  { id: "conifer", label: "Conifer tree", emoji: "🌲", kind: "tree", build: (seed) => treeTemplateFromSpecies("douglasFir", seed, scatterBudget({ ...CONIFER_COLORS, leafScaleMultiplier: 2.45, swayFrom: 0.2 })), palette: [0xffffff, 0xeaffe0, 0xd8f0c8, 0xfff2cf] },
   { id: "broadleaf", label: "Broadleaf tree", emoji: "🌳", kind: "tree", build: (seed) => treeTemplateFromSpecies("blackOak", seed, scatterBudget({ ...BROADLEAF_COLORS, leafScaleMultiplier: 1.45, swayFrom: 0.3 })), palette: [0xffffff, 0xf2ffd9, 0xdfffcb, 0xffe9b8] },
-  { id: "pine", label: "Tall pine", emoji: "🌲", kind: "tree", build: (seed) => treeTemplateFromSpecies("balsamFir", seed, scatterBudget({ ...PINE_COLORS, leafScaleMultiplier: 2.25, swayFrom: 0.4 })), palette: [0xffffff, 0xe2f2dc, 0xcfe8d2] },
+  { id: "pine", label: "Tall pine", emoji: "🌲", kind: "tree", build: (seed) => treeTemplateFromSpecies("balsamFir", seed, scatterBudget({ ...PINE_COLORS, leafScaleMultiplier: 2.9, swayFrom: 0.4 })), palette: [0xffffff, 0xe2f2dc, 0xcfe8d2] },
   { id: "birch", label: "Birch", emoji: "🌳", kind: "tree", build: (seed) => treeTemplateFromSpecies("silverBirch", seed, scatterBudget({ ...BIRCH_COLORS, leafScaleMultiplier: 3.2, swayFrom: 0.42 })), palette: [0xffffff, 0xf4ffd8, 0xffeec2] },
   { id: "palm", label: "Palm", emoji: "🌴", kind: "tree", build: (seed) => treeTemplateFromSpecies("palm", seed, scatterBudget({ maxBranchDepth: 1, maxLeaves: 280, ...PALM_COLORS, swayFrom: 0.55 })), palette: [0xffffff, 0xeaffd4, 0xd9f7c0] },
   { id: "deadtree", label: "Dead tree", emoji: "🪾", kind: "tree", build: (seed) => treeTemplateFromSpecies("blackOak", seed, scatterBudget({ maxLeaves: 0, ...DEAD_COLORS, leafTintable: false, swayFrom: 0.4 })), palette: [0xffffff, 0xe8e0d4, 0xd9cfc4] },
@@ -652,14 +652,14 @@ export const PROCEDURAL_CATALOG: ProceduralArchetype[] = [
   proceduralTree("bamboo", "Bamboo grove", "bamboo", BAMBOO_COLORS, [0xffffff, 0xe7ffd2, 0xd7f6ae], { maxBranchDepth: 2, maxLeaves: 1200, maxStems: 220, swayFrom: 0.18 }),
   proceduralTree("blacktupelo", "Black tupelo", "blackTupelo", TUPELO_COLORS, [0xffffff, 0xffd3b4, 0xffb09a, 0xf2e8ac], { maxBranchDepth: 4, maxLeaves: 4200, leafScaleMultiplier: 2.2, swayFrom: 0.36 }),
   proceduralTree("cambridgeoak", "English oak", "cambridgeOak", OAK_COLORS, [0xffffff, 0xe8ffd1, 0xd9ebb8, 0xffe7b5], { maxBranchDepth: 4, maxLeaves: 4200, leafScaleMultiplier: 1.9, swayFrom: 0.34 }),
-  proceduralTree("douglasfir", "Douglas fir", "douglasFir", CONIFER_COLORS, [0xffffff, 0xeaffe0, 0xd8f0c8], { maxLeaves: 4200, leafScaleMultiplier: 1.9, swayFrom: 0.22 }),
+  proceduralTree("douglasfir", "Douglas fir", "douglasFir", CONIFER_COLORS, [0xffffff, 0xeaffe0, 0xd8f0c8], { maxLeaves: 4200, leafScaleMultiplier: 2.45, swayFrom: 0.22 }),
   proceduralTree("europeanlarch", "European larch", "europeanLarch", LARCH_COLORS, [0xffffff, 0xfff5bc, 0xeee8a4, 0xe3ffd0], { maxLeaves: 4200, leafScaleMultiplier: 2.6, swayFrom: 0.26 }),
   proceduralTree("fanpalm", "Fan palm", "fanPalm", PALM_COLORS, [0xffffff, 0xeaffd4, 0xd9f7c0], { maxBranchDepth: 2, maxLeaves: 320, leafScaleMultiplier: 1.2, swayFrom: 0.55 }),
   proceduralTree("hillcherry", "Hill cherry", "hillCherry", CHERRY_COLORS, [0xffffff, 0xffc9db, 0xffdde8, 0xffefc4], { maxLeaves: 4200, leafScaleMultiplier: 2.0, blossomScaleMultiplier: 2.2, swayFrom: 0.28 }),
   proceduralTree("lombardypoplar", "Lombardy poplar", "lombardyPoplar", POPLAR_COLORS, [0xffffff, 0xf3ffd3, 0xdaf0b4], { maxLeaves: 3200, swayFrom: 0.32 }),
   proceduralTree("quakingaspen", "Quaking aspen", "quakingAspen", ASPEN_COLORS, [0xffffff, 0xfff1ad, 0xf3ffd0], { maxLeaves: 4200, leafScaleMultiplier: 2.9, swayFrom: 0.32 }),
   proceduralTree("sassafras", "Sassafras", "sassafras", SASSAFRAS_COLORS, [0xffffff, 0xffd0a1, 0xffefb4, 0xe6ffd0], { maxBranchDepth: 4, maxLeaves: 4200, leafScaleMultiplier: 2.2, swayFrom: 0.34 }),
-  proceduralTree("smallpine", "Small pine", "smallPine", PINE_COLORS, [0xffffff, 0xe2f2dc, 0xcfe8d2], { maxBranchDepth: 2, maxLeaves: 2400, leafScaleMultiplier: 2.35, swayFrom: 0.38 }),
+  proceduralTree("smallpine", "Small pine", "smallPine", PINE_COLORS, [0xffffff, 0xe2f2dc, 0xcfe8d2], { maxBranchDepth: 2, maxLeaves: 2400, leafScaleMultiplier: 3.05, swayFrom: 0.38 }),
   proceduralTree("spheretree", "Sphere topiary", "sphereTree", TOPIARY_COLORS, [0xffffff, 0xe4ffd0, 0xd0f0b8], { maxLeaves: 4200, leafScaleMultiplier: 1.6, swayFrom: 0.3 }),
   proceduralTree("weepingwillow", "Weeping willow", "weepingWillow", WILLOW_COLORS, [0xffffff, 0xf0ffd0, 0xdcefae], { maxBranchDepth: 4, maxLeaves: 4200, leafScaleMultiplier: 2.4, swayFrom: 0.28 }),
   { id: "bush", label: "Bush", emoji: "🌿", kind: "object", build: () => buildBushTemplate(), palette: [0xffffff, 0xe9ffd9, 0xd2f2bc, 0xffe3b3] },

@@ -474,6 +474,7 @@ declare global {
       sayChat: (text: string, opts?: { channel?: WorldChatChannel; recipientId?: string; recipientName?: string }) => unknown;
       listAnimations?: (opts?: { category?: string; limit?: number }) => unknown;
       listAvatars?: () => unknown;
+      listProceduralAssets?: () => unknown;
       sendAction: (verb: string, args?: Record<string, unknown>) => unknown;
     };
     __tellusSnapshot?: () => TellusSnapshot;
