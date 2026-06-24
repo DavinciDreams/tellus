@@ -11,6 +11,7 @@ import {
 } from "./tellus-chunk-renderer";
 import { largeWorldBaseHeight } from "./tellus-large-world-terrain";
 import {
+  CHUNK_LOAD_RADIUS,
   CHUNK_SEGMENTS,
   CHUNK_SPAN,
   CHUNK_VERTEX_COUNT,
@@ -29,6 +30,10 @@ function makeChunk(over: Partial<ChunkData> = {}): ChunkData {
   };
 }
 
+const skirtVertexCount = (seg: number) => seg * 4;
+const terrainVertexCount = (seg: number) => (seg + 1) * (seg + 1) + skirtVertexCount(seg);
+const terrainIndexCount = (seg: number) => (seg * seg * 6) + (skirtVertexCount(seg) * 12);
+
 describe("createChunkTerrainGeometry", () => {
   it("renders empty sculptOffsets as natural large-world terrain", () => {
     const geometry = createChunkTerrainGeometry(makeChunk());
@@ -42,19 +47,19 @@ describe("createChunkTerrainGeometry", () => {
     expect(maxY - minY).toBeGreaterThan(2);
   });
 
-  it("has CHUNK_VERTEX_COUNT² vertices at full LOD", () => {
+  it("has full LOD vertices plus a border skirt", () => {
     const geometry = createChunkTerrainGeometry(makeChunk());
     expect(geometry.getAttribute("position").count).toBe(
-      CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT,
+      terrainVertexCount(CHUNK_SEGMENTS),
     );
     const index = geometry.getIndex();
-    expect(index?.count).toBe(CHUNK_SEGMENTS * CHUNK_SEGMENTS * 6);
+    expect(index?.count).toBe(terrainIndexCount(CHUNK_SEGMENTS));
   });
 
-  it("decimates to (seg+1)² vertices at lodSegments=16", () => {
+  it("decimates to (seg+1)² vertices plus a border skirt at lodSegments=16", () => {
     const geometry = createChunkTerrainGeometry(makeChunk(), 16);
-    expect(geometry.getAttribute("position").count).toBe(17 * 17);
-    expect(geometry.getIndex()?.count).toBe(16 * 16 * 6);
+    expect(geometry.getAttribute("position").count).toBe(terrainVertexCount(16));
+    expect(geometry.getIndex()?.count).toBe(terrainIndexCount(16));
   });
 
   it("spans local x/z in [0, CHUNK_SPAN] regardless of chunk world coords", () => {
@@ -125,21 +130,24 @@ describe("createChunkRenderer lifecycle", () => {
     await new Promise((res) => setTimeout(res, 0));
   };
 
-  it("builds the load ring and uniform full-res LOD (no per-ring decimation -> no seam cracks)", async () => {
+  it("builds the load ring with skirted near/far LOD", async () => {
     const scene = new THREE.Scene();
     const r = createChunkRenderer(scene);
     r.update(CHUNK_SPAN * 10 + 1, CHUNK_SPAN * 10 + 1); // center chunk (10,10)
     await resolveAll();
     r.flush();
     expect(r.stats().active).toBe(5 * 5); // CHUNK_LOAD_RADIUS=2 -> 5x5
-    // every built chunk is full-res (uniform LOD): 65^2 verts.
     const group = scene.getObjectByName("tellus-chunk-terrain") as THREE.Group;
+    let fullCount = 0;
+    let midCount = 0;
     for (const child of group.children) {
       const mesh = child as THREE.Mesh;
-      expect(mesh.geometry.getAttribute("position").count).toBe(
-        CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT,
-      );
+      const count = mesh.geometry.getAttribute("position").count;
+      if (count === terrainVertexCount(CHUNK_SEGMENTS)) fullCount++;
+      if (count === terrainVertexCount(CHUNK_SEGMENTS / 2)) midCount++;
     }
+    expect(fullCount).toBe(9);
+    expect(midCount).toBe((CHUNK_LOAD_RADIUS * 2 + 1) ** 2 - fullCount);
     r.dispose();
   });
 
