@@ -349,7 +349,9 @@ export function largeWorldTerrainKind(
       template === "evoflow-coral-canyon-child" ||
       template === "evoflow-coral-fold"
     ) {
-      return largeWorldSlope(x, z) > 0.6 ? "rock" : "dirt";
+      const foldBand = Math.sin((islandPoint.cx + islandPoint.cz) * 0.12);
+      if (largeWorldSlope(x, z) > 0.48 || foldBand > 0.25) return "rock";
+      return "dirt";
     }
     const pathBand = Math.abs(Math.sin(Math.atan2(islandPoint.cz, islandPoint.cx) * 3 + 0.5)) < 0.13;
     if (pathBand && islandPoint.r > 8) return "dirt";

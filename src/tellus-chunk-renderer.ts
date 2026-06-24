@@ -33,6 +33,14 @@ function sculptAt(offsets: number[], xi: number, zi: number): number {
   return offsets[zi * CHUNK_VERTEX_COUNT + xi] ?? 0;
 }
 
+function shouldApplyChunkPaint(template: WorldTemplateId, kind: TerrainPaintKind | null): kind is TerrainPaintKind {
+  if (!kind) return false;
+  if (template === "tellus") return true;
+  // Existing chunk worlds can carry generated Tellus paint bands even after switching templates.
+  // Preserve explicit decorative paints, but let non-Tellus templates own the base biome.
+  return kind === "brick" || kind === "stone" || kind === "snow" || kind === "flowers";
+}
+
 // Build a per-chunk square BufferGeometry in LOCAL coords [0,SPAN]; the Mesh is positioned
 // at world (cx*96, 0, cz*96). `lodSegments` decimates the 64-seg grid for distant chunks
 // (e.g. 16 -> stride 4) by subsampling the 65² arrays. Mirrors createTerrainGeometry's
@@ -41,6 +49,7 @@ export function createChunkTerrainGeometry(
   chunk: ChunkData,
   lodSegments: number = CHUNK_SEGMENTS,
 ): THREE.BufferGeometry {
+  const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
   const seg = Math.min(lodSegments, CHUNK_SEGMENTS);
   const stride = CHUNK_SEGMENTS / seg; // 64/seg; integer for 64,32,16,8
   const worldX0 = chunk.cx * CHUNK_SPAN;
@@ -62,7 +71,8 @@ export function createChunkTerrainGeometry(
       const paintCode = chunk.paint.length
         ? (chunk.paint[zi * CHUNK_VERTEX_COUNT + xi] ?? 0)
         : 0;
-      const kind = paintCode ? terrainPaintKindFromCode(paintCode) : null;
+      const paintKind = paintCode ? terrainPaintKindFromCode(paintCode) : null;
+      const kind = shouldApplyChunkPaint(template, paintKind) ? paintKind : null;
       const resolvedKind = kind ?? largeWorldTerrainKind(wx, wz, py) ?? terrainKind(wx, wz, py);
       const color = terrainVertexColor(resolvedKind, wx, wz, xi * 1009 + zi * 9176);
       positions.push(lx, py, lz);
@@ -372,7 +382,8 @@ export function createChunkRenderer(
     const gx = Math.max(0, Math.min(CHUNK_SEGMENTS, Math.round((lx / CHUNK_SPAN) * CHUNK_SEGMENTS)));
     const gz = Math.max(0, Math.min(CHUNK_SEGMENTS, Math.round((lz / CHUNK_SPAN) * CHUNK_SEGMENTS)));
     const code = a.paint[gz * CHUNK_VERTEX_COUNT + gx] ?? 0;
-    return code ? terrainPaintKindFromCode(code) : null;
+    const kind = code ? terrainPaintKindFromCode(code) : null;
+    return shouldApplyChunkPaint(a.template, kind) ? kind : null;
   };
 
   const dispose = () => {
