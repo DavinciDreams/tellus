@@ -23,6 +23,9 @@ describe("world terrain templates", () => {
     expect(templateForWorldId("lisa-fantasy-garden")).toBe("fantasy-garden");
     expect(templateForWorldId("realistic-cove-villa")).toBe("realistic-cove");
     expect(templateForWorldId("flight-simulator-test")).toBe("flight-range");
+    expect(templateForWorldId("64")).toBe("flight-range");
+    expect(templateForWorldId("chunked-64-genesis")).toBe("flight-range");
+    expect(templateForWorldId("chunked-64-main")).toBe("tellus");
     expect(templateForWorldId("pokemon-lowpoly-town")).toBe("low-poly-meadow");
     expect(templateForWorldId("cartoon-hills-playground")).toBe("cartoon-hills");
     expect(templateForWorldId("interior-main-room")).toBe("interior-studio");

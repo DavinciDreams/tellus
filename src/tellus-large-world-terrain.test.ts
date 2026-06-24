@@ -81,4 +81,17 @@ describe("large-world terrain", () => {
     expect(largeWorldBaseHeight(oceanEdge.x, oceanEdge.z)).toBeLessThan(SEA_LEVEL);
     expect(largeWorldTerrainKind(oceanEdge.x, oceanEdge.z)).toBe("water");
   });
+
+  it("keeps flight-range chunked worlds continental instead of island masked", () => {
+    setChunkedWorldChunks({ w: 64, h: 64 });
+    runtimeConfig.worldId = "chunked-64-genesis";
+    runtimeConfig.worldTemplate = "flight-range";
+
+    const legacyLandPoint = { x: CHUNK_SPAN, z: CHUNK_SPAN };
+
+    expect(largeWorldBaseHeight(legacyLandPoint.x, legacyLandPoint.z)).toBeGreaterThan(
+      SEA_LEVEL + 2,
+    );
+    expect(largeWorldTerrainKind(legacyLandPoint.x, legacyLandPoint.z)).not.toBe("water");
+  });
 });

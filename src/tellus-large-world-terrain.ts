@@ -150,6 +150,8 @@ function terrainDetailHeight(shape: LandShapeConfig, cx: number, cz: number, r: 
 
 function chunkedIslandPoint(x: number, z: number): { cx: number; cz: number; r: number } | null {
   if (!getChunkedWorldChunks()) return null;
+  const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
+  if (template === "flight-range") return null;
   const center = chunkedWorldCenter();
   if (!center) return null;
   const scale = worldScaleForId(runtimeConfig.worldId);
