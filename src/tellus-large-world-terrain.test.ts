@@ -11,6 +11,7 @@ import {
   largeWorldTerrainKind,
 } from "./tellus-large-world-terrain";
 import { runtimeConfig } from "./tellus-runtime-config";
+import type { WorldTemplateId } from "./tellus-types";
 
 function sampleGrid(step = 96, count = 12): Array<{ x: number; z: number; h: number; slope: number }> {
   const samples: Array<{ x: number; z: number; h: number; slope: number }> = [];
@@ -27,6 +28,20 @@ function sampleGrid(step = 96, count = 12): Array<{ x: number; z: number; h: num
     }
   }
   return samples;
+}
+
+function islandSignature(template: WorldTemplateId): number[] {
+  setChunkedWorldChunks({ w: 64, h: 64 });
+  runtimeConfig.worldId = `chunked-64-${template}`;
+  runtimeConfig.worldTemplate = template;
+  const center = { x: (64 * CHUNK_SPAN) / 2, z: (64 * CHUNK_SPAN) / 2 };
+  const samples = [
+    { x: center.x, z: center.z },
+    { x: center.x - 28, z: center.z + 12 },
+    { x: center.x + 24, z: center.z - 18 },
+    { x: center.x + 8, z: center.z + 34 },
+  ];
+  return samples.map((sample) => Number(largeWorldBaseHeight(sample.x, sample.z).toFixed(2)));
 }
 
 describe("large-world terrain", () => {
@@ -93,5 +108,29 @@ describe("large-world terrain", () => {
       SEA_LEVEL + 2,
     );
     expect(largeWorldTerrainKind(legacyLandPoint.x, legacyLandPoint.z)).not.toBe("water");
+  });
+
+  it("gives restored chunked templates distinct island profiles", () => {
+    const tellus = islandSignature("tellus").join(",");
+    const signatures = new Map<WorldTemplateId, string>(
+      ([
+        "lowlands",
+        "ridge",
+        "fantasy-garden",
+        "realistic-cove",
+        "low-poly-meadow",
+        "cartoon-hills",
+        "evoflow-glass-ridge",
+        "evoflow-copper-terraces",
+        "evoflow-basalt-teeth",
+        "evoflow-spires",
+        "evoflow-lichen-basin",
+      ] as WorldTemplateId[]).map((template) => [template, islandSignature(template).join(",")]),
+    );
+
+    for (const [template, signature] of signatures) {
+      expect(signature, template).not.toBe(tellus);
+    }
+    expect(new Set(signatures.values()).size).toBeGreaterThan(7);
   });
 });

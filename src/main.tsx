@@ -8611,17 +8611,39 @@ function App(): React.ReactElement {
         /* no world metadata endpoint (or offline) */
       }
     }
-    let template = profile.worldTemplate ?? localProfile.worldTemplate ?? templateFallback;
+    let template = localProfile.worldTemplate ?? profile.worldTemplate ?? templateFallback;
     if (templateFallback === "flight-range" && template === "tellus") {
       template = templateFallback;
     }
-    const skyboxUrl = normalizeSkyboxUrl(
-      profile.skyboxUrl ??
-        localProfile.skyboxUrl ??
-        defaultSkyboxUrlForTemplate(template) ??
+    if (templateFallback !== "tellus" && profile.worldTemplate === undefined && localProfile.worldTemplate === undefined) {
+      template = templateFallback;
+    }
+    const templateSkyboxUrl = normalizeSkyboxUrl(defaultSkyboxUrlForTemplate(template));
+    const fallbackSkyboxUrl = normalizeSkyboxUrl(defaultSkyboxUrlForTemplate(templateFallback));
+    const genericSkyboxes = new Set(
+      [
+        defaultSkyboxUrlRef.current,
+        defaultSkyboxUrlForTemplate("tellus"),
+        defaultSkyboxUrlForTemplate(defaultWorldTemplateRef.current),
+        defaultSkyboxUrlForTemplate(templateFallback),
+      ]
+        .filter(Boolean)
+        .map((url) => normalizeSkyboxUrl(url)),
+    );
+    let skyboxUrl = normalizeSkyboxUrl(
+      localProfile.skyboxUrl ??
+        profile.skyboxUrl ??
+        templateSkyboxUrl ??
         defaultSkyboxUrlRef.current,
     );
-    const landShape = profile.landShape ?? localProfile.landShape ?? defaultLandShapeRef.current;
+    if (
+      templateFallback !== "tellus" &&
+      (localProfile.skyboxUrl === undefined || genericSkyboxes.has(skyboxUrl)) &&
+      (profile.skyboxUrl === undefined || genericSkyboxes.has(skyboxUrl))
+    ) {
+      skyboxUrl = fallbackSkyboxUrl;
+    }
+    const landShape = localProfile.landShape ?? profile.landShape ?? defaultLandShapeRef.current;
     return {
       template,
       skyboxUrl,

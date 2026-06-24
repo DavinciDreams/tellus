@@ -427,9 +427,14 @@ export function templateForWorldId(
     const chunkSize = Number(chunkedMatch[1]);
     const suffix = chunkedMatch[2] ?? "";
     if (/\b(main|tellus|island)\b/.test(suffix)) return "tellus";
+    const suffixTemplate = templateForWorldId(suffix, fallback);
+    if (suffixTemplate !== fallback) return suffixTemplate;
     if (Number.isFinite(chunkSize) && chunkSize >= 64) return "flight-range";
   }
   if (/^\d+$/.test(id) && Number(id) >= 64) return "flight-range";
+  if (id.includes("aurora") || id.includes("glass")) return "evoflow-glass-ridge";
+  if (id.includes("storm") || id.includes("basalt")) return "evoflow-basalt-teeth";
+  if (id.includes("copper") || id.includes("terrace") || id.includes("desert")) return "evoflow-copper-terraces";
   if (id.includes("ridge") || id.includes("mountain")) return "ridge";
   if (id.includes("fantasy") || id.includes("garden")) return "fantasy-garden";
   if (id.includes("realistic") || id.includes("cove")) return "realistic-cove";

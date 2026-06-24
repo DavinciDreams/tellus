@@ -34,9 +34,20 @@ describe("world terrain templates", () => {
     expect(templateForWorldId("64")).toBe("flight-range");
     expect(templateForWorldId("chunked-64-genesis")).toBe("flight-range");
     expect(templateForWorldId("chunked-64-main")).toBe("tellus");
+    expect(templateForWorldId("chunked-64-aurora-test")).toBe("evoflow-glass-ridge");
+    expect(templateForWorldId("chunked-64-copper-terraces")).toBe("evoflow-copper-terraces");
+    expect(templateForWorldId("chunked-64-storm-basalt")).toBe("evoflow-basalt-teeth");
     expect(templateForWorldId("pokemon-lowpoly-town")).toBe("low-poly-meadow");
     expect(templateForWorldId("cartoon-hills-playground")).toBe("cartoon-hills");
     expect(templateForWorldId("interior-main-room")).toBe("interior-studio");
     expect(templateForWorldId("grand-hall-gallery")).toBe("grand-hall-shell");
+  });
+
+  it("preserves inferred evoflow skybox defaults", () => {
+    const aurora = templateForWorldId("chunked-64-aurora-test");
+    const basalt = templateForWorldId("chunked-64-storm-basalt");
+
+    expect(defaultSkyboxUrlForTemplate(aurora)).toBe("/skybox/tellus-aurora-sky/scene.gltf");
+    expect(defaultSkyboxUrlForTemplate(basalt)).toBe("/skybox/tellus-storm-ocean/scene.gltf");
   });
 });

@@ -77,6 +77,15 @@ function lowlandRiverStrength(cx: number, cz: number): number {
   return 1 - smoothstep(width, width + 5.5, distance);
 }
 
+function canyonFoldHeight(cx: number, cz: number, seed: number): number {
+  const angle = Math.atan2(cz + seed * 0.7, cx - seed * 0.4);
+  const foldedRibs = Math.sin(angle * 5.5 + Math.hypot(cx, cz) * 0.12 + seed) * 1.6;
+  const canyonA = gaussian(cx, cz, -18 + seed, -8, 165) * 3.9;
+  const canyonB = gaussian(cx, cz, 18, 18 - seed, 240) * 2.7;
+  const shelf = Math.sin((cx - cz) * 0.12 + seed) * 0.8;
+  return foldedRibs + shelf - canyonA - canyonB;
+}
+
 function templateProfileHeight(template: WorldTemplateId, cx: number, cz: number, r: number): number {
   if (template === "wide-island") {
     const eastPeninsula = gaussian(cx, cz, 39, -2, 720) * 3.8;
@@ -106,6 +115,80 @@ function templateProfileHeight(template: WorldTemplateId, cx: number, cz: number
     const saddle = gaussian(cx, cz, -12, 9, 165) * 2.1;
     const cirque = gaussian(cx, cz, 23, -20, 260) * 2.7;
     return spine - saddle - cirque;
+  }
+
+  if (template === "fantasy-garden") {
+    const gardenRing = Math.sin(r * 0.2) * 0.42 * smoothstep(12, 44, r);
+    const reflectingPond = gaussian(cx, cz, -6, 10, 190) * 1.8;
+    const pavilionRise = gaussian(cx, cz, 18, -16, 210) * 2.2;
+    const softTerrace = Math.sin((cx + cz) * 0.075) * 0.35;
+    return pavilionRise + gardenRing + softTerrace - reflectingPond;
+  }
+
+  if (template === "realistic-cove") {
+    const cove = gaussian(cx, cz, 10, -18, 310) * 2.3;
+    const dune = gaussian(cx, cz, -28, 20, 520) * 1.2;
+    const headland = gaussian(cx, cz, 34, 16, 360) * 1.7;
+    return dune + headland - cove;
+  }
+
+  if (template === "low-poly-meadow") {
+    const terrace = Math.floor((fbm2(cx * 0.05, cz * 0.05, 3, 313) + 1) * 3.5) * 0.34;
+    const moundA = gaussian(cx, cz, -24, 10, 360) * 1.7;
+    const moundB = gaussian(cx, cz, 26, -20, 300) * 1.4;
+    return moundA + moundB + terrace;
+  }
+
+  if (template === "cartoon-hills") {
+    const hillA = gaussian(cx, cz, -26, 16, 310) * 2.6;
+    const hillB = gaussian(cx, cz, 24, -16, 290) * 2.4;
+    const hillC = gaussian(cx, cz, 8, 30, 340) * 1.8;
+    return hillA + hillB + hillC - gaussian(cx, cz, 3, -3, 260) * 1.1;
+  }
+
+  if (template === "evoflow-spires") {
+    const spireA = Math.pow(gaussian(cx, cz, -18, 14, 150), 0.62) * 5.4;
+    const spireB = Math.pow(gaussian(cx, cz, 22, -12, 130), 0.6) * 5.9;
+    const spireC = Math.pow(gaussian(cx, cz, 10, 28, 110), 0.58) * 4.4;
+    return spireA + spireB + spireC - gaussian(cx, cz, -3, -7, 260) * 1.8;
+  }
+
+  if (template === "evoflow-glass-ridge") {
+    const angle = Math.atan2(cz - 3, cx + 5);
+    const crystalSpine = (1 - smoothstep(5, 28, Math.abs(Math.sin(angle + 0.95) * r))) * 6.2;
+    const facets = Math.abs(Math.sin(cx * 0.16) + Math.cos(cz * 0.13)) * 0.9;
+    return crystalSpine + facets - gaussian(cx, cz, 20, -18, 210) * 2.2;
+  }
+
+  if (template === "evoflow-lichen-basin") {
+    const basin = gaussian(cx, cz, 0, 0, 650) * 3.2;
+    const rim = smoothstep(27, 54, r) * (1 - smoothstep(55, 70, r)) * 2.8;
+    const hummocks = fbm2(cx * 0.065, cz * 0.065, 4, 347) * 0.8;
+    return rim + hummocks - basin;
+  }
+
+  if (template === "evoflow-copper-terraces") {
+    const mesa = gaussian(cx, cz, -10, 4, 580) * 2.9 + gaussian(cx, cz, 24, -22, 420) * 2.1;
+    const terrace = Math.sin((mesa + r * 0.055) * 3.1) * 0.75;
+    const wash = gaussian(cx, cz, -24, -28, 280) * 2;
+    return mesa + terrace - wash;
+  }
+
+  if (template === "evoflow-basalt-teeth") {
+    const toothA = Math.pow(gaussian(cx, cz, -14, 8, 125), 0.56) * 5.8;
+    const toothB = Math.pow(gaussian(cx, cz, 18, -15, 120), 0.54) * 6.1;
+    const brokenRidge = ridgeNoise(cx * 0.06 + 4, cz * 0.06 - 7, 359) * 2.5;
+    return toothA + toothB + brokenRidge - gaussian(cx, cz, 8, 20, 260) * 2.4;
+  }
+
+  if (
+    template === "evoflow-coral-canyon" ||
+    template === "evoflow-coral-canyon-child" ||
+    template === "evoflow-coral-fold"
+  ) {
+    const seed =
+      template === "evoflow-coral-canyon-child" ? 7 : template === "evoflow-coral-fold" ? 13 : 3;
+    return canyonFoldHeight(cx, cz, seed);
   }
 
   const valley = gaussian(cx, cz, -26, -20, 360) * 1.35;
@@ -241,8 +324,33 @@ export function largeWorldTerrainKind(
     }
     const pondDistance = Math.hypot(islandPoint.cx - shape.pond.x, islandPoint.cz - shape.pond.z);
     if (pondDistance < shape.pond.radius && y < 1.9) return "water";
+    if (template === "fantasy-garden" && pondDistance < shape.pond.radius * 1.65 && y < 3.1) {
+      return "flowers";
+    }
+    if (template === "realistic-cove" && islandPoint.r > CLASSIC_WORLD_RADIUS * 0.72 && y < 3.2) {
+      return "beach";
+    }
+    if (template === "evoflow-copper-terraces") {
+      if (largeWorldSlope(x, z) > 0.72 || y > 5.8) return "rock";
+      if (Math.sin((islandPoint.cx - islandPoint.cz) * 0.11) > 0.28) return "dirt";
+    }
+    if (template === "evoflow-basalt-teeth" && (y > 4.6 || largeWorldSlope(x, z) > 0.62)) {
+      return "rock";
+    }
+    if (template === "evoflow-lichen-basin" && y < 3.2) return "flowers";
+    if (template === "evoflow-glass-ridge" && (y > 5.5 || largeWorldSlope(x, z) > 0.72)) {
+      return "rock";
+    }
     if (y > 13.5) return "snow";
     if (y > 6.8 || largeWorldSlope(x, z) > 1.05) return "rock";
+    if (template === "low-poly-meadow" || template === "cartoon-hills") return "meadow";
+    if (
+      template === "evoflow-coral-canyon" ||
+      template === "evoflow-coral-canyon-child" ||
+      template === "evoflow-coral-fold"
+    ) {
+      return largeWorldSlope(x, z) > 0.6 ? "rock" : "dirt";
+    }
     const pathBand = Math.abs(Math.sin(Math.atan2(islandPoint.cz, islandPoint.cx) * 3 + 0.5)) < 0.13;
     if (pathBand && islandPoint.r > 8) return "dirt";
     return "meadow";
