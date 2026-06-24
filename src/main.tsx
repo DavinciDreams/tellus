@@ -143,7 +143,7 @@ import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThi
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial } from "./tellus-terrain-material";
-import { largeWorldTerrainKind } from "./tellus-large-world-terrain";
+import { largeWorldBaseHeight, largeWorldTerrainKind } from "./tellus-large-world-terrain";
 import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
 import { generateInteriorRoom } from "./tellus-building";
 import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
@@ -651,6 +651,8 @@ function createTellusWorld(
   // layer. "tellus.grass"="0" disables this vegetation pass entirely; classic worlds remain opt-in.
   // Classic-world vegetation remains opt-in via "tellus.grass"="1".
   const isChunked = isChunkedWorldId(runtimeConfig.worldId);
+  const isFlightRangeWorld =
+    isChunked && parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus") === "flight-range";
   const chunkedDims = isChunked ? getChunkedWorldChunks() : null;
   const chunkedCenterForWorld = isChunked ? chunkedWorldCenter() : null;
   if (chunkedCenterForWorld) {
@@ -679,6 +681,7 @@ function createTellusWorld(
     ? Math.max(18, Math.min(42, CHUNK_SPAN * 0.34))
     : POND_RADIUS;
   const waterFeatureContains = (x: number, z: number, pad = 0) => {
+    if (isFlightRangeWorld) return false;
     const dx = x - waterFeatureCenter.x;
     const dz = z - waterFeatureCenter.z;
     const radius = waterFeatureRadius + pad;
@@ -813,6 +816,10 @@ function createTellusWorld(
   if (isChunked) {
     floatingRim.visible = false;
     pondWater.visible = false;
+    if (isFlightRangeWorld) {
+      ocean.visible = false;
+      archipelago.visible = false;
+    }
   }
   scene.add(
     fallbackSky,
@@ -840,7 +847,7 @@ function createTellusWorld(
     const u = sceneUrl.trim();
     if (!u || u === interiorSceneUrl) return;
     interiorSceneUrl = u;
-    ocean.visible = true;
+    ocean.visible = !isFlightRangeWorld;
     for (const m of [archipelago, terrain, pondWater, flowerPatchGroup, floatingRim]) m.visible = false;
     setChunkedFlatGround(0); // ground the player on the room floor (no heightfield inside)
     // The procedural room is centered at the origin; drop the player INTO the room (origin, flat floor)
@@ -917,8 +924,8 @@ function createTellusWorld(
     interiorObject = null;
     interiorSceneUrl = null;
     rapierPhysics?.clearStatics();
-    ocean.visible = true;
-    archipelago.visible = true;
+    ocean.visible = !isFlightRangeWorld;
+    archipelago.visible = !isFlightRangeWorld;
     terrain.visible = !isChunked;
     pondWater.visible = !isChunked;
     flowerPatchGroup.visible = true;
@@ -1606,7 +1613,11 @@ function createTellusWorld(
         const kind = largeWorldTerrainKind(x, z);
         return { height, kind: kind === "water" ? "beach" : kind, loaded: true };
       }
-      return { height: SEA_LEVEL - 8, kind: "water", loaded: false };
+      return {
+        height: isFlightRangeWorld ? largeWorldBaseHeight(x, z) : SEA_LEVEL - 8,
+        kind: isFlightRangeWorld ? largeWorldTerrainKind(x, z) : "water",
+        loaded: false,
+      };
     }
     const height = terrainHeight(x, z);
     return { height, kind: terrainKind(x, z, height), loaded: true };

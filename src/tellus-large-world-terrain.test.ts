@@ -133,4 +133,17 @@ describe("large-world terrain", () => {
     }
     expect(new Set(signatures.values()).size).toBeGreaterThan(7);
   });
+
+  it("uses distinctive base materials for non-Tellus templates", () => {
+    setChunkedWorldChunks({ w: 64, h: 64 });
+    const center = { x: (64 * CHUNK_SPAN) / 2, z: (64 * CHUNK_SPAN) / 2 };
+
+    runtimeConfig.worldId = "chunked-64-copper-terraces";
+    runtimeConfig.worldTemplate = "evoflow-copper-terraces";
+    expect(largeWorldTerrainKind(center.x, center.z)).not.toBe("meadow");
+
+    runtimeConfig.worldId = "chunked-64-canyon-child";
+    runtimeConfig.worldTemplate = "evoflow-coral-canyon-child";
+    expect(largeWorldTerrainKind(center.x, center.z)).not.toBe("meadow");
+  });
 });

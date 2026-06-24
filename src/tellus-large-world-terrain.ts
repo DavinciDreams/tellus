@@ -331,8 +331,9 @@ export function largeWorldTerrainKind(
       return "beach";
     }
     if (template === "evoflow-copper-terraces") {
-      if (largeWorldSlope(x, z) > 0.72 || y > 5.8) return "rock";
-      if (Math.sin((islandPoint.cx - islandPoint.cz) * 0.11) > 0.28) return "dirt";
+      const terraceBand = Math.sin((islandPoint.cx - islandPoint.cz) * 0.11);
+      if (largeWorldSlope(x, z) > 0.52 || y > 4.2 || terraceBand > 0.2) return "rock";
+      return "dirt";
     }
     if (template === "evoflow-basalt-teeth" && (y > 4.6 || largeWorldSlope(x, z) > 0.62)) {
       return "rock";
@@ -350,7 +351,7 @@ export function largeWorldTerrainKind(
       template === "evoflow-coral-fold"
     ) {
       const foldBand = Math.sin((islandPoint.cx + islandPoint.cz) * 0.12);
-      if (largeWorldSlope(x, z) > 0.48 || foldBand > 0.25) return "rock";
+      if (largeWorldSlope(x, z) > 0.38 || y > 3.4 || foldBand > 0.08) return "rock";
       return "dirt";
     }
     const pathBand = Math.abs(Math.sin(Math.atan2(islandPoint.cz, islandPoint.cx) * 3 + 0.5)) < 0.13;
