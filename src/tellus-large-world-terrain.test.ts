@@ -125,6 +125,33 @@ describe("large-world terrain", () => {
     expect(largeWorldTerrainKind(legacyLandPoint.x, legacyLandPoint.z)).not.toBe("water");
   });
 
+  it("makes large ridge chunked worlds read as mountain terrain", () => {
+    setChunkedWorldChunks({ w: 64, h: 64 });
+    runtimeConfig.worldId = "chunked-64-ridge";
+    runtimeConfig.worldTemplate = "ridge";
+
+    const center = { x: (64 * CHUNK_SPAN) / 2, z: (64 * CHUNK_SPAN) / 2 };
+    const spine = { x: center.x, z: center.z };
+    const foothill = { x: center.x + 520, z: center.z - 260 };
+    const distant = { x: center.x + 920, z: center.z - 460 };
+    const spineHeight = largeWorldBaseHeight(spine.x, spine.z);
+    const foothillHeight = largeWorldBaseHeight(foothill.x, foothill.z);
+    const distantHeight = largeWorldBaseHeight(distant.x, distant.z);
+    const ridgeKinds = new Set(
+      [
+        spine,
+        { x: center.x + 120, z: center.z + 40 },
+        { x: center.x - 180, z: center.z - 30 },
+        foothill,
+      ].map((sample) => largeWorldTerrainKind(sample.x, sample.z)),
+    );
+
+    expect(usesContinentalChunkedTerrain()).toBe(true);
+    expect(spineHeight).toBeGreaterThan(foothillHeight + 8);
+    expect(spineHeight).toBeGreaterThan(distantHeight + 14);
+    expect(ridgeKinds.has("rock") || ridgeKinds.has("snow")).toBe(true);
+  });
+
   it("keeps the main Tellus chunked world island-shaped", () => {
     setChunkedWorldChunks({ w: 64, h: 64 });
     runtimeConfig.worldId = "chunked-64-main";

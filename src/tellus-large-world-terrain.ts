@@ -287,6 +287,7 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
 }
 
 function continentalBaseHeight(x: number, z: number): number {
+  const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
   const warpA = fbm2(x * 0.0028 + 91.7, z * 0.0028 - 33.1, 4, 17);
   const warpB = fbm2(x * 0.0028 - 12.4, z * 0.0028 + 70.6, 4, 29);
   const wx = x + warpA * 72;
@@ -305,7 +306,29 @@ function continentalBaseHeight(x: number, z: number): number {
     smoothstep(0.1, 0.68, Math.abs(fbm2(wx * 0.0019 - 22, wz * 0.0019 + 11, 4, 191))) * 3.4;
   const terrace = Math.sin((continent + ridgeFold) * 0.42) * smoothstep(7, 22, ridgeFold) * 1.1;
 
-  return 4.2 + continent + hills + detail + ridgeFold + brokenRidge + terrace - broadValley;
+  let templateLift = 0;
+  if (template === "ridge") {
+    const center = chunkedWorldCenter();
+    const rx = center ? x - center.x : x;
+    const rz = center ? z - center.z : z;
+    const along = rx * 0.74 + rz * 0.38;
+    const across = -rx * 0.38 + rz * 0.74;
+    const spineWarp =
+      Math.sin(along * 0.0048) * 92 +
+      fbm2(along * 0.0025 + 11, across * 0.0025 - 7, 4, 397) * 80;
+    const spineDistance = Math.abs(across - spineWarp);
+    const core = 1 - smoothstep(38, 230, spineDistance);
+    const foothills = 1 - smoothstep(180, 760, spineDistance);
+    const serration = ridgeNoise(along * 0.006 + 19, across * 0.004 - 23, 409);
+    const brokenCliffs = ridgeNoise(along * 0.012 - 41, across * 0.008 + 7, 421);
+    const valleyCut = smoothstep(250, 680, spineDistance) * 3.8;
+    templateLift =
+      Math.pow(Math.max(0, core), 1.35) * (24 + serration * 16) +
+      Math.pow(Math.max(0, foothills), 1.8) * (8 + brokenCliffs * 5) -
+      valleyCut;
+  }
+
+  return 4.2 + continent + hills + detail + ridgeFold + brokenRidge + terrace + templateLift - broadValley;
 }
 
 export function largeWorldBaseHeight(x: number, z: number): number {
@@ -374,6 +397,12 @@ export function largeWorldTerrainKind(
   }
 
   const slope = largeWorldSlope(x, z);
+  const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
+  if (template === "ridge") {
+    if (y > 34) return "snow";
+    if (y > 17 || slope > 0.58) return "rock";
+    if (y > 9 || slope > 0.42) return "dirt";
+  }
   if (y < -1.2) return "beach";
   if (y > 30) return "snow";
   if (slope > 1.05 || y > 21) return "rock";
