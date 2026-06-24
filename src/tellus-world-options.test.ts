@@ -53,7 +53,13 @@ describe("world option helpers", () => {
       "interior-studio",
       "grand-hall-shell",
       "evoflow-coral-canyon",
+      "evoflow-coral-canyon-child",
+      "evoflow-spires",
       "evoflow-glass-ridge",
+      "evoflow-lichen-basin",
+      "evoflow-copper-terraces",
+      "evoflow-basalt-teeth",
+      "evoflow-coral-fold",
     ]);
     for (const id of curatedIds) {
       expect(allIds.has(id), id).toBe(true);
