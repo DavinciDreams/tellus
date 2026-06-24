@@ -409,6 +409,14 @@ export function parseWorldTemplateId(
     : fallback;
 }
 
+export function parseOptionalWorldTemplateId(value: unknown): WorldTemplateId | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  return TEMPLATE_IDS.has(normalized as WorldTemplateId)
+    ? (normalized as WorldTemplateId)
+    : undefined;
+}
+
 export function templateForWorldId(
   worldId: string,
   fallback: WorldTemplateId = "tellus",

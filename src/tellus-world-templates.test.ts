@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultSkyboxUrlForTemplate,
+  parseOptionalWorldTemplateId,
   parseWorldTemplateId,
   resolveLandShapeConfig,
   templateForWorldId,
@@ -17,6 +18,13 @@ describe("world terrain templates", () => {
       expect(shape.shore.startRatio, template.id).toBeGreaterThan(0);
       expect(shape.detail.scale, template.id).toBeGreaterThan(0);
     }
+  });
+
+  it("does not coerce missing or unknown optional templates to Tellus", () => {
+    expect(parseOptionalWorldTemplateId(undefined)).toBeUndefined();
+    expect(parseOptionalWorldTemplateId("")).toBeUndefined();
+    expect(parseOptionalWorldTemplateId("not-a-template")).toBeUndefined();
+    expect(parseOptionalWorldTemplateId("flight-range")).toBe("flight-range");
   });
 
   it("infers style templates from descriptive world ids", () => {

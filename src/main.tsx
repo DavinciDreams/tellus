@@ -150,7 +150,7 @@ import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
 import { buildAgentMapLocation, resolveAgentMoveTarget } from "./tellus-agent-location";
-import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseWorldTemplateId, templateForWorldId } from "./tellus-world-templates";
+import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, templateForWorldId } from "./tellus-world-templates";
 import { evoflowTerrainSourceFor } from "./tellus-evoflow-terrains";
 import {
   ASSET_SURFACE_CONTEXTS,
@@ -8410,9 +8410,9 @@ function App(): React.ReactElement {
     if (!isRecord(value)) return {};
     const worldTemplate =
       typeof value.worldTemplate === "string" && value.worldTemplate.trim()
-        ? parseWorldTemplateId(value.worldTemplate)
+        ? parseOptionalWorldTemplateId(value.worldTemplate)
         : typeof value.world_template === "string" && value.world_template.trim()
-          ? parseWorldTemplateId(value.world_template)
+          ? parseOptionalWorldTemplateId(value.world_template)
           : undefined;
     const displayName =
       typeof value.displayName === "string" && value.displayName.trim()
@@ -8611,7 +8611,10 @@ function App(): React.ReactElement {
         /* no world metadata endpoint (or offline) */
       }
     }
-    const template = profile.worldTemplate ?? localProfile.worldTemplate ?? templateFallback;
+    let template = profile.worldTemplate ?? localProfile.worldTemplate ?? templateFallback;
+    if (templateFallback === "flight-range" && template === "tellus") {
+      template = templateFallback;
+    }
     const skyboxUrl = normalizeSkyboxUrl(
       profile.skyboxUrl ??
         localProfile.skyboxUrl ??
