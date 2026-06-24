@@ -9,6 +9,7 @@ import {
   largeWorldBaseHeight,
   largeWorldSlope,
   largeWorldTerrainKind,
+  usesContinentalChunkedTerrain,
 } from "./tellus-large-world-terrain";
 import { runtimeConfig } from "./tellus-runtime-config";
 import type { WorldTemplateId } from "./tellus-types";
@@ -30,11 +31,11 @@ function sampleGrid(step = 96, count = 12): Array<{ x: number; z: number; h: num
   return samples;
 }
 
-function islandSignature(template: WorldTemplateId): number[] {
-  setChunkedWorldChunks({ w: 64, h: 64 });
-  runtimeConfig.worldId = `chunked-64-${template}`;
+function islandSignature(template: WorldTemplateId, chunkSize = 24): number[] {
+  setChunkedWorldChunks({ w: chunkSize, h: chunkSize });
+  runtimeConfig.worldId = `chunked-${chunkSize}-${template}`;
   runtimeConfig.worldTemplate = template;
-  const center = { x: (64 * CHUNK_SPAN) / 2, z: (64 * CHUNK_SPAN) / 2 };
+  const center = { x: (chunkSize * CHUNK_SPAN) / 2, z: (chunkSize * CHUNK_SPAN) / 2 };
   const samples = [
     { x: center.x, z: center.z },
     { x: center.x - 28, z: center.z + 12 },
@@ -108,6 +109,31 @@ describe("large-world terrain", () => {
       SEA_LEVEL + 2,
     );
     expect(largeWorldTerrainKind(legacyLandPoint.x, legacyLandPoint.z)).not.toBe("water");
+  });
+
+  it("keeps large non-Tellus chunked templates continental", () => {
+    setChunkedWorldChunks({ w: 64, h: 64 });
+    runtimeConfig.worldId = "chunked-64-desert-test-1";
+    runtimeConfig.worldTemplate = "evoflow-copper-terraces";
+
+    const legacyLandPoint = { x: CHUNK_SPAN, z: CHUNK_SPAN };
+
+    expect(usesContinentalChunkedTerrain()).toBe(true);
+    expect(largeWorldBaseHeight(legacyLandPoint.x, legacyLandPoint.z)).toBeGreaterThan(
+      SEA_LEVEL + 2,
+    );
+    expect(largeWorldTerrainKind(legacyLandPoint.x, legacyLandPoint.z)).not.toBe("water");
+  });
+
+  it("keeps the main Tellus chunked world island-shaped", () => {
+    setChunkedWorldChunks({ w: 64, h: 64 });
+    runtimeConfig.worldId = "chunked-64-main";
+    runtimeConfig.worldTemplate = "tellus";
+
+    const oceanEdge = { x: CHUNK_SPAN, z: CHUNK_SPAN };
+
+    expect(usesContinentalChunkedTerrain()).toBe(false);
+    expect(largeWorldTerrainKind(oceanEdge.x, oceanEdge.z)).toBe("water");
   });
 
   it("gives restored chunked templates distinct island profiles", () => {

@@ -233,14 +233,28 @@ function terrainDetailHeight(shape: LandShapeConfig, cx: number, cz: number, r: 
 
 function chunkedIslandPoint(x: number, z: number): { cx: number; cz: number; r: number } | null {
   if (!getChunkedWorldChunks()) return null;
-  const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
-  if (template === "flight-range") return null;
+  if (usesContinentalChunkedTerrain()) return null;
   const center = chunkedWorldCenter();
   if (!center) return null;
   const scale = worldScaleForId(runtimeConfig.worldId);
   const cx = (x - center.x) / scale;
   const cz = (z - center.z) / scale;
   return { cx, cz, r: Math.hypot(cx, cz) };
+}
+
+export function usesContinentalChunkedTerrain(
+  worldId = runtimeConfig.worldId,
+  template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
+): boolean {
+  if (!getChunkedWorldChunks()) return false;
+  if (template === "tellus") return false;
+  if (template === "flight-range") return true;
+  const chunkedMatch = /^chunked-(\d+)(?:-(.*))?$/.exec(worldId.trim().toLowerCase());
+  if (!chunkedMatch) return false;
+  const chunkSize = Number(chunkedMatch[1]);
+  if (!Number.isFinite(chunkSize) || chunkSize < 64) return false;
+  const suffix = chunkedMatch[2] ?? "";
+  return !/\b(main|tellus|island)\b/.test(suffix);
 }
 
 function chunkedIslandBaseHeight(x: number, z: number): number | null {
