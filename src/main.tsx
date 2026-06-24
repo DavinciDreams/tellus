@@ -8886,7 +8886,7 @@ function App(): React.ReactElement {
             if (typeof world.worldId === "string" && world.worldId.length > 0) {
               const worldId = canonicalWorldId(world.worldId);
               const profile = parseWorldRenderProfile(w);
-              if (profile.displayName) rememberRemoteWorldProfile(worldId, profile);
+              if (Object.keys(profile).length > 0) rememberRemoteWorldProfile(worldId, profile);
               return worldId;
             }
             return undefined;
@@ -9052,6 +9052,36 @@ function App(): React.ReactElement {
     } finally {
       setDeletingWorld(false);
     }
+  };
+  const renderWorldDeleteButton = (target: string, className = "world-icon-button") => {
+    const armed = pendingDeleteWorld === target;
+    const serverDeleteAllowed = canDeleteWorld(target);
+    return (
+      <button
+        type="button"
+        aria-label={
+          armed
+            ? `Confirm ${serverDeleteAllowed ? "delete" : "remove"} world ${target}`
+            : `${serverDeleteAllowed ? "Delete" : "Remove"} world ${target}`
+        }
+        title={
+          armed
+            ? `Click again to ${serverDeleteAllowed ? "permanently delete" : "remove local entry"} "${target}"`
+            : `${serverDeleteAllowed ? "Delete" : "Remove local entry for"} "${target}"`
+        }
+        disabled={deletingWorld}
+        onClick={(event) => {
+          event.stopPropagation();
+          void deleteWorld(target);
+        }}
+        onBlur={() => {
+          if (pendingDeleteWorld === target) disarmDeleteWorld();
+        }}
+        className={`${className} ${armed ? "danger armed" : "danger"}`}
+      >
+        {deletingWorld ? "..." : armed ? "Confirm" : <Trash2 size={14} />}
+      </button>
+    );
   };
   const createNewWorld = () => {
     const displayName = newWorldName.trim().slice(0, 64);
@@ -10798,6 +10828,31 @@ function App(): React.ReactElement {
                   })()}
               </div>
             </div>
+            {worlds.length > 0 && (
+              <div className="world-control-group world-list-group">
+                <span>Worlds</span>
+                <div className="world-list" role="list" aria-label="Known worlds">
+                  {worlds.map((worldId) => {
+                    const active = worldId === (activeWorldId ?? runtimeConfig.worldId);
+                    return (
+                      <div key={worldId} className={active ? "world-list-row active" : "world-list-row"} role="listitem">
+                        <button
+                          type="button"
+                          className="world-list-switch"
+                          aria-current={active ? "true" : undefined}
+                          title={`Switch to ${worldDisplayName(worldId)}`}
+                          onClick={() => switchWorld(worldId)}
+                        >
+                          <span>{worldDisplayName(worldId)}</span>
+                          <small>{active ? "Current" : worldId}</small>
+                        </button>
+                        {renderWorldDeleteButton(worldId, "world-icon-button world-list-delete")}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="world-control-group world-name-edit-group">
               <span>Name</span>
               <button

@@ -295,6 +295,80 @@ textarea::placeholder {
   flex: 1 1 auto;
 }
 
+.world-list-group {
+  flex: 1 1 100%;
+  min-width: min(360px, 100%);
+}
+
+.world-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+  gap: 6px;
+  max-height: 170px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.world-list-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 5px;
+}
+
+.world-list-switch {
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 34%);
+  color: #f3ecd1;
+  padding: 5px 8px;
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.world-list-row.active .world-list-switch {
+  border-color: rgb(230 192 95 / 42%);
+  background: rgb(68 54 21 / 44%);
+}
+
+.world-list-switch:hover {
+  border-color: rgb(230 192 95 / 45%);
+  color: #ffe9a8;
+}
+
+.world-list-switch span,
+.world-list-switch small {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-list-switch span {
+  font: 800 12px/1.1 ui-sans-serif, system-ui;
+}
+
+.world-list-switch small {
+  color: rgb(223 231 216 / 62%);
+  font: 700 10px/1 ui-sans-serif, system-ui;
+}
+
+.world-list-delete {
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+}
+
+.world-list-delete.armed {
+  width: 78px;
+}
+
 .world-name-edit-group {
   flex: 1 1 180px;
 }
