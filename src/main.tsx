@@ -8510,6 +8510,23 @@ function App(): React.ReactElement {
     }
   };
 
+  const rememberRemoteWorldProfile = (worldId: string, profile: WorldRenderProfile) => {
+    const existing = loadLocalWorldProfiles()[worldId] ?? {};
+    const merged: WorldRenderProfile = { ...profile };
+    if (existing.displayName !== undefined) merged.displayName = existing.displayName;
+    if (existing.worldTemplate !== undefined) merged.worldTemplate = existing.worldTemplate;
+    if (existing.skyboxUrl !== undefined) merged.skyboxUrl = existing.skyboxUrl;
+    if (existing.landShape !== undefined) merged.landShape = existing.landShape;
+    if (existing.isPublic !== undefined) merged.isPublic = existing.isPublic;
+    if (existing.canDelete !== undefined) merged.canDelete = existing.canDelete;
+    if (existing.deleteReason !== undefined) merged.deleteReason = existing.deleteReason;
+    if (existing.dayNightMode !== undefined) merged.dayNightMode = existing.dayNightMode;
+    if (existing.dayNightCycleMs !== undefined) merged.dayNightCycleMs = existing.dayNightCycleMs;
+    if (existing.dayNightStart !== undefined) merged.dayNightStart = existing.dayNightStart;
+    if (existing.lightingMood !== undefined) merged.lightingMood = existing.lightingMood;
+    rememberWorldProfile(worldId, merged);
+  };
+
   const fallbackWorldDisplayName = (worldId: string): string => {
     const chunkedMatch = /^chunked-\d+-(.+)$/i.exec(worldId.trim());
     if (chunkedMatch?.[1]) return chunkedMatch[1];
@@ -8605,7 +8622,7 @@ function App(): React.ReactElement {
         );
         if (response.ok) {
           profile = parseWorldRenderProfile(await response.json());
-          rememberWorldProfile(worldId, profile);
+          rememberRemoteWorldProfile(worldId, profile);
         }
       } catch {
         /* no world metadata endpoint (or offline) */
@@ -8714,7 +8731,7 @@ function App(): React.ReactElement {
             if (typeof world.worldId === "string" && world.worldId.length > 0) {
               const worldId = canonicalWorldId(world.worldId);
               const profile = parseWorldRenderProfile(w);
-              if (profile.displayName) rememberWorldProfile(worldId, profile);
+              if (profile.displayName) rememberRemoteWorldProfile(worldId, profile);
               return worldId;
             }
             return undefined;
