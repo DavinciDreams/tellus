@@ -609,7 +609,9 @@ textarea::placeholder {
   display: none;
 }
 
-.world-lighting-controls {
+.world-lighting-controls,
+.world-water-controls,
+.world-tuning-controls {
   display: flex;
   align-items: end;
   flex-wrap: wrap;
@@ -617,6 +619,26 @@ textarea::placeholder {
   padding: 5px 6px;
   border: 1px solid rgb(255 255 255 / 10%);
   background: rgb(0 0 0 / 24%);
+}
+
+.world-tuning-controls {
+  align-items: stretch;
+  color: #dfe7d8;
+}
+
+.world-tuning-controls summary {
+  cursor: pointer;
+  color: var(--hud-gold);
+  font: 800 11px/1.1 ui-sans-serif, system-ui;
+  padding: 4px 2px;
+}
+
+.world-tuning-grid {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 5px;
 }
 
 .world-lighting-control {
@@ -651,6 +673,11 @@ textarea::placeholder {
 
 .world-lighting-control input {
   width: 72px;
+}
+
+.world-lighting-control.slider input {
+  width: 92px;
+  padding: 0;
 }
 
 .world-lighting-control :disabled {

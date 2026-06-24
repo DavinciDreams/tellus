@@ -22,6 +22,7 @@ import type {
   GeneratedThing,
   MaterialWithTextureMaps,
   Vec3,
+  WaterSettings,
 } from "./tellus-types";
 import {
   DISTANT_TERRAIN_SEGMENTS,
@@ -168,21 +169,47 @@ export function createFloatingRim(): THREE.Mesh {
   return new THREE.Mesh(geometry, material);
 }
 
-export function createFallbackOceanMaterial(): THREE.MeshBasicMaterial {
+const DEFAULT_WATER_SETTINGS: WaterSettings = {
+  style: "lagoon",
+  opacity: 0.72,
+  waveStrength: 1,
+};
+
+const WATER_STYLE_COLORS: Record<WaterSettings["style"], { deep: number; shallow: number; foam: number }> = {
+  clear: { deep: 0x2b8ec4, shallow: 0xa7e7ff, foam: 0xe8fbff },
+  lagoon: { deep: 0x0476b7, shallow: 0x7bd7f5, foam: 0xb7f6ff },
+  deep: { deep: 0x07356e, shallow: 0x2c83b9, foam: 0x9fdff7 },
+  dream: { deep: 0x5b60c8, shallow: 0xf0a7f7, foam: 0xfff1ff },
+};
+
+function resolvedWaterSettings(settings?: Partial<WaterSettings>): WaterSettings {
+  return {
+    style: settings?.style ?? DEFAULT_WATER_SETTINGS.style,
+    opacity: clamp(settings?.opacity ?? DEFAULT_WATER_SETTINGS.opacity, 0.25, 0.92),
+    waveStrength: clamp(settings?.waveStrength ?? DEFAULT_WATER_SETTINGS.waveStrength, 0, 2),
+  };
+}
+
+export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): THREE.MeshBasicMaterial {
+  const water = resolvedWaterSettings(settings);
+  const palette = WATER_STYLE_COLORS[water.style];
   return new THREE.MeshBasicMaterial({
-    color: 0x49a8d8,
+    color: new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.38),
     transparent: true,
-    opacity: 0.72,
+    opacity: water.opacity,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
 }
 
-export function createOceanSurface(useBackdropWater: boolean): THREE.Mesh {
+export function createOceanSurface(
+  useBackdropWater: boolean,
+  settings?: Partial<WaterSettings>,
+): THREE.Mesh {
   const geometry = new THREE.CircleGeometry(OCEAN_RADIUS, 192);
   const material = useBackdropWater
-    ? createBackdropWaterMaterial()
-    : createFallbackOceanMaterial();
+    ? createBackdropWaterMaterial(settings)
+    : createFallbackOceanMaterial(settings);
   const ocean = new THREE.Mesh(geometry, material);
   ocean.name = "tellus-surrounding-ocean";
   ocean.rotation.x = -Math.PI / 2;
@@ -449,38 +476,44 @@ export function createMoonCloudVeil(): {
   return { group, materials };
 }
 
-export function createAnimatedWaterMaterial(): MeshBasicNodeMaterial {
-  const t = time.mul(0.62);
+export function createAnimatedWaterMaterial(settings?: Partial<WaterSettings>): MeshBasicNodeMaterial {
+  const water = resolvedWaterSettings(settings);
+  const palette = WATER_STYLE_COLORS[water.style];
+  const wave = 0.18 + water.waveStrength * 0.82;
+  const t = time.mul(0.62 * wave);
   const waterUV = positionWorld.xzy;
-  const broadFlow = mx_worley_noise_float(waterUV.mul(0.36).add(t.mul(0.52)));
+  const broadFlow = mx_worley_noise_float(waterUV.mul(0.26 + wave * 0.1).add(t.mul(0.52)));
   const waveCells = mx_worley_noise_float(
-    waterUV.mul(1.35).add(broadFlow.mul(0.38)).add(t),
+    waterUV.mul(0.95 + wave * 0.4).add(broadFlow.mul(0.28 + wave * 0.1)).add(t),
   );
-  const surfaceIntensity = waveCells.mul(broadFlow).mul(1.18);
-  const waterColor = surfaceIntensity.mix(color(0x0476b7), color(0x7bd7f5));
+  const surfaceIntensity = waveCells.mul(broadFlow).mul(0.86 + wave * 0.32);
+  const waterColor = surfaceIntensity.mix(color(palette.deep), color(palette.shallow));
   const illuminatedColor = waterColor.add(
-    color(0xb7f6ff).mul(surfaceIntensity.mul(0.12)),
+    color(palette.foam).mul(surfaceIntensity.mul(0.12 * wave)),
   );
   const material = new MeshBasicNodeMaterial();
   material.colorNode = illuminatedColor;
   material.transparent = true;
-  material.opacity = 0.72;
+  material.opacity = water.opacity;
   material.depthWrite = false;
   material.side = THREE.DoubleSide;
   return material;
 }
 
-export function createBackdropWaterMaterial(): MeshBasicNodeMaterial {
-  const t = time.mul(0.62);
+export function createBackdropWaterMaterial(settings?: Partial<WaterSettings>): MeshBasicNodeMaterial {
+  const water = resolvedWaterSettings(settings);
+  const palette = WATER_STYLE_COLORS[water.style];
+  const wave = 0.18 + water.waveStrength * 0.82;
+  const t = time.mul(0.62 * wave);
   const waterUV = positionWorld.xzy;
-  const broadFlow = mx_worley_noise_float(waterUV.mul(0.36).add(t.mul(0.52)));
+  const broadFlow = mx_worley_noise_float(waterUV.mul(0.26 + wave * 0.1).add(t.mul(0.52)));
   const waveCells = mx_worley_noise_float(
-    waterUV.mul(1.35).add(broadFlow.mul(0.38)).add(t),
+    waterUV.mul(0.95 + wave * 0.4).add(broadFlow.mul(0.28 + wave * 0.1)).add(t),
   );
-  const surfaceIntensity = waveCells.mul(broadFlow).mul(1.18);
-  const waterColor = surfaceIntensity.mix(color(0x0476b7), color(0x7bd7f5));
+  const surfaceIntensity = waveCells.mul(broadFlow).mul(0.86 + wave * 0.32);
+  const waterColor = surfaceIntensity.mix(color(palette.deep), color(palette.shallow));
   const illuminatedColor = waterColor.add(
-    color(0xb7f6ff).mul(surfaceIntensity.mul(0.12)),
+    color(palette.foam).mul(surfaceIntensity.mul(0.12 * wave)),
   );
 
   const depth = linearDepth();
@@ -489,7 +522,7 @@ export function createBackdropWaterMaterial(): MeshBasicNodeMaterial {
   const refractionUV = screenUV.add(
     vec2(
       broadFlow.sub(0.5).mul(0.0035),
-      surfaceIntensity.sub(0.5).mul(0.055),
+      surfaceIntensity.sub(0.5).mul(0.03 + wave * 0.025),
     ),
   );
   const depthTestForRefraction = linearDepth(
@@ -507,6 +540,7 @@ export function createBackdropWaterMaterial(): MeshBasicNodeMaterial {
   );
   material.backdropAlphaNode = depthRefraction.oneMinus().mul(0.86);
   material.transparent = true;
+  material.opacity = water.opacity;
   material.depthWrite = false;
   material.side = THREE.DoubleSide;
   return material;
@@ -924,6 +958,7 @@ export function createPondWater(options: {
   radius?: number;
   waterLevel?: number;
   animated?: boolean;
+  waterSettings?: Partial<WaterSettings>;
 } = {}): THREE.Group {
   const group = new THREE.Group();
   group.name = "tellus-pond-water";
@@ -932,14 +967,16 @@ export function createPondWater(options: {
   const center = options.center ?? POND_CENTER;
   const radius = options.radius ?? POND_RADIUS;
   const waterLevel = options.waterLevel ?? pondWaterLevel();
+  const waterSettings = resolvedWaterSettings(options.waterSettings);
+  const palette = WATER_STYLE_COLORS[waterSettings.style];
   const water = new THREE.Mesh(
     new THREE.CircleGeometry(radius, 96),
     options.animated
-      ? createBackdropWaterMaterial()
+      ? createBackdropWaterMaterial(waterSettings)
       : new THREE.MeshBasicMaterial({
-          color: 0x6fb7d7,
+          color: new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.55),
           transparent: true,
-          opacity: 0.55,
+          opacity: Math.min(0.86, waterSettings.opacity * 0.78),
           side: THREE.DoubleSide,
           depthWrite: false,
         }),
@@ -950,9 +987,9 @@ export function createPondWater(options: {
   water.renderOrder = 2;
 
   const rippleMaterial = new THREE.MeshBasicMaterial({
-    color: 0xd3f2ff,
+    color: palette.foam,
     transparent: true,
-    opacity: 0.3,
+    opacity: 0.18 + waterSettings.waveStrength * 0.18,
     side: THREE.DoubleSide,
     depthWrite: false,
   });

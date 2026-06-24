@@ -122,6 +122,14 @@ export type LightingMood =
   | "cool-dream"
   | "moonlit"
   | "dramatic-sunset";
+export type WaterStyle = "clear" | "lagoon" | "deep" | "dream";
+
+export interface WaterSettings {
+  style: WaterStyle;
+  opacity: number;
+  waveStrength: number;
+}
+
 export type GeneratedKind =
   | "tree"
   | "flower"
@@ -286,6 +294,7 @@ export interface TellusWorldApi {
   sculptTerrain(mode: TerrainEditMode): void;
   importGeneratedThings(things: WorldGeneratedThing[]): void;
   setSkyboxUrl(url: string): Promise<string | null>;
+  setWaterSettings(settings: WaterSettings): void;
   setGenerationProvider(provider: GenerationProvider): void;
   setPlayerGenerationProvider(provider: RoleGenerationProvider): void;
   setAgentGenerationProvider(provider: RoleGenerationProvider): void;
@@ -380,6 +389,7 @@ export interface TellusRuntimeConfig {
   dayNightStart: number;
   dayNightMode: DayNightMode;
   lightingMood: LightingMood;
+  waterSettings: WaterSettings;
   // When true, fold non-selected static (no-animation) duplicate generated placements that share a modelUrl
   // into a shared THREE.InstancedMesh per sub-mesh to cut draw calls. Default OFF — opt in via
   // VITE_TELLUS_INSTANCE_STATIC=true or a runtime-config `instanceStaticDuplicates: true`.

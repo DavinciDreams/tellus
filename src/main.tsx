@@ -134,10 +134,10 @@ import {
   type PortalEntered,
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
-import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood } from "./tellus-types";
+import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood, WaterSettings, WaterStyle } from "./tellus-types";
 import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
-import { runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig, worldApiUrl } from "./tellus-runtime-config";
+import { parseWaterSettings, runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig, worldApiUrl } from "./tellus-runtime-config";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, toAssetId } from "./tellus-urls-identity";
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
@@ -639,7 +639,7 @@ function createTellusWorld(
   // it (operator: range over thickness; worlds get larger for less).
   const terrainRenderSegments = useWebGPU ? 224 : 144;
   // Rich TSL water on the WebGPU path; WebGL keeps the lightweight fallback material.
-  const ocean = createOceanSurface(useWebGPU);
+  const ocean = createOceanSurface(useWebGPU, runtimeConfig.waterSettings);
   const archipelago = createDistantArchipelago(useWebGPU);
   let chunkRenderer: ChunkRenderer | null = null;
   let lastActiveChunkCount = -1; // re-ground placed assets when the active chunk set changes
@@ -807,6 +807,7 @@ function createTellusWorld(
     radius: waterFeatureRadius,
     waterLevel: waterFeatureLevel(),
     animated: useWebGPU,
+    waterSettings: runtimeConfig.waterSettings,
   });
   const flowerPatchGroup = new THREE.Group();
   flowerPatchGroup.name = "tellus-flower-patches";
@@ -1668,6 +1669,32 @@ function createTellusWorld(
     if (ripples) ripples.position.set(waterFeatureCenter.x, waterLevel + 0.035, waterFeatureCenter.z);
     const shore = pondWater.getObjectByName("tellus-pond-shore");
     if (shore) shore.position.set(waterFeatureCenter.x, waterLevel - 0.035, waterFeatureCenter.z);
+  };
+
+  const setWaterSettings = (settings: WaterSettings) => {
+    runtimeConfig.waterSettings = parseWaterSettings(settings, runtimeConfig.waterSettings);
+    const previousOceanMaterial = ocean.material;
+    ocean.material = useWebGPU
+      ? createBackdropWaterMaterial(runtimeConfig.waterSettings)
+      : createFallbackOceanMaterial(runtimeConfig.waterSettings);
+    disposeMaterial(previousOceanMaterial);
+
+    const rebuiltPond = createPondWater({
+      center: waterFeatureCenter,
+      radius: waterFeatureRadius,
+      waterLevel: waterFeatureLevel(),
+      animated: useWebGPU,
+      waterSettings: runtimeConfig.waterSettings,
+    });
+    for (const child of [...pondWater.children]) {
+      pondWater.remove(child);
+      disposeObject(child);
+    }
+    for (const child of [...rebuiltPond.children]) {
+      rebuiltPond.remove(child);
+      pondWater.add(child);
+    }
+    updatePondSurfacePosition();
   };
 
   const refreshFlowerPatches = () => {
@@ -7026,6 +7053,7 @@ function createTellusWorld(
     sculptTerrain,
     importGeneratedThings,
     setSkyboxUrl,
+    setWaterSettings,
     setGenerationProvider,
     setPlayerGenerationProvider,
     setAgentGenerationProvider,
@@ -7268,6 +7296,38 @@ const avatarSliderToScale = (step: number): number => {
 };
 const avatarScaleLabel = (scale: number): string =>
   `${scale >= 1 ? scale.toFixed(1) : scale.toFixed(2)}×`;
+
+const WATER_STYLE_OPTIONS: Array<{ id: WaterStyle; label: string }> = [
+  { id: "lagoon", label: "Lagoon" },
+  { id: "clear", label: "Clear" },
+  { id: "deep", label: "Deep" },
+  { id: "dream", label: "Dream" },
+];
+
+interface TerrainTuningDraft {
+  elevation: number;
+  detail: number;
+  ridge: number;
+}
+
+const terrainTuningFromLandShape = (landShape?: LandShapeOverrides): TerrainTuningDraft => ({
+  elevation: clamp(landShape?.baseOffset ?? 0, -4, 6),
+  detail: clamp(landShape?.detail?.amplitude ?? 1, 0, 3),
+  ridge: clamp(landShape?.detail?.ridgeAmplitude ?? 0.8, 0, 3),
+});
+
+const landShapeFromTerrainTuning = (
+  tuning: TerrainTuningDraft,
+  existing?: LandShapeOverrides,
+): LandShapeOverrides => ({
+  ...existing,
+  baseOffset: clamp(tuning.elevation, -4, 6),
+  detail: {
+    ...existing?.detail,
+    amplitude: clamp(tuning.detail, 0, 3),
+    ridgeAmplitude: clamp(tuning.ridge, 0, 3),
+  },
+});
 
 // One avatar-picker grid tile: store thumbnail when it loads, else a colored-initial fallback
 // ("classic" has no store thumbnail and always renders the initial tile). Click = select.
@@ -8415,6 +8475,9 @@ function App(): React.ReactElement {
   const [newWorldLightingMood, setNewWorldLightingMood] = useState<LightingMood>(
     runtimeConfig.lightingMood,
   );
+  const [newWorldWaterSettings, setNewWorldWaterSettings] = useState<WaterSettings>(
+    runtimeConfig.waterSettings,
+  );
   const [advancedWorldTemplatesOpen, setAdvancedWorldTemplatesOpen] = useState(false);
   const [currentWorldTemplate, setCurrentWorldTemplate] = useState<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
@@ -8432,6 +8495,12 @@ function App(): React.ReactElement {
   );
   const [currentLightingMood, setCurrentLightingMood] = useState<LightingMood>(
     runtimeConfig.lightingMood,
+  );
+  const [currentWaterSettings, setCurrentWaterSettings] = useState<WaterSettings>(
+    runtimeConfig.waterSettings,
+  );
+  const [terrainTuningDraft, setTerrainTuningDraft] = useState<TerrainTuningDraft>(
+    terrainTuningFromLandShape(runtimeConfig.landShape),
   );
   const [worldRenderRevision, setWorldRenderRevision] = useState(0);
   const [worldCreateNote, setWorldCreateNote] = useState<string | null>(null);
@@ -8451,6 +8520,7 @@ function App(): React.ReactElement {
   const NEW_WORLD_CHUNK_SIZE_KEY = "tellus.newWorldChunkSize";
   const NEW_WORLD_DAY_NIGHT_MODE_KEY = "tellus.newWorldDayNightMode";
   const NEW_WORLD_LIGHTING_MOOD_KEY = "tellus.newWorldLightingMood";
+  const NEW_WORLD_WATER_SETTINGS_KEY = "tellus.newWorldWaterSettings";
   const defaultWorldTemplateRef = useRef<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
   );
@@ -8469,6 +8539,7 @@ function App(): React.ReactElement {
     dayNightCycleMs?: number;
     dayNightStart?: number;
     lightingMood?: LightingMood;
+    waterSettings?: WaterSettings;
   }
 
   const parseWorldRenderProfile = (value: unknown): WorldRenderProfile => {
@@ -8535,6 +8606,11 @@ function App(): React.ReactElement {
       lightingMoodValue === undefined
         ? undefined
         : parseLightingMood(lightingMoodValue, runtimeConfig.lightingMood);
+    const waterSettingsValue = value.waterSettings ?? value.water_settings;
+    const waterSettings =
+      waterSettingsValue === undefined
+        ? undefined
+        : parseWaterSettings(waterSettingsValue, runtimeConfig.waterSettings);
     return {
       displayName,
       worldTemplate,
@@ -8547,6 +8623,7 @@ function App(): React.ReactElement {
       dayNightCycleMs,
       dayNightStart,
       lightingMood,
+      waterSettings,
     };
   };
 
@@ -8589,6 +8666,7 @@ function App(): React.ReactElement {
     if (existing.dayNightCycleMs !== undefined) merged.dayNightCycleMs = existing.dayNightCycleMs;
     if (existing.dayNightStart !== undefined) merged.dayNightStart = existing.dayNightStart;
     if (existing.lightingMood !== undefined) merged.lightingMood = existing.lightingMood;
+    if (existing.waterSettings !== undefined) merged.waterSettings = existing.waterSettings;
     rememberWorldProfile(worldId, merged);
   };
 
@@ -8672,6 +8750,7 @@ function App(): React.ReactElement {
     dayNightCycleMs: number;
     dayNightStart: number;
     lightingMood: LightingMood;
+    waterSettings: WaterSettings;
   }> => {
     const templateFallback = templateForWorldId(
       worldId,
@@ -8750,6 +8829,8 @@ function App(): React.ReactElement {
         profile.dayNightStart ?? localProfile.dayNightStart ?? runtimeConfig.dayNightStart,
       lightingMood:
         profile.lightingMood ?? localProfile.lightingMood ?? runtimeConfig.lightingMood,
+      waterSettings:
+        profile.waterSettings ?? localProfile.waterSettings ?? runtimeConfig.waterSettings,
     };
   };
   const loadKnownWorlds = (): string[] => {
@@ -8894,10 +8975,7 @@ function App(): React.ReactElement {
   // any world and owners to delete only private owned worlds.
   const deleteWorld = async (id: string) => {
     if (!id || deletingWorld) return;
-    if (!canDeleteWorld(id)) {
-      showWorldNote("Delete not allowed for this world", 4000);
-      return;
-    }
+    const serverDeleteAllowed = canDeleteWorld(id);
     if (pendingDeleteWorld !== id) {
       // First click: arm the confirm (auto-disarms after a short window).
       if (pendingDeleteTimerRef.current !== undefined) {
@@ -8914,9 +8992,31 @@ function App(): React.ReactElement {
     disarmDeleteWorld();
     const label = worldDisplayName(id);
     const confirmed = window.confirm(
-      `Permanently delete "${label}"?\n\nThis removes the saved world from the template/world picker and cannot be undone.`,
+      serverDeleteAllowed
+        ? `Permanently delete "${label}"?\n\nThis removes the saved world from the template/world picker and cannot be undone.`
+        : `Remove "${label}" from your local world picker?\n\nYou are not authorized to delete it from the server, but you can hide this local/test entry.`,
     );
     if (!confirmed) return;
+    const moveAwayFromRemovedWorld = async () => {
+      if (id === (activeWorldId ?? runtimeConfig.worldId)) {
+        const fallback =
+          worlds.find((w) => w !== id) ??
+          (runtimeConfig.worldId !== id ? runtimeConfig.worldId : "");
+        if (fallback) {
+          switchWorld(fallback);
+        } else {
+          await refreshWorldList();
+        }
+      } else {
+        await refreshWorldList();
+      }
+    };
+    if (!serverDeleteAllowed) {
+      forgetWorld(id);
+      await moveAwayFromRemovedWorld();
+      showWorldNote(`Removed local world "${id}"`);
+      return;
+    }
     const token = getSession()?.token;
     setDeletingWorld(true);
     try {
@@ -8945,18 +9045,7 @@ function App(): React.ReactElement {
       }
       forgetWorld(id);
       // If the deleted world was active, get the user out of it before it vanishes from the list.
-      if (id === (activeWorldId ?? runtimeConfig.worldId)) {
-        const fallback =
-          worlds.find((w) => w !== id) ??
-          (runtimeConfig.worldId !== id ? runtimeConfig.worldId : "");
-        if (fallback) {
-          switchWorld(fallback);
-        } else {
-          await refreshWorldList();
-        }
-      } else {
-        await refreshWorldList();
-      }
+      await moveAwayFromRemovedWorld();
       showWorldNote(`Deleted world "${id}"`);
     } catch {
       showWorldNote("Delete failed: network error", 4000);
@@ -8996,6 +9085,7 @@ function App(): React.ReactElement {
       dayNightCycleMs: currentDayNightCycleMs,
       dayNightStart: runtimeConfig.dayNightStart,
       lightingMood: newWorldLightingMood,
+      waterSettings: newWorldWaterSettings,
     });
     const enter = () => {
       setNewWorldPanelOpen(false);
@@ -9019,6 +9109,7 @@ function App(): React.ReactElement {
             dayNightCycleMs: currentDayNightCycleMs,
             dayNightStart: runtimeConfig.dayNightStart,
             lightingMood: newWorldLightingMood,
+            waterSettings: newWorldWaterSettings,
           }),
         },
       )
@@ -9034,6 +9125,7 @@ function App(): React.ReactElement {
     setNewWorldPrivate(currentWorldPrivate);
     setNewWorldDayNightMode(currentDayNightMode);
     setNewWorldLightingMood(currentLightingMood);
+    setNewWorldWaterSettings(currentWaterSettings);
     setNewWorldName(`Copy of ${worldDisplayName(activeWorldId ?? runtimeConfig.worldId)}`.slice(0, 64));
     setNewWorldPanelOpen(true);
     if (worldCreateNoteTimerRef.current !== undefined) {
@@ -9090,6 +9182,7 @@ function App(): React.ReactElement {
     setCurrentWorldTemplate(next);
     runtimeConfig.worldTemplate = next;
     runtimeConfig.landShape = undefined;
+    setTerrainTuningDraft(terrainTuningFromLandShape(undefined));
     rememberWorldProfile(activeWorldId, { worldTemplate: next, landShape: undefined });
     applyWorldTerrainTemplate(next, undefined);
     setWorldRenderRevision((revision) => revision + 1);
@@ -9142,6 +9235,63 @@ function App(): React.ReactElement {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(profile),
+        },
+      ).catch(() => undefined);
+    }
+  };
+  const updateActiveWorldWater = (patch: Partial<WaterSettings>) => {
+    if (!activeWorldId) return;
+    const next = parseWaterSettings({ ...currentWaterSettings, ...patch }, currentWaterSettings);
+    setCurrentWaterSettings(next);
+    setNewWorldWaterSettings(next);
+    runtimeConfig.waterSettings = next;
+    worldRef.current?.setWaterSettings(next);
+    rememberWorldProfile(activeWorldId, { waterSettings: next });
+    if (runtimeConfig.worldApiBase) {
+      void fetch(
+        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ waterSettings: next }),
+        },
+      ).catch(() => undefined);
+    }
+  };
+  const applyActiveTerrainTuning = () => {
+    if (!activeWorldId) return;
+    const landShape = landShapeFromTerrainTuning(terrainTuningDraft, runtimeConfig.landShape);
+    runtimeConfig.landShape = landShape;
+    rememberWorldProfile(activeWorldId, { landShape });
+    applyWorldTerrainTemplate(currentWorldTemplate, landShape);
+    setWorldRenderRevision((revision) => revision + 1);
+    showWorldNote("Terrain tuning applied");
+    if (runtimeConfig.worldApiBase) {
+      void fetch(
+        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ landShape }),
+        },
+      ).catch(() => undefined);
+    }
+  };
+  const resetActiveTerrainTuning = () => {
+    setTerrainTuningDraft(terrainTuningFromLandShape(undefined));
+    if (!activeWorldId) return;
+    runtimeConfig.landShape = undefined;
+    rememberWorldProfile(activeWorldId, { landShape: undefined });
+    applyWorldTerrainTemplate(currentWorldTemplate, undefined);
+    setWorldRenderRevision((revision) => revision + 1);
+    showWorldNote("Terrain tuning reset");
+    if (runtimeConfig.worldApiBase) {
+      void fetch(
+        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ landShape: null }),
         },
       ).catch(() => undefined);
     }
@@ -9555,6 +9705,7 @@ function App(): React.ReactElement {
           const savedChunkSize = window.localStorage.getItem(NEW_WORLD_CHUNK_SIZE_KEY);
           const savedDayNightMode = window.localStorage.getItem(NEW_WORLD_DAY_NIGHT_MODE_KEY);
           const savedLightingMood = window.localStorage.getItem(NEW_WORLD_LIGHTING_MOOD_KEY);
+          const savedWaterSettings = window.localStorage.getItem(NEW_WORLD_WATER_SETTINGS_KEY);
           setNewWorldTemplate(
             parseWorldTemplateId(savedTemplate, defaultWorldTemplateRef.current),
           );
@@ -9567,6 +9718,7 @@ function App(): React.ReactElement {
           setNewWorldPrivate(savedPrivate === "1");
           setNewWorldDayNightMode(parseDayNightMode(savedDayNightMode, runtimeConfig.dayNightMode));
           setNewWorldLightingMood(parseLightingMood(savedLightingMood, runtimeConfig.lightingMood));
+          setNewWorldWaterSettings(parseWaterSettings(savedWaterSettings ? JSON.parse(savedWaterSettings) : undefined));
           if (savedChunkSize) {
             const parsed = Math.round(Number(savedChunkSize));
             if (Number.isFinite(parsed)) {
@@ -9583,6 +9735,7 @@ function App(): React.ReactElement {
           setNewWorldChunkSize(8);
           setNewWorldDayNightMode(runtimeConfig.dayNightMode);
           setNewWorldLightingMood(runtimeConfig.lightingMood);
+          setNewWorldWaterSettings(runtimeConfig.waterSettings);
         }
         const sharedLocation = parseSharedLocation();
         sharedLocationRef.current = sharedLocation;
@@ -9622,6 +9775,7 @@ function App(): React.ReactElement {
       window.localStorage.setItem(NEW_WORLD_CHUNK_SIZE_KEY, String(newWorldChunkSize));
       window.localStorage.setItem(NEW_WORLD_DAY_NIGHT_MODE_KEY, newWorldDayNightMode);
       window.localStorage.setItem(NEW_WORLD_LIGHTING_MOOD_KEY, newWorldLightingMood);
+      window.localStorage.setItem(NEW_WORLD_WATER_SETTINGS_KEY, JSON.stringify(newWorldWaterSettings));
     } catch {
       /* ignore */
     }
@@ -9633,6 +9787,7 @@ function App(): React.ReactElement {
     newWorldChunkSize,
     newWorldDayNightMode,
     newWorldLightingMood,
+    newWorldWaterSettings,
   ]);
 
   useEffect(() => {
@@ -9661,6 +9816,9 @@ function App(): React.ReactElement {
         setCurrentDayNightMode(profile.dayNightMode);
         setCurrentDayNightCycleMs(profile.dayNightCycleMs);
         setCurrentLightingMood(profile.lightingMood);
+        setCurrentWaterSettings(profile.waterSettings);
+        setNewWorldWaterSettings(profile.waterSettings);
+        setTerrainTuningDraft(terrainTuningFromLandShape(profile.landShape));
         runtimeConfig.worldTemplate = profile.template;
         runtimeConfig.skyboxUrl = profile.skyboxUrl;
         runtimeConfig.landShape = profile.landShape;
@@ -9668,6 +9826,7 @@ function App(): React.ReactElement {
         runtimeConfig.dayNightCycleMs = profile.dayNightCycleMs;
         runtimeConfig.dayNightStart = profile.dayNightStart;
         runtimeConfig.lightingMood = profile.lightingMood;
+        runtimeConfig.waterSettings = profile.waterSettings;
         applyWorldTerrainTemplate(profile.template, profile.landShape);
         // World scale BEFORE any terrain/state work: derived from the world NAME (large-* → 3×,
         // mega-* → 5×) so every client — and the Hyades terrain port — agrees with no protocol change.
@@ -10608,18 +10767,23 @@ function App(): React.ReactElement {
                     </option>
                   ))}
                 </select>
-                {activeWorldId && canDeleteWorld(activeWorldId) &&
+                {activeWorldId &&
                   (() => {
                     const target = activeWorldId;
                     const armed = pendingDeleteWorld === target;
+                    const serverDeleteAllowed = canDeleteWorld(target);
                     return (
                       <button
                         type="button"
-                        aria-label={armed ? `Confirm delete world ${target}` : `Delete world ${target}`}
+                        aria-label={
+                          armed
+                            ? `Confirm ${serverDeleteAllowed ? "delete" : "remove"} world ${target}`
+                            : `${serverDeleteAllowed ? "Delete" : "Remove"} world ${target}`
+                        }
                         title={
                           armed
-                            ? `Click again to permanently delete "${target}"`
-                            : `Delete world "${target}"`
+                            ? `Click again to ${serverDeleteAllowed ? "permanently delete" : "remove local entry"} "${target}"`
+                            : `${serverDeleteAllowed ? "Delete" : "Remove local entry for"} "${target}"`
                         }
                         disabled={deletingWorld}
                         onClick={() => void deleteWorld(target)}
@@ -10742,6 +10906,119 @@ function App(): React.ReactElement {
                 </select>
               </label>
             </div>
+            <div className="world-water-controls" aria-label="Water settings">
+              <label className="world-lighting-control">
+                <span>Water</span>
+                <select
+                  aria-label="Water style"
+                  title="Water color and clarity style"
+                  value={currentWaterSettings.style}
+                  onChange={(e) =>
+                    updateActiveWorldWater({ style: e.target.value as WaterStyle })
+                  }
+                >
+                  {WATER_STYLE_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="world-lighting-control slider">
+                <span>Opacity</span>
+                <input
+                  type="range"
+                  min={0.25}
+                  max={0.92}
+                  step={0.01}
+                  aria-label="Water opacity"
+                  value={currentWaterSettings.opacity}
+                  onChange={(e) => updateActiveWorldWater({ opacity: Number(e.target.value) })}
+                />
+              </label>
+              <label className="world-lighting-control slider">
+                <span>Waves</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  aria-label="Water wave strength"
+                  value={currentWaterSettings.waveStrength}
+                  onChange={(e) => updateActiveWorldWater({ waveStrength: Number(e.target.value) })}
+                />
+              </label>
+            </div>
+            <details className="world-tuning-controls">
+              <summary>Terrain tune</summary>
+              <div className="world-tuning-grid">
+                <label className="world-lighting-control slider">
+                  <span>Height</span>
+                  <input
+                    type="range"
+                    min={-4}
+                    max={6}
+                    step={0.1}
+                    aria-label="Terrain height offset"
+                    value={terrainTuningDraft.elevation}
+                    onChange={(e) =>
+                      setTerrainTuningDraft((draft) => ({
+                        ...draft,
+                        elevation: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label className="world-lighting-control slider">
+                  <span>Detail</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={3}
+                    step={0.05}
+                    aria-label="Terrain detail strength"
+                    value={terrainTuningDraft.detail}
+                    onChange={(e) =>
+                      setTerrainTuningDraft((draft) => ({
+                        ...draft,
+                        detail: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label className="world-lighting-control slider">
+                  <span>Ridge</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={3}
+                    step={0.05}
+                    aria-label="Terrain ridge strength"
+                    value={terrainTuningDraft.ridge}
+                    onChange={(e) =>
+                      setTerrainTuningDraft((draft) => ({
+                        ...draft,
+                        ridge: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="world-action-button"
+                  onClick={applyActiveTerrainTuning}
+                >
+                  Apply
+                </button>
+                <button
+                  type="button"
+                  className="world-action-button"
+                  onClick={resetActiveTerrainTuning}
+                >
+                  Reset
+                </button>
+              </div>
+            </details>
             <button
               type="button"
               className="world-action-button"
@@ -10816,7 +11093,8 @@ function App(): React.ReactElement {
                     {skyboxLabel(newWorldSkyboxUrl)} -{" "}
                     {LIGHTING_MOOD_OPTIONS.find((option) => option.id === newWorldLightingMood)?.label ??
                       newWorldLightingMood} - {DAY_NIGHT_MODE_OPTIONS.find((option) => option.id === newWorldDayNightMode)?.label ??
-                      newWorldDayNightMode}
+                      newWorldDayNightMode} - {WATER_STYLE_OPTIONS.find((option) => option.id === newWorldWaterSettings.style)?.label ??
+                      newWorldWaterSettings.style}
                   </small>
                 </div>
                 {ADVANCED_WORLD_TEMPLATE_OPTIONS.length > 0 && (
@@ -10897,6 +11175,40 @@ function App(): React.ReactElement {
                         </option>
                       ))}
                     </select>
+                  </label>
+                  <label className="world-field compact">
+                    <span>Water</span>
+                    <select
+                      aria-label="New world water style"
+                      value={newWorldWaterSettings.style}
+                      onChange={(e) =>
+                        setNewWorldWaterSettings((settings) =>
+                          parseWaterSettings({ ...settings, style: e.target.value }),
+                        )
+                      }
+                    >
+                      {WATER_STYLE_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="world-field compact">
+                    <span>Waves</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      aria-label="New world water wave strength"
+                      value={newWorldWaterSettings.waveStrength}
+                      onChange={(e) =>
+                        setNewWorldWaterSettings((settings) =>
+                          parseWaterSettings({ ...settings, waveStrength: Number(e.target.value) }),
+                        )
+                      }
+                    />
                   </label>
                   <label className="world-field compact">
                     <span>Size</span>

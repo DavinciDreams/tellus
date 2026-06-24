@@ -4,6 +4,8 @@ import type {
   LightingMood,
   RoleGenerationProvider,
   TellusRuntimeConfig,
+  WaterSettings,
+  WaterStyle,
 } from "./tellus-types";
 import {
   DEFAULT_DAY_NIGHT_CYCLE_MS,
@@ -25,6 +27,12 @@ const LIGHTING_MOODS = [
   "moonlit",
   "dramatic-sunset",
 ] as const;
+const WATER_STYLES = ["clear", "lagoon", "deep", "dream"] as const;
+export const DEFAULT_WATER_SETTINGS: WaterSettings = {
+  style: "lagoon",
+  opacity: 0.72,
+  waveStrength: 1,
+};
 
 function parseDayNightMode(value: unknown, fallback: DayNightMode): DayNightMode {
   return typeof value === "string" &&
@@ -38,6 +46,32 @@ function parseLightingMood(value: unknown, fallback: LightingMood): LightingMood
     LIGHTING_MOODS.includes(value as LightingMood)
     ? (value as LightingMood)
     : fallback;
+}
+
+function parseWaterStyle(value: unknown, fallback: WaterStyle): WaterStyle {
+  return typeof value === "string" &&
+    WATER_STYLES.includes(value as WaterStyle)
+    ? (value as WaterStyle)
+    : fallback;
+}
+
+export function parseWaterSettings(
+  value: unknown,
+  fallback: WaterSettings = DEFAULT_WATER_SETTINGS,
+): WaterSettings {
+  const source = isRecord(value) ? value : {};
+  const opacity = typeof source.opacity === "number" ? source.opacity : fallback.opacity;
+  const waveStrength =
+    typeof source.waveStrength === "number"
+      ? source.waveStrength
+      : typeof source.wave_strength === "number"
+        ? source.wave_strength
+        : fallback.waveStrength;
+  return {
+    style: parseWaterStyle(source.style, fallback.style),
+    opacity: boundedNumber(opacity, fallback.opacity, 0.25, 0.92),
+    waveStrength: boundedNumber(waveStrength, fallback.waveStrength, 0, 2),
+  };
 }
 
 export const runtimeConfig: TellusRuntimeConfig = {
@@ -99,6 +133,7 @@ export const runtimeConfig: TellusRuntimeConfig = {
     import.meta.env.VITE_TELLUS_LIGHTING_MOOD,
     "natural",
   ),
+  waterSettings: DEFAULT_WATER_SETTINGS,
   instanceStaticDuplicates:
     import.meta.env.VITE_TELLUS_INSTANCE_STATIC === "true",
 };
@@ -248,6 +283,10 @@ export function applyRuntimeConfig(config: unknown): void {
   runtimeConfig.lightingMood = parseLightingMood(
     config.lightingMood ?? config.lighting_mood,
     runtimeConfig.lightingMood,
+  );
+  runtimeConfig.waterSettings = parseWaterSettings(
+    config.waterSettings ?? config.water_settings,
+    runtimeConfig.waterSettings,
   );
 
   const worldApiBase = config.worldApiBase;
