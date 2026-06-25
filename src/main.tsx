@@ -1825,7 +1825,17 @@ function createTellusWorld(
   })();
   const FIRST_PERSON_EYE_HEIGHT = 2.4; // matches poseAgentPovCamera's avatar head height (× scale)
   // The eye rides the avatar's CURRENT (lerped) user scale — a giant sees from a giant's head.
-  const firstPersonEyeHeight = () => FIRST_PERSON_EYE_HEIGHT * getAvatarUserScale(visitor);
+  const firstPersonEyeHeight = () => {
+    if (!interiorObject) return FIRST_PERSON_EYE_HEIGHT * getAvatarUserScale(visitor);
+    const bounds =
+      interiorObject.children[0]?.userData.placementBounds ??
+      interiorObject.userData.placementBounds;
+    const levelHeight =
+      typeof bounds?.levelHeight === "number" && Number.isFinite(bounds.levelHeight)
+        ? bounds.levelHeight
+        : 4;
+    return Math.min(1.72, Math.max(1.2, levelHeight - 0.55));
+  };
   const applyCameraModeVisibility = () => {
     // Whole-group toggle: body + TV + marker. Remote meshes are per-client, so this is local-only.
     visitor.visible = cameraMode !== "first";
