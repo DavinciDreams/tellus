@@ -1,11 +1,21 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 
-import { COLLIDE_FLAG, generateInteriorRoom } from "./tellus-building";
+import {
+  COLLIDE_FLAG,
+  generateInteriorRoom,
+  normalizeInteriorBiomeMaterial,
+} from "./tellus-building";
 
 describe("generateInteriorRoom", () => {
   it("honors larger hall dimensions and marks solids collidable", () => {
-    const room = generateInteriorRoom({ width: 30, depth: 24, levels: 2, stairs: true, seed: 7 });
+    const room = generateInteriorRoom({
+      width: 30,
+      depth: 24,
+      levels: 2,
+      stairs: true,
+      seed: 7,
+    });
     const box = new THREE.Box3().setFromObject(room);
     const size = new THREE.Vector3();
     box.getSize(size);
@@ -27,7 +37,13 @@ describe("generateInteriorRoom", () => {
   });
 
   it("exposes inset placement bounds for room-aware object placement", () => {
-    const room = generateInteriorRoom({ width: 30, depth: 24, levels: 2, stairs: true, seed: 7 });
+    const room = generateInteriorRoom({
+      width: 30,
+      depth: 24,
+      levels: 2,
+      stairs: true,
+      seed: 7,
+    });
     const bounds = room.userData.placementBounds;
 
     expect(bounds).toMatchObject({
@@ -44,7 +60,13 @@ describe("generateInteriorRoom", () => {
   });
 
   it("exposes doorway and window anchors without making trim collidable", () => {
-    const room = generateInteriorRoom({ width: 30, depth: 24, levels: 2, stairs: true, seed: 7 });
+    const room = generateInteriorRoom({
+      width: 30,
+      depth: 24,
+      levels: 2,
+      stairs: true,
+      seed: 7,
+    });
     const openings = room.userData.openings;
 
     expect(openings).toEqual(
@@ -55,15 +77,33 @@ describe("generateInteriorRoom", () => {
         expect.objectContaining({ kind: "window", wall: "+z" }),
       ]),
     );
-    expect(room.userData.portalDoorAnchor).toMatchObject({ kind: "door", wall: "-z" });
-    expect(openings.filter((opening: { kind: string }) => opening.kind === "window")).toHaveLength(4);
+    expect(room.userData.portalDoorAnchor).toMatchObject({
+      kind: "door",
+      wall: "-z",
+    });
+    expect(
+      openings.filter((opening: { kind: string }) => opening.kind === "window"),
+    ).toHaveLength(4);
 
     let visualOpeningMeshes = 0;
     room.traverse((node) => {
       const mesh = node as THREE.Mesh;
       if (!mesh.isMesh || mesh.userData[COLLIDE_FLAG] === true) return;
-      if (mesh.material instanceof THREE.MeshStandardMaterial) visualOpeningMeshes++;
+      if (mesh.material instanceof THREE.MeshStandardMaterial)
+        visualOpeningMeshes++;
     });
     expect(visualOpeningMeshes).toBeGreaterThanOrEqual(10);
+  });
+
+  it("records the selected real-biome material palette", () => {
+    const desertRoom = generateInteriorRoom({ biome: "desert", seed: 11 });
+    const tropicalRoom = generateInteriorRoom({
+      biome: "tropical rain forest",
+      seed: 11,
+    });
+
+    expect(desertRoom.userData.materialBiome).toBe("desert");
+    expect(tropicalRoom.userData.materialBiome).toBe("tropical-rain-forest");
+    expect(normalizeInteriorBiomeMaterial("savannah thatch")).toBe("savanna");
   });
 });

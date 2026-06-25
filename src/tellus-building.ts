@@ -30,7 +30,55 @@ export interface InteriorRoomSpec {
   levels?: number;
   /** Force-enable the staircase even at a single level (mostly for testing). Default: levels > 1. */
   stairs?: boolean;
+  /** Real-world biome/material language for generated floors, walls, trim, and stairs. */
+  biome?: InteriorBiomeMaterial | string;
 }
+
+export type InteriorBiomeMaterial =
+  | "tropical-rain-forest"
+  | "temperate-rain-forest"
+  | "desert"
+  | "tundra"
+  | "taiga"
+  | "grassland"
+  | "savanna"
+  | "estuary"
+  | "coastal";
+
+interface InteriorTextureSet {
+  color: string;
+  normal: string;
+  roughness: string;
+  repeat: readonly [number, number];
+  normalScale: number;
+}
+
+interface InteriorMaterialSlot {
+  color: number;
+  roughness: number;
+  texture?: InteriorTextureSet;
+}
+
+interface InteriorMaterialPalette {
+  floor: InteriorMaterialSlot;
+  wall: InteriorMaterialSlot;
+  stair: InteriorMaterialSlot;
+  trim: InteriorMaterialSlot;
+  ceiling: InteriorMaterialSlot;
+  light: number;
+}
+
+export const INTERIOR_BIOME_MATERIALS: readonly InteriorBiomeMaterial[] = [
+  "tropical-rain-forest",
+  "temperate-rain-forest",
+  "desert",
+  "tundra",
+  "taiga",
+  "grassland",
+  "savanna",
+  "estuary",
+  "coastal",
+] as const;
 
 /** Marker key Track A reads to decide which meshes become static colliders. */
 export const COLLIDE_FLAG = "collide" as const;
@@ -70,28 +118,65 @@ const WINDOW_BOTTOM = 1.35;
 
 const INTERIOR_TEXTURE_BASE = "/textures/interiors";
 const INTERIOR_TEXTURES = {
-  floor: {
+  woodFloor: {
     color: `${INTERIOR_TEXTURE_BASE}/WoodFloor051_1K-PNG_Color.png`,
     normal: `${INTERIOR_TEXTURE_BASE}/WoodFloor051_1K-PNG_NormalGL.png`,
     roughness: `${INTERIOR_TEXTURE_BASE}/WoodFloor051_1K-PNG_Roughness.png`,
     repeat: [5.5, 5.5] as const,
     normalScale: 0.55,
   },
-  trim: {
+  lightWood: {
     color: `${INTERIOR_TEXTURE_BASE}/Wood092_1K-PNG_Color.png`,
     normal: `${INTERIOR_TEXTURE_BASE}/Wood092_1K-PNG_NormalGL.png`,
     roughness: `${INTERIOR_TEXTURE_BASE}/Wood092_1K-PNG_Roughness.png`,
     repeat: [2.6, 2.6] as const,
     normalScale: 0.42,
   },
-  wall: {
-    color: `${INTERIOR_TEXTURE_BASE}/Bricks075A_1K-PNG_Color.png`,
-    normal: `${INTERIOR_TEXTURE_BASE}/Bricks075A_1K-PNG_NormalGL.png`,
-    roughness: `${INTERIOR_TEXTURE_BASE}/Bricks075A_1K-PNG_Roughness.png`,
+  splitfaceStone: {
+    color: `${INTERIOR_TEXTURE_BASE}/StoneBricksSplitface001_COL_1K.jpg`,
+    normal: `${INTERIOR_TEXTURE_BASE}/StoneBricksSplitface001_NRM_1K.jpg`,
+    roughness: `${INTERIOR_TEXTURE_BASE}/StoneBricksSplitface001_ROUGH_1K.jpg`,
     repeat: [3.4, 1.8] as const,
+    normalScale: 0.32,
+  },
+  clay: {
+    color: `${INTERIOR_TEXTURE_BASE}/Clay002_1K-PNG_Color.png`,
+    normal: `${INTERIOR_TEXTURE_BASE}/Clay002_1K-PNG_NormalGL.png`,
+    roughness: `${INTERIOR_TEXTURE_BASE}/Clay002_1K-PNG_Roughness.png`,
+    repeat: [3.2, 2.2] as const,
+    normalScale: 0.22,
+  },
+  plaster: {
+    color: `${INTERIOR_TEXTURE_BASE}/PaintedPlaster017_1K-PNG_Color.png`,
+    normal: `${INTERIOR_TEXTURE_BASE}/PaintedPlaster017_1K-PNG_NormalGL.png`,
+    roughness: `${INTERIOR_TEXTURE_BASE}/PaintedPlaster017_1K-PNG_Roughness.png`,
+    repeat: [2.4, 1.6] as const,
+    normalScale: 0.18,
+  },
+  bamboo: {
+    color: `${INTERIOR_TEXTURE_BASE}/Bamboo001B_1K-PNG_Color.png`,
+    normal: `${INTERIOR_TEXTURE_BASE}/Bamboo001B_1K-PNG_NormalGL.png`,
+    roughness: `${INTERIOR_TEXTURE_BASE}/Bamboo001B_1K-PNG_Roughness.png`,
+    repeat: [2.4, 2.4] as const,
     normalScale: 0.38,
   },
+  thatch: {
+    color: `${INTERIOR_TEXTURE_BASE}/ThatchedRoof001A_1K-PNG_Color.png`,
+    normal: `${INTERIOR_TEXTURE_BASE}/ThatchedRoof001A_1K-PNG_NormalGL.png`,
+    roughness: `${INTERIOR_TEXTURE_BASE}/ThatchedRoof001A_1K-PNG_Roughness.png`,
+    repeat: [3.8, 2.4] as const,
+    normalScale: 0.42,
+  },
+  woodSiding: {
+    color: `${INTERIOR_TEXTURE_BASE}/WoodSiding002_1K-PNG_Color.png`,
+    normal: `${INTERIOR_TEXTURE_BASE}/WoodSiding002_1K-PNG_NormalGL.png`,
+    roughness: `${INTERIOR_TEXTURE_BASE}/WoodSiding002_1K-PNG_Roughness.png`,
+    repeat: [2.2, 1.7] as const,
+    normalScale: 0.34,
+  },
 };
+
+const interiorTextureCache = new Map<string, THREE.Texture>();
 
 let interiorTextureLoader: THREE.TextureLoader | null = null;
 
@@ -112,18 +197,23 @@ function loadInteriorTexture(
 ): THREE.Texture | undefined {
   const loader = textureLoader();
   if (!loader) return undefined;
+  const key = `${url}|${repeat[0]}x${repeat[1]}|${colorMap ? "srgb" : "linear"}`;
+  const cached = interiorTextureCache.get(key);
+  if (cached) return cached;
   const texture = loader.load(url);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(repeat[0], repeat[1]);
   if (colorMap) texture.colorSpace = THREE.SRGBColorSpace;
+  interiorTextureCache.set(key, texture);
   return texture;
 }
 
 function applyInteriorTextureSet(
   material: THREE.MeshStandardMaterial,
-  textureSet: (typeof INTERIOR_TEXTURES)[keyof typeof INTERIOR_TEXTURES],
+  textureSet?: InteriorTextureSet,
 ): THREE.MeshStandardMaterial {
+  if (!textureSet) return material;
   const colorMap = loadInteriorTexture(
     textureSet.color,
     textureSet.repeat,
@@ -138,6 +228,187 @@ function applyInteriorTextureSet(
   material.normalScale.set(textureSet.normalScale, textureSet.normalScale);
   material.needsUpdate = true;
   return material;
+}
+
+export function normalizeInteriorBiomeMaterial(
+  value: unknown,
+): InteriorBiomeMaterial {
+  if (typeof value !== "string") return "temperate-rain-forest";
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+  if (INTERIOR_BIOME_MATERIALS.includes(normalized as InteriorBiomeMaterial)) {
+    return normalized as InteriorBiomeMaterial;
+  }
+  if (
+    normalized.includes("tropical") ||
+    normalized.includes("bamboo") ||
+    normalized.includes("palm")
+  ) {
+    return "tropical-rain-forest";
+  }
+  if (
+    normalized.includes("temperate") ||
+    normalized.includes("forest") ||
+    normalized.includes("plaster")
+  ) {
+    return "temperate-rain-forest";
+  }
+  if (
+    normalized.includes("desert") ||
+    normalized.includes("adobe") ||
+    normalized.includes("mudbrick") ||
+    normalized.includes("dune")
+  ) {
+    return "desert";
+  }
+  if (
+    normalized.includes("tundra") ||
+    normalized.includes("sod") ||
+    normalized.includes("hearth")
+  ) {
+    return "tundra";
+  }
+  if (
+    normalized.includes("taiga") ||
+    normalized.includes("boreal") ||
+    normalized.includes("log")
+  ) {
+    return "taiga";
+  }
+  if (
+    normalized.includes("savanna") ||
+    normalized.includes("savannah") ||
+    normalized.includes("woven")
+  ) {
+    return "savanna";
+  }
+  if (
+    normalized.includes("grassland") ||
+    normalized.includes("thatch") ||
+    normalized.includes("wattle")
+  ) {
+    return "grassland";
+  }
+  if (
+    normalized.includes("estuary") ||
+    normalized.includes("marsh") ||
+    normalized.includes("delta")
+  ) {
+    return "estuary";
+  }
+  if (
+    normalized.includes("coast") ||
+    normalized.includes("cove") ||
+    normalized.includes("beach") ||
+    normalized.includes("island")
+  ) {
+    return "coastal";
+  }
+  return "temperate-rain-forest";
+}
+
+function interiorMaterialPaletteFor(value: unknown): InteriorMaterialPalette {
+  const biome = normalizeInteriorBiomeMaterial(value);
+  const t = INTERIOR_TEXTURES;
+  switch (biome) {
+    case "tropical-rain-forest":
+      return {
+        floor: { color: 0x7c5a32, roughness: 0.9, texture: t.bamboo },
+        wall: { color: 0x8a6b3e, roughness: 0.92, texture: t.woodSiding },
+        stair: { color: 0x7c5a32, roughness: 0.9, texture: t.bamboo },
+        trim: { color: 0x9c7a43, roughness: 0.9, texture: t.thatch },
+        ceiling: { color: 0x6e653b, roughness: 0.96, texture: t.thatch },
+        light: 0xffd991,
+      };
+    case "desert":
+      return {
+        floor: { color: 0xb87849, roughness: 0.98, texture: t.clay },
+        wall: { color: 0xc48756, roughness: 0.98, texture: t.clay },
+        stair: { color: 0xa9683d, roughness: 0.97, texture: t.clay },
+        trim: { color: 0x8f623b, roughness: 0.9, texture: t.lightWood },
+        ceiling: { color: 0xbb8055, roughness: 0.98, texture: t.plaster },
+        light: 0xffc07a,
+      };
+    case "tundra":
+      return {
+        floor: { color: 0x7e7564, roughness: 0.96, texture: t.clay },
+        wall: { color: 0x6f6f62, roughness: 0.98, texture: t.plaster },
+        stair: { color: 0x6c5d48, roughness: 0.94, texture: t.woodFloor },
+        trim: { color: 0x76634d, roughness: 0.94, texture: t.lightWood },
+        ceiling: { color: 0x5f5848, roughness: 0.98, texture: t.thatch },
+        light: 0xffb36b,
+      };
+    case "taiga":
+      return {
+        floor: { color: 0x695035, roughness: 0.9, texture: t.woodFloor },
+        wall: { color: 0x6d5539, roughness: 0.92, texture: t.woodSiding },
+        stair: { color: 0x5f4a32, roughness: 0.9, texture: t.woodFloor },
+        trim: { color: 0x4f3d2c, roughness: 0.9, texture: t.lightWood },
+        ceiling: { color: 0x5c5243, roughness: 0.96, texture: t.thatch },
+        light: 0xffc985,
+      };
+    case "grassland":
+      return {
+        floor: { color: 0x9f7b3b, roughness: 0.94, texture: t.lightWood },
+        wall: { color: 0xb8955b, roughness: 0.97, texture: t.plaster },
+        stair: { color: 0x8e6b35, roughness: 0.92, texture: t.lightWood },
+        trim: { color: 0xb99a54, roughness: 0.96, texture: t.thatch },
+        ceiling: { color: 0xa9884c, roughness: 0.98, texture: t.thatch },
+        light: 0xffd384,
+      };
+    case "savanna":
+      return {
+        floor: { color: 0x9f773a, roughness: 0.94, texture: t.thatch },
+        wall: { color: 0xb98f50, roughness: 0.97, texture: t.thatch },
+        stair: { color: 0x826034, roughness: 0.92, texture: t.bamboo },
+        trim: { color: 0x8a6a38, roughness: 0.92, texture: t.bamboo },
+        ceiling: { color: 0xb49255, roughness: 0.98, texture: t.thatch },
+        light: 0xffcd7b,
+      };
+    case "estuary":
+      return {
+        floor: { color: 0x83664f, roughness: 0.98, texture: t.clay },
+        wall: { color: 0x9d8064, roughness: 0.98, texture: t.plaster },
+        stair: { color: 0x6f563c, roughness: 0.93, texture: t.woodSiding },
+        trim: { color: 0x6c5639, roughness: 0.92, texture: t.bamboo },
+        ceiling: { color: 0x80715e, roughness: 0.98, texture: t.thatch },
+        light: 0xffc98f,
+      };
+    case "coastal":
+      return {
+        floor: { color: 0xa48b61, roughness: 0.9, texture: t.woodFloor },
+        wall: { color: 0x9a9d92, roughness: 0.96, texture: t.splitfaceStone },
+        stair: { color: 0x8b744f, roughness: 0.9, texture: t.lightWood },
+        trim: { color: 0x9b7f52, roughness: 0.88, texture: t.woodSiding },
+        ceiling: { color: 0xa8aa9c, roughness: 0.96, texture: t.plaster },
+        light: 0xffdda6,
+      };
+    case "temperate-rain-forest":
+    default:
+      return {
+        floor: { color: 0x80623c, roughness: 0.92, texture: t.woodFloor },
+        wall: { color: 0x76736a, roughness: 0.96, texture: t.splitfaceStone },
+        stair: { color: 0x725231, roughness: 0.9, texture: t.lightWood },
+        trim: { color: 0x6e4c2c, roughness: 0.86, texture: t.lightWood },
+        ceiling: { color: 0x8c8878, roughness: 0.96, texture: t.plaster },
+        light: 0xffdfaa,
+      };
+  }
+}
+
+function makeInteriorMaterial(
+  slot: InteriorMaterialSlot,
+): THREE.MeshStandardMaterial {
+  return applyInteriorTextureSet(
+    new THREE.MeshStandardMaterial({
+      color: slot.color,
+      roughness: slot.roughness,
+      metalness: 0,
+    }),
+    slot.texture,
+  );
 }
 
 interface WallOpening {
@@ -502,49 +773,17 @@ export function generateInteriorRoom(spec: InteriorRoomSpec = {}): THREE.Group {
   const levels = Math.max(1, Math.floor(spec.levels ?? 1));
   const wantStairs = spec.stairs ?? levels > 1;
   const rng = makeRng(seed);
+  const biome = normalizeInteriorBiomeMaterial(spec.biome);
+  const palette = interiorMaterialPaletteFor(biome);
 
   const room = new THREE.Group();
   room.name = "tellus-interior-room";
 
-  // Deterministic warm palette nudged by the seed (so different rooms read differently but stably).
-  const hue = (rng() * 0.08 + 0.07) % 1; // warm browns/tans
-  const floorMat = applyInteriorTextureSet(
-    new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setHSL(hue, 0.35, 0.32),
-      roughness: 0.92,
-      metalness: 0.0,
-    }),
-    INTERIOR_TEXTURES.floor,
-  );
-  const wallMat = applyInteriorTextureSet(
-    new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setHSL(hue, 0.28, 0.46),
-      roughness: 0.95,
-      metalness: 0.0,
-    }),
-    INTERIOR_TEXTURES.wall,
-  );
-  const stairMat = applyInteriorTextureSet(
-    new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setHSL(hue, 0.4, 0.4),
-      roughness: 0.9,
-      metalness: 0.0,
-    }),
-    INTERIOR_TEXTURES.trim,
-  );
-  const ceilMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setHSL(hue, 0.2, 0.5),
-    roughness: 0.95,
-    metalness: 0.0,
-  });
-  const trimMat = applyInteriorTextureSet(
-    new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setHSL(hue, 0.42, 0.22),
-      roughness: 0.84,
-      metalness: 0.0,
-    }),
-    INTERIOR_TEXTURES.trim,
-  );
+  const floorMat = makeInteriorMaterial(palette.floor);
+  const wallMat = makeInteriorMaterial(palette.wall);
+  const stairMat = makeInteriorMaterial(palette.stair);
+  const ceilMat = makeInteriorMaterial(palette.ceiling);
+  const trimMat = makeInteriorMaterial(palette.trim);
   const glassMat = new THREE.MeshStandardMaterial({
     color: 0x9fd8ff,
     roughness: 0.2,
@@ -565,6 +804,7 @@ export function generateInteriorRoom(spec: InteriorRoomSpec = {}): THREE.Group {
     levels,
     levelHeight: LEVEL_HEIGHT,
   };
+  room.userData.materialBiome = biome;
   const openingAnchors: InteriorOpeningAnchor[] = [];
   const windowZ = Math.max(-hz + 3.2, -hz * 0.35);
   const backWindowLeft = Math.max(-hx + 3, -hx * 0.55);

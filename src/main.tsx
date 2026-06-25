@@ -145,7 +145,7 @@ import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, 
 import { createTerrainMaterial } from "./tellus-terrain-material";
 import { largeWorldBaseHeight, largeWorldTerrainKind, usesContinentalChunkedTerrain } from "./tellus-large-world-terrain";
 import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
-import { generateInteriorRoom } from "./tellus-building";
+import { generateInteriorRoom, normalizeInteriorBiomeMaterial, type InteriorBiomeMaterial } from "./tellus-building";
 import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
@@ -872,12 +872,51 @@ function createTellusWorld(
   // floor slab(s) + perimeter walls (with a doorway gap) + a climbable staircase between levels +
   // ceiling + warm light, all flagged userData.collide for the physics track. A real sceneUrl GLB
   // (when it loads) is added INSIDE the same container.
+  const interiorBiomeFromLegacyName = (value: string): InteriorBiomeMaterial => {
+    const lower = value.toLowerCase();
+    if (lower.includes("desert") || lower.includes("dune") || lower.includes("copper")) return "desert";
+    if (lower.includes("snow") || lower.includes("ice") || lower.includes("tundra")) return "tundra";
+    if (lower.includes("taiga") || lower.includes("boreal")) return "taiga";
+    if (lower.includes("savanna") || lower.includes("savannah")) return "savanna";
+    if (lower.includes("grass") || lower.includes("meadow") || lower.includes("lowland")) return "grassland";
+    if (lower.includes("estuary") || lower.includes("marsh") || lower.includes("mud")) return "estuary";
+    if (lower.includes("coast") || lower.includes("cove") || lower.includes("beach") || lower.includes("water") || lower.includes("island")) return "coastal";
+    if (lower.includes("tropical") || lower.includes("jungle") || lower.includes("palm") || lower.includes("bamboo")) return "tropical-rain-forest";
+    return "temperate-rain-forest";
+  };
+
+  const dominantWorldBiome = (): string | null => {
+    const counts = new Map<string, number>();
+    for (const cell of worldBiomeCells.values()) {
+      const name = (cell.becoming || cell.biome || "").trim();
+      if (!name) continue;
+      counts.set(name, (counts.get(name) ?? 0) + Math.max(0.1, cell.intensity ?? 1));
+    }
+    let winner: string | null = null;
+    let winnerCount = 0;
+    for (const [name, count] of counts) {
+      if (count <= winnerCount) continue;
+      winner = name;
+      winnerCount = count;
+    }
+    return winner;
+  };
+
+  const interiorBiomeForSceneUrl = (sceneUrl: string): InteriorBiomeMaterial => {
+    const source = [sceneUrl, dominantWorldBiome(), runtimeConfig.worldTemplate, runtimeConfig.worldId]
+      .filter((part): part is string => Boolean(part && part.trim()))
+      .join(" ");
+    const explicit = normalizeInteriorBiomeMaterial(source);
+    if (explicit !== "temperate-rain-forest" || /temperate|forest|plaster|stone/i.test(source)) return explicit;
+    return interiorBiomeFromLegacyName(source);
+  };
+
   const interiorRoomSpecForSceneUrl = (sceneUrl: string) => {
     const lower = sceneUrl.toLowerCase();
     if (lower.includes("grand-hall") || lower.includes("tavern")) {
-      return { width: 30, depth: 24, levels: 2, stairs: true, seed: 7 };
+      return { width: 30, depth: 24, levels: 2, stairs: true, seed: 7, biome: interiorBiomeForSceneUrl(sceneUrl) };
     }
-    return { width: 20, depth: 18, levels: 2, stairs: true, seed: 3 };
+    return { width: 20, depth: 18, levels: 2, stairs: true, seed: 3, biome: interiorBiomeForSceneUrl(sceneUrl) };
   };
 
   const hashPortalPreviewWorld = (worldId: string): number => {
