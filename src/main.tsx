@@ -1115,6 +1115,7 @@ function createTellusWorld(
   const exitInterior = () => {
     if (!interiorObject) return;
     disposePortalPreview();
+    setInteriorWallDoorPlacement(null);
     scene.remove(interiorObject);
     disposeObject(interiorObject);
     interiorObject = null;
@@ -1162,6 +1163,13 @@ function createTellusWorld(
   portalMarkerGroup.name = "tellus-portal-markers";
   scene.add(portalMarkerGroup);
   const portalMarkers = new Map<string, THREE.Object3D>();
+  let wallDoorPlacement:
+    | {
+        targetWorldId: string;
+        label: string;
+      }
+    | null = null;
+  let wallDoorPlacementGhost: THREE.Object3D | null = null;
   const pendingPortalIds = new Set<string>();
   const pendingPortalStartedAt = new Map<string, number>();
   const pendingPortalWarnedIds = new Set<string>();
@@ -1246,6 +1254,51 @@ function createTellusWorld(
     g.add(triggerRing, base, swirl, halo, pillar);
     return g;
   };
+  const makeWallDoorMarker = (pending = false): THREE.Object3D => {
+    const g = new THREE.Group();
+    g.userData.portalMarkerKey = `wall-door:${pending ? "pending" : "ready"}`;
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: pending ? 0x8fd5ff : 0x5e3b1f,
+      roughness: 0.72,
+      metalness: 0.0,
+      transparent: pending,
+      opacity: pending ? 0.62 : 1,
+    });
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: pending ? 0x8fd5ff : 0xffd76a,
+      transparent: true,
+      opacity: pending ? 0.24 : 0.18,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const panelMat = new THREE.MeshBasicMaterial({
+      color: pending ? 0x6ad0ff : 0x142033,
+      transparent: true,
+      opacity: pending ? 0.28 : 0.38,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const width = 2.3;
+    const height = 3.0;
+    const depth = 0.12;
+    const visual = new THREE.Mesh(new THREE.PlaneGeometry(width * 0.86, height * 0.9), panelMat);
+    visual.position.set(0, height / 2, 0.035);
+    visual.userData.portalDoorFace = true;
+    const left = new THREE.Mesh(new THREE.BoxGeometry(0.16, height, depth), frameMat);
+    left.position.set(-width / 2, height / 2, 0);
+    const right = new THREE.Mesh(new THREE.BoxGeometry(0.16, height, depth), frameMat);
+    right.position.set(width / 2, height / 2, 0);
+    const top = new THREE.Mesh(new THREE.BoxGeometry(width + 0.16, 0.16, depth), frameMat);
+    top.position.set(0, height, 0);
+    const threshold = new THREE.Mesh(new THREE.BoxGeometry(width + 0.34, 0.08, 0.46), frameMat);
+    threshold.position.set(0, 0.04, 0.16);
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(width * 1.12, height * 1.04), glowMat);
+    glow.position.set(0, height / 2, 0.02);
+    g.add(glow, visual, left, right, top, threshold);
+    return g;
+  };
+  const isWallDoorPortal = (p: WorldPortal): boolean =>
+    Boolean(interiorObject && p.target.kind === "world" && typeof p.rotation?.y === "number");
   const portalAnchorPosition = (p: WorldPortal): Vec3 => {
     const anchor = p.anchorThingId
       ? generated.find((thing) => thing.id === p.anchorThingId)
@@ -1295,7 +1348,10 @@ function createTellusWorld(
     for (const p of worldPortals) {
       seen.add(p.id);
       const pending = pendingPortalIds.has(p.id);
-      const markerKey = `${p.target.kind === "interior" ? "interior" : "world"}:${pending ? "pending" : "ready"}`;
+      const wallDoor = isWallDoorPortal(p);
+      const markerKey = wallDoor
+        ? `wall-door:${pending ? "pending" : "ready"}`
+        : `${p.target.kind === "interior" ? "interior" : "world"}:${pending ? "pending" : "ready"}`;
       let marker = portalMarkers.get(p.id);
       if (marker && marker.userData.portalMarkerKey !== markerKey) {
         portalMarkerGroup.remove(marker);
@@ -1304,13 +1360,14 @@ function createTellusWorld(
         marker = undefined;
       }
       if (!marker) {
-        marker = makePortalMarker(p.target.kind === "interior", pending);
+        marker = wallDoor ? makeWallDoorMarker(pending) : makePortalMarker(p.target.kind === "interior", pending);
         portalMarkers.set(p.id, marker);
         portalMarkerGroup.add(marker);
       }
       const position = portalAnchorPosition(p);
-      const y = portalGroundY(p) + 0.05;
+      const y = wallDoor ? position.y : portalGroundY(p) + 0.05;
       marker.position.set(position.x, y, position.z);
+      marker.rotation.y = wallDoor ? p.rotation?.y ?? 0 : 0;
       const triggerRing = marker.children.find((child) => child.userData.portalTriggerRing);
       if (triggerRing) {
         const r = Math.max(1.2, p.radius);
@@ -1327,7 +1384,15 @@ function createTellusWorld(
   // Called each frame: auto-enter when the player stands in a portal's trigger volume.
   const updatePortals = (now: number) => {
     for (const marker of portalMarkers.values()) {
-      marker.rotation.y = now * 0.00025;
+      if (marker.userData.portalMarkerKey?.startsWith?.("wall-door:")) {
+        const face = marker.children.find((child) => child.userData.portalDoorFace);
+        if (face) {
+          const mat = (face as THREE.Mesh).material;
+          if (mat instanceof THREE.MeshBasicMaterial) mat.opacity = 0.32 + Math.sin(now * 0.002) * 0.08;
+        }
+      } else {
+        marker.rotation.y = now * 0.00025;
+      }
       for (const child of marker.children) {
         const spin = Number(child.userData.portalSpin);
         if (spin) child.rotation.y = now * 0.001 * spin;
@@ -6444,6 +6509,11 @@ function createTellusWorld(
 
   const handleKeyDown = (event: KeyboardEvent) => {
     if (isTextEditingTarget(event.target)) return;
+    if (event.key === "Escape" && wallDoorPlacement) {
+      event.preventDefault();
+      setInteriorWallDoorPlacement(null);
+      return;
+    }
     if (event.key.startsWith("Arrow")) {
       event.preventDefault();
       if (nudgeSelectedWithArrowKey(event.key)) return;
@@ -6514,6 +6584,15 @@ function createTellusWorld(
       if (controlsStillDragging) return;
       transformDragging = false;
     }
+    if (wallDoorPlacement) {
+      event.preventDefault();
+      const target = updateWallDoorPlacementGhost(event);
+      if (target) {
+        createInteriorWallDoorAt(target, wallDoorPlacement.targetWorldId, wallDoorPlacement.label);
+        setInteriorWallDoorPlacement(null);
+      }
+      return;
+    }
     // Move mode: every press repositions the target — no picking, no modifier.
     if (moveModeThingId) {
       const thing = thingById(moveModeThingId);
@@ -6554,6 +6633,10 @@ function createTellusWorld(
     pointerY = event.clientY;
   };
   const handlePointerMove = (event: PointerEvent) => {
+    if (wallDoorPlacement) {
+      updateWallDoorPlacementGhost(event);
+      return;
+    }
     if (draggingThingId) {
       const nowMs = performance.now();
       if (nowMs - lastDragMoveAt < 70) return; // throttle move+publish cadence
@@ -6690,6 +6773,94 @@ function createTellusWorld(
   // While active for the selected object, ANY press/drag on the world repositions it (click =
   // teleport there, drag = carry); camera orbit is suspended until the mode is toggled off. ──
   let moveModeThingId: string | null = null;
+  const wallDoorTargetFromPointer = (event: PointerEvent): { position: Vec3; rotationY: number } | null => {
+    if (!interiorObject) return null;
+    setPointerNdcFromEvent(event);
+    raycaster.setFromCamera(pointerNdc, camera);
+    const hits = raycaster.intersectObject(interiorObject, true);
+    const bounds = interiorPlacementBounds(1.4);
+    for (const h of hits) {
+      const mesh = h.object as THREE.Mesh;
+      if (!mesh.isMesh || mesh.userData.collide !== true) continue;
+      const n = h.face?.normal;
+      if (!n) continue;
+      const worldN = n.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld)).normalize();
+      if (Math.abs(worldN.y) > 0.25) continue;
+      const axisX = Math.abs(worldN.x) > Math.abs(worldN.z);
+      const floorY = interiorFloorHeightAt(h.point.x, h.point.z, visitorPosition.y) ?? Math.max(0, visitorPosition.y);
+      const x = axisX
+        ? h.point.x + Math.sign(worldN.x || 1) * 0.12
+        : bounds
+          ? clamp(h.point.x, bounds.minX, bounds.maxX)
+          : h.point.x;
+      const z = axisX
+        ? bounds
+          ? clamp(h.point.z, bounds.minZ, bounds.maxZ)
+          : h.point.z
+        : h.point.z + Math.sign(worldN.z || 1) * 0.12;
+      return {
+        position: { x, y: floorY, z },
+        rotationY: Math.atan2(worldN.x, worldN.z),
+      };
+    }
+    return null;
+  };
+
+  const disposeWallDoorPlacementGhost = () => {
+    if (!wallDoorPlacementGhost) return;
+    portalMarkerGroup.remove(wallDoorPlacementGhost);
+    disposeObject(wallDoorPlacementGhost);
+    wallDoorPlacementGhost = null;
+  };
+
+  const updateWallDoorPlacementGhost = (event: PointerEvent): { position: Vec3; rotationY: number } | null => {
+    const target = wallDoorTargetFromPointer(event);
+    if (!target) {
+      if (wallDoorPlacementGhost) wallDoorPlacementGhost.visible = false;
+      return null;
+    }
+    if (!wallDoorPlacementGhost) {
+      wallDoorPlacementGhost = makeWallDoorMarker(true);
+      portalMarkerGroup.add(wallDoorPlacementGhost);
+    }
+    wallDoorPlacementGhost.visible = true;
+    wallDoorPlacementGhost.position.set(target.position.x, target.position.y, target.position.z);
+    wallDoorPlacementGhost.rotation.y = target.rotationY;
+    return target;
+  };
+
+  const setInteriorWallDoorPlacement = (targetWorldId?: string | null, label?: string) => {
+    const target = targetWorldId?.trim();
+    if (!target) {
+      wallDoorPlacement = null;
+      disposeWallDoorPlacementGhost();
+      container.style.cursor = moveModeThingId ? "move" : "";
+      return;
+    }
+    if (!interiorObject) {
+      addLog({
+        agentId: "world",
+        agentName: "Tellus",
+        tool: "interact",
+        text: "Enter an interior before placing a wall door.",
+      });
+      publish();
+      return;
+    }
+    wallDoorPlacement = {
+      targetWorldId: target,
+      label: (label || `Door to ${target}`).slice(0, 48),
+    };
+    container.style.cursor = "crosshair";
+    addLog({
+      agentId: "world",
+      agentName: "Tellus",
+      tool: "interact",
+      text: "Slide the door along a wall, then click to place it.",
+    });
+    publish();
+  };
+
   const setMoveMode = (id: string | null) => {
     moveModeThingId = id && thingById(id) ? id : null;
     container.style.cursor = moveModeThingId ? "move" : "";
@@ -7415,6 +7586,23 @@ function createTellusWorld(
       ...(anchor ? { anchorThingId: anchor.id } : {}),
     });
   };
+  const createInteriorWallDoorAt = (
+    placement: { position: Vec3; rotationY: number },
+    targetWorldId: string,
+    label?: string,
+  ) => {
+    const target = targetWorldId.trim();
+    if (!target) return;
+    sendPortalUpsert({
+      id: makeId("door"),
+      worldId: runtimeConfig.worldId,
+      label: (label || `${runtimeConfig.worldId} to ${target} door`).slice(0, 48),
+      position: placement.position,
+      radius: 1.7,
+      rotation: { x: 0, y: placement.rotationY, z: 0 },
+      target: { kind: "world", worldId: target },
+    });
+  };
   const createDoorHere = (label?: string) => {
     const interiorId = `interior-${runtimeConfig.worldId}-${makeId("room").slice(0, 12)}`;
     const x = Math.round(visitorPosition.x);
@@ -7439,6 +7627,7 @@ function createTellusWorld(
     enterPortal,
     createPortalHere,
     previewPortalTarget,
+    startInteriorWallDoorPlacement: setInteriorWallDoorPlacement,
     updatePortalTarget,
     deletePortal: sendPortalDelete,
     createDoorHere,
@@ -7637,6 +7826,7 @@ function createTellusWorld(
       resizeObserver?.disconnect();
       transformControls?.detach();
       transformControls?.dispose();
+      disposeWallDoorPlacementGhost();
       disposePortalPreview();
       renderer?.dispose();
       if (renderer?.domElement.parentElement === container) {
@@ -10658,7 +10848,11 @@ function App(): React.ReactElement {
   useEffect(() => {
     const target = portalsPanelOpen ? portalTargetWorldId : "";
     worldRef.current?.previewPortalTarget(target || null);
-    return () => worldRef.current?.previewPortalTarget(null);
+    if (!portalsPanelOpen) worldRef.current?.startInteriorWallDoorPlacement(null);
+    return () => {
+      worldRef.current?.previewPortalTarget(null);
+      worldRef.current?.startInteriorWallDoorPlacement(null);
+    };
   }, [portalsPanelOpen, portalTargetWorldId, currentWorldId]);
   const portalPanelNotice = useMemo(() => {
     for (let i = snapshot.logs.length - 1; i >= 0; i--) {
@@ -12566,6 +12760,28 @@ function App(): React.ReactElement {
                 }}
               >
                 ＋ Portal here
+              </button>
+              <button
+                type="button"
+                title="Place a door on an interior wall and slide it into position"
+                disabled={!portalTargetWorldId}
+                onClick={() => {
+                  const target = portalTargetWorldId.trim();
+                  if (target) {
+                    worldRef.current?.startInteriorWallDoorPlacement(
+                      target,
+                      `${worldDisplayName(currentWorldId)} to ${worldDisplayName(target)} door`,
+                    );
+                  }
+                }}
+                style={{
+                  ...portalBtn,
+                  borderColor: "rgba(255,207,106,0.65)",
+                  opacity: portalTargetWorldId ? 1 : 0.55,
+                  cursor: portalTargetWorldId ? "crosshair" : "default",
+                }}
+              >
+                ï¼‹ Place wall door
               </button>
               <select
                 value={portalTargetWorldId}
