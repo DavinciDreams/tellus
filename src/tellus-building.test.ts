@@ -25,4 +25,21 @@ describe("generateInteriorRoom", () => {
     expect(size.y).toBeGreaterThan(8);
     expect(collidableMeshes).toBeGreaterThan(8);
   });
+
+  it("exposes inset placement bounds for room-aware object placement", () => {
+    const room = generateInteriorRoom({ width: 30, depth: 24, levels: 2, stairs: true, seed: 7 });
+    const bounds = room.userData.placementBounds;
+
+    expect(bounds).toMatchObject({
+      minX: expect.any(Number),
+      maxX: expect.any(Number),
+      minZ: expect.any(Number),
+      maxZ: expect.any(Number),
+      levels: 2,
+    });
+    expect(bounds.minX).toBeGreaterThan(-15);
+    expect(bounds.maxX).toBeLessThan(15);
+    expect(bounds.minZ).toBeGreaterThan(-12);
+    expect(bounds.maxZ).toBeLessThan(12);
+  });
 });

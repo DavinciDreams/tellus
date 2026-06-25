@@ -3035,6 +3035,58 @@ function createTellusWorld(
   const terrainRayTargets: THREE.Object3D[] = [];
   const footprintCache = new Map<string, { radius: number; height: number }>();
 
+  const interiorPlacementBounds = (margin = 0): { minX: number; maxX: number; minZ: number; maxZ: number } | null => {
+    const raw = interiorObject?.children[0]?.userData.placementBounds ?? interiorObject?.userData.placementBounds;
+    if (!isRecord(raw)) return null;
+    const minX = typeof raw.minX === "number" ? raw.minX + margin : null;
+    const maxX = typeof raw.maxX === "number" ? raw.maxX - margin : null;
+    const minZ = typeof raw.minZ === "number" ? raw.minZ + margin : null;
+    const maxZ = typeof raw.maxZ === "number" ? raw.maxZ - margin : null;
+    if (minX === null || maxX === null || minZ === null || maxZ === null) return null;
+    return {
+      minX: Math.min(minX, maxX),
+      maxX: Math.max(minX, maxX),
+      minZ: Math.min(minZ, maxZ),
+      maxZ: Math.max(minZ, maxZ),
+    };
+  };
+
+  const clampInteriorPlacementXZ = (x: number, z: number, margin = 0.65): { x: number; z: number } => {
+    const bounds = interiorPlacementBounds(margin);
+    if (!bounds) return { x, z };
+    return {
+      x: clamp(x, bounds.minX, bounds.maxX),
+      z: clamp(z, bounds.minZ, bounds.maxZ),
+    };
+  };
+
+  const interiorFloorHeightAt = (x: number, z: number, referenceY = visitorPosition.y): number | null => {
+    if (!interiorObject) return null;
+    const clamped = clampInteriorPlacementXZ(x, z);
+    terrainRayOrigin.set(clamped.x, Math.max(referenceY + 4, 32), clamped.z);
+    terrainRaycaster.set(terrainRayOrigin, terrainRayDirection);
+    terrainRaycaster.far = Math.max(80, terrainRayOrigin.y + 12);
+    const hits = terrainRaycaster.intersectObject(interiorObject, true);
+    const maxFloorY = referenceY + 1.35;
+    for (const h of hits) {
+      const n = h.face?.normal;
+      if (!n) continue;
+      const worldN = n.clone().applyNormalMatrix(
+        new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld),
+      );
+      if (worldN.y > 0.45 && h.point.y <= maxFloorY) return h.point.y;
+    }
+    return null;
+  };
+
+  const interiorPlacementPosition = (x: number, z: number, referenceY = visitorPosition.y): Vec3 => {
+    const clamped = clampInteriorPlacementXZ(x, z);
+    return {
+      ...clamped,
+      y: interiorFloorHeightAt(clamped.x, clamped.z, referenceY) ?? Math.max(0, referenceY),
+    };
+  };
+
   const thingFootprint = (thing: GeneratedThing): { radius: number; height: number } | null => {
     const mesh = generatedMeshes.get(thing.id);
     if (!mesh) return null;
@@ -4098,10 +4150,10 @@ function createTellusWorld(
     }
   };
 
-  const moveGenerated = (id: string, dx: number, dz: number) => {
+  const moveGenerated = (id: string, dx: number, dz: number, targetY?: number) => {
     const thing = thingById(id);
     if (!thing) return;
-    const preserveCurrentY = draggingThingId === id;
+    const preserveCurrentY = draggingThingId === id && targetY === undefined;
     const oldGroundY = groundHeightAt(thing.position.x, thing.position.z);
     const manualHeightOffset =
       oldGroundY !== null && Number.isFinite(oldGroundY)
@@ -4115,18 +4167,30 @@ function createTellusWorld(
             thing.position.z + dz,
             thing.position,
           )
-        : preserveCurrentY
+        : targetY !== undefined
           ? {
               x: thing.position.x + dx,
-              y: thing.position.y,
+              y: targetY,
               z: thing.position.z + dz,
             }
-        : groundedPosition(
-            thing.position.x + dx,
-            thing.position.z + dz,
-            thing.position,
-          );
-    if (!preserveCurrentY && !isVehicleThing(thing) && sailingThingId !== id && manualHeightOffset > 0) {
+          : preserveCurrentY
+            ? {
+                x: thing.position.x + dx,
+                y: thing.position.y,
+                z: thing.position.z + dz,
+              }
+            : groundedPosition(
+                thing.position.x + dx,
+                thing.position.z + dz,
+                thing.position,
+              );
+    if (
+      targetY === undefined &&
+      !preserveCurrentY &&
+      !isVehicleThing(thing) &&
+      sailingThingId !== id &&
+      manualHeightOffset > 0
+    ) {
       const newGroundY = groundHeightAt(position.x, position.z);
       if (newGroundY !== null && Number.isFinite(newGroundY)) {
         position.y = newGroundY + manualHeightOffset;
@@ -4155,11 +4219,13 @@ function createTellusWorld(
       prompt: source.prompt,
       creatorId: "visitor",
       ownerUserId: userId,
-      position: groundedPosition(
-        source.position.x + offset,
-        source.position.z + offset,
-        source.position,
-      ),
+      position: interiorObject
+        ? interiorPlacementPosition(source.position.x + offset, source.position.z + offset, source.position.y)
+        : groundedPosition(
+            source.position.x + offset,
+            source.position.z + offset,
+            source.position,
+          ),
       rotationX: source.rotationX,
       rotationY: source.rotationY,
       rotationZ: source.rotationZ,
@@ -4485,8 +4551,11 @@ function createTellusWorld(
   };
 
   const chooseLocation = (request: GenerateRequest): Vec3 => {
-    if (typeof request.location === "object")
-      return normalizedDiscPosition(request.location.x, request.location.z);
+    if (typeof request.location === "object") {
+      return interiorObject
+        ? interiorPlacementPosition(request.location.x, request.location.z)
+        : normalizedDiscPosition(request.location.x, request.location.z);
+    }
     if (request.location === "near-mountain") {
       const angle = rand(tick + generated.length) * Math.PI * 2;
       const radius = 8 + rand(tick + 3) * 13;
@@ -4502,7 +4571,13 @@ function createTellusWorld(
       );
     const origin = visitorPosition;
     const angle = rand(tick + generated.length * 17) * Math.PI * 2;
-    const radius = 3 + rand(tick + 33) * 7;
+    const radius = interiorObject ? 2.2 + rand(tick + 33) * 2.8 : 3 + rand(tick + 33) * 7;
+    if (interiorObject) {
+      return interiorPlacementPosition(
+        origin.x + Math.cos(angle) * radius,
+        origin.z + Math.sin(angle) * radius,
+      );
+    }
     return normalizedDiscPosition(
       origin.x + Math.cos(angle) * radius,
       origin.z + Math.sin(angle) * radius,
@@ -6274,7 +6349,7 @@ function createTellusWorld(
         dragMoved = false;
         const target = dragGroundTarget(event);
         if (target) {
-          moveGenerated(moveModeThingId, target.x - thing.position.x, target.z - thing.position.z);
+          moveGenerated(moveModeThingId, target.x - thing.position.x, target.z - thing.position.z, target.y);
           dragMoved = true;
         }
         return;
@@ -6316,7 +6391,7 @@ function createTellusWorld(
       const dx = target.x - thing.position.x;
       const dz = target.z - thing.position.z;
       if (Math.hypot(dx, dz) < 0.05) return;
-      moveGenerated(draggingThingId, dx, dz);
+      moveGenerated(draggingThingId, dx, dz, target.y);
       dragMoved = true;
       return;
     }
@@ -6381,12 +6456,30 @@ function createTellusWorld(
   let draggingThingId: string | null = null;
   let dragMoved = false;
   let lastDragMoveAt = 0;
-  const dragGroundTarget = (event: PointerEvent): { x: number; z: number } | null => {
+  const dragGroundTarget = (event: PointerEvent): Vec3 | null => {
     // Analytic ray-march against terrainHeight() — the math, not the (now ~90K-vertex) mesh, so a
     // pointer-move never pays a dense-mesh raycast. Coarse 2u steps then 14 bisection rounds.
     setPointerNdcFromEvent(event);
     raycaster.setFromCamera(pointerNdc, camera);
     const ray = raycaster.ray;
+    if (interiorObject) {
+      const hits = raycaster.intersectObject(interiorObject, true);
+      for (const h of hits) {
+        const n = h.face?.normal;
+        if (!n) continue;
+        const worldN = n.clone().applyNormalMatrix(
+          new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld),
+        );
+        if (worldN.y <= 0.45 || h.point.y > visitorPosition.y + 1.35) continue;
+        return interiorPlacementPosition(h.point.x, h.point.z, visitorPosition.y);
+      }
+      const fallbackDistance = 3.2;
+      return interiorPlacementPosition(
+        visitorPosition.x + Math.sin(yaw) * fallbackDistance,
+        visitorPosition.z + Math.cos(yaw) * fallbackDistance,
+        visitorPosition.y,
+      );
+    }
     const maxT = 260 * WORLD_SCALE;
     const sampleGround = (x: number, z: number) => groundHeightAt(x, z) ?? SEA_LEVEL;
     let prevT = 0;
@@ -6410,7 +6503,9 @@ function createTellusWorld(
           else hi = mid;
         }
         const ft = (lo + hi) / 2;
-        return { x: ray.origin.x + ray.direction.x * ft, z: ray.origin.z + ray.direction.z * ft };
+        const x = ray.origin.x + ray.direction.x * ft;
+        const z = ray.origin.z + ray.direction.z * ft;
+        return { x, y: sampleGround(x, z), z };
       }
       prevAbove = above;
       prevT = t;

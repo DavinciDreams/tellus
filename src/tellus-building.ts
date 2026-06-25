@@ -202,6 +202,14 @@ export function generateInteriorRoom(spec: InteriorRoomSpec = {}): THREE.Group {
   const hx = width / 2;
   const hz = depth / 2;
   const solids: THREE.Mesh[] = [];
+  room.userData.placementBounds = {
+    minX: -hx + 0.8,
+    maxX: hx - 0.8,
+    minZ: -hz + 0.8,
+    maxZ: hz - 0.8,
+    levels,
+    levelHeight: LEVEL_HEIGHT,
+  };
 
   // ── Floor slabs (one per level) ──────────────────────────────────────────────────────────────
   // Ground floor: full slab, top surface at y = 0 (player grounds on y ≈ 0, matching applyInterior).
