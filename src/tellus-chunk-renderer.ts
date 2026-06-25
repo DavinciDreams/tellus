@@ -26,6 +26,7 @@ import type { ChunkData } from "./world-protocol";
 import type { TerrainPaintKind, WorldTemplateId } from "./tellus-types";
 
 const key = (cx: number, cz: number) => `${cx},${cz}`;
+const CHUNK_SKIRT_DEPTH = 8;
 
 // Sample the 65x65 sculpt grid (row-major z*65+x). Empty array => flat (revision 0).
 function sculptAt(offsets: number[], xi: number, zi: number): number {
@@ -50,7 +51,7 @@ export function createChunkTerrainGeometry(
   lodSegments: number = CHUNK_SEGMENTS,
 ): THREE.BufferGeometry {
   const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
-  const seg = Math.min(lodSegments, CHUNK_SEGMENTS);
+  const seg = Math.max(1, Math.min(lodSegments, CHUNK_SEGMENTS));
   const stride = CHUNK_SEGMENTS / seg; // 64/seg; integer for 64,32,16,8
   const worldX0 = chunk.cx * CHUNK_SPAN;
   const worldZ0 = chunk.cz * CHUNK_SPAN;
@@ -91,11 +92,45 @@ export function createChunkTerrainGeometry(
     }
   }
 
+  const addSkirtVertex = (surfaceIndex: number) => {
+    const offset = surfaceIndex * 3;
+    const skirtIndex = positions.length / 3;
+    positions.push(
+      positions[offset],
+      positions[offset + 1] - CHUNK_SKIRT_DEPTH,
+      positions[offset + 2],
+    );
+    colors.push(
+      colors[offset] * 0.7,
+      colors[offset + 1] * 0.7,
+      colors[offset + 2] * 0.7,
+    );
+    return skirtIndex;
+  };
+
+  const ring: number[] = [];
+  for (let x = 0; x < seg; x++) ring.push(x);
+  for (let z = 0; z < seg; z++) ring.push(z * row + seg);
+  for (let x = seg; x > 0; x--) ring.push(seg * row + x);
+  for (let z = seg; z > 0; z--) ring.push(z * row);
+
+  const skirtRing = ring.map(addSkirtVertex);
+  for (let i = 0; i < ring.length; i++) {
+    const next = (i + 1) % ring.length;
+    const a = ring[i];
+    const b = ring[next];
+    const a2 = skirtRing[i];
+    const b2 = skirtRing[next];
+    // Include both windings so the skirt masks seams from above and below with front-face materials.
+    indices.push(a, a2, b, b, a2, b2, a, b, a2, b, b2, a2);
+  }
+
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
   return geometry;
 }
 
@@ -168,14 +203,10 @@ export function createChunkRenderer(
   let loadRadius = CHUNK_LOAD_RADIUS;
   const keepRadius = () => loadRadius + 1;
 
-  // Uniform full-res LOD: per-ring decimation produced T-junction CRACKS at every near/far seam
-  // (a 65-edge-vertex chunk next to a 17-edge-vertex chunk leaves gaps). Until edge-skirts/stitching
-  // land (Phase-2.5), keep every loaded chunk at full CHUNK_SEGMENTS so matched seams stay crack-free.
-  // (CHUNK_LOD_FAR_SEGMENTS / CHUNK_LOD_NEAR_RADIUS retained for the future skirted LOD path.)
-  const lodForRing = (_ring: number) => {
-    void CHUNK_LOD_NEAR_RADIUS;
-    void CHUNK_LOD_FAR_SEGMENTS;
-    return CHUNK_SEGMENTS;
+  const lodForRing = (ring: number) => {
+    if (ring <= CHUNK_LOD_NEAR_RADIUS) return CHUNK_SEGMENTS;
+    if (ring === CHUNK_LOD_NEAR_RADIUS + 1) return CHUNK_SEGMENTS / 2;
+    return CHUNK_LOD_FAR_SEGMENTS;
   };
 
   const scheduleRetry = (k: string) => {
