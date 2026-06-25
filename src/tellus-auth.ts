@@ -223,13 +223,28 @@ function payUrl(path: string): string {
 }
 
 /** True when the URL targets the Hyades gateway API (worldApiBase / apiBase / same-origin /api/*). */
-function isHyadesApiUrl(raw: string): boolean {
+function isHeaderFreeWorldRead(url: URL, method: string): boolean {
+  const normalizedMethod = method.toUpperCase();
+  if (normalizedMethod !== "GET" && normalizedMethod !== "HEAD") return false;
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (parts[0] !== "api" || parts[1] !== "world" || parts.length < 4) return false;
+  const route = parts[3];
+  return (
+    route === "state" ||
+    route === "chunk" ||
+    route === "chunks" ||
+    (route === "preview" && parts[4] === "live")
+  );
+}
+
+export function shouldAttachSessionHeader(raw: string, method = "GET"): boolean {
   try {
     const url = new URL(raw, window.location.href);
     if (!url.pathname.startsWith("/api/")) return false;
     // The asset-library proxy is identity-free — skip the session header there so the (many, large)
     // model/texture GETs stay simple requests with no CORS preflight.
     if (url.pathname.startsWith("/api/assets/")) return false;
+    if (isHeaderFreeWorldRead(url, method)) return false;
     for (const base of [runtimeConfig.worldApiBase, runtimeConfig.apiBase]) {
       if (!base) continue;
       try {
@@ -262,7 +277,11 @@ export function installSessionFetch(): void {
       if (token) {
         const url =
           typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-        if (isHyadesApiUrl(url)) {
+        const method =
+          init?.method ??
+          (typeof Request !== "undefined" && input instanceof Request ? input.method : undefined) ??
+          "GET";
+        if (shouldAttachSessionHeader(url, method)) {
           const headers = new Headers(
             init?.headers ?? (typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined),
           );
