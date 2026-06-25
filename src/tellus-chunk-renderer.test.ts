@@ -14,7 +14,9 @@ import {
   CHUNK_SEGMENTS,
   CHUNK_SPAN,
   CHUNK_VERTEX_COUNT,
+  setChunkedWorldChunks,
 } from "./tellus-constants";
+import { runtimeConfig } from "./tellus-runtime-config";
 import type { ChunkData } from "./world-protocol";
 
 function makeChunk(over: Partial<ChunkData> = {}): ChunkData {
@@ -30,6 +32,13 @@ function makeChunk(over: Partial<ChunkData> = {}): ChunkData {
 }
 
 describe("createChunkTerrainGeometry", () => {
+  afterEach(() => {
+    setChunkedWorldChunks(null);
+    runtimeConfig.worldId = "chunked-64-genesis";
+    runtimeConfig.worldTemplate = "tellus";
+    runtimeConfig.landShape = undefined;
+  });
+
   it("renders empty sculptOffsets as natural large-world terrain", () => {
     const geometry = createChunkTerrainGeometry(makeChunk());
     const pos = geometry.getAttribute("position");
@@ -91,6 +100,25 @@ describe("createChunkTerrainGeometry", () => {
     const wz = (zi / CHUNK_SEGMENTS) * CHUNK_SPAN;
     expect(pos.getY(vtx)).toBeCloseTo(largeWorldBaseHeight(wx, wz) + 7.5, 5);
   });
+
+  it("renders template changes into chunk geometry", () => {
+    setChunkedWorldChunks({ w: 64, h: 64 });
+    const chunk = makeChunk({ cx: 32, cz: 32 });
+
+    runtimeConfig.worldId = "chunked-64-copper-terraces";
+    runtimeConfig.worldTemplate = "evoflow-copper-terraces";
+    const copper = createChunkTerrainGeometry(chunk);
+    const copperY = (copper.getAttribute("position") as THREE.BufferAttribute).getY(0);
+
+    runtimeConfig.worldId = "chunked-64-basalt-teeth";
+    runtimeConfig.worldTemplate = "evoflow-basalt-teeth";
+    const basalt = createChunkTerrainGeometry(chunk);
+    const basaltY = (basalt.getAttribute("position") as THREE.BufferAttribute).getY(0);
+
+    expect(Math.abs(basaltY - copperY)).toBeGreaterThan(1);
+    copper.dispose();
+    basalt.dispose();
+  });
 });
 
 describe("createChunkRenderer lifecycle", () => {
@@ -113,6 +141,10 @@ describe("createChunkRenderer lifecycle", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    setChunkedWorldChunks(null);
+    runtimeConfig.worldId = "chunked-64-genesis";
+    runtimeConfig.worldTemplate = "tellus";
+    runtimeConfig.landShape = undefined;
   });
 
   const resolveAll = async () => {
@@ -265,4 +297,5 @@ describe("createChunkRenderer sampleHeight (walk the sculpted chunk height)", ()
     );
     r.dispose();
   });
+
 });

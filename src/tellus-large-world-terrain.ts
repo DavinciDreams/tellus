@@ -13,6 +13,11 @@ import {
   parseWorldTemplateId,
   resolveLandShapeConfig,
 } from "./tellus-world-templates";
+import { evoflowTerrainSourceFor } from "./tellus-evoflow-terrains";
+import {
+  activeEvoflowBaseTerrainHeight,
+  activeEvoflowTerrainKind,
+} from "./tellus-terrain";
 
 function fade(t: number): number {
   return t * t * (3 - 2 * t);
@@ -231,15 +236,40 @@ function terrainDetailHeight(shape: LandShapeConfig, cx: number, cz: number, r: 
   return (macro + micro + ridges + terraces) * landMask;
 }
 
-function chunkedIslandPoint(x: number, z: number): { cx: number; cz: number; r: number } | null {
+function isEvoflowTemplate(template: WorldTemplateId): boolean {
+  return Boolean(evoflowTerrainSourceFor(template));
+}
+
+function templateWorldScaleMultiplier(template: WorldTemplateId): number {
+  if (isEvoflowTemplate(template)) return 4.5;
+  if (template === "ridge") return 5.2;
+  if (template === "cartoon-hills") return 3.7;
+  if (template === "fantasy-garden") return 5.6;
+  if (template === "low-poly-meadow") return 5.4;
+  if (template === "lowlands") return 2;
+  if (template === "realistic-cove") return 4.7;
+  if (template === "wide-island") return 2.4;
+  return 1;
+}
+
+function chunkedTemplatePoint(
+  x: number,
+  z: number,
+  scaleMultiplier = 1,
+): { cx: number; cz: number; r: number } | null {
   if (!getChunkedWorldChunks()) return null;
-  if (usesContinentalChunkedTerrain()) return null;
   const center = chunkedWorldCenter();
   if (!center) return null;
-  const scale = worldScaleForId(runtimeConfig.worldId);
+  const scale = worldScaleForId(runtimeConfig.worldId) * scaleMultiplier;
   const cx = (x - center.x) / scale;
   const cz = (z - center.z) / scale;
   return { cx, cz, r: Math.hypot(cx, cz) };
+}
+
+function chunkedIslandPoint(x: number, z: number): { cx: number; cz: number; r: number } | null {
+  if (usesContinentalChunkedTerrain()) return null;
+  const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
+  return chunkedTemplatePoint(x, z, templateWorldScaleMultiplier(template));
 }
 
 export function usesContinentalChunkedTerrain(
@@ -267,6 +297,147 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
     return SEA_LEVEL - 0.65 - Math.min(3.8, (r - CLASSIC_WORLD_RADIUS) * 0.035);
   }
 
+  if (isEvoflowTemplate(template)) {
+    const rasterHeight = activeEvoflowBaseTerrainHeight(cx, cz, r);
+    const washA = Math.abs(Math.sin(cx * 0.085 + fbm2(cx * 0.022, cz * 0.022, 3, 601) * 2.8));
+    const washB = Math.abs(Math.sin((cx + cz * 0.45) * 0.06 + fbm2(cx * 0.026 - 4, cz * 0.026 + 9, 3, 607) * 2.4));
+    const canyonCuts =
+      (1 - smoothstep(0.07, 0.24, washA)) * 5.8 +
+      (1 - smoothstep(0.05, 0.2, washB)) * 4.4;
+    const mesaSteps =
+      Math.floor((fbm2(cx * 0.045 + 8, cz * 0.045 - 5, 4, 613) + 1) * 6) * 1.35 +
+      Math.sin(r * 0.18) * 1.1;
+    const fallbackCanyon =
+      templateProfileHeight(template, cx, cz, r) * 3.4 +
+      ridgeNoise(cx * 0.055 - 8, cz * 0.055 + 3, 509) * 4.2 +
+      mesaSteps -
+      canyonCuts -
+      gaussian(cx, cz, -20, -24, 420) * 2.4;
+    const networkHeight = rasterHeight ?? fallbackCanyon;
+    const sandyFloor = 2.4 + fbm2(cx * 0.045, cz * 0.045, 4, 503) * 1.4;
+    const detail = terrainDetailHeight(shape, cx, cz, r) * 0.32;
+    return sandyFloor + networkHeight * 1.1 + detail + shape.baseOffset;
+  }
+
+  if (template === "ridge") {
+    const along = cx * 0.82 + cz * 0.34;
+    const across = -cx * 0.34 + cz * 0.82;
+    const spineWarp = Math.sin(along * 0.09) * 18 + fbm2(along * 0.04, across * 0.04, 4, 449) * 11;
+    const spineDistance = Math.abs(across - spineWarp);
+    const core = 1 - smoothstep(3.5, 17, spineDistance);
+    const secondaryDistance = Math.abs(across + 26 - spineWarp * 0.5);
+    const secondary = 1 - smoothstep(4, 15, secondaryDistance);
+    const foothills = 1 - smoothstep(14, 66, spineDistance);
+    const serration = ridgeNoise(along * 0.15 + 2, across * 0.11 - 4, 457);
+    const peakTrain = Math.pow(Math.max(0, Math.sin(along * 0.28) * 0.75 + serration * 0.9 - 0.28), 1.45);
+    const clefts = Math.pow(Math.max(0, ridgeNoise(along * 0.18 - 6, across * 0.18 + 2, 463) - 0.42), 1.3) * 9;
+    const summitCaps =
+      Math.pow(gaussian(cx, cz, -38, -10, 130), 0.5) * 20 +
+      Math.pow(gaussian(cx, cz, -12, 8, 95), 0.48) * 18 +
+      Math.pow(gaussian(cx, cz, 18, 14, 105), 0.5) * 22 +
+      Math.pow(gaussian(cx, cz, 42, 4, 120), 0.52) * 17;
+    const shoulder = gaussian(cx, cz, -24, -18, 520) * 3.6 + gaussian(cx, cz, 28, 22, 640) * 2.8;
+    const landMask = 1 - smoothstep(CLASSIC_WORLD_RADIUS * 0.9, CLASSIC_WORLD_RADIUS * 1.08, r);
+    return (
+      1.4 +
+      Math.pow(Math.max(0, core), 1.7) * (28 + serration * 20 + peakTrain * 34 + clefts) +
+      Math.pow(Math.max(0, secondary), 1.45) * (11 + ridgeNoise(along * 0.13, across * 0.09, 461) * 8) +
+      Math.pow(Math.max(0, foothills), 1.8) * 7 +
+      summitCaps +
+      shoulder -
+      smoothstep(36, 70, spineDistance) * 3.2
+    ) * landMask - (1 - landMask) * 2.4;
+  }
+
+  if (template === "low-poly-meadow") {
+    const landMask = 1 - smoothstep(CLASSIC_WORLD_RADIUS * 0.88, CLASSIC_WORLD_RADIUS * 1.08, r);
+    const cellX = Math.floor((cx + 96) / 14);
+    const cellZ = Math.floor((cz + 96) / 14);
+    const cellHeight = Math.floor(hash2(cellX, cellZ, 701) * 8) * 0.85;
+    const diagonalFacets =
+      Math.floor((Math.sin((cx + cz) * 0.16) + Math.sin((cx - cz) * 0.13) + 2) * 2.1) * 0.9;
+    const broad =
+      gaussian(cx, cz, -34, 18, 820) * 13.5 +
+      gaussian(cx, cz, 26, -28, 720) * 11.8 +
+      gaussian(cx, cz, 18, 34, 560) * 9.2;
+    const stepped = Math.floor((fbm2(cx * 0.095, cz * 0.095, 4, 467) + 1) * 9.5) * 1.35;
+    const flowerPlateaus = Math.max(0, Math.sin(cx * 0.12) * Math.cos(cz * 0.1)) * 2.2;
+    return (3.2 + broad + stepped + diagonalFacets + cellHeight + flowerPlateaus) * landMask - (1 - landMask) * 2.3;
+  }
+
+  if (template === "cartoon-hills") {
+    const landMask = 1 - smoothstep(CLASSIC_WORLD_RADIUS * 0.86, CLASSIC_WORLD_RADIUS * 1.08, r);
+    const hx = cx * 1.55;
+    const hz = cz * 1.55;
+    const bubbly =
+      Math.pow(gaussian(hx, hz, -34, 18, 180), 0.34) * 54 +
+      Math.pow(gaussian(hx, hz, 32, -20, 165), 0.32) * 58 +
+      Math.pow(gaussian(hx, hz, 8, 36, 155), 0.35) * 44 +
+      Math.pow(gaussian(hx, hz, -4, -34, 145), 0.38) * 32;
+    const softValleys =
+      gaussian(hx, hz, -4, 0, 270) * 24 +
+      gaussian(hx, hz, 38, 38, 260) * 13 +
+      gaussian(hx, hz, -44, -32, 250) * 10;
+    const toySteps = Math.floor((fbm2(hx * 0.055, hz * 0.055, 3, 431) + 1) * 4) * 1.35;
+    return (4.8 + bubbly + toySteps - softValleys + terrainDetailHeight(shape, cx, cz, r) * 0.12) * landMask -
+      (1 - landMask) * 2.6;
+  }
+
+  if (template === "realistic-cove") {
+    const coastNoise =
+      fbm2(cx * 0.045 + 13, cz * 0.045 - 9, 4, 739) * 3.6 +
+      Math.sin(Math.atan2(cz, cx) * 5.5 + r * 0.04) * 1.8;
+    const shoreRadius = CLASSIC_WORLD_RADIUS * (0.92 + coastNoise * 0.006);
+    const landMask = 1 - smoothstep(shoreRadius, shoreRadius + CLASSIC_WORLD_RADIUS * 0.18, r);
+    const angle = Math.atan2(cz, cx);
+    const bayMouth = Math.abs(angle + 1.32 + Math.sin(r * 0.035) * 0.12);
+    const bayChannel = (1 - smoothstep(0.16, 0.54, bayMouth)) * smoothstep(16, 72, r);
+    const inletOffset = Math.abs(cx * 0.58 + (cz + 32) * 0.18);
+    const inletTrough = (1 - smoothstep(8, 31, inletOffset)) * smoothstep(-58, -8, cz);
+    const coveBasin =
+      gaussian(cx, cz, 10, -32, 360) * 10.4 +
+      gaussian(cx, cz, -8, -47, 420) * 6.6 +
+      bayChannel * 9.2 +
+      inletTrough * 5.8;
+    const westernHeadland =
+      gaussian(cx, cz, -42, -18, 220) * 15.5 +
+      gaussian(cx, cz, -32, 8, 360) * 7.2;
+    const easternHeadland =
+      gaussian(cx, cz, 38, -15, 230) * 13.8 +
+      gaussian(cx, cz, 48, 14, 340) * 6.4;
+    const backDunes =
+      gaussian(cx, cz, -26, 28, 520) * 5.8 +
+      gaussian(cx, cz, 18, 34, 500) * 5.2 +
+      gaussian(cx, cz, 46, 38, 620) * 3.2;
+    const coastalBluffs =
+      ridgeNoise(cx * 0.06 - 5, cz * 0.056 + 8, 733) *
+      6.6 *
+      smoothstep(16, 60, r) *
+      (0.55 + smoothstep(-6, 44, cz) * 0.45);
+    const scrubUndulation = fbm2(cx * 0.068 - 11, cz * 0.068 + 4, 5, 727) * 2.4;
+    const sandFlat = 2.8 + fbm2(cx * 0.038, cz * 0.038, 4, 727) * 1.1;
+    return (sandFlat + westernHeadland + easternHeadland + backDunes + coastalBluffs + scrubUndulation - coveBasin) * landMask -
+      (1 - landMask) * 2.9;
+  }
+
+  if (template === "fantasy-garden") {
+    const landMask = 1 - smoothstep(CLASSIC_WORLD_RADIUS * 0.88, CLASSIC_WORLD_RADIUS * 1.08, r);
+    const ring = Math.sin(r * 0.34 + Math.atan2(cz, cx) * 5);
+    const pathCarve = (1 - smoothstep(0.06, 0.2, Math.abs(ring))) * 2.4;
+    const pond = gaussian(cx, cz, -5, 8, 155) * 8.4;
+    const flowerBeds =
+      Math.pow(gaussian(cx, cz, -32, -8, 180), 0.6) * 5 +
+      Math.pow(gaussian(cx, cz, 28, 20, 190), 0.6) * 4.4 +
+      Math.pow(gaussian(cx, cz, 8, -34, 170), 0.62) * 4.8;
+    const gardenBowls =
+      gaussian(cx, cz, -26, 18, 900) * 11.4 +
+      gaussian(cx, cz, 28, -14, 720) * 9.2 +
+      gaussian(cx, cz, 18, 34, 520) * 6.6;
+    const terraces = Math.sin((cx - cz) * 0.1) * 1.5 + Math.sin((cx + cz) * 0.065) * 1.2;
+    return (4.6 + gardenBowls + flowerBeds + terraces - pathCarve - pond + terrainDetailHeight(shape, cx, cz, r) * 0.25) * landMask -
+      (1 - landMask) * 2.2;
+  }
+
   const mountain = Math.max(0, 1 - r / shape.mountain.radius);
   const mound = Math.pow(mountain, shape.mountain.exponent) * shape.mountain.height;
   const shoulder = gaussian(cx, cz, shape.shoulder.x, shape.shoulder.z, shape.shoulder.radius) * shape.shoulder.height;
@@ -288,6 +459,8 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
 
 function continentalBaseHeight(x: number, z: number): number {
   const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
+  const evoflow = isEvoflowTemplate(template);
+  const templatePoint = chunkedTemplatePoint(x, z, templateWorldScaleMultiplier(template));
   const warpA = fbm2(x * 0.0028 + 91.7, z * 0.0028 - 33.1, 4, 17);
   const warpB = fbm2(x * 0.0028 - 12.4, z * 0.0028 + 70.6, 4, 29);
   const wx = x + warpA * 72;
@@ -328,7 +501,20 @@ function continentalBaseHeight(x: number, z: number): number {
       valleyCut;
   }
 
-  return 4.2 + continent + hills + detail + ridgeFold + brokenRidge + terrace + templateLift - broadValley;
+  let templateSurface = templateLift;
+  if (templatePoint) {
+    const shape = resolveLandShapeConfig(template, runtimeConfig.landShape);
+    const { cx, cz, r } = templatePoint;
+    const centeredMask = evoflow
+      ? 1 - smoothstep(CLASSIC_WORLD_RADIUS * 0.92, CLASSIC_WORLD_RADIUS * 1.18, r)
+      : 1 - smoothstep(CLASSIC_WORLD_RADIUS * 2.4, CLASSIC_WORLD_RADIUS * 7.5, r);
+    const rasterHeight = evoflow ? activeEvoflowBaseTerrainHeight(cx, cz, r) : null;
+    const profile = (rasterHeight ?? templateProfileHeight(template, cx, cz, r)) * 1.7;
+    const generated = terrainDetailHeight(shape, cx, cz, r) + shape.baseOffset;
+    templateSurface += (profile + generated) * centeredMask;
+  }
+
+  return 4.2 + continent + hills + detail + ridgeFold + brokenRidge + terrace + templateSurface - broadValley;
 }
 
 export function largeWorldBaseHeight(x: number, z: number): number {
@@ -352,6 +538,85 @@ export function largeWorldTerrainKind(
   if (islandPoint) {
     const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
     const shape = resolveLandShapeConfig(template, runtimeConfig.landShape);
+    if (isEvoflowTemplate(template)) {
+      const kind = activeEvoflowTerrainKind(islandPoint.cx, islandPoint.cz, y);
+      if (kind && kind !== "water" && kind !== "meadow") return kind;
+      if (islandPoint.r > CLASSIC_WORLD_RADIUS * 1.02) return "beach";
+      const washA = Math.abs(Math.sin(islandPoint.cx * 0.085 + fbm2(islandPoint.cx * 0.022, islandPoint.cz * 0.022, 3, 601) * 2.8));
+      const washB = Math.abs(Math.sin((islandPoint.cx + islandPoint.cz * 0.45) * 0.06 + fbm2(islandPoint.cx * 0.026 - 4, islandPoint.cz * 0.026 + 9, 3, 607) * 2.4));
+      if (largeWorldSlope(x, z) > 1.45 || y > 24) return "rock";
+      if (washA < 0.18 || washB < 0.14) return "dirt";
+      if (template === "evoflow-copper-terraces" || template === "evoflow-coral-fold") return "beach";
+      return y < 6.4 ? "beach" : "dirt";
+    }
+    if (template === "ridge") {
+      if (islandPoint.r > CLASSIC_WORLD_RADIUS * 1.04 || y <= SEA_LEVEL + 0.18) return "beach";
+      if (y > 54) return "snow";
+      if (y > 18 || largeWorldSlope(x, z) > 0.72) return "rock";
+      if (y > 8 || largeWorldSlope(x, z) > 0.42) return "dirt";
+      return "meadow";
+    }
+    if (template === "low-poly-meadow") {
+      if (islandPoint.r > CLASSIC_WORLD_RADIUS * 1.04 || y <= SEA_LEVEL + 0.18) return "meadow";
+      if (largeWorldSlope(x, z) > 2.4 && y > 42) return "rock";
+      if (
+        Math.abs(Math.sin((islandPoint.cx - islandPoint.cz) * 0.14)) < 0.24 ||
+        Math.sin(islandPoint.cx * 0.18) * Math.cos(islandPoint.cz * 0.16) > 0.35
+      ) {
+        return "flowers";
+      }
+      return "meadow";
+    }
+    if (template === "cartoon-hills") {
+      if (islandPoint.r > CLASSIC_WORLD_RADIUS * 1.04 || y <= SEA_LEVEL + 0.18) return "beach";
+      if (y > 22 || largeWorldSlope(x, z) > 0.62) return "flowers";
+      return "meadow";
+    }
+    if (template === "realistic-cove") {
+      const bayAngle = Math.abs(
+        Math.atan2(islandPoint.cz, islandPoint.cx) +
+          1.32 +
+          Math.sin(islandPoint.r * 0.035) * 0.12,
+      );
+      const bayChannel = (1 - smoothstep(0.16, 0.54, bayAngle)) * smoothstep(16, 72, islandPoint.r);
+      const inletOffset = Math.abs(islandPoint.cx * 0.58 + (islandPoint.cz + 32) * 0.18);
+      const inletTrough = (1 - smoothstep(8, 31, inletOffset)) * smoothstep(-58, -8, islandPoint.cz);
+      const inCove =
+        gaussian(islandPoint.cx, islandPoint.cz, 10, -32, 360) > 0.2 ||
+        gaussian(islandPoint.cx, islandPoint.cz, -8, -47, 420) > 0.28 ||
+        bayChannel > 0.34 ||
+        inletTrough > 0.42;
+      const headland =
+        gaussian(islandPoint.cx, islandPoint.cz, -42, -18, 220) +
+        gaussian(islandPoint.cx, islandPoint.cz, -32, 8, 360) * 0.7 +
+        gaussian(islandPoint.cx, islandPoint.cz, 38, -15, 230) +
+        gaussian(islandPoint.cx, islandPoint.cz, 48, 14, 340) * 0.7;
+      const scrub =
+        fbm2(islandPoint.cx * 0.065 - 2, islandPoint.cz * 0.065 + 6, 4, 751) +
+        smoothstep(-4, 42, islandPoint.cz) * 0.45;
+      if (islandPoint.r > CLASSIC_WORLD_RADIUS * 1.04 || y <= SEA_LEVEL - 0.2 || (inCove && y < SEA_LEVEL + 0.5)) {
+        return "water";
+      }
+      if (inCove && y < SEA_LEVEL + 3.8) return "beach";
+      if (headland > 0.5 || largeWorldSlope(x, z) > 0.86 || y > 16) return "rock";
+      if (islandPoint.r > CLASSIC_WORLD_RADIUS * 0.67 || y < SEA_LEVEL + 5.4) return "beach";
+      if (scrub > 0.32) return "dirt";
+      return "meadow";
+    }
+    if (template === "fantasy-garden") {
+      if (islandPoint.r > CLASSIC_WORLD_RADIUS * 1.04 || y <= SEA_LEVEL + 0.18) return "beach";
+      const pondDistance = Math.hypot(islandPoint.cx + 5, islandPoint.cz - 8);
+      if (pondDistance < 12 && y < 2.4) return "water";
+      const ring = Math.abs(Math.sin(islandPoint.r * 0.34 + Math.atan2(islandPoint.cz, islandPoint.cx) * 5));
+      if (ring < 0.19) return "dirt";
+      const bed =
+        gaussian(islandPoint.cx, islandPoint.cz, -32, -8, 180) +
+        gaussian(islandPoint.cx, islandPoint.cz, 28, 20, 190) +
+        gaussian(islandPoint.cx, islandPoint.cz, 8, -34, 170);
+      if (bed > 0.42 || y > 12) return "flowers";
+      if (largeWorldSlope(x, z) > 0.8) return "dirt";
+      return "meadow";
+    }
     if (islandPoint.r > CLASSIC_WORLD_RADIUS * 1.04 || y <= SEA_LEVEL + 0.18) return "water";
     if (y <= SEA_LEVEL + 1.55 || islandPoint.r > CLASSIC_WORLD_RADIUS * 0.88) return "beach";
     if (template === "lowlands") {
@@ -361,12 +626,6 @@ export function largeWorldTerrainKind(
     }
     const pondDistance = Math.hypot(islandPoint.cx - shape.pond.x, islandPoint.cz - shape.pond.z);
     if (pondDistance < shape.pond.radius && y < 1.9) return "water";
-    if (template === "fantasy-garden" && pondDistance < shape.pond.radius * 1.65 && y < 3.1) {
-      return "flowers";
-    }
-    if (template === "realistic-cove" && islandPoint.r > CLASSIC_WORLD_RADIUS * 0.72 && y < 3.2) {
-      return "beach";
-    }
     if (template === "evoflow-copper-terraces") {
       const terraceBand = Math.sin((islandPoint.cx - islandPoint.cz) * 0.11);
       if (largeWorldSlope(x, z) > 0.52 || y > 4.2 || terraceBand > 0.2) return "rock";
@@ -381,7 +640,6 @@ export function largeWorldTerrainKind(
     }
     if (y > 13.5) return "snow";
     if (y > 6.8 || largeWorldSlope(x, z) > 1.05) return "rock";
-    if (template === "low-poly-meadow" || template === "cartoon-hills") return "meadow";
     if (
       template === "evoflow-coral-canyon" ||
       template === "evoflow-coral-canyon-child" ||
@@ -398,6 +656,14 @@ export function largeWorldTerrainKind(
 
   const slope = largeWorldSlope(x, z);
   const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
+  if (isEvoflowTemplate(template)) {
+    const point = chunkedTemplatePoint(x, z, 10);
+    const kind = point ? activeEvoflowTerrainKind(point.cx, point.cz, y) : null;
+    if (kind) return kind;
+    if (point && point.r > CLASSIC_WORLD_RADIUS * 1.05) return "beach";
+    if (slope > 0.7 || y > 14) return "rock";
+    return y < SEA_LEVEL + 0.5 ? "beach" : "dirt";
+  }
   if (template === "ridge") {
     if (y > 34) return "snow";
     if (y > 17 || slope > 0.58) return "rock";

@@ -441,7 +441,7 @@ export function templateForWorldId(
   if (id.includes("flight") || id.includes("simulator") || id.includes("range")) return "flight-range";
   if (id.includes("low-poly") || id.includes("lowpoly")) return "low-poly-meadow";
   if (id.includes("cartoon") || id.includes("toon")) return "cartoon-hills";
-  if (id.includes("grand-hall") || id.includes("hall")) return "grand-hall-shell";
+  if (id.includes("grand-hall") || id.includes("hall") || id.includes("tavern") || id.includes("inn") || id.includes("pub")) return "grand-hall-shell";
   if (id.includes("interior") || id.includes("studio") || id.includes("room")) return "interior-studio";
   if (id.includes("evoflow") || id.includes("coral") || id.includes("canyon")) {
     return "evoflow-coral-canyon";

@@ -45,6 +45,43 @@ function islandSignature(template: WorldTemplateId, chunkSize = 24): number[] {
   return samples.map((sample) => Number(largeWorldBaseHeight(sample.x, sample.z).toFixed(2)));
 }
 
+function continentalSignature(template: WorldTemplateId): number[] {
+  setChunkedWorldChunks({ w: 64, h: 64 });
+  runtimeConfig.worldId = `chunked-64-${template}`;
+  runtimeConfig.worldTemplate = template;
+  const center = { x: (64 * CHUNK_SPAN) / 2, z: (64 * CHUNK_SPAN) / 2 };
+  const samples = [
+    { x: center.x, z: center.z },
+    { x: center.x - 56, z: center.z + 24 },
+    { x: center.x + 48, z: center.z - 36 },
+    { x: center.x + 16, z: center.z + 68 },
+  ];
+  return samples.map((sample) => Number(largeWorldBaseHeight(sample.x, sample.z).toFixed(2)));
+}
+
+function showcaseSamples(chunkSize = 24): Array<{ x: number; z: number }> {
+  const center = { x: (chunkSize * CHUNK_SPAN) / 2, z: (chunkSize * CHUNK_SPAN) / 2 };
+  return [
+    { x: center.x, z: center.z },
+    { x: center.x - 210, z: center.z + 42 },
+    { x: center.x + 180, z: center.z - 84 },
+    { x: center.x + 300, z: center.z + 12 },
+    { x: center.x - 96, z: center.z - 260 },
+    { x: center.x + 56, z: center.z + 232 },
+  ];
+}
+
+function showcaseGridSamples(chunkSize = 24): Array<{ x: number; z: number }> {
+  const center = { x: (chunkSize * CHUNK_SPAN) / 2, z: (chunkSize * CHUNK_SPAN) / 2 };
+  const samples: Array<{ x: number; z: number }> = [];
+  for (let z = -3; z <= 3; z++) {
+    for (let x = -3; x <= 3; x++) {
+      samples.push({ x: center.x + x * 108, z: center.z + z * 108 });
+    }
+  }
+  return samples;
+}
+
 describe("large-world terrain", () => {
   afterEach(() => {
     setChunkedWorldChunks(null);
@@ -185,6 +222,110 @@ describe("large-world terrain", () => {
       expect(signature, template).not.toBe(tellus);
     }
     expect(new Set(signatures.values()).size).toBeGreaterThan(7);
+  });
+
+  it("keeps showcase templates broad instead of tiny Tellus-island clones", () => {
+    const chunkSize = 24;
+    setChunkedWorldChunks({ w: chunkSize, h: chunkSize });
+    const center = { x: (chunkSize * CHUNK_SPAN) / 2, z: (chunkSize * CHUNK_SPAN) / 2 };
+    const showcasePoint = { x: center.x + 300, z: center.z + 12 };
+
+    runtimeConfig.worldId = "chunked-24-tellus";
+    runtimeConfig.worldTemplate = "tellus";
+    expect(largeWorldTerrainKind(showcasePoint.x, showcasePoint.z)).toBe("water");
+
+    for (const template of [
+      "ridge",
+      "realistic-cove",
+      "low-poly-meadow",
+      "cartoon-hills",
+      "fantasy-garden",
+      "evoflow-copper-terraces",
+    ] as WorldTemplateId[]) {
+      runtimeConfig.worldId = `chunked-24-${template}`;
+      runtimeConfig.worldTemplate = template;
+      const h = largeWorldBaseHeight(showcasePoint.x, showcasePoint.z);
+      expect(h, template).toBeGreaterThan(SEA_LEVEL - 0.25);
+      expect(largeWorldTerrainKind(showcasePoint.x, showcasePoint.z), template).not.toBe("water");
+    }
+  });
+
+  it("gives showcase templates strong relief and style-specific material bands", () => {
+    const chunkSize = 24;
+    setChunkedWorldChunks({ w: chunkSize, h: chunkSize });
+    const samples = showcaseGridSamples(chunkSize);
+
+    for (const template of [
+      "ridge",
+      "realistic-cove",
+      "low-poly-meadow",
+      "cartoon-hills",
+      "fantasy-garden",
+      "evoflow-copper-terraces",
+    ] as WorldTemplateId[]) {
+      runtimeConfig.worldId = `chunked-${chunkSize}-${template}`;
+      runtimeConfig.worldTemplate = template;
+      const heights = samples.map((sample) => largeWorldBaseHeight(sample.x, sample.z));
+      const kinds = new Set(samples.map((sample) => largeWorldTerrainKind(sample.x, sample.z)));
+      const relief = Math.max(...heights) - Math.min(...heights);
+      const minRelief: Partial<Record<WorldTemplateId, number>> = {
+        ridge: 28,
+        "realistic-cove": 18,
+        "low-poly-meadow": 22,
+        "cartoon-hills": 22,
+        "fantasy-garden": 12,
+        "evoflow-copper-terraces": 12,
+      };
+
+      expect(relief, template).toBeGreaterThan(minRelief[template] ?? 8);
+      expect(kinds.size, template).toBeGreaterThan(1);
+      if (template === "ridge") expect(kinds.has("snow") || kinds.has("rock")).toBe(true);
+      if (template === "realistic-cove") {
+        expect(kinds.has("water") || kinds.has("beach")).toBe(true);
+        expect(kinds.has("rock")).toBe(true);
+        expect(kinds.has("dirt") || kinds.has("beach")).toBe(true);
+      }
+      if (template === "low-poly-meadow") expect(kinds.has("rock") || kinds.has("dirt")).toBe(false);
+      if (template === "cartoon-hills") expect(kinds.has("flowers")).toBe(true);
+      if (template === "fantasy-garden") {
+        expect(kinds.has("flowers")).toBe(true);
+        expect(kinds.has("dirt")).toBe(true);
+      }
+      if (template === "evoflow-copper-terraces") {
+        expect(kinds.has("beach")).toBe(true);
+        expect(kinds.has("dirt")).toBe(true);
+        expect(kinds.has("meadow")).toBe(false);
+      }
+    }
+  });
+
+  it("applies EvoFlow template profiles to large continental chunked worlds", () => {
+    const signatures = new Map<WorldTemplateId, string>(
+      ([
+        "evoflow-glass-ridge",
+        "evoflow-copper-terraces",
+        "evoflow-basalt-teeth",
+        "evoflow-spires",
+        "evoflow-lichen-basin",
+      ] as WorldTemplateId[]).map((template) => [template, continentalSignature(template).join(",")]),
+    );
+
+    expect(new Set(signatures.values()).size).toBe(signatures.size);
+  });
+
+  it("applies procedural land-shape overrides to large continental chunked worlds", () => {
+    setChunkedWorldChunks({ w: 64, h: 64 });
+    runtimeConfig.worldId = "chunked-64-flight-range";
+    runtimeConfig.worldTemplate = "flight-range";
+    const center = { x: (64 * CHUNK_SPAN) / 2, z: (64 * CHUNK_SPAN) / 2 };
+    const before = largeWorldBaseHeight(center.x, center.z);
+
+    runtimeConfig.landShape = {
+      baseOffset: 5,
+      detail: { amplitude: 2.5, ridgeAmplitude: 2, terraceAmplitude: 1.2 },
+    };
+
+    expect(largeWorldBaseHeight(center.x, center.z)).toBeGreaterThan(before + 4);
   });
 
   it("uses distinctive base materials for non-Tellus templates", () => {

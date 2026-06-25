@@ -165,12 +165,13 @@ export function applyWorldTerrainTemplate(
 ): void {
   activeTemplate = template;
   activeLandShape = resolveLandShapeConfig(template, overrides);
-  beginEvoflowTerrainLoad(template);
   setClassicPondShape(
     activeLandShape.pond.x,
     activeLandShape.pond.z,
     activeLandShape.pond.radius,
   );
+  beginEvoflowTerrainLoad(template);
+  terrainTemplateLoadedCallback?.();
 }
 
 function readImageData(url: string): Promise<ImageData> {
@@ -290,6 +291,10 @@ function evoflowBaseTerrainHeight(cx: number, cz: number, r: number): number | n
   return (normalized - 0.33) * source.heightScale * Math.max(0.28, shoreFade) + source.heightOffset - rimDrop;
 }
 
+export function activeEvoflowBaseTerrainHeight(cx: number, cz: number, r: number): number | null {
+  return evoflowBaseTerrainHeight(cx, cz, r);
+}
+
 function evoflowTerrainKind(cx: number, cz: number, y: number): TerrainKind | null {
   if (!activeEvoflowRaster?.semanticData) return null;
   const { u, v } = evoflowUv(cx, cz);
@@ -310,6 +315,10 @@ function evoflowTerrainKind(cx: number, cz: number, y: number): TerrainKind | nu
   if (y > 12.5) return "rock";
   if (y < -1.5) return "beach";
   return "meadow";
+}
+
+export function activeEvoflowTerrainKind(cx: number, cz: number, y: number): TerrainKind | null {
+  return evoflowTerrainKind(cx, cz, y);
 }
 
 void beginEvoflowTerrainLoad(activeTemplate);

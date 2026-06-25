@@ -192,6 +192,17 @@ installSessionFetch();
 
 const PORTAL_ARRIVAL_EXIT_OFFSET = 4.5;
 const GENERATED_INTERIOR_SCENE_URL = "generated://interior-room";
+const GRAND_HALL_INTERIOR_SCENE_URL = "generated://interior-room?style=grand-hall";
+
+const isInteriorWorldTemplate = (template: WorldTemplateId): boolean =>
+  template === "interior-studio" || template === "grand-hall-shell";
+
+const generatedInteriorSceneUrlForTemplate = (template: WorldTemplateId): string | undefined =>
+  !isInteriorWorldTemplate(template)
+    ? undefined
+    : template === "grand-hall-shell"
+      ? GRAND_HALL_INTERIOR_SCENE_URL
+      : GENERATED_INTERIOR_SCENE_URL;
 
 // Per-user embodied-agent status shape returned by the Hyades world agent endpoints (camelCase).
 interface AgentStatus {
@@ -836,6 +847,7 @@ function createTellusWorld(
   // are hidden, the player grounds on the room floor (flat y≈0 — interiors have no heightfield).
   let interiorObject: THREE.Object3D | null = null;
   let interiorSceneUrl: string | null = null;
+  let profileInteriorSceneUrl = options.initialInteriorSceneUrl?.trim() || null;
   // Guards the ONE-TIME interior trimesh bake (see ensureInteriorStatics). Declared here (before
   // applyInterior uses it) to avoid a temporal-dead-zone reference.
   let interiorBaked = false;
@@ -843,6 +855,14 @@ function createTellusWorld(
   // floor slab(s) + perimeter walls (with a doorway gap) + a climbable staircase between levels +
   // ceiling + warm light, all flagged userData.collide for the physics track. A real sceneUrl GLB
   // (when it loads) is added INSIDE the same container.
+  const interiorRoomSpecForSceneUrl = (sceneUrl: string) => {
+    const lower = sceneUrl.toLowerCase();
+    if (lower.includes("grand-hall") || lower.includes("tavern")) {
+      return { width: 30, depth: 24, levels: 2, stairs: true, seed: 7 };
+    }
+    return { width: 20, depth: 18, levels: 2, stairs: true, seed: 3 };
+  };
+
   const applyInterior = (sceneUrl: string) => {
     const u = sceneUrl.trim();
     if (!u || u === interiorSceneUrl) return;
@@ -871,7 +891,7 @@ function createTellusWorld(
     // Track B: real multi-surface interior geometry (floor/walls/stairs/ceiling). Solid meshes carry
     // userData.collide === true so Track A can bake them into a Rapier static trimesh. Default room:
     // 16×16, single level (set levels>1 to get a climbable staircase between mezzanine floors).
-    container.add(generateInteriorRoom({ levels: 2 }));
+    container.add(generateInteriorRoom(interiorRoomSpecForSceneUrl(u)));
     interiorObject = container;
     scene.add(container);
     // TRACK-A: bake the interior's solid meshes (userData.collide === true) into a Rapier static
@@ -1369,9 +1389,6 @@ function createTellusWorld(
     applyInterior(GENERATED_INTERIOR_SCENE_URL);
   };
   window.__tellusExitInterior = () => exitInterior();
-  if (options.initialInteriorSceneUrl) {
-    applyInterior(options.initialInteriorSceneUrl);
-  }
   // DEV-ONLY perf readout: window.__tellusPerf() → { fps, vegetation: {tier, chunks, trees, grassTris} }.
   window.__tellusPerf = () => ({ fps: fpsValue, vegetation: vegetation.stats() });
 
@@ -2128,8 +2145,16 @@ function createTellusWorld(
         // A snapshot WITHOUT a sceneUrl while an interior is mounted means we left the room (switched
         // back to an outdoor world in the same scene) — tear the room + its physics statics down.
         const sceneUrl = (parsed as { sceneUrl?: unknown }).sceneUrl;
-        if (typeof sceneUrl === "string" && sceneUrl) applyInterior(sceneUrl);
-        else if (interiorObject && !runtimeConfig.worldId.startsWith("interior-")) exitInterior();
+        if (typeof sceneUrl === "string" && sceneUrl) {
+          profileInteriorSceneUrl = sceneUrl;
+          applyInterior(sceneUrl);
+        } else if (
+          interiorObject &&
+          !runtimeConfig.worldId.startsWith("interior-") &&
+          !profileInteriorSceneUrl
+        ) {
+          exitInterior();
+        }
         // Phase 4: a tiles world carries a tileSetUrl → mount the 3D tileset as the render substrate.
         const tileUrl = (parsed as { tileSetUrl?: unknown }).tileSetUrl;
         if (typeof tileUrl === "string" && tileUrl) mountTileset(tileUrl);
@@ -3165,7 +3190,11 @@ function createTellusWorld(
   };
 
   onTerrainTemplateLoaded(() => {
-    if (isChunked) return;
+    if (isChunked) {
+      chunkRenderer?.rebuildTerrain();
+      publish();
+      return;
+    }
     refreshTerrainGeometry();
     updatePondSurfacePosition();
     regroundClassicTerrainActorsAndThings();
@@ -3938,6 +3967,10 @@ function createTellusWorld(
     // portal and you'd bounce straight back).
     portalSpawnGuard = true;
   };
+
+  if (options.initialInteriorSceneUrl) {
+    applyInterior(options.initialInteriorSceneUrl);
+  }
 
   const moveMountedUnitTo = (x: number, z: number): boolean => {
     if (!sailingThingId) return false;
@@ -8540,6 +8573,7 @@ function App(): React.ReactElement {
     dayNightStart?: number;
     lightingMood?: LightingMood;
     waterSettings?: WaterSettings;
+    sceneUrl?: string;
   }
 
   const parseWorldRenderProfile = (value: unknown): WorldRenderProfile => {
@@ -8611,6 +8645,12 @@ function App(): React.ReactElement {
       waterSettingsValue === undefined
         ? undefined
         : parseWaterSettings(waterSettingsValue, runtimeConfig.waterSettings);
+    const sceneUrl =
+      typeof value.sceneUrl === "string" && value.sceneUrl.trim()
+        ? value.sceneUrl.trim()
+        : typeof value.scene_url === "string" && value.scene_url.trim()
+          ? value.scene_url.trim()
+          : undefined;
     return {
       displayName,
       worldTemplate,
@@ -8624,6 +8664,7 @@ function App(): React.ReactElement {
       dayNightStart,
       lightingMood,
       waterSettings,
+      sceneUrl,
     };
   };
 
@@ -8667,6 +8708,7 @@ function App(): React.ReactElement {
     if (existing.dayNightStart !== undefined) merged.dayNightStart = existing.dayNightStart;
     if (existing.lightingMood !== undefined) merged.lightingMood = existing.lightingMood;
     if (existing.waterSettings !== undefined) merged.waterSettings = existing.waterSettings;
+    if (existing.sceneUrl !== undefined) merged.sceneUrl = existing.sceneUrl;
     rememberWorldProfile(worldId, merged);
   };
 
@@ -8751,6 +8793,7 @@ function App(): React.ReactElement {
     dayNightStart: number;
     lightingMood: LightingMood;
     waterSettings: WaterSettings;
+    sceneUrl?: string;
   }> => {
     const templateFallback = templateForWorldId(
       worldId,
@@ -8831,6 +8874,10 @@ function App(): React.ReactElement {
         profile.lightingMood ?? localProfile.lightingMood ?? runtimeConfig.lightingMood,
       waterSettings:
         profile.waterSettings ?? localProfile.waterSettings ?? runtimeConfig.waterSettings,
+      sceneUrl:
+        profile.sceneUrl ??
+        localProfile.sceneUrl ??
+        generatedInteriorSceneUrlForTemplate(template),
     };
   };
   const loadKnownWorlds = (): string[] => {
@@ -9092,16 +9139,19 @@ function App(): React.ReactElement {
       return;
     }
     const size = Math.min(64, Math.max(1, Math.round(newWorldChunkSize) || 1));
-    // Server parses N from "chunked-<n>-<name>"; keep the name suffix non-empty.
-    const namePart = sanitized.startsWith("chunked-")
-      ? sanitized.replace(/^chunked-(?:\d+-)?/, "")
-      : sanitized;
-    const id = `chunked-${size}-${namePart || "world"}`;
-    if (!id) return;
     const pickedTemplate = parseWorldTemplateId(
       newWorldTemplate,
       defaultWorldTemplateRef.current,
     );
+    const pickedInteriorSceneUrl = generatedInteriorSceneUrlForTemplate(pickedTemplate);
+    // Server parses N from "chunked-<n>-<name>"; keep the name suffix non-empty.
+    const namePart = sanitized.startsWith("chunked-")
+      ? sanitized.replace(/^chunked-(?:\d+-)?/, "")
+      : sanitized;
+    const id = pickedInteriorSceneUrl
+      ? `${pickedTemplate === "grand-hall-shell" ? "interior-grand-hall" : "interior-studio"}-${namePart || "room"}`
+      : `chunked-${size}-${namePart || "world"}`;
+    if (!id) return;
     const pickedSkybox = normalizeSkyboxUrl(
       newWorldSkyboxUrl || defaultSkyboxUrlForTemplate(pickedTemplate),
     );
@@ -9116,6 +9166,7 @@ function App(): React.ReactElement {
       dayNightStart: runtimeConfig.dayNightStart,
       lightingMood: newWorldLightingMood,
       waterSettings: newWorldWaterSettings,
+      sceneUrl: pickedInteriorSceneUrl,
     });
     const enter = () => {
       setNewWorldPanelOpen(false);
@@ -9140,6 +9191,9 @@ function App(): React.ReactElement {
             dayNightStart: runtimeConfig.dayNightStart,
             lightingMood: newWorldLightingMood,
             waterSettings: newWorldWaterSettings,
+            ...(pickedInteriorSceneUrl
+              ? { sceneUrl: pickedInteriorSceneUrl, terrainProviderKind: "interior" }
+              : {}),
           }),
         },
       )
@@ -9858,6 +9912,9 @@ function App(): React.ReactElement {
         runtimeConfig.lightingMood = profile.lightingMood;
         runtimeConfig.waterSettings = profile.waterSettings;
         applyWorldTerrainTemplate(profile.template, profile.landShape);
+        if (profile.sceneUrl) {
+          pendingInteriorSceneUrlsRef.current[activeWorldId] = profile.sceneUrl;
+        }
         // World scale BEFORE any terrain/state work: derived from the world NAME (large-* → 3×,
         // mega-* → 5×) so every client — and the Hyades terrain port — agrees with no protocol change.
         setWorldScale(worldScaleForId(activeWorldId));

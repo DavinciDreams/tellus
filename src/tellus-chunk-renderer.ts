@@ -119,6 +119,8 @@ export interface ChunkRenderer {
   setLoadRadius(radius: number): void;
   /** /live chunk.updated -> mark dirty + refetch that chunk (rebuilt in the next flush). */
   reloadChunk(chunkX: number, chunkZ: number): void;
+  /** Rebuild already-loaded chunks when the active terrain template/land-shape changes. */
+  rebuildTerrain(): void;
   /** Rebuild any chunks whose data arrived since last frame — call once/frame next to flushTerrain(). */
   flush(): void;
   /**
@@ -302,6 +304,24 @@ export function createChunkRenderer(
     });
   };
 
+  const rebuildTerrain = () => {
+    if (disposed) return;
+    for (const [k, a] of active) {
+      buildOrUpdate(
+        k,
+        {
+          cx: a.cx,
+          cz: a.cz,
+          revision: a.revision,
+          segments: CHUNK_SEGMENTS,
+          sculptOffsets: a.sculptOffsets,
+          paint: a.paint,
+        },
+        a.lodSegments,
+      );
+    }
+  };
+
   const flush = () => {
     if (disposed || ready.size === 0) return;
     for (const [k, data] of ready) {
@@ -415,6 +435,7 @@ export function createChunkRenderer(
     update,
     setLoadRadius,
     reloadChunk,
+    rebuildTerrain,
     flush,
     sampleHeight,
     samplePaint,

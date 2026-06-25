@@ -42,6 +42,7 @@ describe("world terrain templates", () => {
     expect(templateForWorldId("cartoon-hills-playground")).toBe("cartoon-hills");
     expect(templateForWorldId("interior-main-room")).toBe("interior-studio");
     expect(templateForWorldId("grand-hall-gallery")).toBe("grand-hall-shell");
+    expect(templateForWorldId("interior-lisa-tavern")).toBe("grand-hall-shell");
   });
 
   it("preserves inferred evoflow skybox defaults", () => {
