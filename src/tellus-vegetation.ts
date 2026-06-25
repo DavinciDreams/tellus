@@ -46,14 +46,13 @@ import {
 // Crysis-style ground cover, deterministic from the synced terrain state (fixed seeds + chunk/sector
 // coords), so every client grows the identical world with no protocol changes. Two layers:
 //
-//  • CHUNKS (12u, streamed around the player): grass + flowers + small flora (bushes, ferns, reeds at
-//    the waterline, mushrooms, rare crystals) stamped into pre-allocated merged buffers — one draw
-//    call per chunk, wind sway / gust / player-bend / distance-fade in a TSL node material on WebGPU
-//    (static Lambert on the WebGL fallback).
+//  • CHUNKS (12u, streamed around the player): optional grass tufts stamped into pre-allocated
+//    merged buffers — one draw call per chunk, wind sway / gust / player-bend / distance-fade in a
+//    TSL node material on WebGPU (static Lambert on the WebGL fallback).
 //
-//  • SECTORS (72u, island-wide, frustum-culled): trees (conifer/broadleaf/pine/birch/palm/dead) and
-//    rocks + boulders, rebuilt only when the terrain changes. Sector granularity keeps huge worlds
-//    (large-*/mega-*) from paying vertex cost for off-screen forests. Trunks and boulders feed the
+//  • SECTORS (72u, island-wide, frustum-culled): trees (conifer/broadleaf/pine/birch/palm/dead),
+//    rebuilt only when the terrain changes. Sector granularity keeps huge worlds
+//    (large-*/mega-*) from paying vertex cost for off-screen forests. Trunks feed the
 //    player-collision circle list.
 //
 // Density adapts to the live FPS through quality tiers (MIN→ULTRA); scatter density is per-paint-kind
@@ -103,8 +102,8 @@ export interface VegetationSystem {
 const CHUNK = 12;
 const SECTOR = 72;
 const MAX_TUFTS = 320;
-const MAX_FLOWERS = 180;
-const MAX_EXTRAS = 24;
+const MAX_FLOWERS = 0;
+const MAX_EXTRAS = 0;
 const TUFT_CANDIDATES = 460;
 
 // Quality tiers — radius streams fewer chunks AND trims the per-chunk cap. The accepted-candidate
@@ -378,7 +377,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     return 0;
   };
 
-  // ── Chunk build: grass + flowers + small flora ──
+  // ── Chunk build: optional grass tufts ──
   const buildChunk = (chunk: ActiveChunk) => {
     const { cx, cz, pooled } = chunk;
     const ox = minWorldX + cx * CHUNK;
@@ -548,9 +547,9 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     chunk.tier = tier;
   };
 
-  // ── Sectors: trees + rocks/boulders, island-wide, frustum-culled, rebuilt on terrain change ──
+  // ── Sectors: trees, island-wide, frustum-culled, rebuilt on terrain change ──
   const TREES_PER_SECTOR = 56;
-  const ROCKS_PER_SECTOR = 90;
+  const ROCKS_PER_SECTOR = 0;
   interface Sector {
     sx: number;
     sz: number;
@@ -643,46 +642,48 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     if (cur.i > 0) setBounds(sector.trees, ox + SECTOR / 2, oz + SECTOR / 2, SECTOR, minY, maxY);
     treeCount += stamped;
 
-    // rocks + boulders
-    sector.rocks ??= makePooled(
-      ROCKS_PER_SECTOR * (boulderTpl.pos.length / 3),
-      ROCKS_PER_SECTOR * boulderTpl.idx.length,
-      rockMaterial,
-    );
-    sector.rocks.mesh.castShadow = true;
-    const rcur: StampCursor = { v: 0, i: 0 };
-    let rMinY = Infinity;
-    let rMaxY = -Infinity;
-    let rocks = 0;
-    for (let gx = ox + 2; gx < ox + SECTOR && rocks < ROCKS_PER_SECTOR; gx += 5.5) {
-      for (let gz = oz + 2; gz < oz + SECTOR && rocks < ROCKS_PER_SECTOR; gz += 5.5) {
-        const rng = mulberry32(cellSeed(Math.round(gx * 5), Math.round(gz * 5), 0x9bb1));
-        const x = gx + rng() * 4.4;
-        const z = gz + rng() * 4.4;
-        if (x < ox || z < oz || x >= ox + SECTOR || z >= oz + SECTOR) continue;
-        if (!inWorld(x, z, 2)) continue;
-        const h = sampleHeight(x, z);
-        if (h < SEA_LEVEL + 0.3) continue;
-        if (isExcluded(x, z, h)) continue;
-        const paint = samplePaint(x, z);
-        const accept =
-          paint === "rock" ? 0.55 : paint === "dirt" ? 0.22 : paint === "beach" ? 0.18 : paint === "snow" ? 0.2 : 0.07;
-        if (rng() > accept) continue;
-        const isBoulder = (paint === "rock" || paint === "dirt") && rng() < 0.16;
-        tintColor.setHex(paint === "snow" ? 0xc9cdd4 : 0x8d8a84);
-        tintColor.offsetHSL(0, 0, (rng() - 0.5) * 0.14);
-        const scale = isBoulder ? 1.6 + rng() * 2.4 : 0.22 + rng() * rng() * 0.8;
-        const tpl = isBoulder ? boulderTpl : rockTpl;
-        // sink stones well into the ground so a slope never opens a see-through gap under the rim
-        if (!stampTemplate(sector.rocks, rcur, tpl, x, h + scale * (isBoulder ? 0.22 : 0.12), z, scale, rng() * Math.PI * 2, tintColor, 0, 0)) break;
-        if (isBoulder) sectorColliders.push({ x, z, r: scale * 0.72 });
-        rocks++;
-        if (h < rMinY) rMinY = h;
-        if (h + scale > rMaxY) rMaxY = h + scale;
+    if (ROCKS_PER_SECTOR > 0) {
+      // rocks + boulders
+      sector.rocks ??= makePooled(
+        ROCKS_PER_SECTOR * (boulderTpl.pos.length / 3),
+        ROCKS_PER_SECTOR * boulderTpl.idx.length,
+        rockMaterial,
+      );
+      sector.rocks.mesh.castShadow = true;
+      const rcur: StampCursor = { v: 0, i: 0 };
+      let rMinY = Infinity;
+      let rMaxY = -Infinity;
+      let rocks = 0;
+      for (let gx = ox + 2; gx < ox + SECTOR && rocks < ROCKS_PER_SECTOR; gx += 5.5) {
+        for (let gz = oz + 2; gz < oz + SECTOR && rocks < ROCKS_PER_SECTOR; gz += 5.5) {
+          const rng = mulberry32(cellSeed(Math.round(gx * 5), Math.round(gz * 5), 0x9bb1));
+          const x = gx + rng() * 4.4;
+          const z = gz + rng() * 4.4;
+          if (x < ox || z < oz || x >= ox + SECTOR || z >= oz + SECTOR) continue;
+          if (!inWorld(x, z, 2)) continue;
+          const h = sampleHeight(x, z);
+          if (h < SEA_LEVEL + 0.3) continue;
+          if (isExcluded(x, z, h)) continue;
+          const paint = samplePaint(x, z);
+          const accept =
+            paint === "rock" ? 0.55 : paint === "dirt" ? 0.22 : paint === "beach" ? 0.18 : paint === "snow" ? 0.2 : 0.07;
+          if (rng() > accept) continue;
+          const isBoulder = (paint === "rock" || paint === "dirt") && rng() < 0.16;
+          tintColor.setHex(paint === "snow" ? 0xc9cdd4 : 0x8d8a84);
+          tintColor.offsetHSL(0, 0, (rng() - 0.5) * 0.14);
+          const scale = isBoulder ? 1.6 + rng() * 2.4 : 0.22 + rng() * rng() * 0.8;
+          const tpl = isBoulder ? boulderTpl : rockTpl;
+          // sink stones well into the ground so a slope never opens a see-through gap under the rim
+          if (!stampTemplate(sector.rocks, rcur, tpl, x, h + scale * (isBoulder ? 0.22 : 0.12), z, scale, rng() * Math.PI * 2, tintColor, 0, 0)) break;
+          if (isBoulder) sectorColliders.push({ x, z, r: scale * 0.72 });
+          rocks++;
+          if (h < rMinY) rMinY = h;
+          if (h + scale > rMaxY) rMaxY = h + scale;
+        }
       }
+      markPooledUpdated(sector.rocks, rcur.i);
+      if (rcur.i > 0) setBounds(sector.rocks, ox + SECTOR / 2, oz + SECTOR / 2, SECTOR, rMinY, rMaxY);
     }
-    markPooledUpdated(sector.rocks, rcur.i);
-    if (rcur.i > 0) setBounds(sector.rocks, ox + SECTOR / 2, oz + SECTOR / 2, SECTOR, rMinY, rMaxY);
   };
 
   // ── streaming + adaptive tier ──
