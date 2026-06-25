@@ -285,7 +285,7 @@ export interface TellusWorldApi {
       scale?: number;
     },
   ): GeneratedThing;
-  scatterProceduralAsset(archetypeId: string, count?: number): GeneratedThing[];
+  scatterProceduralAsset(archetypeId: string, count?: number): ProceduralAssetPlacement[];
   interact(request: InteractRequest): TellusLog;
   selectGenerated(id?: string): void;
   goToGenerated(id: string): void;
@@ -380,6 +380,14 @@ export interface TellusWorldApi {
     rapierSolids: number;
   };
   destroy(): void;
+}
+
+export interface ProceduralAssetPlacement {
+  id: string;
+  archetypeId: string;
+  label: string;
+  generatedThingId?: string;
+  chunkedVegetation?: boolean;
 }
 
 export interface TellusRuntimeConfig {
@@ -503,6 +511,14 @@ declare global {
     __tellusEnterInterior?: () => void;
     __tellusExitInterior?: () => void;
     __tellusPerf?: () => { fps: number; vegetation: unknown };
+    __tellusAssetLodUrls?: (assetIdOrUrl: string) => {
+      assetId: string;
+      gameOptimized: string;
+      lod0: string;
+      lod1: string;
+      lod2: string;
+      impostor: string;
+    } | null;
     __tellusWorldDebug?: () => {
       worldId: string;
       runtimeTemplate: WorldTemplateId;

@@ -10,6 +10,7 @@ import {
   buildProcPlantInstancedParts,
   createProcPlantConiferSprayGeometry,
   createProcPlantDaylilyBloomGeometry,
+  defaultPlantEnvironment,
   createProcPlantFlowerCenterGeometry,
   createProcPlantFlowerDiscGeometry,
   createProcPlantFoxgloveBloomGeometry,
@@ -20,6 +21,7 @@ import {
   type ProcPlantGenome,
   type ProcPlantInstance,
   type ProcPlantTemplate,
+  procPlantPresets,
 } from "./tellus-procplants";
 
 export interface ProcPlantVegetationOptions {
@@ -37,6 +39,7 @@ export interface ProcPlantVegetationOptions {
 export interface ProcPlantVegetationStats {
   chunks: number;
   plants: number;
+  manualPlants: number;
   instances: number;
   stemTriangles: number;
   organDraws: number;
@@ -48,8 +51,18 @@ export interface ProcPlantVegetationStats {
 export interface ProcPlantVegetationSystem {
   update(px: number, pz: number, playerY: number, fps: number, nowMs: number): void;
   notifyTerrainChanged(): void;
+  placeManualPlant(placement: ProcPlantManualPlacement): boolean;
   stats(): ProcPlantVegetationStats;
   dispose(): void;
+}
+
+export interface ProcPlantManualPlacement {
+  id: string;
+  presetId: string;
+  seed: number;
+  x: number;
+  z: number;
+  scale: number;
 }
 
 interface ActiveChunk {
@@ -59,7 +72,7 @@ interface ActiveChunk {
   lod: 0 | 1 | 2;
   rev: number;
   group: THREE.Group;
-  stats: Omit<ProcPlantVegetationStats, "chunks" | "lod0" | "lod1" | "lod2">;
+  stats: Omit<ProcPlantVegetationStats, "chunks" | "manualPlants" | "lod0" | "lod1" | "lod2">;
 }
 
 interface OrganBucket {
@@ -72,6 +85,9 @@ const DEFAULT_CHUNK_SIZE = 12;
 const DEFAULT_MAX_RING = 2;
 const MAX_LOD0_PLANTS = 16;
 const MAX_LOD1_PLANTS = 6;
+
+const manualPlacementStorageKey = (worldId: string): string =>
+  `tellus.procplants.manual.${worldId}`;
 
 const hashString = (value: string): number => {
   let h = 2166136261;
@@ -207,6 +223,7 @@ const geometryForKey = (key: string): THREE.BufferGeometry => {
 const emptyStats = (): ProcPlantVegetationStats => ({
   chunks: 0,
   plants: 0,
+  manualPlants: 0,
   instances: 0,
   stemTriangles: 0,
   organDraws: 0,
@@ -214,6 +231,33 @@ const emptyStats = (): ProcPlantVegetationStats => ({
   lod1: 0,
   lod2: 0,
 });
+
+const isFinitePlacementNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const normalizeManualPlacement = (value: unknown): ProcPlantManualPlacement | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Partial<ProcPlantManualPlacement>;
+  if (
+    typeof record.id !== "string" ||
+    typeof record.presetId !== "string" ||
+    !isFinitePlacementNumber(record.seed) ||
+    !isFinitePlacementNumber(record.x) ||
+    !isFinitePlacementNumber(record.z) ||
+    !isFinitePlacementNumber(record.scale) ||
+    !procPlantPresets[record.presetId]
+  ) {
+    return null;
+  }
+  return {
+    id: record.id,
+    presetId: record.presetId,
+    seed: record.seed >>> 0,
+    x: record.x,
+    z: record.z,
+    scale: THREE.MathUtils.clamp(record.scale, 0.08, 12),
+  };
+};
 
 export function createProcPlantVegetation(
   options: ProcPlantVegetationOptions,
@@ -234,6 +278,8 @@ export function createProcPlantVegetation(
   let terrainRev = 0;
   let disposed = false;
   const active = new Map<string, ActiveChunk>();
+  const manualPlacements = new Map<string, ProcPlantManualPlacement>();
+  const manualPlacementChunks = new Map<string, string>();
   const queued = new Set<string>();
   const rebuildQueue: string[] = [];
   const stemMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -245,11 +291,48 @@ export function createProcPlantVegetation(
   const inBounds = (x: number, z: number) =>
     x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
 
+  const chunkKeyAt = (x: number, z: number) =>
+    `${Math.floor(x / chunkSize)},${Math.floor(z / chunkSize)}`;
+
   const enqueue = (key: string) => {
     if (queued.has(key)) return;
     queued.add(key);
     rebuildQueue.push(key);
   };
+
+  const rememberManualPlacement = (placement: ProcPlantManualPlacement) => {
+    const key = chunkKeyAt(placement.x, placement.z);
+    manualPlacements.set(placement.id, placement);
+    manualPlacementChunks.set(placement.id, key);
+    enqueue(key);
+  };
+
+  const saveManualPlacements = () => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        manualPlacementStorageKey(options.worldId),
+        JSON.stringify([...manualPlacements.values()]),
+      );
+    } catch (error) {
+      console.warn("Tellus manual procplant save failed", error);
+    }
+  };
+
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.localStorage.getItem(manualPlacementStorageKey(options.worldId));
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          const placement = normalizeManualPlacement(item);
+          if (placement) rememberManualPlacement(placement);
+        }
+      }
+    } catch (error) {
+      console.warn("Tellus manual procplant load failed", error);
+    }
+  }
 
   const buildChunk = (chunk: ActiveChunk) => {
     disposeGroup(chunk.group);
@@ -301,6 +384,41 @@ export function createProcPlantVegetation(
           matrix: matrix.clone().multiply(instance.matrix),
         };
         bucket.instances.push(placed);
+        chunk.stats.instances++;
+      }
+    }
+
+    for (const placement of manualPlacements.values()) {
+      if (manualPlacementChunks.get(placement.id) !== chunk.key) continue;
+      if (!inBounds(placement.x, placement.z)) continue;
+      const height = options.sampleHeight(placement.x, placement.z);
+      if (height === null || height < SEA_LEVEL - 12) continue;
+      if (options.isExcluded?.(placement.x, placement.z, height)) continue;
+      const genome = procPlantPresets[placement.presetId];
+      if (!genome) continue;
+      const built = buildProcPlantInstancedParts(
+        genome,
+        placement.seed,
+        defaultPlantEnvironment(),
+      );
+      const matrix = new THREE.Matrix4()
+        .makeRotationY(((placement.seed >>> 0) / 4294967296) * Math.PI * 2)
+        .premultiply(new THREE.Matrix4().makeScale(placement.scale, placement.scale, placement.scale))
+        .premultiply(new THREE.Matrix4().makeTranslation(placement.x, height + 0.02, placement.z));
+      stemTemplates.push({ template: built.stems, matrix });
+      chunk.stats.plants++;
+      chunk.stats.stemTriangles += built.stats.stemTriangles;
+      for (const instance of built.instances) {
+        const key = geometryKeyFor(genome, instance);
+        let bucket = organBuckets.get(key);
+        if (!bucket) {
+          bucket = { key, geometry: geometryForKey(key), instances: [] };
+          organBuckets.set(key, bucket);
+        }
+        bucket.instances.push({
+          ...instance,
+          matrix: matrix.clone().multiply(instance.matrix),
+        });
         chunk.stats.instances++;
       }
     }
@@ -385,6 +503,7 @@ export function createProcPlantVegetation(
   const stats = (): ProcPlantVegetationStats => {
     const out = emptyStats();
     out.chunks = active.size;
+    out.manualPlants = manualPlacements.size;
     for (const chunk of active.values()) {
       out.plants += chunk.stats.plants;
       out.instances += chunk.stats.instances;
@@ -402,6 +521,14 @@ export function createProcPlantVegetation(
     notifyTerrainChanged: () => {
       terrainRev++;
       for (const key of active.keys()) enqueue(key);
+    },
+    placeManualPlant: (placement) => {
+      if (disposed) return false;
+      const normalized = normalizeManualPlacement(placement);
+      if (!normalized) return false;
+      rememberManualPlacement(normalized);
+      saveManualPlacements();
+      return true;
     },
     stats,
     dispose: () => {

@@ -138,11 +138,11 @@ import {
   type PortalEntered,
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
-import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood, WaterSettings, WaterStyle } from "./tellus-types";
+import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, ProceduralAssetPlacement, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood, WaterSettings, WaterStyle } from "./tellus-types";
 import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { parseWaterSettings, runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig, worldApiUrl } from "./tellus-runtime-config";
-import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, toAssetId } from "./tellus-urls-identity";
+import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, assetStoreOptimizedAssetUrls, toAssetId } from "./tellus-urls-identity";
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
@@ -869,6 +869,7 @@ function createTellusWorld(
         stats: () => ({
           chunks: 0,
           plants: 0,
+          manualPlants: 0,
           instances: 0,
           stemTriangles: 0,
           organDraws: 0,
@@ -876,6 +877,7 @@ function createTellusWorld(
           lod1: 0,
           lod2: 0,
         }),
+        placeManualPlant: () => false,
         dispose: () => undefined,
       };
   const ambientPhysics = createAmbientPhysics({
@@ -1872,6 +1874,21 @@ function createTellusWorld(
     runtimeSkyboxUrl: runtimeConfig.skyboxUrl,
     chunkedWorldChunks: getChunkedWorldChunks(),
   });
+  window.__tellusAssetLodUrls = (assetIdOrUrl: string) => {
+    const assetId =
+      assetStoreIdFromModelUrl(assetIdOrUrl) ??
+      (assetIdOrUrl.trim() ? assetIdOrUrl.trim() : null);
+    if (!assetId) return null;
+    const urls = assetStoreOptimizedAssetUrls(assetId);
+    return {
+      assetId,
+      gameOptimized: worldApiUrl(urls.gameOptimized),
+      lod0: worldApiUrl(urls.lod0),
+      lod1: worldApiUrl(urls.lod1),
+      lod2: worldApiUrl(urls.lod2),
+      impostor: worldApiUrl(urls.impostor),
+    };
+  };
   const countSkinnedMeshes = (root: THREE.Object3D | undefined): number => {
     if (!root) return 0;
     let n = 0;
@@ -5841,6 +5858,7 @@ function createTellusWorld(
         scale: (variation = 1) =>
           defaultScaleForRealisticKind(arch.kind, arch.label) * (arch.kind === "tree" ? 1.48 : 1) * variation,
         description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
+        procPlantPresetId: undefined,
       };
     }
     const procPlant = procPlantPlaceableById(archetypeId);
@@ -5858,10 +5876,37 @@ function createTellusWorld(
       assetId: (seed: number) => `procplant-${procPlant.presetId.toLowerCase()}-${seed.toString(16)}`,
       scale: (variation = 1) => procPlant.scale * variation,
       description: `${procPlant.label} procplant`,
+      procPlantPresetId: procPlant.presetId,
     };
   };
 
-  const scatterProceduralAsset = (archetypeId: string, count?: number): GeneratedThing[] => {
+  const placeProcPlantAsset = (
+    option: NonNullable<ReturnType<typeof proceduralAssetOption>>,
+    seed: number,
+    location: { x: number; y: number; z: number },
+    scale: number,
+  ): ProceduralAssetPlacement | null => {
+    if (!option.procPlantPresetId) return null;
+    const id = option.assetId(seed);
+    const placed = procplants.placeManualPlant({
+      id,
+      presetId: option.procPlantPresetId,
+      seed,
+      x: location.x,
+      z: location.z,
+      scale,
+    });
+    if (!placed) return null;
+    procplants.notifyTerrainChanged();
+    return {
+      id,
+      archetypeId: option.id,
+      label: option.label,
+      chunkedVegetation: true,
+    };
+  };
+
+  const scatterProceduralAsset = (archetypeId: string, count?: number): ProceduralAssetPlacement[] => {
     const option = proceduralAssetOption(archetypeId);
     if (!option) return [];
     const rng = Math.random;
@@ -5870,7 +5915,7 @@ function createTellusWorld(
       1,
       option.max,
     );
-    const placed: GeneratedThing[] = [];
+    const placed: ProceduralAssetPlacement[] = [];
     for (let i = 0; i < total; i++) {
       const seed = (rng() * 0xffffffff) >>> 0;
       const angle = rng() * Math.PI * 2;
@@ -5880,21 +5925,31 @@ function createTellusWorld(
         y: 0,
         z: visitorPosition.z + Math.cos(angle) * distance,
       };
-      placed.push(
-        addLibraryAsset(
-          {
-            id: option.assetId(seed),
-            name: option.label,
-            description: option.description,
-            modelUrl: option.modelUrl(seed),
-            source: "generated",
-          },
-          {
-            location,
-            scale: option.scale(0.82 + rng() * 0.42),
-          },
-        ),
+      const scale = option.scale(0.82 + rng() * 0.42);
+      const plantPlacement = placeProcPlantAsset(option, seed, location, scale);
+      if (plantPlacement) {
+        placed.push(plantPlacement);
+        continue;
+      }
+      const thing = addLibraryAsset(
+        {
+          id: option.assetId(seed),
+          name: option.label,
+          description: option.description,
+          modelUrl: option.modelUrl(seed),
+          source: "generated",
+        },
+        {
+          location,
+          scale,
+        },
       );
+      placed.push({
+        id: thing.id,
+        archetypeId: option.id,
+        label: option.label,
+        generatedThingId: thing.id,
+      });
     }
     addLog({
       agentId: "visitor",
@@ -7986,6 +8041,16 @@ function createTellusWorld(
           const seed = typeof a.seed === "number" && Number.isFinite(a.seed)
             ? a.seed >>> 0
             : (Math.random() * 0xffffffff) >>> 0;
+          const location = nearToLocation(a.near);
+          const scale = typeof a.scale === "number"
+            ? a.scale
+            : option.scale();
+          const plantLocation =
+            typeof location === "string" ? { ...visitorPosition } : location;
+          const plantPlacement = placeProcPlantAsset(option, seed, plantLocation, scale);
+          if (plantPlacement) {
+            return { ok: true, id: plantPlacement.id, archetypeId: option.id, label: option.label, chunkedVegetation: true };
+          }
           const thing = addLibraryAsset(
             {
               id: option.assetId(seed),
@@ -7996,10 +8061,8 @@ function createTellusWorld(
             },
             {
               creatorId: visitorId as GenerateRequest["creatorId"],
-              location: nearToLocation(a.near),
-              scale: typeof a.scale === "number"
-                ? a.scale
-                : option.scale(),
+              location,
+              scale,
             },
           );
           return { ok: true, id: thing.id, archetypeId: option.id, label: option.label };
@@ -8012,7 +8075,7 @@ function createTellusWorld(
             ok: true,
             archetypeId,
             count: placed.length,
-            ids: placed.map((thing) => thing.id),
+            ids: placed.map((placement) => placement.id),
           };
         }
         case "generate": {
@@ -8512,6 +8575,7 @@ function createTellusWorld(
       }
       delete window.__tellusAvatarDebug;
       delete window.__tellusWorldDebug;
+      delete window.__tellusAssetLodUrls;
       delete window.__tellusViewDebug;
       delete window.__tellusThingsDebug;
       delete window.__tellusMirrorDebug;
@@ -14703,18 +14767,7 @@ function App(): React.ReactElement {
                   className="terrain-scatter-place"
                   title={`${entry.label} procplant — tap again for a new variation`}
                   aria-label={entry.label}
-                  onClick={() => {
-                    const seed = (Math.random() * 0xffffffff) >>> 0;
-                    worldRef.current?.addLibraryAsset({
-                      id: `procplant-${entry.presetId.toLowerCase()}-${seed.toString(16)}`,
-                      name: entry.label,
-                      description: `${entry.label} procplant`,
-                      modelUrl: makeProcPlantModelUrl(entry.presetId, seed),
-                      source: "generated",
-                    }, {
-                      scale: entry.scale,
-                    });
-                  }}
+                  onClick={() => worldRef.current?.scatterProceduralAsset(entry.id, 1)}
                 >
                   <span className="terrain-scatter-emoji" aria-hidden="true">{entry.emoji}</span>
                   <span className="terrain-scatter-label">{entry.label}</span>

@@ -53,6 +53,30 @@ export function assetStoreGameOptimizedModelUrl(assetId: string): string {
   return `/api/assets/model/${encodeURIComponent(assetId)}/game-optimized`;
 }
 
+export function assetStoreLodModelUrl(assetId: string, level: 0 | 1 | 2): string {
+  return `/api/assets/model/${encodeURIComponent(assetId)}/lod/${level}`;
+}
+
+export function assetStoreImpostorModelUrl(assetId: string): string {
+  return `/api/assets/model/${encodeURIComponent(assetId)}/impostor`;
+}
+
+export function assetStoreOptimizedAssetUrls(assetId: string): {
+  gameOptimized: string;
+  lod0: string;
+  lod1: string;
+  lod2: string;
+  impostor: string;
+} {
+  return {
+    gameOptimized: assetStoreGameOptimizedModelUrl(assetId),
+    lod0: assetStoreLodModelUrl(assetId, 0),
+    lod1: assetStoreLodModelUrl(assetId, 1),
+    lod2: assetStoreLodModelUrl(assetId, 2),
+    impostor: assetStoreImpostorModelUrl(assetId),
+  };
+}
+
 function isAssetProxyPath(pathname: string): boolean {
   return /^\/(?:__hyades\/)?api\/assets\//i.test(pathname);
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as THREE from "three";
 import { makeProcPlantModelUrl, parseProceduralModelUrl } from "./tellus-procedural-assets";
 import {
   PROCPLANT_PLACEABLE_CATALOG,
@@ -6,7 +7,7 @@ import {
   genomeForBiomePatch,
   procPlantPlaceableById,
 } from "./tellus-procplant-biomes";
-import { procPlantChunkSeed } from "./tellus-procplant-vegetation";
+import { createProcPlantVegetation, procPlantChunkSeed } from "./tellus-procplant-vegetation";
 
 describe("procplant vegetation", () => {
   it("derives stable chunk seeds from world, chunk, and terrain revision", () => {
@@ -43,5 +44,37 @@ describe("procplant vegetation", () => {
     expect(parsed?.archetypeId).toBe("procplant-daylilyflower");
     expect(parsed?.seed).toBe(42);
     expect(parsed?.procPlant?.presetId).toBe("daylilyFlower");
+  });
+
+  it("renders manual procplant placements through the chunked vegetation system", () => {
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -20, maxX: 20, minZ: -20, maxZ: 20 },
+      densityMultiplier: 0,
+    });
+
+    expect(
+      vegetation.placeManualPlant({
+        id: "manual-daylily-1",
+        presetId: "daylilyFlower",
+        seed: 42,
+        x: 1,
+        z: 1,
+        scale: 1,
+      }),
+    ).toBe(true);
+
+    vegetation.update(0, 0, 1, 60, 0);
+    const stats = vegetation.stats();
+
+    expect(stats.manualPlants).toBe(1);
+    expect(stats.plants).toBeGreaterThanOrEqual(1);
+    expect(scene.children.some((child) => child.name === "tellus-procplant-vegetation")).toBe(true);
+
+    vegetation.dispose();
   });
 });
