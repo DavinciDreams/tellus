@@ -418,6 +418,60 @@ function createTellusWorld(
     disabled: boolean; // a failure here disables the whole group, reverting to regular meshes
   }
   const instancePools = new Map<string, InstancePool>();
+  const generatedAssetPerfStats = () => {
+    let instancedThings = 0;
+    let instancedDraws = 0;
+    for (const pool of instancePools.values()) {
+      instancedThings += pool.thingToSlot.size;
+      instancedDraws += pool.instanced.length;
+    }
+    let visibleMeshes = 0;
+    for (const mesh of generatedMeshes.values()) {
+      if (mesh.visible) visibleMeshes += 1;
+    }
+    return {
+      things: generated.length,
+      mountedMeshes: generatedMeshes.size,
+      visibleMeshes,
+      queue: {
+        pending: worldModelLoadQueue.length,
+        queuedUnique: queuedWorldModelLoads.size,
+        active: activeWorldModelLoads,
+        maxActive: MAX_WORLD_MODEL_LOADS,
+        pumpDelayMs: WORLD_MODEL_LOAD_PUMP_DELAY_MS,
+      },
+      loads: {
+        enqueued: generatedModelLoadStats.enqueued,
+        started: generatedModelLoadStats.started,
+        loaded: generatedModelLoadStats.loaded,
+        failed: generatedModelLoadStats.failed,
+        retried: generatedModelLoadStats.retried,
+        lastMs: Math.round(generatedModelLoadStats.lastMs),
+        averageMs:
+          generatedModelLoadStats.loaded > 0
+            ? Math.round(generatedModelLoadStats.totalMs / generatedModelLoadStats.loaded)
+            : 0,
+        maxMs: Math.round(generatedModelLoadStats.maxMs),
+        lastQueueWaitMs: Math.round(generatedModelLoadStats.lastQueueWaitMs),
+        averageQueueWaitMs:
+          generatedModelLoadStats.started > 0
+            ? Math.round(generatedModelLoadStats.totalQueueWaitMs / generatedModelLoadStats.started)
+            : 0,
+        lastUrl: generatedModelLoadStats.lastUrl,
+      },
+      caches: {
+        generatedGltf: generatedGltfCache.size,
+        gltfObject: gltfObjectCache.size,
+      },
+      instancing: {
+        enabled: instancingEnabled(),
+        pools: instancePools.size,
+        instancedThings,
+        instancedDraws,
+        disabledUrls: instancingDisabledUrls.size,
+      },
+    };
+  };
   // Model URLs whose instancing hit an error once — never re-attempt for the session (they stay regular).
   const instancingDisabledUrls = new Set<string>();
   const skyboxTintMaterials = new Set<THREE.MeshBasicMaterial>();
@@ -1918,6 +1972,7 @@ function createTellusWorld(
     fps: fpsValue,
     vegetation: vegetation.stats(),
     procplants: procplants.stats(),
+    generatedAssets: generatedAssetPerfStats(),
   });
 
   let yaw = 0.72;
@@ -4208,7 +4263,21 @@ function createTellusWorld(
   let activeWorldModelLoads = 0;
   const worldModelLoadQueue: string[] = [];
   const queuedWorldModelLoads = new Set<string>();
+  const worldModelLoadEnqueuedAt = new Map<string, number>();
   let worldModelLoadPumpScheduled = false;
+  const generatedModelLoadStats = {
+    enqueued: 0,
+    started: 0,
+    loaded: 0,
+    failed: 0,
+    retried: 0,
+    totalMs: 0,
+    lastMs: 0,
+    maxMs: 0,
+    lastQueueWaitMs: 0,
+    totalQueueWaitMs: 0,
+    lastUrl: "",
+  };
 
   const isDeadLegacyHyadesContentUrl = (url: string): boolean => {
     try {
@@ -4304,6 +4373,8 @@ function createTellusWorld(
       const id = worldModelLoadQueue.shift();
       if (!id) return;
       queuedWorldModelLoads.delete(id);
+      const enqueuedAt = worldModelLoadEnqueuedAt.get(id);
+      worldModelLoadEnqueuedAt.delete(id);
       const thing = thingById(id);
       if (!thing?.modelUrl || thing.generationStatus !== "ready") continue;
       const modelUrl = thing.modelUrl;
@@ -4319,8 +4390,21 @@ function createTellusWorld(
       const currentMesh = generatedMeshes.get(thing.id);
       if (currentMesh?.userData.loadedModelUrl === modelUrl) continue;
       activeWorldModelLoads++;
+      const loadStartedAt = performance.now();
+      const queueWaitMs =
+        typeof enqueuedAt === "number" ? Math.max(0, loadStartedAt - enqueuedAt) : 0;
+      generatedModelLoadStats.started += 1;
+      generatedModelLoadStats.lastQueueWaitMs = queueWaitMs;
+      generatedModelLoadStats.totalQueueWaitMs += queueWaitMs;
+      generatedModelLoadStats.lastUrl = modelUrl;
       void loadGeneratedModel(modelUrl, thing, useWebGPU)
         .then((model) => {
+          const loadMs = Math.max(0, performance.now() - loadStartedAt);
+          generatedModelLoadStats.loaded += 1;
+          generatedModelLoadStats.totalMs += loadMs;
+          generatedModelLoadStats.lastMs = loadMs;
+          generatedModelLoadStats.maxMs = Math.max(generatedModelLoadStats.maxMs, loadMs);
+          generatedModelLoadStats.lastUrl = modelUrl;
           const current = thingById(id);
           if (destroyed || !current || current.modelUrl !== modelUrl) {
             disposeObject(model);
@@ -4348,6 +4432,11 @@ function createTellusWorld(
           publish();
         })
         .catch(async (error) => {
+          const loadMs = Math.max(0, performance.now() - loadStartedAt);
+          generatedModelLoadStats.failed += 1;
+          generatedModelLoadStats.lastMs = loadMs;
+          generatedModelLoadStats.maxMs = Math.max(generatedModelLoadStats.maxMs, loadMs);
+          generatedModelLoadStats.lastUrl = modelUrl;
           const current = thingById(id);
           console.warn("Remote generated model load failed", error);
           if (!current || current.modelUrl !== modelUrl) return;
@@ -4365,6 +4454,7 @@ function createTellusWorld(
             publishGeneratedThing(current);
           } else {
             transientModelLoadFailures.set(id, (transientModelLoadFailures.get(id) ?? 0) + 1);
+            generatedModelLoadStats.retried += 1;
             showTransientGeneratedLoadFailure(current, error);
             scheduleTransientModelRetry(id, modelUrl);
           }
@@ -4385,6 +4475,8 @@ function createTellusWorld(
     }
     if (queuedWorldModelLoads.has(thing.id)) return;
     queuedWorldModelLoads.add(thing.id);
+    worldModelLoadEnqueuedAt.set(thing.id, performance.now());
+    generatedModelLoadStats.enqueued += 1;
     worldModelLoadQueue.push(thing.id);
     scheduleWorldModelLoadPump();
   };
@@ -8341,6 +8433,7 @@ function createTellusWorld(
     getAmbientStats: () => ({
       vegetation: vegetation.stats(),
       procplants: procplants.stats(),
+      generatedAssets: generatedAssetPerfStats(),
       chunkTerrain: chunkRenderer?.stats() ?? null,
       physicsBodies: ambientPhysics.activeCount(),
       rapierSolids: rapierPhysics?.stats().solids ?? 0,
