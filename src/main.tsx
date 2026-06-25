@@ -3007,6 +3007,9 @@ function createTellusWorld(
   // chunkRenderer.reloadChunk), not edit the compatibility 97² grid.
   const sendChunkedSculpt = (mode: TerrainEditMode, center: Vec3) => {
     if (!tellusWorldBackendAvailable) return;
+    if (isTerrainPaintMode(mode)) {
+      chunkRenderer?.applyLocalPaint(mode, center.x, center.z, TERRAIN_SCULPT_RADIUS * WORLD_SCALE * 0.68);
+    }
     const action = {
       type: "terrain.sculpt",
       visitorId,
@@ -14328,6 +14331,14 @@ function App(): React.ReactElement {
             >
               <span className="terrain-swatch-preview" />
               <span>Meadow</span>
+            </button>
+            <button
+              type="button"
+              className="terrain-swatch grass"
+              onClick={() => worldRef.current?.sculptTerrain("grass")}
+            >
+              <span className="terrain-swatch-preview" />
+              <span>Grass</span>
             </button>
             <button
               type="button"

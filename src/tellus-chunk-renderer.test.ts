@@ -61,6 +61,12 @@ describe("createChunkTerrainGeometry", () => {
     expect(geometry.getAttribute("position").count).toBe(
       terrainVertexCount(CHUNK_SEGMENTS),
     );
+    expect(geometry.getAttribute("uv").count).toBe(
+      terrainVertexCount(CHUNK_SEGMENTS),
+    );
+    expect(geometry.getAttribute("tellusPaintCode").count).toBe(
+      terrainVertexCount(CHUNK_SEGMENTS),
+    );
     const index = geometry.getIndex();
     expect(index?.count).toBe(terrainIndexCount(CHUNK_SEGMENTS));
   });
@@ -306,4 +312,15 @@ describe("createChunkRenderer sampleHeight (walk the sculpted chunk height)", ()
     r.dispose();
   });
 
+  it("applies local paint immediately for optimistic chunked brush feedback", async () => {
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    await loadRing(0, 0, r);
+    const x = CHUNK_SPAN * 0.5;
+    const z = CHUNK_SPAN * 0.5;
+    expect(r.samplePaint(x, z)).toBeNull();
+    r.applyLocalPaint("stone", x, z, 8);
+    expect(r.samplePaint(x, z)).toBe("stone");
+    r.dispose();
+  });
 });

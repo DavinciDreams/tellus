@@ -2,6 +2,7 @@ import type { AssetAnimationMetadata } from "./tellus-animation-intents";
 
 export type TerrainPaintKind =
   | "meadow"
+  | "grass"
   | "rock"
   | "snow"
   | "beach"
