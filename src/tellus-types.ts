@@ -1,5 +1,6 @@
 import type { createRoot } from "react-dom/client";
 import type * as THREE from "three";
+import type { AssetAnimationMetadata } from "./tellus-animation-intents";
 import type { MeshStats } from "./webrtc-mesh";
 import type { WorldChatChannel, WorldChatMessage, WorldGeneratedThing, WorldPresence, WorldPortal, PortalEntered, WorldBiomeCell } from "./world-protocol";
 
@@ -173,6 +174,9 @@ export interface GeneratedThing {
   animation?: string;
   /** Local companion ownership. Pets are independent from mounts and follow their owner everywhere. */
   petOwnerId?: string;
+  /** Optional asset-store enrichment for embedded/retargetable clips. Missing during backfill is OK:
+   * runtime falls back to clip-name heuristics. */
+  animationClips?: AssetAnimationMetadata[];
 }
 
 export interface AssetLibraryModel {
@@ -192,6 +196,7 @@ export interface AssetLibraryModel {
   /** Store reports the model can actually be rendered/served (conversion done, a view URL exists). */
   viewable?: boolean;
   tags?: string[];
+  animationClips?: AssetAnimationMetadata[];
 }
 
 export interface AssetLibraryResponse {

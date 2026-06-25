@@ -94,6 +94,7 @@ import {
   restoreProceduralAvatar,
   setAvatarUserScale,
   tickAvatarScale,
+  vrmaMetadataForNameSync,
   vrmaCategorySummarySync,
   type VrmaCategoryId,
   VrmObjectRig,
@@ -185,6 +186,15 @@ import {
   worldTemplateLabel,
 } from "./tellus-world-options";
 import { AssetTile, AvatarTile } from "./tellus-picker-tiles";
+import {
+  animationMetadataHasBlockingIssue,
+  inferAnimationIntentFromText,
+  normalizeAnimationIntent,
+  selectAnimationClipByIntent,
+  type AssetAnimationMetadata,
+  type AnimationActorKind,
+  type AnimationIntent,
+} from "./tellus-animation-intents";
 import "./styles.css";
 
 // Attach X-Tellus-Session to every Hyades API call (agent endpoints, world meta PATCH, state, pay)
@@ -377,7 +387,7 @@ function createTellusWorld(
     clipName?: string;
     mode: GeneratedMotionMode;
   };
-  type GeneratedMotionMode = "idle" | "walk" | "run";
+  type GeneratedMotionMode = AnimationIntent;
   const generatedAnimationMixers = new Map<string, GeneratedAnimationState>();
   // Placed VRM things (auton/Atlantean store models) animate through a real VRM rig — a VRMA idle clip
   // looped by default, advanced (mixer + spring bones) each frame here. Parallel to the plain-GLB
@@ -2583,6 +2593,80 @@ function createTellusWorld(
     return true;
   };
 
+  const avatarIntentCategories = (intent: AnimationIntent): VrmaCategoryId[] => {
+    switch (intent) {
+      case "dance":
+        return ["dance", "gesture", "other"];
+      case "throw":
+        return ["sport", "action", "gesture"];
+      case "wave":
+        return ["gesture", "core"];
+      case "jump":
+      case "walk":
+      case "run":
+      case "fly":
+      case "swim":
+        return ["locomotion", "sport", "core"];
+      case "sit":
+      case "stand":
+      case "idle":
+        return ["pose", "core", "locomotion"];
+      case "mount":
+      case "dismount":
+        return ["locomotion", "pose", "core"];
+      default:
+        return ["gesture", "action", "sport", "core", "other"];
+    }
+  };
+
+  const avatarClipNamesForIntent = (intent: AnimationIntent): string[] => {
+    const seen = new Set<string>();
+    const names: string[] = [];
+    const add = (clipName: string) => {
+      const key = clipName.toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      names.push(clipName);
+    };
+    for (const category of avatarIntentCategories(intent)) {
+      for (const clipName of emoteClipNamesByCategorySync(category, 80)) add(clipName);
+    }
+    for (const clipName of recommendedEmoteClipNamesSync(80)) add(clipName);
+    return names;
+  };
+
+  const resolveAvatarAnimationName = (input: string, preferIntent = false): string => {
+    const raw = input.trim();
+    if (!raw) return "";
+    const intent = normalizeAnimationIntent(raw) ?? inferAnimationIntentFromText(raw);
+    const allNames = [
+      ...recommendedEmoteClipNamesSync(100),
+      ...(["core", "gesture", "dance", "action", "sport", "locomotion", "pose", "other"] as VrmaCategoryId[])
+        .flatMap((category) => emoteClipNamesByCategorySync(category, 100)),
+    ];
+    const exact =
+      allNames.find((name) => name === raw) ??
+      allNames.find((name) => name.toLowerCase() === raw.toLowerCase());
+    if (exact && !preferIntent) return exact;
+    if (!intent) return raw;
+    const candidates = avatarClipNamesForIntent(intent);
+    const matched = selectAnimationClipByIntent(
+      candidates.map((name) => ({ name })),
+      intent,
+      {
+        actor: "avatar",
+        metadataForClip: (clip) => vrmaMetadataForNameSync(clip.name),
+        reject: (clip) => animationMetadataHasBlockingIssue(vrmaMetadataForNameSync(clip.name)),
+      },
+    );
+    return matched?.name ?? exact ?? raw;
+  };
+
+  const playLocalAnimationIntent = (input: string): boolean => {
+    const name = resolveAvatarAnimationName(input, true);
+    return name ? playLocalEmote(name) : false;
+  };
+
   const connectTellusWorldRealtime = () => {
     if (!tellusWorldBackendAvailable || worldSocket || destroyed) return;
     const socket = new WebSocket(tellusWorldWebSocketUrl(visitorId));
@@ -3356,6 +3440,30 @@ function createTellusWorld(
       "hitreact",
     ]);
 
+  const metadataForGeneratedClip = (
+    thing: GeneratedThing | undefined,
+    clipName: string | undefined,
+  ): AssetAnimationMetadata | undefined => {
+    if (!thing?.animationClips || !clipName) return undefined;
+    const wanted = clipName.trim().toLowerCase();
+    if (!wanted) return undefined;
+    return thing.animationClips.find((entry) => entry.name.trim().toLowerCase() === wanted);
+  };
+
+  const animationActorKindForThing = (
+    thing: GeneratedThing | undefined,
+    vehicle: VehicleMode | null = null,
+  ): AnimationActorKind => {
+    if (!thing) return "object";
+    if (isMountThing(thing)) return "mount";
+    if (isVehicleThing(thing) || vehicle) return "vehicle";
+    const prompt = `${thing.kind ?? ""} ${thing.prompt ?? ""}`.toLowerCase();
+    if (/\b(animal|horse|deer|bird|dog|cat|wolf|fox|tiger|lion|bear|unicorn|dragon|fish)\b/.test(prompt)) {
+      return "animal";
+    }
+    return "object";
+  };
+
   const selectGeneratedClip = (
     clips: THREE.AnimationClip[],
     thing: GeneratedThing | undefined,
@@ -3370,33 +3478,20 @@ function createTellusWorld(
         clips.find((c) => c.name?.toLowerCase() === wanted.toLowerCase())
       : undefined;
     if (wantedClip) return wantedClip;
-    const findAny = (fragments: string[]) =>
-      clips.find((clip) => generatedClipNameIncludes(clip, fragments) && !badGeneratedClip(clip));
-    if (mode === "walk" || mode === "run") {
-      if (vehicle === "air") {
-        const fly = findAny(["fly", "flying", "glide", "hover"]);
-        if (fly) return fly;
-      }
-      if (vehicle === "water") {
-        const swim = findAny(["swim", "swimming", "paddle", "float"]);
-        if (swim) return swim;
-      }
-      if (mode === "walk") {
-        return (
-          findAny(["walk", "trot"]) ??
-          findAny(["run", "gallop", "canter"]) ??
-          findAny(["fly", "glide", "swim"]) ??
-          findAny(["idle"])
-        );
-      }
-      return (
-        findAny(["run", "gallop", "canter"]) ??
-        findAny(["walk", "trot"]) ??
-        findAny(["fly", "glide", "swim"]) ??
-        findAny(["idle"])
-      );
-    }
-    return findAny(["idle"]) ?? findAny(["stand"]) ?? findAny(["walk"]) ?? clips.find((c) => !badGeneratedClip(c)) ?? clips[0];
+    const effectiveMode =
+      (mode === "walk" || mode === "run") && vehicle === "air"
+        ? "fly"
+        : (mode === "walk" || mode === "run") && vehicle === "water"
+          ? "swim"
+          : mode;
+    return (
+      selectAnimationClipByIntent(clips, effectiveMode, {
+        actor: animationActorKindForThing(thing, vehicle),
+        metadataForClip: (clip) => metadataForGeneratedClip(thing, clip.name),
+        reject: (clip) =>
+          badGeneratedClip(clip) || animationMetadataHasBlockingIssue(metadataForGeneratedClip(thing, clip.name)),
+      }) ?? clips.find((c) => !badGeneratedClip(c)) ?? clips[0]
+    );
   };
 
   const playGeneratedClip = (
@@ -3429,6 +3524,55 @@ function createTellusWorld(
     state.action = next;
     state.clipName = clip.name;
     state.mode = mode;
+  };
+
+  const playGeneratedIntent = (
+    id: string,
+    input: string,
+    options: { persist?: boolean } = {},
+  ): { ok: boolean; animation?: string; intent?: AnimationIntent; error?: string } => {
+    const thing = thingById(id);
+    if (!thing) return { ok: false, error: "No placed asset matched targetId" };
+    const model = generatedMeshes.get(id);
+    if (!model || model.userData.loadedModelUrl !== thing.modelUrl) {
+      return { ok: false, error: "The target asset is not loaded yet" };
+    }
+    const raw = input.trim();
+    if (!raw) return { ok: false, error: "Animation intent or clip name is required" };
+    const intent = normalizeAnimationIntent(raw) ?? inferAnimationIntentFromText(raw) ?? undefined;
+    const vrmRig = model.userData.vrmObjectRig as VrmObjectRig | undefined;
+    let animation = raw;
+    if (vrmRig) {
+      const clips = vrmRig.clipNames().map((name) => ({ name }));
+      const exact =
+        clips.find((clip) => clip.name === raw) ??
+        clips.find((clip) => clip.name.toLowerCase() === raw.toLowerCase());
+      const selected = intent
+        ? selectAnimationClipByIntent(clips, intent, {
+            actor: animationActorKindForThing(thing, vehicleMode(thing)),
+          })
+        : exact;
+      animation = selected?.name ?? exact?.name ?? raw;
+      vrmRig.play(animation);
+    } else {
+      const clips = generatedModelClips(model);
+      const selected = intent
+        ? selectGeneratedClip(clips, thing, intent, vehicleMode(thing), { ignoreExplicit: true })
+        : clips.find((clip) => clip.name === raw) ??
+          clips.find((clip) => clip.name?.toLowerCase() === raw.toLowerCase());
+      if (!selected) return { ok: false, error: "No matching animation clip is loaded for targetId" };
+      animation = selected.name;
+      const previousAnimation = thing.animation;
+      thing.animation = animation;
+      playGeneratedClip(id, model, intent ?? "idle", vehicleMode(thing));
+      thing.animation = previousAnimation;
+    }
+    if (options.persist !== false && thing.animation !== animation) {
+      thing.animation = animation;
+      publishGeneratedThing(thing);
+      publish();
+    }
+    return { ok: true, animation, intent };
   };
 
   const updateMountedAnimation = (thing: GeneratedThing, moving: boolean, running = false) => {
@@ -3788,6 +3932,7 @@ function createTellusWorld(
     animation: thing.animation ?? "",
     // "" = explicit "not a pet". ABSENT from a mid-rollout server means "keep local value".
     petOwnerId: thing.petOwnerId ?? "",
+    animationClips: thing.animationClips,
     updatedAt: new Date().toISOString(),
   });
 
@@ -4244,6 +4389,9 @@ function createTellusWorld(
           : normalized.animation || undefined;
       const animationChanged = (existing.animation ?? "") !== (nextAnimation ?? "");
       existing.animation = nextAnimation;
+      if (normalized.animationClips !== undefined) {
+        existing.animationClips = normalized.animationClips;
+      }
       applyGenerationState(existing, normalized);
       ensureGeneratedVisual(existing);
       updateThingMeshPosition(existing);
@@ -4281,6 +4429,7 @@ function createTellusWorld(
       generationStatus: normalized.generationStatus,
       animation: normalized.animation || undefined, // "" (explicit default) → unset internally
       petOwnerId: normalized.petOwnerId || undefined,
+      animationClips: normalized.animationClips,
     };
     generated.push(thing);
     const mesh = shouldShowGenerationSwirl(thing)
@@ -5403,6 +5552,7 @@ function createTellusWorld(
       assetStoreModelId,
       modelUrl,
       generationStatus: "ready",
+      animationClips: model.animationClips,
     };
     generated.push(thing);
     const mesh = createGenerationSwirl(thing);
@@ -5936,6 +6086,7 @@ function createTellusWorld(
     if (!thing || thing.id === sailingThingId) return;
     const mesh = generatedMeshes.get(id);
     if (!mesh) return;
+    playLocalAnimationIntent("throw");
     const fp = thingFootprint(thing);
     const radius = THREE.MathUtils.clamp(fp?.radius ?? 0.5, 0.3, 2.4);
     const dir = new THREE.Vector3();
@@ -7394,6 +7545,23 @@ function createTellusWorld(
         // A small default vocabulary for embodied agents. The full VRMA feed is available by category
         // through listAnimations so agents don't have to reason over hundreds of near-duplicate clips.
         animations: recommendedEmoteClipNamesSync(),
+        animationIntents: [
+          "idle",
+          "walk",
+          "run",
+          "fly",
+          "swim",
+          "flap",
+          "dance",
+          "wave",
+          "throw",
+          "jump",
+          "sit",
+          "stand",
+          "graze",
+          "mount",
+          "dismount",
+        ],
         animationCategories: vrmaCategorySummarySync(),
         avatarId: localAvatarId,
         avatarScale: localAvatarScale,
@@ -7653,12 +7821,31 @@ function createTellusWorld(
           return { ok: true };
         }
         case "playAnimation": {
-          const name = typeof a.name === "string" ? a.name : typeof a.animation === "string" ? a.animation : "";
-          if (!name.trim()) return { ok: false, error: "playAnimation requires a name" };
-          // Plays on the local avatar immediately and best-effort broadcasts to nearby clients. A name
-          // outside the avatar's vocabulary simply doesn't play (matches the rig's ignore-unknown rule).
-          playLocalEmote(name);
-          return { ok: true };
+          const targetId =
+            typeof a.targetId === "string"
+              ? a.targetId
+              : typeof a.assetId === "string"
+                ? a.assetId
+                : "";
+          const explicit = typeof a.name === "string" ? a.name : typeof a.animation === "string" ? a.animation : "";
+          const intent = typeof a.intent === "string" ? a.intent : "";
+          const text = typeof a.text === "string" ? a.text : typeof a.prompt === "string" ? a.prompt : "";
+          const requested = intent || explicit || text;
+          if (!requested.trim()) {
+            return { ok: false, error: "playAnimation requires an intent, name, animation, or text" };
+          }
+          if (targetId.trim()) {
+            return playGeneratedIntent(targetId.trim(), requested, {
+              persist: a.persist === false ? false : true,
+            });
+          }
+          // Plays on the local avatar immediately and best-effort broadcasts to nearby clients. Exact
+          // clip names still work; intents/text pick from the categorized VRMA catalog first.
+          const animation = intent || text ? resolveAvatarAnimationName(requested, true) : resolveAvatarAnimationName(requested);
+          const ok = intent || text ? playLocalAnimationIntent(requested) : playLocalEmote(animation);
+          return ok
+            ? { ok: true, animation, intent: normalizeAnimationIntent(requested) ?? inferAnimationIntentFromText(requested) }
+            : { ok: false, error: "No avatar animation matched" };
         }
         case "listAnimations":
           return tellusAgent.listAnimations({
@@ -10832,6 +11019,9 @@ function App(): React.ReactElement {
                   item.generationStatus === "failed"
                 ? item.generationStatus
                 : "ready",
+          animationClips: Array.isArray(item.animationClips)
+            ? (item.animationClips as AssetAnimationMetadata[])
+            : undefined,
           updatedAt:
             typeof item.updatedAt === "string"
               ? item.updatedAt

@@ -1,3 +1,5 @@
+import type { AssetAnimationMetadata } from "./tellus-animation-intents";
+
 export type TerrainPaintKind =
   | "meadow"
   | "rock"
@@ -74,6 +76,8 @@ export interface WorldGeneratedThing {
   animation?: string;
   /** Companion ownership. Pets follow their owner and are separate from mounts. */
   petOwnerId?: string;
+  /** Optional asset-store enrichment for clip intent/category search. Older gateways omit it. */
+  animationClips?: AssetAnimationMetadata[];
   updatedAt: string;
 }
 
