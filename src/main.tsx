@@ -3746,7 +3746,8 @@ function createTellusWorld(
     // "" = explicit "default" (mirrors presence.avatarId): a mid-rollout server that doesn't know
     // the field yet echoes it back ABSENT, and absent must mean "keep what you have", not "clear".
     animation: thing.animation ?? "",
-    petOwnerId: thing.petOwnerId,
+    // "" = explicit "not a pet". ABSENT from a mid-rollout server means "keep local value".
+    petOwnerId: thing.petOwnerId ?? "",
     updatedAt: new Date().toISOString(),
   });
 
@@ -4188,7 +4189,12 @@ function createTellusWorld(
       }
       existing.color = normalized.color;
       existing.assetStoreModelId = normalized.assetStoreModelId ?? existing.assetStoreModelId;
-      existing.petOwnerId = normalized.petOwnerId;
+      // petOwnerId wire convention mirrors animation/avatar fields: "" clears, non-empty sets,
+      // ABSENT means a mid-rollout backend stripped the field, so keep the local value.
+      existing.petOwnerId =
+        normalized.petOwnerId === undefined
+          ? existing.petOwnerId
+          : normalized.petOwnerId || undefined;
       // animation wire convention (mirrors presence.avatarId): "" = explicit default, a non-empty
       // string = explicit clip, ABSENT = a mid-rollout server stripped the field — keep ours
       // (otherwise our own upsert's echo would wipe a just-picked clip).
@@ -4234,7 +4240,7 @@ function createTellusWorld(
       pipelineId: normalized.pipelineId,
       generationStatus: normalized.generationStatus,
       animation: normalized.animation || undefined, // "" (explicit default) → unset internally
-      petOwnerId: normalized.petOwnerId,
+      petOwnerId: normalized.petOwnerId || undefined,
     };
     generated.push(thing);
     const mesh = shouldShowGenerationSwirl(thing)
@@ -4512,7 +4518,7 @@ function createTellusWorld(
       const dz = target.z - pet.position.z;
       const distance = Math.hypot(dx, dz);
       const shouldSnap = forceTeleport || distance > 70;
-      const shouldMove = shouldSnap || distance > 1.1;
+      const shouldMove = shouldSnap || distance > 0.28;
       if (!shouldMove) continue;
       const previous = { ...pet.position };
       if (shouldSnap || delta <= 0) {
