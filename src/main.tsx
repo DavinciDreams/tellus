@@ -1512,6 +1512,9 @@ function createTellusWorld(
     }
     return best ?? (Number.isFinite(position.y) ? position.y : SEA_LEVEL);
   };
+  const announcePortalSelection = (portalId: string) => {
+    window.dispatchEvent(new CustomEvent("tellus:portal-selected", { detail: portalId }));
+  };
   const syncPortalMarkers = () => {
     const seen = new Set<string>();
     for (const p of worldPortals) {
@@ -1533,6 +1536,10 @@ function createTellusWorld(
         portalMarkers.set(p.id, marker);
         portalMarkerGroup.add(marker);
       }
+      marker.userData.portalId = p.id;
+      marker.traverse((child) => {
+        child.userData.portalId = p.id;
+      });
       const position = portalAnchorPosition(p);
       const y = wallDoor ? position.y : portalGroundY(p) + 0.05;
       marker.position.set(position.x, y, position.z);
@@ -6767,8 +6774,9 @@ function createTellusWorld(
       event.preventDefault();
       const target = updateWallDoorPlacementGhost(event);
       if (target) {
-        createInteriorWallDoorAt(target, wallDoorPlacement.targetWorldId, wallDoorPlacement.label);
+        const portalId = createInteriorWallDoorAt(target, wallDoorPlacement.targetWorldId, wallDoorPlacement.label);
         setInteriorWallDoorPlacement(null);
+        if (portalId) announcePortalSelection(portalId);
       }
       return;
     }
@@ -6790,6 +6798,12 @@ function createTellusWorld(
     // Object grab: Ctrl/Cmd + drag on a mouse picks up ANY object (auto-selecting it); plain drag is
     // ALWAYS camera orbit so the two never fight. Touch (no modifier keys) keeps the old rule: press
     // the already-selected object to drag it.
+    const portalId = pickPortalIdAtPointer(event);
+    if (portalId) {
+      event.preventDefault();
+      announcePortalSelection(portalId);
+      return;
+    }
     const wantsGrab =
       event.pointerType === "touch"
         ? Boolean(selectedThingId)
@@ -6875,6 +6889,21 @@ function createTellusWorld(
       while (object) {
         const tellusId = object.userData.tellusId;
         if (typeof tellusId === "string") return tellusId;
+        object = object.parent;
+      }
+    }
+    return null;
+  };
+
+  const pickPortalIdAtPointer = (event: PointerEvent): string | null => {
+    setPointerNdcFromEvent(event);
+    raycaster.setFromCamera(pointerNdc, camera);
+    const intersections = raycaster.intersectObjects([...portalMarkers.values()], true);
+    for (const intersection of intersections) {
+      let object: THREE.Object3D | null = intersection.object;
+      while (object) {
+        const portalId = object.userData.portalId;
+        if (typeof portalId === "string") return portalId;
         object = object.parent;
       }
     }
@@ -7769,11 +7798,12 @@ function createTellusWorld(
     placement: { position: Vec3; rotationY: number },
     targetWorldId: string,
     label?: string,
-  ) => {
+  ): string | null => {
     const target = targetWorldId.trim();
-    if (!target) return;
+    if (!target) return null;
+    const portalId = makeId("door");
     sendPortalUpsert({
-      id: makeId("door"),
+      id: portalId,
       worldId: runtimeConfig.worldId,
       label: (label || `${runtimeConfig.worldId} to ${target} door`).slice(0, 48),
       position: placement.position,
@@ -7781,6 +7811,7 @@ function createTellusWorld(
       rotation: { x: 0, y: placement.rotationY, z: 0 },
       target: { kind: "world", worldId: target },
     });
+    return portalId;
   };
   const createDoorHere = (label?: string) => {
     const interiorId = `interior-${runtimeConfig.worldId}-${makeId("room").slice(0, 12)}`;
@@ -10384,6 +10415,7 @@ function App(): React.ReactElement {
   const [worldMapOpen, setWorldMapOpen] = useState(true);
   // Portals card: foldable + dismissable (was always-on with no close — the worst right-side offender).
   const [portalsPanelOpen, setPortalsPanelOpen] = useState(false);
+  const [selectedPortalId, setSelectedPortalId] = useState("");
   const [mapActorList, setMapActorList] = useState<"items" | "players" | "agents" | null>(null);
   const worldMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
@@ -11024,6 +11056,26 @@ function App(): React.ReactElement {
     if (portalTargetWorldId && portalTargetOptions.includes(portalTargetWorldId)) return;
     setPortalTargetWorldId(portalTargetOptions[0] ?? "");
   }, [portalTargetOptions.join("\n"), portalTargetWorldId]);
+  useEffect(() => {
+    if (!selectedPortalId) return;
+    if ((snapshot.portals ?? []).some((portal) => portal.id === selectedPortalId)) return;
+    setSelectedPortalId("");
+  }, [selectedPortalId, snapshot.portals]);
+  useEffect(() => {
+    const onPortalSelected = (event: Event) => {
+      const portalId = (event as CustomEvent<string>).detail;
+      if (typeof portalId !== "string" || !portalId.trim()) return;
+      setSelectedPortalId(portalId);
+      setPortalsPanelOpen(true);
+      window.setTimeout(() => {
+        document
+          .querySelector<HTMLElement>(`[data-portal-id="${CSS.escape(portalId)}"]`)
+          ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }, 0);
+    };
+    window.addEventListener("tellus:portal-selected", onPortalSelected);
+    return () => window.removeEventListener("tellus:portal-selected", onPortalSelected);
+  }, []);
   useEffect(() => {
     const target = portalsPanelOpen ? portalTargetWorldId : "";
     worldRef.current?.previewPortalTarget(target || null);
@@ -12880,10 +12932,22 @@ function App(): React.ReactElement {
                 const targetChoices = portalTargetOptions.includes(p.target.worldId)
                   ? portalTargetOptions
                   : [p.target.worldId, ...portalTargetOptions].filter(Boolean);
+                const selected = selectedPortalId === p.id;
                 return (
-                  <article key={p.id} className="portal-panel-row">
+                  <article
+                    key={p.id}
+                    className="portal-panel-row"
+                    data-portal-id={p.id}
+                    onClick={() => setSelectedPortalId(p.id)}
+                    style={selected ? {
+                      borderColor: "rgba(255,215,106,0.65)",
+                      background: "rgba(255,215,106,0.12)",
+                      outline: "1px solid rgba(255,215,106,0.55)",
+                    } : undefined}
+                  >
                     <button type="button" title={`Enter ${p.label || worldDisplayName(p.target.worldId)} (${p.target.kind})`} onClick={() => worldRef.current?.enterPortal(p.id)} style={portalBtn}>
                       {"->"} {p.label || worldDisplayName(p.target.worldId)} <small style={{ opacity: 0.6 }}>{p.target.kind}</small>
+                      {selected && <small style={{ float: "right", opacity: 0.78 }}>editing</small>}
                     </button>
                     <div className="portal-panel-row-actions">
                       <select
