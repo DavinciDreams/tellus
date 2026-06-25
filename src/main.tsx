@@ -848,6 +848,7 @@ function createTellusWorld(
   // are hidden, the player grounds on the room floor (flat y≈0 — interiors have no heightfield).
   let interiorObject: THREE.Object3D | null = null;
   let interiorSceneUrl: string | null = null;
+  let preInteriorCameraMode: CameraMode | null = null;
   let profileInteriorSceneUrl = options.initialInteriorSceneUrl?.trim() || null;
   // Guards the ONE-TIME interior trimesh bake (see ensureInteriorStatics). Declared here (before
   // applyInterior uses it) to avoid a temporal-dead-zone reference.
@@ -880,6 +881,8 @@ function createTellusWorld(
     lastLocalAvatarPos.z = 0;
     // Don't let the return/entry portal at the spawn immediately re-fire (the spawn-on-door loop).
     armPortalArrivalGrace();
+    if (preInteriorCameraMode === null) preInteriorCameraMode = cameraMode;
+    setCameraMode("first", { persist: false });
     if (interiorObject) {
       scene.remove(interiorObject);
       disposeObject(interiorObject);
@@ -951,6 +954,11 @@ function createTellusWorld(
     pondWater.visible = !isChunked;
     flowerPatchGroup.visible = true;
     floatingRim.visible = !isChunked;
+    if (preInteriorCameraMode !== null) {
+      const restoreMode = preInteriorCameraMode;
+      preInteriorCameraMode = null;
+      setCameraMode(restoreMode, { persist: false });
+    }
     setChunkedFlatGround(isChunked ? 0 : null); // restore the world's normal grounding
   };
 
@@ -1416,13 +1424,15 @@ function createTellusWorld(
     // Whole-group toggle: body + TV + marker. Remote meshes are per-client, so this is local-only.
     visitor.visible = cameraMode !== "first";
   };
-  const setCameraMode = (mode: CameraMode) => {
+  const setCameraMode = (mode: CameraMode, options: { persist?: boolean } = {}) => {
     if (mode === cameraMode) return;
     cameraMode = mode;
-    try {
-      window.localStorage.setItem(CAMERA_MODE_STORAGE_KEY, mode);
-    } catch {
-      /* private mode — the selection just won't persist */
+    if (options.persist !== false) {
+      try {
+        window.localStorage.setItem(CAMERA_MODE_STORAGE_KEY, mode);
+      } catch {
+        /* private mode — the selection just won't persist */
+      }
     }
     applyCameraModeVisibility();
     updateCamera();
