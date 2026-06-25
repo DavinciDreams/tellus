@@ -42,4 +42,28 @@ describe("generateInteriorRoom", () => {
     expect(bounds.minZ).toBeGreaterThan(-12);
     expect(bounds.maxZ).toBeLessThan(12);
   });
+
+  it("exposes doorway and window anchors without making trim collidable", () => {
+    const room = generateInteriorRoom({ width: 30, depth: 24, levels: 2, stairs: true, seed: 7 });
+    const openings = room.userData.openings;
+
+    expect(openings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "door", wall: "-z" }),
+        expect.objectContaining({ kind: "window", wall: "-x" }),
+        expect.objectContaining({ kind: "window", wall: "+x" }),
+        expect.objectContaining({ kind: "window", wall: "+z" }),
+      ]),
+    );
+    expect(room.userData.portalDoorAnchor).toMatchObject({ kind: "door", wall: "-z" });
+    expect(openings.filter((opening: { kind: string }) => opening.kind === "window")).toHaveLength(4);
+
+    let visualOpeningMeshes = 0;
+    room.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      if (!mesh.isMesh || mesh.userData[COLLIDE_FLAG] === true) return;
+      if (mesh.material instanceof THREE.MeshStandardMaterial) visualOpeningMeshes++;
+    });
+    expect(visualOpeningMeshes).toBeGreaterThanOrEqual(10);
+  });
 });
