@@ -850,6 +850,18 @@ function createTellusWorld(
   let interiorSceneUrl: string | null = null;
   let preInteriorCameraMode: CameraMode | null = null;
   let profileInteriorSceneUrl = options.initialInteriorSceneUrl?.trim() || null;
+  let portalPreviewTargetWorldId: string | null = null;
+  let portalPreview:
+    | {
+        targetWorldId: string;
+        scene: THREE.Scene;
+        camera: THREE.PerspectiveCamera;
+        renderTarget: THREE.WebGLRenderTarget;
+        material: THREE.MeshBasicMaterial;
+        plane: THREE.Mesh;
+        room: THREE.Object3D;
+      }
+    | null = null;
   // Guards the ONE-TIME interior trimesh bake (see ensureInteriorStatics). Declared here (before
   // applyInterior uses it) to avoid a temporal-dead-zone reference.
   let interiorBaked = false;
@@ -863,6 +875,163 @@ function createTellusWorld(
       return { width: 30, depth: 24, levels: 2, stairs: true, seed: 7 };
     }
     return { width: 20, depth: 18, levels: 2, stairs: true, seed: 3 };
+  };
+
+  const hashPortalPreviewWorld = (worldId: string): number => {
+    let h = 2166136261;
+    for (let i = 0; i < worldId.length; i++) {
+      h ^= worldId.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  };
+
+  const createPortalPreviewScene = (worldId: string): THREE.Scene => {
+    const previewScene = new THREE.Scene();
+    const lower = worldId.toLowerCase();
+    const hash = hashPortalPreviewWorld(worldId);
+    const hue = ((hash % 360) / 360 + (lower.includes("fantasy") ? 0.22 : 0)) % 1;
+    const sky = lower.includes("cove") || lower.includes("beach") ? 0x9fd8ff : lower.includes("ridge") || lower.includes("mountain") ? 0xb7c8e8 : 0xcfe9ff;
+    previewScene.background = new THREE.Color(sky);
+    previewScene.add(new THREE.HemisphereLight(0xffffff, 0x5c6a55, 1.8));
+    const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+    sun.position.set(-4, 7, 5);
+    previewScene.add(sun);
+
+    const groundColor = lower.includes("cove") || lower.includes("beach")
+      ? 0xd9c28a
+      : lower.includes("ridge") || lower.includes("mountain")
+        ? 0x6d7a62
+        : lower.includes("garden") || lower.includes("fantasy")
+          ? 0x4f9d63
+          : new THREE.Color().setHSL(hue, 0.42, 0.45).getHex();
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(18, 16, 1, 1),
+      new THREE.MeshStandardMaterial({ color: groundColor, roughness: 0.9 }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.z = -1.5;
+    previewScene.add(ground);
+
+    if (lower.includes("cove") || lower.includes("beach")) {
+      const water = new THREE.Mesh(
+        new THREE.PlaneGeometry(18, 8),
+        new THREE.MeshStandardMaterial({ color: 0x358fbd, roughness: 0.35, metalness: 0.05 }),
+      );
+      water.rotation.x = -Math.PI / 2;
+      water.position.set(0, 0.04, -5.5);
+      previewScene.add(water);
+    }
+
+    const mountainCount = lower.includes("ridge") || lower.includes("mountain") ? 6 : 3;
+    for (let i = 0; i < mountainCount; i++) {
+      const x = -6 + i * (12 / Math.max(1, mountainCount - 1));
+      const h = lower.includes("ridge") || lower.includes("mountain") ? 2.4 + ((hash >> (i % 16)) & 3) * 0.55 : 0.8 + (i % 2) * 0.35;
+      const cone = new THREE.Mesh(
+        new THREE.ConeGeometry(1.6 + h * 0.25, h, 5),
+        new THREE.MeshStandardMaterial({ color: lower.includes("cartoon") ? 0x5daf57 : 0x6b735f, roughness: 0.88 }),
+      );
+      cone.position.set(x, h / 2, -5 - (i % 2) * 1.2);
+      previewScene.add(cone);
+      if (h > 2.2) {
+        const snow = new THREE.Mesh(
+          new THREE.ConeGeometry(0.55 + h * 0.08, h * 0.26, 5),
+          new THREE.MeshStandardMaterial({ color: 0xf1f2ec, roughness: 0.7 }),
+        );
+        snow.position.set(x, h * 0.88, -5 - (i % 2) * 1.2);
+        previewScene.add(snow);
+      }
+    }
+
+    const marker = new THREE.Mesh(
+      new THREE.TorusGeometry(1.1, 0.06, 10, 40),
+      new THREE.MeshBasicMaterial({ color: 0xffd76a }),
+    );
+    marker.position.set(0, 0.08, -1.2);
+    marker.rotation.x = -Math.PI / 2;
+    previewScene.add(marker);
+    return previewScene;
+  };
+
+  const findInteriorPortalDoor = (): { room: THREE.Object3D; anchor: { position: Vec3; width: number; height: number } } | null => {
+    if (!interiorObject) return null;
+    for (const child of interiorObject.children) {
+      const anchor = child.userData.portalDoorAnchor as { position?: Vec3; width?: number; height?: number } | undefined;
+      if (
+        anchor?.position &&
+        typeof anchor.position.x === "number" &&
+        typeof anchor.position.y === "number" &&
+        typeof anchor.position.z === "number" &&
+        typeof anchor.width === "number" &&
+        typeof anchor.height === "number"
+      ) {
+        return { room: child, anchor: { position: anchor.position, width: anchor.width, height: anchor.height } };
+      }
+    }
+    return null;
+  };
+
+  const disposePortalPreview = () => {
+    if (!portalPreview) return;
+    portalPreview.room.remove(portalPreview.plane);
+    portalPreview.plane.geometry.dispose();
+    portalPreview.material.dispose();
+    portalPreview.renderTarget.dispose();
+    disposeObject(portalPreview.scene);
+    portalPreview = null;
+  };
+
+  const ensurePortalPreview = () => {
+    const target = portalPreviewTargetWorldId?.trim();
+    const door = findInteriorPortalDoor();
+    if (!target || !door) {
+      disposePortalPreview();
+      return;
+    }
+    if (portalPreview && portalPreview.targetWorldId === target && portalPreview.room === door.room) return;
+    disposePortalPreview();
+
+    const renderTarget = new THREE.WebGLRenderTarget(512, 512, {
+      depthBuffer: true,
+      stencilBuffer: false,
+    });
+    renderTarget.texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({
+      map: renderTarget.texture,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(door.anchor.width * 0.96, door.anchor.height * 0.94), material);
+    plane.name = "tellus-portal-door-preview";
+    plane.position.set(door.anchor.position.x, door.anchor.height / 2, door.anchor.position.z + 0.08);
+    plane.renderOrder = 2;
+    const previewScene = createPortalPreviewScene(target);
+    const previewCamera = new THREE.PerspectiveCamera(55, 1, 0.1, 80);
+    previewCamera.position.set(0, 3.2, 6.8);
+    previewCamera.lookAt(0, 1.1, -3.4);
+    door.room.add(plane);
+    portalPreview = {
+      targetWorldId: target,
+      scene: previewScene,
+      camera: previewCamera,
+      renderTarget,
+      material,
+      plane,
+      room: door.room,
+    };
+  };
+
+  const renderPortalPreview = () => {
+    if (!renderer || !portalPreview) return;
+    const previousTarget = renderer.getRenderTarget() as THREE.WebGLRenderTarget | null;
+    renderer.setRenderTarget(portalPreview.renderTarget);
+    renderer.render(portalPreview.scene, portalPreview.camera);
+    renderer.setRenderTarget(previousTarget);
+  };
+
+  const previewPortalTarget = (targetWorldId?: string | null) => {
+    portalPreviewTargetWorldId = targetWorldId?.trim() || null;
+    ensurePortalPreview();
   };
 
   const applyInterior = (sceneUrl: string) => {
@@ -884,6 +1053,7 @@ function createTellusWorld(
     if (preInteriorCameraMode === null) preInteriorCameraMode = cameraMode;
     setCameraMode("first", { persist: false });
     if (interiorObject) {
+      disposePortalPreview();
       scene.remove(interiorObject);
       disposeObject(interiorObject);
       rapierPhysics?.clearStatics(); // drop the prior room's trimesh statics before baking the new one
@@ -898,6 +1068,7 @@ function createTellusWorld(
     container.add(generateInteriorRoom(interiorRoomSpecForSceneUrl(u)));
     interiorObject = container;
     scene.add(container);
+    ensurePortalPreview();
     // TRACK-A: bake the interior's solid meshes (userData.collide === true) into a Rapier static
     // trimesh so floors/walls/stairs are walkable + impassable. Re-adding "interior" replaces any
     // prior room's statics. Rapier may still be loading (dynamic import) on the first interior — the
@@ -943,6 +1114,7 @@ function createTellusWorld(
   // terrain grounding. Called when a snapshot arrives WITHOUT a sceneUrl while an interior is active.
   const exitInterior = () => {
     if (!interiorObject) return;
+    disposePortalPreview();
     scene.remove(interiorObject);
     disposeObject(interiorObject);
     interiorObject = null;
@@ -6220,6 +6392,7 @@ function createTellusWorld(
     vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
     ambientPhysics.step(delta);
     try {
+      renderPortalPreview();
       renderer.render(scene, camera);
     } catch (error) {
       if (!renderIssueLogged) {
@@ -7265,6 +7438,7 @@ function createTellusWorld(
   return {
     enterPortal,
     createPortalHere,
+    previewPortalTarget,
     updatePortalTarget,
     deletePortal: sendPortalDelete,
     createDoorHere,
@@ -7463,6 +7637,7 @@ function createTellusWorld(
       resizeObserver?.disconnect();
       transformControls?.detach();
       transformControls?.dispose();
+      disposePortalPreview();
       renderer?.dispose();
       if (renderer?.domElement.parentElement === container) {
         container.removeChild(renderer.domElement);
@@ -10480,6 +10655,11 @@ function App(): React.ReactElement {
     if (portalTargetWorldId && portalTargetOptions.includes(portalTargetWorldId)) return;
     setPortalTargetWorldId(portalTargetOptions[0] ?? "");
   }, [portalTargetOptions.join("\n"), portalTargetWorldId]);
+  useEffect(() => {
+    const target = portalsPanelOpen ? portalTargetWorldId : "";
+    worldRef.current?.previewPortalTarget(target || null);
+    return () => worldRef.current?.previewPortalTarget(null);
+  }, [portalsPanelOpen, portalTargetWorldId, currentWorldId]);
   const portalPanelNotice = useMemo(() => {
     for (let i = snapshot.logs.length - 1; i >= 0; i--) {
       const text = snapshot.logs[i]?.text ?? "";

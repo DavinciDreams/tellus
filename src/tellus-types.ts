@@ -264,6 +264,7 @@ export interface TellusSnapshot {
 export interface TellusWorldApi {
   enterPortal(portalId: string): void;
   createPortalHere(targetWorldId: string, label?: string): void;
+  previewPortalTarget(targetWorldId?: string | null): void;
   updatePortalTarget(portalId: string, targetWorldId: string): void;
   deletePortal(portalId: string): void;
   createDoorHere(label?: string): void;
