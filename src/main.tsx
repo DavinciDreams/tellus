@@ -9369,6 +9369,7 @@ function App(): React.ReactElement {
   const pendingDeleteTimerRef = useRef<number | undefined>(undefined);
   const KNOWN_WORLDS_KEY = "tellus.knownWorlds";
   const WORLD_PROFILES_KEY = "tellus.worldProfiles";
+  const HIDDEN_WORLDS_KEY = "tellus.hiddenWorlds";
   const ACTIVE_WORLD_KEY = "tellus.activeWorldId";
   const NEW_WORLD_TEMPLATE_KEY = "tellus.newWorldTemplate";
   const NEW_WORLD_SKYBOX_KEY = "tellus.newWorldSkyboxUrl";
@@ -9383,6 +9384,7 @@ function App(): React.ReactElement {
   );
   const defaultSkyboxUrlRef = useRef(runtimeConfig.skyboxUrl);
   const defaultLandShapeRef = useRef<LandShapeOverrides | undefined>(runtimeConfig.landShape);
+  const pendingWorldProfileOverridesRef = useRef<Record<string, { profile: WorldRenderProfile; expiresAt: number }>>({});
 
   interface WorldRenderProfile {
     displayName?: string;
@@ -9507,10 +9509,74 @@ function App(): React.ReactElement {
     }
   };
 
+  const loadHiddenWorlds = (): Record<string, number> => {
+    try {
+      const raw = window.localStorage.getItem(HIDDEN_WORLDS_KEY);
+      const value = raw ? (JSON.parse(raw) as unknown) : {};
+      if (!isRecord(value)) return {};
+      const now = Date.now();
+      const hidden: Record<string, number> = {};
+      let changed = false;
+      for (const [worldId, expiresAt] of Object.entries(value)) {
+        if (typeof expiresAt !== "number" || expiresAt <= now) {
+          changed = true;
+          continue;
+        }
+        hidden[canonicalWorldId(worldId)] = expiresAt;
+      }
+      if (changed) window.localStorage.setItem(HIDDEN_WORLDS_KEY, JSON.stringify(hidden));
+      return hidden;
+    } catch {
+      return {};
+    }
+  };
+
+  const isWorldHidden = (worldId: string): boolean =>
+    (loadHiddenWorlds()[canonicalWorldId(worldId)] ?? 0) > Date.now();
+
+  const hideWorldLocally = (worldId: string, ttlMs = 7 * 24 * 60 * 60 * 1000) => {
+    try {
+      const hidden = loadHiddenWorlds();
+      hidden[canonicalWorldId(worldId)] = Date.now() + ttlMs;
+      window.localStorage.setItem(HIDDEN_WORLDS_KEY, JSON.stringify(hidden));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const unhideWorldLocally = (worldId: string) => {
+    try {
+      const hidden = loadHiddenWorlds();
+      delete hidden[canonicalWorldId(worldId)];
+      window.localStorage.setItem(HIDDEN_WORLDS_KEY, JSON.stringify(hidden));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const protectWorldProfileOverride = (worldId: string, profile: WorldRenderProfile, ttlMs = 60_000) => {
+    pendingWorldProfileOverridesRef.current[canonicalWorldId(worldId)] = {
+      profile,
+      expiresAt: Date.now() + ttlMs,
+    };
+  };
+
+  const pendingWorldProfileOverride = (worldId: string): WorldRenderProfile | undefined => {
+    const key = canonicalWorldId(worldId);
+    const pending = pendingWorldProfileOverridesRef.current[key];
+    if (!pending) return undefined;
+    if (pending.expiresAt <= Date.now()) {
+      delete pendingWorldProfileOverridesRef.current[key];
+      return undefined;
+    }
+    return pending.profile;
+  };
+
   const rememberWorldProfile = (worldId: string, profile: WorldRenderProfile) => {
     try {
+      const key = canonicalWorldId(worldId);
       const profiles = loadLocalWorldProfiles();
-      profiles[worldId] = { ...profiles[worldId], ...profile };
+      profiles[key] = { ...profiles[key], ...profile };
       window.localStorage.setItem(WORLD_PROFILES_KEY, JSON.stringify(profiles));
     } catch {
       /* ignore */
@@ -9518,10 +9584,13 @@ function App(): React.ReactElement {
   };
 
   const rememberRemoteWorldProfile = (worldId: string, profile: WorldRenderProfile) => {
-    const existing = loadLocalWorldProfiles()[worldId] ?? {};
+    const key = canonicalWorldId(worldId);
+    const existing = loadLocalWorldProfiles()[key] ?? {};
+    const pending = pendingWorldProfileOverride(worldId);
     const merged: WorldRenderProfile = {
       ...existing,
       ...profile,
+      ...(pending ?? {}),
     };
     rememberWorldProfile(worldId, merged);
   };
@@ -9580,6 +9649,24 @@ function App(): React.ReactElement {
     }
   };
 
+  const currentWorldMetadataProfile = (overrides: WorldRenderProfile = {}): WorldRenderProfile => {
+    const activeId = canonicalWorldId(activeWorldId ?? runtimeConfig.worldId);
+    const existing = activeId ? loadLocalWorldProfiles()[activeId] ?? {} : {};
+    return {
+      ...existing,
+      worldTemplate: currentWorldTemplate,
+      skyboxUrl: currentWorldSkyboxUrl,
+      landShape: runtimeConfig.landShape,
+      isPublic: currentWorldPrivate ? false : true,
+      dayNightMode: currentDayNightMode,
+      dayNightCycleMs: currentDayNightCycleMs,
+      dayNightStart: runtimeConfig.dayNightStart,
+      lightingMood: currentLightingMood,
+      waterSettings: currentWaterSettings,
+      ...overrides,
+    };
+  };
+
   const renameActiveWorld = () => {
     const id = activeWorldId ?? runtimeConfig.worldId;
     if (!id) return;
@@ -9587,8 +9674,15 @@ function App(): React.ReactElement {
     const next = window.prompt("World name:", currentName === id ? "" : currentName);
     if (next === null) return;
     const displayName = next.trim().slice(0, 64);
+    const requestedProfile = currentWorldMetadataProfile({ displayName: displayName || undefined });
     const applyLocalRename = (profile?: WorldRenderProfile) => {
-      rememberWorldProfile(id, profile ?? { displayName: displayName || undefined });
+      const finalProfile = {
+        ...requestedProfile,
+        ...(profile ?? {}),
+        displayName: displayName || undefined,
+      };
+      protectWorldProfileOverride(id, finalProfile);
+      rememberWorldProfile(id, finalProfile);
       setWorldRenderRevision((revision) => revision + 1);
       showWorldNote(displayName ? `Renamed world to "${displayName}"` : "World name cleared");
     };
@@ -9604,6 +9698,16 @@ function App(): React.ReactElement {
           body: JSON.stringify({
             name: displayName || id,
             displayName: displayName || undefined,
+            isPublic: requestedProfile.isPublic,
+            worldTemplate: requestedProfile.worldTemplate,
+            skyboxUrl: requestedProfile.skyboxUrl,
+            landShape: requestedProfile.landShape,
+            dayNightMode: requestedProfile.dayNightMode,
+            dayNightCycleMs: requestedProfile.dayNightCycleMs,
+            dayNightStart: requestedProfile.dayNightStart,
+            lightingMood: requestedProfile.lightingMood,
+            waterSettings: requestedProfile.waterSettings,
+            ...(requestedProfile.sceneUrl ? { sceneUrl: requestedProfile.sceneUrl } : {}),
           }),
         },
       )
@@ -9726,6 +9830,7 @@ function App(): React.ReactElement {
   };
   const rememberWorld = (id: string) => {
     const worldId = canonicalWorldId(id);
+    unhideWorldLocally(worldId);
     try {
       const next = [...new Set([...loadKnownWorlds().map(canonicalWorldId), worldId])];
       window.localStorage.setItem(KNOWN_WORLDS_KEY, JSON.stringify(next));
@@ -9735,6 +9840,7 @@ function App(): React.ReactElement {
   };
   const forgetWorld = (id: string) => {
     const worldId = canonicalWorldId(id);
+    hideWorldLocally(worldId);
     try {
       const next = loadKnownWorlds().map(canonicalWorldId).filter((known) => known !== worldId);
       window.localStorage.setItem(KNOWN_WORLDS_KEY, JSON.stringify(next));
@@ -9779,7 +9885,7 @@ function App(): React.ReactElement {
             }
             return undefined;
           })
-          .filter((x): x is string => typeof x === "string" && x.length > 0);
+          .filter((x): x is string => typeof x === "string" && x.length > 0 && !isWorldHidden(x));
       }
     } catch {
       /* offline / no index — fall back to local */
@@ -9787,8 +9893,8 @@ function App(): React.ReactElement {
     const cur = canonicalWorldId(current ?? activeWorldId ?? runtimeConfig.worldId);
     const local = loadKnownWorlds()
       .map(canonicalWorldId)
-      .filter((worldId) => !deletedOnServer.has(worldId));
-    const currentEntry = cur && !deletedOnServer.has(cur) ? [cur] : [];
+      .filter((worldId) => !deletedOnServer.has(worldId) && !isWorldHidden(worldId));
+    const currentEntry = cur && !deletedOnServer.has(cur) && !isWorldHidden(cur) ? [cur] : [];
     setWorlds([...new Set([...server, ...local, ...currentEntry])].sort());
   };
   const switchWorld = (id: string) => {
@@ -9914,6 +10020,7 @@ function App(): React.ReactElement {
   const deleteWorld = async (id: string) => {
     if (!id || deletingWorld) return;
     const serverDeleteAllowed = canDeleteWorld(id);
+    const canAttemptServerDelete = Boolean(runtimeConfig.worldApiBase && (serverDeleteAllowed || getSession()));
     if (pendingDeleteWorld !== id) {
       // First click: arm the confirm (auto-disarms after a short window).
       if (pendingDeleteTimerRef.current !== undefined) {
@@ -9930,7 +10037,7 @@ function App(): React.ReactElement {
     disarmDeleteWorld();
     const label = worldDisplayName(id);
     const confirmed = window.confirm(
-      serverDeleteAllowed
+      canAttemptServerDelete
         ? `Permanently delete "${label}"?\n\nThis removes the saved world from the template/world picker and cannot be undone.`
         : `Remove "${label}" from your local world picker?\n\nYou are not authorized to delete it from the server, but you can hide this local/test entry.`,
     );
@@ -9949,7 +10056,7 @@ function App(): React.ReactElement {
         await refreshWorldList();
       }
     };
-    if (!serverDeleteAllowed) {
+    if (!canAttemptServerDelete) {
       forgetWorld(id);
       await moveAwayFromRemovedWorld();
       showWorldNote(`Removed local world "${id}"`);
@@ -9969,6 +10076,12 @@ function App(): React.ReactElement {
           body: JSON.stringify({ confirm: id }),
         },
       );
+      if (res.status === 404 || res.status === 410) {
+        forgetWorld(id);
+        await moveAwayFromRemovedWorld();
+        showWorldNote(`Removed stale world "${id}"`);
+        return;
+      }
       if (!res.ok) {
         let detail = "";
         try {
@@ -9993,7 +10106,7 @@ function App(): React.ReactElement {
   };
   const renderWorldDeleteButton = (target: string, className = "world-icon-button") => {
     const armed = pendingDeleteWorld === target;
-    const serverDeleteAllowed = canDeleteWorld(target);
+    const serverDeleteAllowed = Boolean(runtimeConfig.worldApiBase && (canDeleteWorld(target) || getSession()));
     return (
       <button
         type="button"
@@ -10151,12 +10264,14 @@ function App(): React.ReactElement {
       console.warn("Tellus skybox update failed", error);
     });
     if (runtimeConfig.worldApiBase && activeWorldId) {
+      const profile = currentWorldMetadataProfile({ skyboxUrl: next });
+      protectWorldProfileOverride(activeWorldId, profile);
       void fetch(
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
           headers: worldMetadataHeaders(),
-          body: JSON.stringify({ skyboxUrl: next }),
+          body: JSON.stringify(profile),
         },
       ).catch(() => undefined);
     }
@@ -10173,12 +10288,14 @@ function App(): React.ReactElement {
     applyWorldTerrainTemplate(next, undefined);
     setWorldRenderRevision((revision) => revision + 1);
     if (runtimeConfig.worldApiBase) {
+      const profile = currentWorldMetadataProfile({ worldTemplate: next, landShape: undefined });
+      protectWorldProfileOverride(activeWorldId, profile);
       void fetch(
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
           headers: worldMetadataHeaders(),
-          body: JSON.stringify({ worldTemplate: next }),
+          body: JSON.stringify(profile),
         },
       ).catch(() => undefined);
     }
@@ -10215,12 +10332,14 @@ function App(): React.ReactElement {
     };
     rememberWorldProfile(activeWorldId, profile);
     if (runtimeConfig.worldApiBase) {
+      const fullProfile = currentWorldMetadataProfile(profile);
+      protectWorldProfileOverride(activeWorldId, fullProfile);
       void fetch(
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
           headers: worldMetadataHeaders(),
-          body: JSON.stringify(profile),
+          body: JSON.stringify(fullProfile),
         },
       ).catch(() => undefined);
     }
@@ -10234,12 +10353,14 @@ function App(): React.ReactElement {
     worldRef.current?.setWaterSettings(next);
     rememberWorldProfile(activeWorldId, { waterSettings: next });
     if (runtimeConfig.worldApiBase) {
+      const profile = currentWorldMetadataProfile({ waterSettings: next });
+      protectWorldProfileOverride(activeWorldId, profile);
       void fetch(
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
           headers: worldMetadataHeaders(),
-          body: JSON.stringify({ waterSettings: next }),
+          body: JSON.stringify(profile),
         },
       ).catch(() => undefined);
     }
@@ -10253,12 +10374,14 @@ function App(): React.ReactElement {
     setWorldRenderRevision((revision) => revision + 1);
     showWorldNote("Terrain tuning applied");
     if (runtimeConfig.worldApiBase) {
+      const profile = currentWorldMetadataProfile({ landShape });
+      protectWorldProfileOverride(activeWorldId, profile);
       void fetch(
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
           headers: worldMetadataHeaders(),
-          body: JSON.stringify({ landShape }),
+          body: JSON.stringify(profile),
         },
       ).catch(() => undefined);
     }
@@ -10272,12 +10395,14 @@ function App(): React.ReactElement {
     setWorldRenderRevision((revision) => revision + 1);
     showWorldNote("Terrain tuning reset");
     if (runtimeConfig.worldApiBase) {
+      const profile = currentWorldMetadataProfile({ landShape: undefined });
+      protectWorldProfileOverride(activeWorldId, profile);
       void fetch(
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
           headers: worldMetadataHeaders(),
-          body: JSON.stringify({ landShape: null }),
+          body: JSON.stringify({ ...profile, landShape: null }),
         },
       ).catch(() => undefined);
     }
@@ -11795,7 +11920,7 @@ function App(): React.ReactElement {
                   (() => {
                     const target = activeWorldId;
                     const armed = pendingDeleteWorld === target;
-                    const serverDeleteAllowed = canDeleteWorld(target);
+                    const serverDeleteAllowed = Boolean(runtimeConfig.worldApiBase && (canDeleteWorld(target) || getSession()));
                     return (
                       <button
                         type="button"
