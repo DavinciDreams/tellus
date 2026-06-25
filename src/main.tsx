@@ -38,9 +38,11 @@ import {
 import * as THREE from "three";
 import { TilesRenderer } from "3d-tiles-renderer";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
+import { PROCPLANT_PLACEABLE_CATALOG, procPlantPlaceableById } from "./tellus-procplant-biomes";
+import { createProcPlantVegetation } from "./tellus-procplant-vegetation";
 import { createVegetation } from "./tellus-vegetation";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
-import { makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, MAX_LIVE_MIRRORS, liveMirrorCount, resetLiveMirrors } from "./tellus-procedural-assets";
+import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, MAX_LIVE_MIRRORS, liveMirrorCount, resetLiveMirrors } from "./tellus-procedural-assets";
 import {
   BUILDING_LIGHTING_OPTIONS,
   BUILDING_MATERIAL_OPTIONS,
@@ -728,23 +730,40 @@ function createTellusWorld(
       return null;
     }
   })();
+  const procPlantPreference = (() => {
+    try {
+      return window.localStorage.getItem("tellus.procplants");
+    } catch {
+      return null;
+    }
+  })();
+  const procPlantDensityPreference = (() => {
+    try {
+      const value = Number(window.localStorage.getItem("tellus.procplants.density"));
+      return Number.isFinite(value) && value > 0 ? value : 1;
+    } catch {
+      return 1;
+    }
+  })();
+  const sampleVegetationHeight = isChunked
+    ? (x: number, z: number) => chunkRenderer?.sampleHeight(x, z) ?? SEA_LEVEL - 100
+    : terrainHeight;
+  const sampleVegetationPaint = isChunked
+    ? (x: number, z: number) => {
+        const painted = chunkRenderer?.samplePaint(x, z);
+        if (painted) return painted;
+        const kind = largeWorldTerrainKind(x, z);
+        return kind === "water" ? null : kind;
+      }
+    : centralTerrainPaintAt;
   const vegetationEnabled = vegetationPreference !== "0" && (isChunked || vegetationPreference === "1");
   const groundGrassEnabled = !isChunked && vegetationPreference === "1";
   const vegetation = vegetationEnabled
     ? createVegetation({
         scene,
         useWebGPU,
-        sampleHeight: isChunked
-          ? (x, z) => chunkRenderer?.sampleHeight(x, z) ?? SEA_LEVEL - 100
-          : terrainHeight,
-        samplePaint: isChunked
-          ? (x, z) => {
-              const painted = chunkRenderer?.samplePaint(x, z);
-              if (painted) return painted;
-              const kind = largeWorldTerrainKind(x, z);
-              return kind === "water" ? null : kind;
-            }
-          : centralTerrainPaintAt,
+        sampleHeight: sampleVegetationHeight,
+        samplePaint: sampleVegetationPaint,
         bounds: chunkedVegetationBounds,
         sectorsEnabled: !isChunked,
         grassOnly: false,
@@ -775,6 +794,34 @@ function createTellusWorld(
         notifyTerrainChanged: () => undefined,
         getTreeColliders: () => [],
         stats: () => ({ tier: 0, chunks: 0, grassIndices: 0, trees: 0, sectors: 0 }),
+        dispose: () => undefined,
+      };
+  const procplantsEnabled = procPlantPreference !== "0" && (isChunked || procPlantPreference === "1");
+  const procplants = procplantsEnabled
+    ? createProcPlantVegetation({
+        scene,
+        worldId: runtimeConfig.worldId,
+        sampleHeight: sampleVegetationHeight,
+        samplePaint: sampleVegetationPaint,
+        bounds: chunkedVegetationBounds,
+        densityMultiplier: procPlantDensityPreference,
+        isExcluded: (x, z, h) =>
+          waterFeatureContains(x, z, 0.6) &&
+          h < waterFeatureLevel() + 0.35,
+      })
+    : {
+        update: () => undefined,
+        notifyTerrainChanged: () => undefined,
+        stats: () => ({
+          chunks: 0,
+          plants: 0,
+          instances: 0,
+          stemTriangles: 0,
+          organDraws: 0,
+          lod0: 0,
+          lod1: 0,
+          lod2: 0,
+        }),
         dispose: () => undefined,
       };
   const ambientPhysics = createAmbientPhysics({
@@ -1866,8 +1913,12 @@ function createTellusWorld(
     applyInterior(GENERATED_INTERIOR_SCENE_URL);
   };
   window.__tellusExitInterior = () => exitInterior();
-  // DEV-ONLY perf readout: window.__tellusPerf() → { fps, vegetation: {tier, chunks, trees, grassTris} }.
-  window.__tellusPerf = () => ({ fps: fpsValue, vegetation: vegetation.stats() });
+  // DEV-ONLY perf readout: window.__tellusPerf() -> { fps, vegetation, procplants }.
+  window.__tellusPerf = () => ({
+    fps: fpsValue,
+    vegetation: vegetation.stats(),
+    procplants: procplants.stats(),
+  });
 
   let yaw = 0.72;
   let pitch = -0.28;
@@ -2358,12 +2409,14 @@ function createTellusWorld(
       repaintCentralTerrainRegion(b.minX, b.minZ, b.maxX, b.maxZ);
       refreshFlowerPatches();
       vegetation.notifyTerrainChanged();
+      procplants.notifyTerrainChanged();
       return;
     }
     rebuildCentralTerrain();
     // Re-grow the procedural vegetation lazily wherever the terrain changed (local sculpt or remote
     // patch both funnel through here).
     vegetation.notifyTerrainChanged();
+    procplants.notifyTerrainChanged();
   };
   refreshFlowerPatches();
 
@@ -3924,6 +3977,7 @@ function createTellusWorld(
     regroundClassicTerrainActorsAndThings();
     refreshFlowerPatches();
     vegetation.notifyTerrainChanged();
+    procplants.notifyTerrainChanged();
     publish();
   });
 
@@ -5678,24 +5732,57 @@ function createTellusWorld(
     return thing;
   };
 
-  const scatterProceduralAsset = (archetypeId: string, count?: number): GeneratedThing[] => {
+  const proceduralAssetOption = (archetypeId: string) => {
     const arch = PROCEDURAL_CATALOG.find((item) => item.id === archetypeId);
-    if (!arch) return [];
+    if (arch) {
+      return {
+        id: arch.id,
+        label: arch.label,
+        kind: arch.kind,
+        tree: arch.kind === "tree",
+        count: arch.kind === "tree" ? 5 : arch.kind === "flower" ? 14 : 10,
+        max: arch.kind === "tree" ? 9 : 24,
+        radius: arch.kind === "tree" ? 24 : 12,
+        minDistance: arch.kind === "tree" ? 7 : 3,
+        modelUrl: (seed: number) => makeProceduralModelUrl(arch.id, seed),
+        assetId: (seed: number) => `proc-${arch.id}-${seed.toString(16)}`,
+        scale: (variation = 1) =>
+          defaultScaleForRealisticKind(arch.kind, arch.label) * (arch.kind === "tree" ? 1.48 : 1) * variation,
+        description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
+      };
+    }
+    const procPlant = procPlantPlaceableById(archetypeId);
+    if (!procPlant) return null;
+    return {
+      id: procPlant.id,
+      label: procPlant.label,
+      kind: procPlant.kind,
+      tree: procPlant.kind === "tree",
+      count: procPlant.scatterCount,
+      max: procPlant.kind === "tree" ? 8 : 22,
+      radius: procPlant.scatterRadius,
+      minDistance: procPlant.kind === "tree" ? 6 : 2.5,
+      modelUrl: (seed: number) => makeProcPlantModelUrl(procPlant.presetId, seed),
+      assetId: (seed: number) => `procplant-${procPlant.presetId.toLowerCase()}-${seed.toString(16)}`,
+      scale: (variation = 1) => procPlant.scale * variation,
+      description: `${procPlant.label} procplant`,
+    };
+  };
+
+  const scatterProceduralAsset = (archetypeId: string, count?: number): GeneratedThing[] => {
+    const option = proceduralAssetOption(archetypeId);
+    if (!option) return [];
     const rng = Math.random;
-    const isTree = arch.kind === "tree";
-    const proceduralScale = (variation = 1) =>
-      defaultScaleForRealisticKind(arch.kind, arch.label) * (isTree ? 1.48 : 1) * variation;
     const total = clamp(
-      Math.round(count ?? (isTree ? 5 : arch.kind === "flower" ? 14 : 10)),
+      Math.round(count ?? option.count),
       1,
-      isTree ? 9 : 24,
+      option.max,
     );
-    const radius = isTree ? 24 : 12;
     const placed: GeneratedThing[] = [];
     for (let i = 0; i < total; i++) {
       const seed = (rng() * 0xffffffff) >>> 0;
       const angle = rng() * Math.PI * 2;
-      const distance = (isTree ? 7 : 3) + Math.sqrt(rng()) * radius;
+      const distance = option.minDistance + Math.sqrt(rng()) * option.radius;
       const location = {
         x: visitorPosition.x + Math.sin(angle) * distance,
         y: 0,
@@ -5704,15 +5791,15 @@ function createTellusWorld(
       placed.push(
         addLibraryAsset(
           {
-            id: `proc-${arch.id}-${seed.toString(16)}`,
-            name: arch.label,
-            description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
-            modelUrl: makeProceduralModelUrl(arch.id, seed),
+            id: option.assetId(seed),
+            name: option.label,
+            description: option.description,
+            modelUrl: option.modelUrl(seed),
             source: "generated",
           },
           {
             location,
-            scale: proceduralScale(0.82 + rng() * 0.42),
+            scale: option.scale(0.82 + rng() * 0.42),
           },
         ),
       );
@@ -5721,7 +5808,7 @@ function createTellusWorld(
       agentId: "visitor",
       agentName: "Visitor",
       tool: "generate",
-      text: `scattered ${placed.length} ${arch.label}`,
+      text: `scattered ${placed.length} ${option.label}`,
     });
     publish();
     return placed;
@@ -6858,6 +6945,7 @@ function createTellusWorld(
       if (activeChunks !== lastActiveChunkCount) {
         lastActiveChunkCount = activeChunks;
         vegetation.notifyTerrainChanged();
+        procplants.notifyTerrainChanged();
         const mounted = sailingThingId ? thingById(sailingThingId) : undefined;
         if (mounted && !isFreeMovingVehicle(mounted) && !isVisiblyOffsetFromLiveGround(mounted)) {
           groundThingToRenderedSurface(mounted);
@@ -6912,6 +7000,7 @@ function createTellusWorld(
       pruneStaleRemotePresence(Date.now());
     }
     vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
+    procplants.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
     ambientPhysics.step(delta);
     try {
       renderPortalPreview();
@@ -7667,12 +7756,20 @@ function createTellusWorld(
       }));
     },
     listProceduralAssets() {
-      return PROCEDURAL_CATALOG.map((entry) => ({
-        id: entry.id,
-        label: entry.label,
-        kind: entry.kind,
-        scatterable: true,
-      }));
+      return [
+        ...PROCEDURAL_CATALOG.map((entry) => ({
+          id: entry.id,
+          label: entry.label,
+          kind: entry.kind,
+          scatterable: true,
+        })),
+        ...PROCPLANT_PLACEABLE_CATALOG.map((entry) => ({
+          id: entry.id,
+          label: entry.label,
+          kind: entry.kind,
+          scatterable: true,
+        })),
+      ];
     },
     getChat(opts: { radius?: number; channel?: WorldChatChannel; recipientId?: string } = {}) {
       const messages = nearbyWorldChat(
@@ -7792,17 +7889,17 @@ function createTellusWorld(
           return { ok: true, assets: tellusAgent.listProceduralAssets() };
         case "placeProceduralAsset": {
           const archetypeId = typeof a.archetypeId === "string" ? a.archetypeId : typeof a.id === "string" ? a.id : "";
-          const arch = PROCEDURAL_CATALOG.find((item) => item.id === archetypeId);
-          if (!arch) return { ok: false, error: "placeProceduralAsset requires a valid archetypeId" };
+          const option = proceduralAssetOption(archetypeId);
+          if (!option) return { ok: false, error: "placeProceduralAsset requires a valid archetypeId" };
           const seed = typeof a.seed === "number" && Number.isFinite(a.seed)
             ? a.seed >>> 0
             : (Math.random() * 0xffffffff) >>> 0;
           const thing = addLibraryAsset(
             {
-              id: `proc-${arch.id}-${seed.toString(16)}`,
-              name: arch.label,
-              description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
-              modelUrl: makeProceduralModelUrl(arch.id, seed),
+              id: option.assetId(seed),
+              name: option.label,
+              description: option.description,
+              modelUrl: option.modelUrl(seed),
               source: "generated",
             },
             {
@@ -7810,10 +7907,10 @@ function createTellusWorld(
               location: nearToLocation(a.near),
               scale: typeof a.scale === "number"
                 ? a.scale
-                : defaultScaleForRealisticKind(arch.kind, arch.label) * (arch.kind === "tree" ? 1.48 : 1),
+                : option.scale(),
             },
           );
-          return { ok: true, id: thing.id, archetypeId: arch.id, label: arch.label };
+          return { ok: true, id: thing.id, archetypeId: option.id, label: option.label };
         }
         case "scatterProceduralAsset": {
           const archetypeId = typeof a.archetypeId === "string" ? a.archetypeId : typeof a.id === "string" ? a.id : "";
@@ -8243,6 +8340,7 @@ function createTellusWorld(
     setMoveMode,
     getAmbientStats: () => ({
       vegetation: vegetation.stats(),
+      procplants: procplants.stats(),
       chunkTerrain: chunkRenderer?.stats() ?? null,
       physicsBodies: ambientPhysics.activeCount(),
       rapierSolids: rapierPhysics?.stats().solids ?? 0,
@@ -8255,6 +8353,7 @@ function createTellusWorld(
       }
       agentViewTarget?.dispose();
       vegetation.dispose();
+      procplants.dispose();
       chunkRenderer?.dispose();
       onTerrainTemplateLoaded(null);
       setChunkedHeightProvider(null);
@@ -14499,6 +14598,40 @@ function App(): React.ReactElement {
                   title={`Scatter ${arch.label}`}
                   aria-label={`Scatter ${arch.label}`}
                   onClick={() => worldRef.current?.scatterProceduralAsset(arch.id)}
+                >
+                  <Sprout size={13} />
+                </button>
+              </div>
+            ))}
+            {PROCPLANT_PLACEABLE_CATALOG.map((entry) => (
+              <div key={entry.id} className="terrain-scatter-tile">
+                <button
+                  type="button"
+                  className="terrain-scatter-place"
+                  title={`${entry.label} procplant — tap again for a new variation`}
+                  aria-label={entry.label}
+                  onClick={() => {
+                    const seed = (Math.random() * 0xffffffff) >>> 0;
+                    worldRef.current?.addLibraryAsset({
+                      id: `procplant-${entry.presetId.toLowerCase()}-${seed.toString(16)}`,
+                      name: entry.label,
+                      description: `${entry.label} procplant`,
+                      modelUrl: makeProcPlantModelUrl(entry.presetId, seed),
+                      source: "generated",
+                    }, {
+                      scale: entry.scale,
+                    });
+                  }}
+                >
+                  <span className="terrain-scatter-emoji" aria-hidden="true">{entry.emoji}</span>
+                  <span className="terrain-scatter-label">{entry.label}</span>
+                </button>
+                <button
+                  type="button"
+                  className="terrain-scatter-burst"
+                  title={`Scatter ${entry.label}`}
+                  aria-label={`Scatter ${entry.label}`}
+                  onClick={() => worldRef.current?.scatterProceduralAsset(entry.id)}
                 >
                   <Sprout size={13} />
                 </button>
