@@ -22,6 +22,7 @@ import {
   Plus,
   RotateCcw,
   RotateCw,
+  Save,
   Search,
   Send,
   Ship,
@@ -139,7 +140,7 @@ import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayer
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { parseWaterSettings, runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig, worldApiUrl } from "./tellus-runtime-config";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, toAssetId } from "./tellus-urls-identity";
-import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainSaveTimer, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
+import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial } from "./tellus-terrain-material";
@@ -9366,10 +9367,24 @@ function App(): React.ReactElement {
   // second click within the window confirms; clicking elsewhere / a timeout disarms.
   const [pendingDeleteWorld, setPendingDeleteWorld] = useState<string | null>(null);
   const [deletingWorld, setDeletingWorld] = useState(false);
+  const [savingWorld, setSavingWorld] = useState(false);
   const pendingDeleteTimerRef = useRef<number | undefined>(undefined);
   const KNOWN_WORLDS_KEY = "tellus.knownWorlds";
   const WORLD_PROFILES_KEY = "tellus.worldProfiles";
   const HIDDEN_WORLDS_KEY = "tellus.hiddenWorlds";
+  const FRONTEND_VISIBLE_WORLD_IDS = new Set(
+    [
+      "chunked-64-main",
+      "chunked-64-genesis",
+      "chunked-64-aurora-test",
+      "chunked-64-holo-test",
+      "chunked-64-codex-chat-probe-cfa668f5e02f",
+      "chunked-64-dick",
+      "interior-infinity-demo-tavern",
+      "interior-grand-hall",
+      "interior-studio",
+    ].map(canonicalWorldId),
+  );
   const ACTIVE_WORLD_KEY = "tellus.activeWorldId";
   const NEW_WORLD_TEMPLATE_KEY = "tellus.newWorldTemplate";
   const NEW_WORLD_SKYBOX_KEY = "tellus.newWorldSkyboxUrl";
@@ -9534,6 +9549,14 @@ function App(): React.ReactElement {
 
   const isWorldHidden = (worldId: string): boolean =>
     (loadHiddenWorlds()[canonicalWorldId(worldId)] ?? 0) > Date.now();
+
+  const isFrontendVisibleWorld = (worldId: string): boolean => {
+    const key = canonicalWorldId(worldId);
+    if (FRONTEND_VISIBLE_WORLD_IDS.has(key)) return true;
+    if (/^interior-(?:grand-hall|studio|infinity-demo-tavern)(?:-|$)/.test(key)) return true;
+    if (/^chunked-\d+-.+(?:ridge|canyon|coral|flight|range)/.test(key)) return true;
+    return false;
+  };
 
   const hideWorldLocally = (worldId: string, ttlMs = 7 * 24 * 60 * 60 * 1000) => {
     try {
@@ -9720,6 +9743,67 @@ function App(): React.ReactElement {
     }
   };
 
+  const activeWorldMetadataPayload = (profile: WorldRenderProfile): object => ({
+    name: profile.displayName || activeWorldId || runtimeConfig.worldId,
+    displayName: profile.displayName,
+    isPublic: profile.isPublic,
+    worldTemplate: profile.worldTemplate,
+    skyboxUrl: profile.skyboxUrl,
+    landShape: profile.landShape,
+    dayNightMode: profile.dayNightMode,
+    dayNightCycleMs: profile.dayNightCycleMs,
+    dayNightStart: profile.dayNightStart,
+    lightingMood: profile.lightingMood,
+    waterSettings: profile.waterSettings,
+    ...(profile.sceneUrl ? { sceneUrl: profile.sceneUrl } : {}),
+  });
+
+  const saveActiveTerrainToHyades = async (): Promise<boolean> => {
+    if (!terrainStateLoaded) return true;
+    const body = tellusStatePayload();
+    saveTerrainStateLocally(body);
+    try {
+      return await saveTellusWorldState(body, true);
+    } catch (error) {
+      console.warn("Tellus terrain save failed", error);
+      return false;
+    }
+  };
+
+  const saveActiveWorldSettings = async () => {
+    const id = activeWorldId ?? runtimeConfig.worldId;
+    if (!id || savingWorld) return;
+    setSavingWorld(true);
+    try {
+      const profile = currentWorldMetadataProfile();
+      protectWorldProfileOverride(id, profile);
+      rememberWorldProfile(id, profile);
+      const terrainSaved = await saveActiveTerrainToHyades();
+      if (!terrainSaved) {
+        showWorldNote("Terrain not saved to Hyades", 5000);
+        return;
+      }
+      if (!runtimeConfig.worldApiBase) {
+        showWorldNote("World settings saved locally");
+        return;
+      }
+      const savedProfile = await patchWorldMetadata(
+        id,
+        activeWorldMetadataPayload(profile),
+        "World settings",
+      );
+      if (savedProfile === null) return;
+      if (Object.keys(savedProfile).length > 0) {
+        rememberWorldProfile(id, { ...profile, ...savedProfile });
+      }
+      setWorldRenderRevision((revision) => revision + 1);
+      await refreshWorldList(id);
+      showWorldNote("World settings saved to Hyades");
+    } finally {
+      setSavingWorld(false);
+    }
+  };
+
   const renameActiveWorld = () => {
     const id = activeWorldId ?? runtimeConfig.worldId;
     if (!id) return;
@@ -9743,24 +9827,7 @@ function App(): React.ReactElement {
       applyLocalRename();
       return;
     }
-    void patchWorldMetadata(
-      id,
-      {
-        name: displayName || id,
-        displayName: displayName || undefined,
-        isPublic: requestedProfile.isPublic,
-        worldTemplate: requestedProfile.worldTemplate,
-        skyboxUrl: requestedProfile.skyboxUrl,
-        landShape: requestedProfile.landShape,
-        dayNightMode: requestedProfile.dayNightMode,
-        dayNightCycleMs: requestedProfile.dayNightCycleMs,
-        dayNightStart: requestedProfile.dayNightStart,
-        lightingMood: requestedProfile.lightingMood,
-        waterSettings: requestedProfile.waterSettings,
-        ...(requestedProfile.sceneUrl ? { sceneUrl: requestedProfile.sceneUrl } : {}),
-      },
-      "Rename",
-    ).then((profile) => {
+    void patchWorldMetadata(id, activeWorldMetadataPayload(requestedProfile), "Rename").then((profile) => {
       if (profile === null) return;
       applyLocalRename(Object.keys(profile).length > 0 ? profile : undefined);
       void refreshWorldList(id);
@@ -9923,6 +9990,7 @@ function App(): React.ReactElement {
                 forgetWorld(worldId);
                 return undefined;
               }
+              if (!isFrontendVisibleWorld(worldId)) return undefined;
               const profile = parseWorldRenderProfile(w);
               if (Object.keys(profile).length > 0) rememberRemoteWorldProfile(worldId, profile);
               return worldId;
@@ -9937,8 +10005,11 @@ function App(): React.ReactElement {
     const cur = canonicalWorldId(current ?? activeWorldId ?? runtimeConfig.worldId);
     const local = loadKnownWorlds()
       .map(canonicalWorldId)
-      .filter((worldId) => !deletedOnServer.has(worldId) && !isWorldHidden(worldId));
-    const currentEntry = cur && !deletedOnServer.has(cur) && !isWorldHidden(cur) ? [cur] : [];
+      .filter((worldId) => !deletedOnServer.has(worldId) && !isWorldHidden(worldId) && isFrontendVisibleWorld(worldId));
+    const currentEntry =
+      cur && !deletedOnServer.has(cur) && !isWorldHidden(cur) && isFrontendVisibleWorld(cur)
+        ? [cur]
+        : [];
     setWorlds([...new Set([...server, ...local, ...currentEntry])].sort());
   };
   const switchWorld = (id: string) => {
@@ -11981,16 +12052,29 @@ function App(): React.ReactElement {
             )}
             <div className="world-control-group world-name-edit-group">
               <span>Name</span>
-              <button
-                type="button"
-                className="world-name-edit-button"
-                title="Rename world"
-                aria-label="Rename world"
-                onClick={renameActiveWorld}
-              >
-                <span>{worldDisplayName(activeWorldId ?? runtimeConfig.worldId)}</span>
-                <Pencil size={14} />
-              </button>
+              <div className="world-name-action-row">
+                <button
+                  type="button"
+                  className="world-name-edit-button"
+                  title="Rename world"
+                  aria-label="Rename world"
+                  onClick={renameActiveWorld}
+                >
+                  <span>{worldDisplayName(activeWorldId ?? runtimeConfig.worldId)}</span>
+                  <Pencil size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="world-action-button"
+                  title="Save world name and terrain settings to Hyades"
+                  aria-label="Save world name and terrain settings to Hyades"
+                  disabled={savingWorld}
+                  onClick={() => void saveActiveWorldSettings()}
+                >
+                  <Save size={14} />
+                  <span>{savingWorld ? "Saving" : "Save"}</span>
+                </button>
+              </div>
             </div>
             <div className="world-control-group">
               <span>Terrain</span>

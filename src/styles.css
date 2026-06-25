@@ -373,6 +373,13 @@ textarea::placeholder {
   flex: 1 1 180px;
 }
 
+.world-name-action-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .world-name-edit-button {
   min-width: 150px;
   max-width: 240px;
