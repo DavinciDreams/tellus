@@ -9372,19 +9372,6 @@ function App(): React.ReactElement {
   const KNOWN_WORLDS_KEY = "tellus.knownWorlds";
   const WORLD_PROFILES_KEY = "tellus.worldProfiles";
   const HIDDEN_WORLDS_KEY = "tellus.hiddenWorlds";
-  const FRONTEND_VISIBLE_WORLD_IDS = new Set(
-    [
-      "chunked-64-main",
-      "chunked-64-genesis",
-      "chunked-64-aurora-test",
-      "chunked-64-holo-test",
-      "chunked-64-codex-chat-probe-cfa668f5e02f",
-      "chunked-64-dick",
-      "interior-infinity-demo-tavern",
-      "interior-grand-hall",
-      "interior-studio",
-    ].map(canonicalWorldId),
-  );
   const ACTIVE_WORLD_KEY = "tellus.activeWorldId";
   const NEW_WORLD_TEMPLATE_KEY = "tellus.newWorldTemplate";
   const NEW_WORLD_SKYBOX_KEY = "tellus.newWorldSkyboxUrl";
@@ -9408,6 +9395,7 @@ function App(): React.ReactElement {
     skyboxUrl?: string;
     landShape?: LandShapeOverrides;
     isPublic?: boolean;
+    canEdit?: boolean;
     canDelete?: boolean;
     deleteReason?: string;
     dayNightMode?: DayNightMode;
@@ -9455,6 +9443,16 @@ function App(): React.ReactElement {
         : typeof value.can_delete === "boolean"
           ? value.can_delete
           : undefined;
+    const canEdit =
+      typeof value.canEdit === "boolean"
+        ? value.canEdit
+        : typeof value.can_edit === "boolean"
+          ? value.can_edit
+          : typeof value.canWrite === "boolean"
+            ? value.canWrite
+            : typeof value.can_write === "boolean"
+              ? value.can_write
+              : undefined;
     const deleteReason =
       typeof value.deleteReason === "string" && value.deleteReason.trim()
         ? value.deleteReason.trim()
@@ -9499,6 +9497,7 @@ function App(): React.ReactElement {
       skyboxUrl,
       landShape,
       isPublic,
+      canEdit,
       canDelete,
       deleteReason,
       dayNightMode,
@@ -9550,12 +9549,16 @@ function App(): React.ReactElement {
   const isWorldHidden = (worldId: string): boolean =>
     (loadHiddenWorlds()[canonicalWorldId(worldId)] ?? 0) > Date.now();
 
-  const isFrontendVisibleWorld = (worldId: string): boolean => {
+  const isMainWorld = (worldId: string): boolean =>
+    canonicalWorldId(worldId) === canonicalWorldId("main");
+
+  const canEditWorldFromProfile = (profile: WorldRenderProfile | undefined): boolean =>
+    Boolean(profile?.canEdit || profile?.canDelete);
+
+  const isFrontendVisibleWorld = (worldId: string, profile?: WorldRenderProfile): boolean => {
     const key = canonicalWorldId(worldId);
-    if (FRONTEND_VISIBLE_WORLD_IDS.has(key)) return true;
-    if (/^interior-(?:grand-hall|studio|infinity-demo-tavern)(?:-|$)/.test(key)) return true;
-    if (/^chunked-\d+-.+(?:ridge|canyon|coral|flight|range)/.test(key)) return true;
-    return false;
+    if (isMainWorld(key)) return true;
+    return canEditWorldFromProfile(profile ?? loadLocalWorldProfiles()[key]);
   };
 
   const hideWorldLocally = (worldId: string, ttlMs = 7 * 24 * 60 * 60 * 1000) => {
@@ -9981,7 +9984,10 @@ function App(): React.ReactElement {
       if (Array.isArray(list)) {
         server = list
           .map((w) => {
-            if (typeof w === "string") return canonicalWorldId(w);
+            if (typeof w === "string") {
+              const worldId = canonicalWorldId(w);
+              return isFrontendVisibleWorld(worldId) ? worldId : undefined;
+            }
             const world = w as { worldId?: string; exists?: boolean };
             if (typeof world.worldId === "string" && world.worldId.length > 0) {
               const worldId = canonicalWorldId(world.worldId);
@@ -9990,9 +9996,9 @@ function App(): React.ReactElement {
                 forgetWorld(worldId);
                 return undefined;
               }
-              if (!isFrontendVisibleWorld(worldId)) return undefined;
               const profile = parseWorldRenderProfile(w);
               if (Object.keys(profile).length > 0) rememberRemoteWorldProfile(worldId, profile);
+              if (!isFrontendVisibleWorld(worldId, profile)) return undefined;
               return worldId;
             }
             return undefined;
@@ -10285,6 +10291,7 @@ function App(): React.ReactElement {
       worldTemplate: pickedTemplate,
       skyboxUrl: pickedSkybox,
       isPublic: !makePrivate,
+      canEdit: true,
       dayNightMode: newWorldDayNightMode,
       dayNightCycleMs: currentDayNightCycleMs,
       dayNightStart: runtimeConfig.dayNightStart,
