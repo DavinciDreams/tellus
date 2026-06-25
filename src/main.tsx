@@ -9395,6 +9395,7 @@ function App(): React.ReactElement {
     skyboxUrl?: string;
     landShape?: LandShapeOverrides;
     isPublic?: boolean;
+    ownerId?: string;
     canEdit?: boolean;
     canDelete?: boolean;
     deleteReason?: string;
@@ -9453,6 +9454,18 @@ function App(): React.ReactElement {
             : typeof value.can_write === "boolean"
               ? value.can_write
               : undefined;
+    const ownerId =
+      typeof value.ownerId === "string" && value.ownerId.trim()
+        ? value.ownerId.trim()
+        : typeof value.owner_id === "string" && value.owner_id.trim()
+          ? value.owner_id.trim()
+          : typeof value.ownerUserId === "string" && value.ownerUserId.trim()
+            ? value.ownerUserId.trim()
+            : typeof value.userId === "string" && value.userId.trim()
+              ? value.userId.trim()
+              : typeof value.user_id === "string" && value.user_id.trim()
+                ? value.user_id.trim()
+                : undefined;
     const deleteReason =
       typeof value.deleteReason === "string" && value.deleteReason.trim()
         ? value.deleteReason.trim()
@@ -9497,6 +9510,7 @@ function App(): React.ReactElement {
       skyboxUrl,
       landShape,
       isPublic,
+      ownerId,
       canEdit,
       canDelete,
       deleteReason,
@@ -9553,7 +9567,11 @@ function App(): React.ReactElement {
     canonicalWorldId(worldId) === canonicalWorldId("main");
 
   const canEditWorldFromProfile = (profile: WorldRenderProfile | undefined): boolean =>
-    Boolean(profile?.canEdit || profile?.canDelete);
+    Boolean(
+      profile?.canEdit ||
+        (profile?.ownerId && profile.ownerId === tellusUserId()) ||
+        (profile?.canDelete && profile.deleteReason === "owner"),
+    );
 
   const isFrontendVisibleWorld = (worldId: string, profile?: WorldRenderProfile): boolean => {
     const key = canonicalWorldId(worldId);
