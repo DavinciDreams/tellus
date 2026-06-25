@@ -851,17 +851,20 @@ function createTellusWorld(
   let preInteriorCameraMode: CameraMode | null = null;
   let profileInteriorSceneUrl = options.initialInteriorSceneUrl?.trim() || null;
   let portalPreviewTargetWorldId: string | null = null;
-  let portalPreview:
-    | {
-        targetWorldId: string;
-        scene: THREE.Scene;
-        camera: THREE.PerspectiveCamera;
-        renderTarget: THREE.WebGLRenderTarget;
-        material: THREE.MeshBasicMaterial;
-        plane: THREE.Mesh;
-        room: THREE.Object3D;
-      }
-    | null = null;
+  type PortalPreview = {
+    targetWorldId: string;
+    scene: THREE.Scene;
+    camera: THREE.PerspectiveCamera;
+    renderTarget: THREE.WebGLRenderTarget;
+    material: THREE.MeshBasicMaterial;
+    plane: THREE.Mesh;
+    room: THREE.Object3D;
+    socket?: WebSocket;
+    liveGroup: THREE.Group;
+    presenceMarkers: Map<string, THREE.Object3D>;
+    generatedMarkers: Map<string, THREE.Object3D>;
+  };
+  let portalPreview: PortalPreview | null = null;
   // Guards the ONE-TIME interior trimesh bake (see ensureInteriorStatics). Declared here (before
   // applyInterior uses it) to avoid a temporal-dead-zone reference.
   let interiorBaked = false;
@@ -953,6 +956,163 @@ function createTellusWorld(
     return previewScene;
   };
 
+  const portalPreviewLiveUrl = (worldId: string): string => {
+    const httpUrl = new URL(
+      worldApiUrl(`/api/world/${encodeURIComponent(worldId)}/preview/live?userId=${encodeURIComponent(tellusUserId())}`),
+      window.location.href,
+    );
+    httpUrl.searchParams.set("visitorId", `${visitorId}-preview`);
+    httpUrl.protocol = httpUrl.protocol === "https:" ? "wss:" : "ws:";
+    return httpUrl.toString();
+  };
+
+  const portalPreviewPosition = (position?: Vec3): THREE.Vector3 | null => {
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.z)) return null;
+    return new THREE.Vector3(
+      clamp(position.x / 14, -6.4, 6.4),
+      Math.max(0.34, clamp((position.y ?? 0) / 18 + 0.34, 0.34, 3.2)),
+      clamp(position.z / 14 - 2.5, -6.8, 2.8),
+    );
+  };
+
+  const makePortalPreviewPresenceMarker = (presence: WorldPresence): THREE.Object3D => {
+    const group = new THREE.Group();
+    group.name = `portal-preview-presence-${presence.visitorId}`;
+    const hue = ((hashPortalPreviewWorld(presence.ownerUserId || presence.visitorId) % 360) / 360);
+    const bodyColor = new THREE.Color().setHSL(hue, 0.62, 0.58).getHex();
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.16, 0.46, 4, 8),
+      new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.68 }),
+    );
+    body.position.y = 0.45;
+    group.add(body);
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.15, 12, 8),
+      new THREE.MeshStandardMaterial({ color: 0xffd7a3, roughness: 0.72 }),
+    );
+    head.position.y = 0.86;
+    group.add(head);
+    const halo = new THREE.Mesh(
+      new THREE.TorusGeometry(0.32, 0.018, 8, 24),
+      new THREE.MeshBasicMaterial({ color: 0xffe27c }),
+    );
+    halo.rotation.x = -Math.PI / 2;
+    halo.position.y = 0.04;
+    group.add(halo);
+    return group;
+  };
+
+  const makePortalPreviewGeneratedMarker = (thing: WorldGeneratedThing): THREE.Object3D => {
+    const color = Number.isFinite(thing.color) ? thing.color : kindColor(thing.kind as GeneratedKind, thing.prompt);
+    const material = new THREE.MeshStandardMaterial({ color, roughness: 0.76 });
+    const mesh = new THREE.Mesh(
+      thing.kind === "plant" || /tree|flower|garden/i.test(thing.prompt)
+        ? new THREE.ConeGeometry(0.24, 0.72, 7)
+        : new THREE.BoxGeometry(0.42, 0.42, 0.42),
+      material,
+    );
+    mesh.name = `portal-preview-generated-${thing.id}`;
+    mesh.position.y = 0.22;
+    mesh.scale.setScalar(clamp(thing.scale || 1, 0.65, 1.8));
+    return mesh;
+  };
+
+  const syncPortalPreviewPresence = (preview: PortalPreview, presenceRaw: WorldPresence[]) => {
+    const active = new Set<string>();
+    for (const presence of presenceRaw.filter(isLivePresence)) {
+      const pos = portalPreviewPosition(presence.position);
+      if (!pos) continue;
+      active.add(presence.visitorId);
+      let marker = preview.presenceMarkers.get(presence.visitorId);
+      if (!marker) {
+        marker = makePortalPreviewPresenceMarker(presence);
+        preview.presenceMarkers.set(presence.visitorId, marker);
+        preview.liveGroup.add(marker);
+      }
+      marker.position.copy(pos);
+    }
+    for (const [id, marker] of preview.presenceMarkers) {
+      if (active.has(id)) continue;
+      preview.liveGroup.remove(marker);
+      disposeObject(marker);
+      preview.presenceMarkers.delete(id);
+    }
+  };
+
+  const upsertPortalPreviewGenerated = (preview: PortalPreview, thing: WorldGeneratedThing) => {
+    const pos = portalPreviewPosition(thing.position);
+    if (!pos) return;
+    let marker = preview.generatedMarkers.get(thing.id);
+    if (!marker) {
+      marker = makePortalPreviewGeneratedMarker(thing);
+      preview.generatedMarkers.set(thing.id, marker);
+      preview.liveGroup.add(marker);
+    }
+    marker.position.copy(pos);
+    marker.rotation.y = thing.rotationY || 0;
+  };
+
+  const syncPortalPreviewGenerated = (preview: PortalPreview, things: WorldGeneratedThing[]) => {
+    const active = new Set<string>();
+    for (const thing of things.filter(isWorldGeneratedThing).slice(0, 64)) {
+      active.add(thing.id);
+      upsertPortalPreviewGenerated(preview, thing);
+    }
+    for (const [id, marker] of preview.generatedMarkers) {
+      if (active.has(id)) continue;
+      preview.liveGroup.remove(marker);
+      disposeObject(marker);
+      preview.generatedMarkers.delete(id);
+    }
+  };
+
+  const applyPortalPreviewPatch = (preview: PortalPreview, patch: WorldPatch) => {
+    if (patch.type === "world.snapshot") {
+      syncPortalPreviewPresence(preview, patch.presence ?? []);
+      syncPortalPreviewGenerated(preview, patch.generated ?? []);
+      return;
+    }
+    if (patch.type === "presence.updated") {
+      syncPortalPreviewPresence(preview, patch.presence ?? []);
+      return;
+    }
+    if (patch.type === "generated.updated" && isWorldGeneratedThing(patch.thing)) {
+      upsertPortalPreviewGenerated(preview, patch.thing);
+      return;
+    }
+    if (patch.type === "generated.deleted") {
+      const marker = preview.generatedMarkers.get(patch.id);
+      if (!marker) return;
+      preview.liveGroup.remove(marker);
+      disposeObject(marker);
+      preview.generatedMarkers.delete(patch.id);
+    }
+  };
+
+  const connectPortalPreviewLive = (preview: PortalPreview) => {
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(portalPreviewLiveUrl(preview.targetWorldId));
+    } catch {
+      return;
+    }
+    preview.socket = socket;
+    socket.onmessage = (event) => {
+      if (preview !== portalPreview || typeof event.data !== "string") return;
+      try {
+        applyPortalPreviewPatch(preview, JSON.parse(event.data) as WorldPatch);
+      } catch {
+        // The static doorway scene remains useful if a mid-rollout backend sends something unexpected.
+      }
+    };
+    socket.onerror = () => {
+      try { socket.close(); } catch { /* best effort */ }
+    };
+    socket.onclose = () => {
+      if (preview.socket === socket) preview.socket = undefined;
+    };
+  };
+
   const findInteriorPortalDoor = (): { room: THREE.Object3D; anchor: { position: Vec3; width: number; height: number } } | null => {
     if (!interiorObject) return null;
     for (const child of interiorObject.children) {
@@ -973,6 +1133,7 @@ function createTellusWorld(
 
   const disposePortalPreview = () => {
     if (!portalPreview) return;
+    try { portalPreview.socket?.close(); } catch { /* best effort */ }
     portalPreview.room.remove(portalPreview.plane);
     portalPreview.plane.geometry.dispose();
     portalPreview.material.dispose();
@@ -1006,6 +1167,9 @@ function createTellusWorld(
     plane.position.set(door.anchor.position.x, door.anchor.height / 2, door.anchor.position.z + 0.08);
     plane.renderOrder = 2;
     const previewScene = createPortalPreviewScene(target);
+    const liveGroup = new THREE.Group();
+    liveGroup.name = "tellus-portal-preview-live";
+    previewScene.add(liveGroup);
     const previewCamera = new THREE.PerspectiveCamera(55, 1, 0.1, 80);
     previewCamera.position.set(0, 3.2, 6.8);
     previewCamera.lookAt(0, 1.1, -3.4);
@@ -1018,7 +1182,12 @@ function createTellusWorld(
       material,
       plane,
       room: door.room,
+      socket: undefined,
+      liveGroup,
+      presenceMarkers: new Map(),
+      generatedMarkers: new Map(),
     };
+    connectPortalPreviewLive(portalPreview);
   };
 
   const renderPortalPreview = () => {
