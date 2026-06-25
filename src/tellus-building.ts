@@ -45,7 +45,7 @@ function markSolid(mesh: THREE.Mesh): THREE.Mesh {
 
 /** Small deterministic PRNG (mulberry32) so a seed yields a stable layout. */
 function makeRng(seed: number): () => number {
-  let a = (seed | 0) || 1;
+  let a = seed | 0 || 1;
   return () => {
     a |= 0;
     a = (a + 0x6d2b79f5) | 0;
@@ -67,6 +67,78 @@ const DOOR_HEIGHT = 3;
 const WINDOW_WIDTH = 2.4;
 const WINDOW_HEIGHT = 1.35;
 const WINDOW_BOTTOM = 1.35;
+
+const INTERIOR_TEXTURE_BASE = "/textures/interiors";
+const INTERIOR_TEXTURES = {
+  floor: {
+    color: `${INTERIOR_TEXTURE_BASE}/WoodFloor051_1K-PNG_Color.png`,
+    normal: `${INTERIOR_TEXTURE_BASE}/WoodFloor051_1K-PNG_NormalGL.png`,
+    roughness: `${INTERIOR_TEXTURE_BASE}/WoodFloor051_1K-PNG_Roughness.png`,
+    repeat: [5.5, 5.5] as const,
+    normalScale: 0.55,
+  },
+  trim: {
+    color: `${INTERIOR_TEXTURE_BASE}/Wood092_1K-PNG_Color.png`,
+    normal: `${INTERIOR_TEXTURE_BASE}/Wood092_1K-PNG_NormalGL.png`,
+    roughness: `${INTERIOR_TEXTURE_BASE}/Wood092_1K-PNG_Roughness.png`,
+    repeat: [2.6, 2.6] as const,
+    normalScale: 0.42,
+  },
+  wall: {
+    color: `${INTERIOR_TEXTURE_BASE}/Bricks075A_1K-PNG_Color.png`,
+    normal: `${INTERIOR_TEXTURE_BASE}/Bricks075A_1K-PNG_NormalGL.png`,
+    roughness: `${INTERIOR_TEXTURE_BASE}/Bricks075A_1K-PNG_Roughness.png`,
+    repeat: [3.4, 1.8] as const,
+    normalScale: 0.38,
+  },
+};
+
+let interiorTextureLoader: THREE.TextureLoader | null = null;
+
+function canLoadInteriorTextures(): boolean {
+  return typeof document !== "undefined" && typeof window !== "undefined";
+}
+
+function textureLoader(): THREE.TextureLoader | null {
+  if (!canLoadInteriorTextures()) return null;
+  interiorTextureLoader ??= new THREE.TextureLoader();
+  return interiorTextureLoader;
+}
+
+function loadInteriorTexture(
+  url: string,
+  repeat: readonly [number, number],
+  colorMap = false,
+): THREE.Texture | undefined {
+  const loader = textureLoader();
+  if (!loader) return undefined;
+  const texture = loader.load(url);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeat[0], repeat[1]);
+  if (colorMap) texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function applyInteriorTextureSet(
+  material: THREE.MeshStandardMaterial,
+  textureSet: (typeof INTERIOR_TEXTURES)[keyof typeof INTERIOR_TEXTURES],
+): THREE.MeshStandardMaterial {
+  const colorMap = loadInteriorTexture(
+    textureSet.color,
+    textureSet.repeat,
+    true,
+  );
+  if (!colorMap) return material;
+  material.map = colorMap;
+  material.normalMap =
+    loadInteriorTexture(textureSet.normal, textureSet.repeat) ?? null;
+  material.roughnessMap =
+    loadInteriorTexture(textureSet.roughness, textureSet.repeat) ?? null;
+  material.normalScale.set(textureSet.normalScale, textureSet.normalScale);
+  material.needsUpdate = true;
+  return material;
+}
 
 interface WallOpening {
   center: number;
@@ -138,7 +210,11 @@ function addWallPanel(
   else out.push(solidBox(SLAB, h, span, offset, cy, center, mat));
 }
 
-function openingContains(opening: WallOpening, pos: number, y: number): boolean {
+function openingContains(
+  opening: WallOpening,
+  pos: number,
+  y: number,
+): boolean {
   const min = opening.center - opening.width / 2;
   const max = opening.center + opening.width / 2;
   const bottom = opening.bottom;
@@ -165,11 +241,20 @@ function addWall(
   openings: WallOpening[] = [],
 ): void {
   const wallOpenings = doorway
-    ? [{ center: 0, width: DOOR_WIDTH, bottom: baseY, height: DOOR_HEIGHT }, ...openings]
+    ? [
+        { center: 0, width: DOOR_WIDTH, bottom: baseY, height: DOOR_HEIGHT },
+        ...openings,
+      ]
     : openings;
   if (wallOpenings.length === 0) {
-    if (axis === "x") out.push(solidBox(length, height, SLAB, 0, baseY + height / 2, offset, mat));
-    else out.push(solidBox(SLAB, height, length, offset, baseY + height / 2, 0, mat));
+    if (axis === "x")
+      out.push(
+        solidBox(length, height, SLAB, 0, baseY + height / 2, offset, mat),
+      );
+    else
+      out.push(
+        solidBox(SLAB, height, length, offset, baseY + height / 2, 0, mat),
+      );
     return;
   }
 
@@ -184,7 +269,10 @@ function addWall(
       Math.max(minPos, opening.center - opening.width / 2),
       Math.min(maxPos, opening.center + opening.width / 2),
     );
-    yCuts.push(Math.max(minY, opening.bottom), Math.min(maxY, opening.bottom + opening.height));
+    yCuts.push(
+      Math.max(minY, opening.bottom),
+      Math.min(maxY, opening.bottom + opening.height),
+    );
   }
   const positions = Array.from(new Set(posCuts)).sort((a, b) => a - b);
   const ys = Array.from(new Set(yCuts)).sort((a, b) => a - b);
@@ -197,7 +285,8 @@ function addWall(
       const top = ys[yi + 1];
       const center = (from + to) / 2;
       const cy = (bottom + top) / 2;
-      if (wallOpenings.some((opening) => openingContains(opening, center, cy))) continue;
+      if (wallOpenings.some((opening) => openingContains(opening, center, cy)))
+        continue;
       addWallPanel(out, axis, offset, from, to, bottom, top, mat);
     }
   }
@@ -218,17 +307,117 @@ function addWindowTrim(
   const top = opening.bottom + opening.height;
   const y = bottom + opening.height / 2;
   if (axis === "x") {
-    room.add(visualBox(opening.width + frame * 2, frame, depth, center, top, offset, trimMat));
-    room.add(visualBox(opening.width + frame * 2, frame, depth, center, bottom, offset, trimMat));
-    room.add(visualBox(frame, opening.height, depth, center - opening.width / 2, y, offset, trimMat));
-    room.add(visualBox(frame, opening.height, depth, center + opening.width / 2, y, offset, trimMat));
-    room.add(visualBox(opening.width * 0.96, opening.height * 0.9, 0.035, center, y, offset, glassMat));
+    room.add(
+      visualBox(
+        opening.width + frame * 2,
+        frame,
+        depth,
+        center,
+        top,
+        offset,
+        trimMat,
+      ),
+    );
+    room.add(
+      visualBox(
+        opening.width + frame * 2,
+        frame,
+        depth,
+        center,
+        bottom,
+        offset,
+        trimMat,
+      ),
+    );
+    room.add(
+      visualBox(
+        frame,
+        opening.height,
+        depth,
+        center - opening.width / 2,
+        y,
+        offset,
+        trimMat,
+      ),
+    );
+    room.add(
+      visualBox(
+        frame,
+        opening.height,
+        depth,
+        center + opening.width / 2,
+        y,
+        offset,
+        trimMat,
+      ),
+    );
+    room.add(
+      visualBox(
+        opening.width * 0.96,
+        opening.height * 0.9,
+        0.035,
+        center,
+        y,
+        offset,
+        glassMat,
+      ),
+    );
   } else {
-    room.add(visualBox(depth, frame, opening.width + frame * 2, offset, top, center, trimMat));
-    room.add(visualBox(depth, frame, opening.width + frame * 2, offset, bottom, center, trimMat));
-    room.add(visualBox(depth, opening.height, frame, offset, y, center - opening.width / 2, trimMat));
-    room.add(visualBox(depth, opening.height, frame, offset, y, center + opening.width / 2, trimMat));
-    room.add(visualBox(0.035, opening.height * 0.9, opening.width * 0.96, offset, y, center, glassMat));
+    room.add(
+      visualBox(
+        depth,
+        frame,
+        opening.width + frame * 2,
+        offset,
+        top,
+        center,
+        trimMat,
+      ),
+    );
+    room.add(
+      visualBox(
+        depth,
+        frame,
+        opening.width + frame * 2,
+        offset,
+        bottom,
+        center,
+        trimMat,
+      ),
+    );
+    room.add(
+      visualBox(
+        depth,
+        opening.height,
+        frame,
+        offset,
+        y,
+        center - opening.width / 2,
+        trimMat,
+      ),
+    );
+    room.add(
+      visualBox(
+        depth,
+        opening.height,
+        frame,
+        offset,
+        y,
+        center + opening.width / 2,
+        trimMat,
+      ),
+    );
+    room.add(
+      visualBox(
+        0.035,
+        opening.height * 0.9,
+        opening.width * 0.96,
+        offset,
+        y,
+        center,
+        glassMat,
+      ),
+    );
   }
 }
 
@@ -240,10 +429,26 @@ function addDoorTrim(
   const frame = 0.14;
   const depth = SLAB + 0.14;
   const y = DOOR_HEIGHT / 2;
-  room.add(visualBox(frame, DOOR_HEIGHT, depth, -DOOR_WIDTH / 2, y, offset, trimMat));
-  room.add(visualBox(frame, DOOR_HEIGHT, depth, DOOR_WIDTH / 2, y, offset, trimMat));
-  room.add(visualBox(DOOR_WIDTH + frame * 2, frame, depth, 0, DOOR_HEIGHT, offset, trimMat));
-  room.add(visualBox(DOOR_WIDTH + 0.5, 0.08, 0.8, 0, 0.04, offset + 0.25, trimMat));
+  room.add(
+    visualBox(frame, DOOR_HEIGHT, depth, -DOOR_WIDTH / 2, y, offset, trimMat),
+  );
+  room.add(
+    visualBox(frame, DOOR_HEIGHT, depth, DOOR_WIDTH / 2, y, offset, trimMat),
+  );
+  room.add(
+    visualBox(
+      DOOR_WIDTH + frame * 2,
+      frame,
+      depth,
+      0,
+      DOOR_HEIGHT,
+      offset,
+      trimMat,
+    ),
+  );
+  room.add(
+    visualBox(DOOR_WIDTH + 0.5, 0.08, 0.8, 0, 0.04, offset + 0.25, trimMat),
+  );
 }
 
 /**
@@ -269,7 +474,9 @@ function buildStaircase(
     const treadTop = baseY + (i + 1) * (rise / count);
     const h = treadTop - baseY;
     const cz = startZ + i * STEP_RUN + STEP_RUN / 2;
-    steps.push(solidBox(stairWidth, h, STEP_RUN, startX, baseY + h / 2, cz, mat));
+    steps.push(
+      solidBox(stairWidth, h, STEP_RUN, startX, baseY + h / 2, cz, mat),
+    );
   }
   return steps;
 }
@@ -301,31 +508,43 @@ export function generateInteriorRoom(spec: InteriorRoomSpec = {}): THREE.Group {
 
   // Deterministic warm palette nudged by the seed (so different rooms read differently but stably).
   const hue = (rng() * 0.08 + 0.07) % 1; // warm browns/tans
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setHSL(hue, 0.35, 0.32),
-    roughness: 0.92,
-    metalness: 0.0,
-  });
-  const wallMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setHSL(hue, 0.28, 0.46),
-    roughness: 0.95,
-    metalness: 0.0,
-  });
-  const stairMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setHSL(hue, 0.4, 0.4),
-    roughness: 0.9,
-    metalness: 0.0,
-  });
+  const floorMat = applyInteriorTextureSet(
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(hue, 0.35, 0.32),
+      roughness: 0.92,
+      metalness: 0.0,
+    }),
+    INTERIOR_TEXTURES.floor,
+  );
+  const wallMat = applyInteriorTextureSet(
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(hue, 0.28, 0.46),
+      roughness: 0.95,
+      metalness: 0.0,
+    }),
+    INTERIOR_TEXTURES.wall,
+  );
+  const stairMat = applyInteriorTextureSet(
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(hue, 0.4, 0.4),
+      roughness: 0.9,
+      metalness: 0.0,
+    }),
+    INTERIOR_TEXTURES.trim,
+  );
   const ceilMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color().setHSL(hue, 0.2, 0.5),
     roughness: 0.95,
     metalness: 0.0,
   });
-  const trimMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setHSL(hue, 0.42, 0.22),
-    roughness: 0.84,
-    metalness: 0.0,
-  });
+  const trimMat = applyInteriorTextureSet(
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(hue, 0.42, 0.22),
+      roughness: 0.84,
+      metalness: 0.0,
+    }),
+    INTERIOR_TEXTURES.trim,
+  );
   const glassMat = new THREE.MeshStandardMaterial({
     color: 0x9fd8ff,
     roughness: 0.2,
@@ -390,7 +609,11 @@ export function generateInteriorRoom(spec: InteriorRoomSpec = {}): THREE.Group {
     {
       kind: "window",
       wall: "+z",
-      position: { x: backWindowLeft, y: WINDOW_BOTTOM + WINDOW_HEIGHT / 2, z: hz },
+      position: {
+        x: backWindowLeft,
+        y: WINDOW_BOTTOM + WINDOW_HEIGHT / 2,
+        z: hz,
+      },
       rotationY: Math.PI,
       width: backWindowOpening.width,
       height: backWindowOpening.height,
@@ -398,7 +621,11 @@ export function generateInteriorRoom(spec: InteriorRoomSpec = {}): THREE.Group {
     {
       kind: "window",
       wall: "+z",
-      position: { x: backWindowRight, y: WINDOW_BOTTOM + WINDOW_HEIGHT / 2, z: hz },
+      position: {
+        x: backWindowRight,
+        y: WINDOW_BOTTOM + WINDOW_HEIGHT / 2,
+        z: hz,
+      },
       rotationY: Math.PI,
       width: backWindowOpening.width,
       height: backWindowOpening.height,
@@ -415,7 +642,17 @@ export function generateInteriorRoom(spec: InteriorRoomSpec = {}): THREE.Group {
   for (let lvl = 1; lvl < levels; lvl++) {
     const y = lvl * LEVEL_HEIGHT;
     const mezDepth = depth / 2;
-    solids.push(solidBox(width, SLAB, mezDepth, 0, y - SLAB / 2, hz - mezDepth / 2, floorMat));
+    solids.push(
+      solidBox(
+        width,
+        SLAB,
+        mezDepth,
+        0,
+        y - SLAB / 2,
+        hz - mezDepth / 2,
+        floorMat,
+      ),
+    );
   }
 
   // ── Perimeter walls (ground level) ───────────────────────────────────────────────────────────
@@ -426,11 +663,31 @@ export function generateInteriorRoom(spec: InteriorRoomSpec = {}): THREE.Group {
     { ...backWindowOpening, center: backWindowLeft },
     { ...backWindowOpening, center: backWindowRight },
   ]);
-  addWall(solids, "z", -hx, depth, 0, wallHeight, wallMat, false, [sideWindowOpening]);
-  addWall(solids, "z", hx, depth, 0, wallHeight, wallMat, false, [sideWindowOpening]);
+  addWall(solids, "z", -hx, depth, 0, wallHeight, wallMat, false, [
+    sideWindowOpening,
+  ]);
+  addWall(solids, "z", hx, depth, 0, wallHeight, wallMat, false, [
+    sideWindowOpening,
+  ]);
   addDoorTrim(room, -hz, trimMat);
-  addWindowTrim(room, "x", hz, backWindowLeft, backWindowOpening, trimMat, glassMat);
-  addWindowTrim(room, "x", hz, backWindowRight, backWindowOpening, trimMat, glassMat);
+  addWindowTrim(
+    room,
+    "x",
+    hz,
+    backWindowLeft,
+    backWindowOpening,
+    trimMat,
+    glassMat,
+  );
+  addWindowTrim(
+    room,
+    "x",
+    hz,
+    backWindowRight,
+    backWindowOpening,
+    trimMat,
+    glassMat,
+  );
   addWindowTrim(room, "z", -hx, windowZ, sideWindowOpening, trimMat, glassMat);
   addWindowTrim(room, "z", hx, windowZ, sideWindowOpening, trimMat, glassMat);
 
@@ -450,7 +707,9 @@ export function generateInteriorRoom(spec: InteriorRoomSpec = {}): THREE.Group {
       const mezEdgeZ = hz - depth / 2; // = 0: where the mezzanine (far half) begins
       // Anchor the run so its top tread reaches just PAST the mezzanine edge — overlap, never a gap.
       const startZ = mezEdgeZ - runLength + 0.3;
-      solids.push(...buildStaircase(baseY, rise, stairX, startZ, stairWidth, stairMat));
+      solids.push(
+        ...buildStaircase(baseY, rise, stairX, startZ, stairWidth, stairMat),
+      );
       // Generous flat landing at the top level, overlapping BOTH the last tread and the mezzanine, so
       // the climb-to-walk transition is continuous (no lip to get stuck on / jump over). Spans from a
       // bit before the mezzanine edge to a bit into the mezzanine, at the exact mezzanine floor height.
@@ -479,7 +738,12 @@ export function generateInteriorRoom(spec: InteriorRoomSpec = {}): THREE.Group {
   for (const m of solids) room.add(m);
 
   // ── Lighting (visual-only — NEVER flagged collidable) ────────────────────────────────────────
-  const light = new THREE.PointLight(0xffe0b0, 1.2, Math.max(width, depth) * 3, 1.4);
+  const light = new THREE.PointLight(
+    0xffe0b0,
+    1.2,
+    Math.max(width, depth) * 3,
+    1.4,
+  );
   light.position.set(0, wallHeight - 0.8, 0);
   light.castShadow = false;
   room.add(light);
