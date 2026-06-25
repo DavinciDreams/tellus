@@ -9519,21 +9519,19 @@ function App(): React.ReactElement {
 
   const rememberRemoteWorldProfile = (worldId: string, profile: WorldRenderProfile) => {
     const existing = loadLocalWorldProfiles()[worldId] ?? {};
-    const merged: WorldRenderProfile = { ...profile };
-    if (existing.displayName !== undefined) merged.displayName = existing.displayName;
-    if (existing.worldTemplate !== undefined) merged.worldTemplate = existing.worldTemplate;
-    if (existing.skyboxUrl !== undefined) merged.skyboxUrl = existing.skyboxUrl;
-    if (existing.landShape !== undefined) merged.landShape = existing.landShape;
-    if (existing.isPublic !== undefined) merged.isPublic = existing.isPublic;
-    if (existing.canDelete !== undefined) merged.canDelete = existing.canDelete;
-    if (existing.deleteReason !== undefined) merged.deleteReason = existing.deleteReason;
-    if (existing.dayNightMode !== undefined) merged.dayNightMode = existing.dayNightMode;
-    if (existing.dayNightCycleMs !== undefined) merged.dayNightCycleMs = existing.dayNightCycleMs;
-    if (existing.dayNightStart !== undefined) merged.dayNightStart = existing.dayNightStart;
-    if (existing.lightingMood !== undefined) merged.lightingMood = existing.lightingMood;
-    if (existing.waterSettings !== undefined) merged.waterSettings = existing.waterSettings;
-    if (existing.sceneUrl !== undefined) merged.sceneUrl = existing.sceneUrl;
+    const merged: WorldRenderProfile = {
+      ...existing,
+      ...profile,
+    };
     rememberWorldProfile(worldId, merged);
+  };
+
+  const worldMetadataHeaders = (): HeadersInit => {
+    const token = getSession()?.token;
+    return {
+      "Content-Type": "application/json",
+      ...(token ? { [SESSION_HEADER]: token } : {}),
+    };
   };
 
   const fallbackWorldDisplayName = (worldId: string): string => {
@@ -9589,22 +9587,35 @@ function App(): React.ReactElement {
     const next = window.prompt("World name:", currentName === id ? "" : currentName);
     if (next === null) return;
     const displayName = next.trim().slice(0, 64);
-    rememberWorldProfile(id, { displayName: displayName || undefined });
-    setWorldRenderRevision((revision) => revision + 1);
-    showWorldNote(displayName ? `Renamed world to "${displayName}"` : "World name cleared");
-    if (runtimeConfig.worldApiBase) {
-      void fetch(
+    const applyLocalRename = (profile?: WorldRenderProfile) => {
+      rememberWorldProfile(id, profile ?? { displayName: displayName || undefined });
+      setWorldRenderRevision((revision) => revision + 1);
+      showWorldNote(displayName ? `Renamed world to "${displayName}"` : "World name cleared");
+    };
+    if (!runtimeConfig.worldApiBase) {
+      applyLocalRename();
+      return;
+    }
+    void fetch(
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(id)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: worldMetadataHeaders(),
           body: JSON.stringify({
             name: displayName || id,
             displayName: displayName || undefined,
           }),
         },
-      ).catch(() => undefined);
-    }
+      )
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const profile = parseWorldRenderProfile(await response.json().catch(() => ({})));
+          applyLocalRename(Object.keys(profile).length > 0 ? profile : undefined);
+          void refreshWorldList(id);
+        })
+        .catch((error) => {
+          showWorldNote(`Rename failed: ${extractErrorMessage(error)}`, 4000);
+        });
   };
 
   const resolveWorldRenderProfile = async (worldId: string): Promise<{
@@ -9740,6 +9751,7 @@ function App(): React.ReactElement {
   };
   const refreshWorldList = async (current?: string) => {
     let server: string[] = [];
+    const deletedOnServer = new Set<string>();
     try {
       const res = await fetch(
         `${runtimeConfig.worldApiBase}/api/tellus/worlds?userId=${encodeURIComponent(tellusUserId())}`,
@@ -9753,9 +9765,14 @@ function App(): React.ReactElement {
         server = list
           .map((w) => {
             if (typeof w === "string") return canonicalWorldId(w);
-            const world = w as { worldId?: string };
+            const world = w as { worldId?: string; exists?: boolean };
             if (typeof world.worldId === "string" && world.worldId.length > 0) {
               const worldId = canonicalWorldId(world.worldId);
+              if (world.exists === false) {
+                deletedOnServer.add(worldId);
+                forgetWorld(worldId);
+                return undefined;
+              }
               const profile = parseWorldRenderProfile(w);
               if (Object.keys(profile).length > 0) rememberRemoteWorldProfile(worldId, profile);
               return worldId;
@@ -9768,7 +9785,11 @@ function App(): React.ReactElement {
       /* offline / no index — fall back to local */
     }
     const cur = canonicalWorldId(current ?? activeWorldId ?? runtimeConfig.worldId);
-    setWorlds([...new Set([...server, ...loadKnownWorlds().map(canonicalWorldId), ...(cur ? [cur] : [])])].sort());
+    const local = loadKnownWorlds()
+      .map(canonicalWorldId)
+      .filter((worldId) => !deletedOnServer.has(worldId));
+    const currentEntry = cur && !deletedOnServer.has(cur) ? [cur] : [];
+    setWorlds([...new Set([...server, ...local, ...currentEntry])].sort());
   };
   const switchWorld = (id: string) => {
     const next = canonicalWorldId(id);
@@ -10026,7 +10047,7 @@ function App(): React.ReactElement {
       newWorldSkyboxUrl || defaultSkyboxUrlForTemplate(pickedTemplate),
     );
     const makePrivate = newWorldPrivate;
-    rememberWorldProfile(id, {
+    const localProfile: WorldRenderProfile = {
       displayName,
       worldTemplate: pickedTemplate,
       skyboxUrl: pickedSkybox,
@@ -10037,7 +10058,7 @@ function App(): React.ReactElement {
       lightingMood: newWorldLightingMood,
       waterSettings: newWorldWaterSettings,
       sceneUrl: pickedInteriorSceneUrl,
-    });
+    };
     const enter = () => {
       setNewWorldPanelOpen(false);
       setNewWorldName("");
@@ -10049,7 +10070,7 @@ function App(): React.ReactElement {
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(id)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: worldMetadataHeaders(),
           body: JSON.stringify({
             name: displayName,
             displayName,
@@ -10067,9 +10088,20 @@ function App(): React.ReactElement {
           }),
         },
       )
-        .then(enter)
-        .catch(enter);
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const profile = parseWorldRenderProfile(await response.json().catch(() => ({})));
+          rememberWorldProfile(id, {
+            ...localProfile,
+            ...profile,
+          });
+          enter();
+        })
+        .catch((error) => {
+          showWorldNote(`World create failed: ${extractErrorMessage(error)}`, 4000);
+        });
     } else {
+      rememberWorldProfile(id, localProfile);
       enter();
     }
   };
@@ -10123,7 +10155,7 @@ function App(): React.ReactElement {
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: worldMetadataHeaders(),
           body: JSON.stringify({ skyboxUrl: next }),
         },
       ).catch(() => undefined);
@@ -10145,7 +10177,7 @@ function App(): React.ReactElement {
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: worldMetadataHeaders(),
           body: JSON.stringify({ worldTemplate: next }),
         },
       ).catch(() => undefined);
@@ -10187,7 +10219,7 @@ function App(): React.ReactElement {
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: worldMetadataHeaders(),
           body: JSON.stringify(profile),
         },
       ).catch(() => undefined);
@@ -10206,7 +10238,7 @@ function App(): React.ReactElement {
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: worldMetadataHeaders(),
           body: JSON.stringify({ waterSettings: next }),
         },
       ).catch(() => undefined);
@@ -10225,7 +10257,7 @@ function App(): React.ReactElement {
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: worldMetadataHeaders(),
           body: JSON.stringify({ landShape }),
         },
       ).catch(() => undefined);
@@ -10244,7 +10276,7 @@ function App(): React.ReactElement {
         `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: worldMetadataHeaders(),
           body: JSON.stringify({ landShape: null }),
         },
       ).catch(() => undefined);
