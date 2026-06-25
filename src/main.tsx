@@ -9784,7 +9784,7 @@ function App(): React.ReactElement {
     const body = tellusStatePayload();
     saveTerrainStateLocally(body);
     try {
-      return await saveTellusWorldState(body, true);
+      return await saveTellusWorldState(body);
     } catch (error) {
       console.warn("Tellus terrain save failed", error);
       return false;

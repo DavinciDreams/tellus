@@ -1171,7 +1171,13 @@ export async function loadTellusWorldState(): Promise<boolean> {
 }
 
 export async function saveTellusWorldState(body: string, keepalive = false): Promise<boolean> {
-  if (!tellusWorldBackendAvailable) return false;
+  if (!tellusWorldBackendAvailable) {
+    try {
+      tellusWorldBackendAvailable = await loadTellusWorldState();
+    } catch {
+      tellusWorldBackendAvailable = false;
+    }
+  }
   const response = await fetch(tellusWorldHttpUrl("action"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1186,6 +1192,7 @@ export async function saveTellusWorldState(body: string, keepalive = false): Pro
     tellusWorldBackendAvailable = false;
     return false;
   }
+  tellusWorldBackendAvailable = true;
   return true;
 }
 
