@@ -9385,6 +9385,7 @@ function App(): React.ReactElement {
   const defaultSkyboxUrlRef = useRef(runtimeConfig.skyboxUrl);
   const defaultLandShapeRef = useRef<LandShapeOverrides | undefined>(runtimeConfig.landShape);
   const pendingWorldProfileOverridesRef = useRef<Record<string, { profile: WorldRenderProfile; expiresAt: number }>>({});
+  const metadataWriteDeniedRef = useRef<Record<string, number>>({});
 
   interface WorldRenderProfile {
     displayName?: string;
@@ -9613,7 +9614,8 @@ function App(): React.ReactElement {
     loadLocalWorldProfiles()[worldId]?.displayName?.trim() || fallbackWorldDisplayName(worldId);
 
   const worldOptionLabel = (worldId: string): string => {
-    return worldDisplayName(worldId);
+    const label = worldDisplayName(worldId);
+    return label === worldId ? label : `${label} (${worldId})`;
   };
 
   const canDeleteWorld = (worldId: string): boolean => {
@@ -9667,6 +9669,57 @@ function App(): React.ReactElement {
     };
   };
 
+  const metadataWriteDenied = (worldId: string): boolean => {
+    const key = canonicalWorldId(worldId);
+    const expiresAt = metadataWriteDeniedRef.current[key] ?? 0;
+    if (expiresAt <= Date.now()) {
+      delete metadataWriteDeniedRef.current[key];
+      return false;
+    }
+    return true;
+  };
+
+  const describeMetadataAccount = (): string => {
+    const session = getSession();
+    const accountId = account?.accountId ?? session?.account?.accountId ?? tellusUserId();
+    const role = account?.role ?? session?.account?.role ?? (session ? "no role" : "not logged in");
+    return `${accountId.slice(0, 8)}..., ${role}`;
+  };
+
+  const patchWorldMetadata = async (
+    worldId: string,
+    body: object,
+    actionLabel: string,
+  ): Promise<WorldRenderProfile | null> => {
+    if (!runtimeConfig.worldApiBase || metadataWriteDenied(worldId)) return null;
+    try {
+      const response = await fetch(
+        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(worldId)}?userId=${encodeURIComponent(tellusUserId())}`,
+        {
+          method: "PATCH",
+          headers: worldMetadataHeaders(),
+          body: JSON.stringify(body),
+        },
+      );
+      if (response.status === 403) {
+        metadataWriteDeniedRef.current[canonicalWorldId(worldId)] = Date.now() + 30_000;
+        showWorldNote(
+          `${actionLabel} not saved on server: not authorized (${describeMetadataAccount()})`,
+          6000,
+        );
+        return null;
+      }
+      if (!response.ok) {
+        showWorldNote(`${actionLabel} not saved on server: HTTP ${response.status}`, 5000);
+        return null;
+      }
+      return parseWorldRenderProfile(await response.json().catch(() => ({})));
+    } catch (error) {
+      showWorldNote(`${actionLabel} not saved: ${extractErrorMessage(String(error))}`, 5000);
+      return null;
+    }
+  };
+
   const renameActiveWorld = () => {
     const id = activeWorldId ?? runtimeConfig.worldId;
     if (!id) return;
@@ -9690,36 +9743,28 @@ function App(): React.ReactElement {
       applyLocalRename();
       return;
     }
-    void fetch(
-        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(id)}?userId=${encodeURIComponent(tellusUserId())}`,
-        {
-          method: "PATCH",
-          headers: worldMetadataHeaders(),
-          body: JSON.stringify({
-            name: displayName || id,
-            displayName: displayName || undefined,
-            isPublic: requestedProfile.isPublic,
-            worldTemplate: requestedProfile.worldTemplate,
-            skyboxUrl: requestedProfile.skyboxUrl,
-            landShape: requestedProfile.landShape,
-            dayNightMode: requestedProfile.dayNightMode,
-            dayNightCycleMs: requestedProfile.dayNightCycleMs,
-            dayNightStart: requestedProfile.dayNightStart,
-            lightingMood: requestedProfile.lightingMood,
-            waterSettings: requestedProfile.waterSettings,
-            ...(requestedProfile.sceneUrl ? { sceneUrl: requestedProfile.sceneUrl } : {}),
-          }),
-        },
-      )
-        .then(async (response) => {
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const profile = parseWorldRenderProfile(await response.json().catch(() => ({})));
-          applyLocalRename(Object.keys(profile).length > 0 ? profile : undefined);
-          void refreshWorldList(id);
-        })
-        .catch((error) => {
-          showWorldNote(`Rename failed: ${extractErrorMessage(error)}`, 4000);
-        });
+    void patchWorldMetadata(
+      id,
+      {
+        name: displayName || id,
+        displayName: displayName || undefined,
+        isPublic: requestedProfile.isPublic,
+        worldTemplate: requestedProfile.worldTemplate,
+        skyboxUrl: requestedProfile.skyboxUrl,
+        landShape: requestedProfile.landShape,
+        dayNightMode: requestedProfile.dayNightMode,
+        dayNightCycleMs: requestedProfile.dayNightCycleMs,
+        dayNightStart: requestedProfile.dayNightStart,
+        lightingMood: requestedProfile.lightingMood,
+        waterSettings: requestedProfile.waterSettings,
+        ...(requestedProfile.sceneUrl ? { sceneUrl: requestedProfile.sceneUrl } : {}),
+      },
+      "Rename",
+    ).then((profile) => {
+      if (profile === null) return;
+      applyLocalRename(Object.keys(profile).length > 0 ? profile : undefined);
+      void refreshWorldList(id);
+    });
   };
 
   const resolveWorldRenderProfile = async (worldId: string): Promise<{
@@ -9840,7 +9885,6 @@ function App(): React.ReactElement {
   };
   const forgetWorld = (id: string) => {
     const worldId = canonicalWorldId(id);
-    hideWorldLocally(worldId);
     try {
       const next = loadKnownWorlds().map(canonicalWorldId).filter((known) => known !== worldId);
       window.localStorage.setItem(KNOWN_WORLDS_KEY, JSON.stringify(next));
@@ -9885,7 +9929,7 @@ function App(): React.ReactElement {
             }
             return undefined;
           })
-          .filter((x): x is string => typeof x === "string" && x.length > 0 && !isWorldHidden(x));
+          .filter((x): x is string => typeof x === "string" && x.length > 0);
       }
     } catch {
       /* offline / no index — fall back to local */
@@ -10020,7 +10064,7 @@ function App(): React.ReactElement {
   const deleteWorld = async (id: string) => {
     if (!id || deletingWorld) return;
     const serverDeleteAllowed = canDeleteWorld(id);
-    const canAttemptServerDelete = Boolean(runtimeConfig.worldApiBase && (serverDeleteAllowed || getSession()));
+    const canAttemptServerDelete = Boolean(runtimeConfig.worldApiBase && serverDeleteAllowed);
     if (pendingDeleteWorld !== id) {
       // First click: arm the confirm (auto-disarms after a short window).
       if (pendingDeleteTimerRef.current !== undefined) {
@@ -10056,6 +10100,11 @@ function App(): React.ReactElement {
         await refreshWorldList();
       }
     };
+    if (!canAttemptServerDelete && runtimeConfig.worldApiBase) {
+      showWorldNote(`Cannot delete "${id}" on server: ${canDeleteWorld(id) ? "not authorized" : "not owner/admin"}`, 5000);
+      await refreshWorldList(id);
+      return;
+    }
     if (!canAttemptServerDelete) {
       forgetWorld(id);
       await moveAwayFromRemovedWorld();
@@ -10106,7 +10155,7 @@ function App(): React.ReactElement {
   };
   const renderWorldDeleteButton = (target: string, className = "world-icon-button") => {
     const armed = pendingDeleteWorld === target;
-    const serverDeleteAllowed = Boolean(runtimeConfig.worldApiBase && (canDeleteWorld(target) || getSession()));
+    const serverDeleteAllowed = Boolean(runtimeConfig.worldApiBase && canDeleteWorld(target));
     return (
       <button
         type="button"
@@ -10266,14 +10315,7 @@ function App(): React.ReactElement {
     if (runtimeConfig.worldApiBase && activeWorldId) {
       const profile = currentWorldMetadataProfile({ skyboxUrl: next });
       protectWorldProfileOverride(activeWorldId, profile);
-      void fetch(
-        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
-        {
-          method: "PATCH",
-          headers: worldMetadataHeaders(),
-          body: JSON.stringify(profile),
-        },
-      ).catch(() => undefined);
+      void patchWorldMetadata(activeWorldId, profile, "Skybox");
     }
   };
   const updateActiveWorldTemplate = (template: WorldTemplateId) => {
@@ -10290,14 +10332,7 @@ function App(): React.ReactElement {
     if (runtimeConfig.worldApiBase) {
       const profile = currentWorldMetadataProfile({ worldTemplate: next, landShape: undefined });
       protectWorldProfileOverride(activeWorldId, profile);
-      void fetch(
-        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
-        {
-          method: "PATCH",
-          headers: worldMetadataHeaders(),
-          body: JSON.stringify(profile),
-        },
-      ).catch(() => undefined);
+      void patchWorldMetadata(activeWorldId, profile, "Terrain template");
     }
   };
   const updateActiveWorldLighting = (patch: Partial<WorldRenderProfile>) => {
@@ -10334,14 +10369,7 @@ function App(): React.ReactElement {
     if (runtimeConfig.worldApiBase) {
       const fullProfile = currentWorldMetadataProfile(profile);
       protectWorldProfileOverride(activeWorldId, fullProfile);
-      void fetch(
-        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
-        {
-          method: "PATCH",
-          headers: worldMetadataHeaders(),
-          body: JSON.stringify(fullProfile),
-        },
-      ).catch(() => undefined);
+      void patchWorldMetadata(activeWorldId, fullProfile, "Lighting");
     }
   };
   const updateActiveWorldWater = (patch: Partial<WaterSettings>) => {
@@ -10355,14 +10383,7 @@ function App(): React.ReactElement {
     if (runtimeConfig.worldApiBase) {
       const profile = currentWorldMetadataProfile({ waterSettings: next });
       protectWorldProfileOverride(activeWorldId, profile);
-      void fetch(
-        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
-        {
-          method: "PATCH",
-          headers: worldMetadataHeaders(),
-          body: JSON.stringify(profile),
-        },
-      ).catch(() => undefined);
+      void patchWorldMetadata(activeWorldId, profile, "Water settings");
     }
   };
   const applyActiveTerrainTuning = () => {
@@ -10376,14 +10397,7 @@ function App(): React.ReactElement {
     if (runtimeConfig.worldApiBase) {
       const profile = currentWorldMetadataProfile({ landShape });
       protectWorldProfileOverride(activeWorldId, profile);
-      void fetch(
-        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
-        {
-          method: "PATCH",
-          headers: worldMetadataHeaders(),
-          body: JSON.stringify(profile),
-        },
-      ).catch(() => undefined);
+      void patchWorldMetadata(activeWorldId, profile, "Terrain tuning");
     }
   };
   const resetActiveTerrainTuning = () => {
@@ -10397,14 +10411,7 @@ function App(): React.ReactElement {
     if (runtimeConfig.worldApiBase) {
       const profile = currentWorldMetadataProfile({ landShape: undefined });
       protectWorldProfileOverride(activeWorldId, profile);
-      void fetch(
-        `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(activeWorldId)}?userId=${encodeURIComponent(tellusUserId())}`,
-        {
-          method: "PATCH",
-          headers: worldMetadataHeaders(),
-          body: JSON.stringify({ ...profile, landShape: null }),
-        },
-      ).catch(() => undefined);
+      void patchWorldMetadata(activeWorldId, { ...profile, landShape: null }, "Terrain tuning");
     }
   };
   const [assetLibrary, setAssetLibrary] = useState<AssetLibraryModel[]>([]);
@@ -11961,10 +11968,10 @@ function App(): React.ReactElement {
                           aria-current={active ? "true" : undefined}
                           title={`Switch to ${worldDisplayName(worldId)}`}
                           onClick={() => switchWorld(worldId)}
-                        >
-                          <span>{worldDisplayName(worldId)}</span>
-                          <small>{active ? "Current" : worldId}</small>
-                        </button>
+                          >
+                            <span>{worldDisplayName(worldId)}</span>
+                            <small>{active ? `Current - ${worldId}` : worldId}</small>
+                          </button>
                         {renderWorldDeleteButton(worldId, "world-icon-button world-list-delete")}
                       </div>
                     );
