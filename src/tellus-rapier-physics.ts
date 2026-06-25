@@ -49,6 +49,8 @@ export interface TellusRapierPhysics {
 const PLAYER_RADIUS = 0.5;
 const PLAYER_HALF_HEIGHT = 0.68;
 const PLAYER_CENTER_OFFSET = PLAYER_RADIUS + PLAYER_HALF_HEIGHT;
+const MAX_SOLID_HALF_EXTENT = 18;
+const MAX_SOLID_HALF_HEIGHT = 40;
 
 const solidKey = (solid: RapierSolid): string =>
   [
@@ -95,6 +97,7 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
   );
   const colliders = new Map<string, { key: string; collider: Collider }>();
   let disposed = false;
+  let failed = false;
   let collisionWorldDirty = true;
 
   // ── Interior static trimeshes ──────────────────────────────────────────────────────────────
@@ -162,9 +165,15 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
     collisionWorldDirty = true;
   };
 
+  const failRapier = (error: unknown): void => {
+    failed = true;
+    collisionWorldDirty = false;
+    console.warn("Tellus Rapier physics disabled after movement failure", error);
+  };
+
   const api: TellusRapierPhysics = {
     syncSolids(solids) {
-      if (disposed) return;
+      if (disposed || failed) return;
       const seen = new Set<string>();
       for (const solid of solids) {
         if (
@@ -184,23 +193,27 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
         const existing = colliders.get(solid.id);
         if (existing?.key === key) continue;
         removeSolid(solid.id);
-        const hx = Math.max(0.2, solid.radius);
-        const hy = Math.max(0.2, solid.height / 2);
-        const hz = Math.max(0.2, solid.radius);
-        const collider = world.createCollider(
-          ColliderDesc.cuboid(hx, hy, hz)
-            .setFriction(0.9)
-            .setTranslation(solid.x, solid.y + hy, solid.z),
-        );
-        colliders.set(solid.id, { key, collider });
-        collisionWorldDirty = true;
+        const hx = Math.min(MAX_SOLID_HALF_EXTENT, Math.max(0.2, solid.radius));
+        const hy = Math.min(MAX_SOLID_HALF_HEIGHT, Math.max(0.2, solid.height / 2));
+        const hz = Math.min(MAX_SOLID_HALF_EXTENT, Math.max(0.2, solid.radius));
+        try {
+          const collider = world.createCollider(
+            ColliderDesc.cuboid(hx, hy, hz)
+              .setFriction(0.9)
+              .setTranslation(solid.x, solid.y + hy, solid.z),
+          );
+          colliders.set(solid.id, { key, collider });
+          collisionWorldDirty = true;
+        } catch (error) {
+          console.warn("Tellus Rapier generated solid skipped", error);
+        }
       }
       for (const id of [...colliders.keys()]) {
         if (!seen.has(id)) removeSolid(id);
       }
     },
     movePlayer(fromFeet, desiredFeet) {
-      if (disposed) {
+      if (disposed || failed) {
         return { position: desiredFeet, grounded: false, collisions: 0 };
       }
       // Refuse non-finite input — forwarding NaN/Inf to Rapier panics the WASM solver. Keep the
@@ -214,31 +227,36 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
       }
       const from = playerCenter(fromFeet);
       const desired = playerCenter(desiredFeet);
-      playerCollider.setTranslation(from);
-      if (collisionWorldDirty) {
-        world.step();
-        collisionWorldDirty = false;
+      try {
+        playerCollider.setTranslation(from);
+        if (collisionWorldDirty) {
+          world.step();
+          collisionWorldDirty = false;
+        }
+        controller.computeColliderMovement(playerCollider, {
+          x: desired.x - from.x,
+          y: desired.y - from.y,
+          z: desired.z - from.z,
+        });
+        const movement = controller.computedMovement();
+        const nextCenter = {
+          x: from.x + movement.x,
+          y: from.y + movement.y,
+          z: from.z + movement.z,
+        };
+        playerCollider.setTranslation(nextCenter);
+        return {
+          position: playerFeet(nextCenter),
+          grounded: controller.computedGrounded(),
+          collisions: controller.numComputedCollisions(),
+        };
+      } catch (error) {
+        failRapier(error);
+        return { position: desiredFeet, grounded: false, collisions: 0 };
       }
-      controller.computeColliderMovement(playerCollider, {
-        x: desired.x - from.x,
-        y: desired.y - from.y,
-        z: desired.z - from.z,
-      });
-      const movement = controller.computedMovement();
-      const nextCenter = {
-        x: from.x + movement.x,
-        y: from.y + movement.y,
-        z: from.z + movement.z,
-      };
-      playerCollider.setTranslation(nextCenter);
-      return {
-        position: playerFeet(nextCenter),
-        grounded: controller.computedGrounded(),
-        collisions: controller.numComputedCollisions(),
-      };
     },
     movePlayer3D(fromFeet, desiredFeet) {
-      if (disposed) {
+      if (disposed || failed) {
         return { position: desiredFeet, grounded: false, collisions: 0 };
       }
       // Same NaN/Inf backstop as movePlayer — a non-finite delta into the controller + world.step()
@@ -252,7 +270,8 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
       }
       const from = playerCenter(fromFeet);
       const desired = playerCenter(desiredFeet);
-      playerCollider.setTranslation(from);
+      try {
+        playerCollider.setTranslation(from);
       // Step every frame in interiors so trimesh statics + autostep/snap-to-ground resolve. (Dirty
       // also forces a step right after geometry changes; the unconditional step covers the rest.)
       world.step();
@@ -271,14 +290,18 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
         z: from.z + movement.z,
       };
       playerCollider.setTranslation(nextCenter);
-      return {
-        position: playerFeet(nextCenter),
-        grounded: controller.computedGrounded(),
-        collisions: controller.numComputedCollisions(),
-      };
+        return {
+          position: playerFeet(nextCenter),
+          grounded: controller.computedGrounded(),
+          collisions: controller.numComputedCollisions(),
+        };
+      } catch (error) {
+        failRapier(error);
+        return { position: desiredFeet, grounded: false, collisions: 0 };
+      }
     },
     addStaticTrimesh(id, object) {
-      if (disposed) return;
+      if (disposed || failed) return;
       // World matrices must be current before we read positions into world space.
       object.updateMatrixWorld(true);
       removeStaticId(id);
@@ -306,7 +329,7 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
       }
     },
     clearStatics() {
-      if (disposed) return;
+      if (disposed || failed) return;
       for (const id of [...staticColliders.keys()]) removeStaticId(id);
       if (staticBody) {
         world.removeRigidBody(staticBody);
@@ -315,10 +338,10 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
       collisionWorldDirty = true;
     },
     hasStatics() {
-      return staticColliders.size > 0;
+      return !failed && staticColliders.size > 0;
     },
     stats() {
-      return { solids: colliders.size, ready: !disposed, statics: staticColliders.size };
+      return { solids: colliders.size, ready: !disposed && !failed, statics: staticColliders.size };
     },
     dispose() {
       disposed = true;

@@ -61,4 +61,32 @@ describe("Tellus Rapier physics adapter", () => {
       physics.dispose();
     }
   });
+
+  it("keeps movement finite when generated solids are oversized", async () => {
+    const physics = await createTellusRapierPhysics();
+    try {
+      physics.syncSolids([
+        {
+          id: "huge-generated-object",
+          x: 0,
+          y: 0,
+          z: 0,
+          radius: 1_000_000,
+          height: 1_000_000,
+        },
+      ]);
+
+      const moved = physics.movePlayer(
+        { x: 30, y: 0, z: 0 },
+        { x: 31, y: 0, z: 0 },
+      );
+
+      expect(Number.isFinite(moved.position.x)).toBe(true);
+      expect(Number.isFinite(moved.position.y)).toBe(true);
+      expect(Number.isFinite(moved.position.z)).toBe(true);
+      expect(physics.stats()).toMatchObject({ solids: 1, ready: true });
+    } finally {
+      physics.dispose();
+    }
+  });
 });
