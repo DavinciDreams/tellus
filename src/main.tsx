@@ -388,6 +388,11 @@ function createTellusWorld(
     mode: GeneratedMotionMode;
   };
   type GeneratedMotionMode = AnimationIntent;
+  type GeneratedClipOptions = {
+    ignoreExplicit?: boolean;
+    movementHints?: string[];
+    preferSit?: boolean;
+  };
   const generatedAnimationMixers = new Map<string, GeneratedAnimationState>();
   // Placed VRM things (auton/Atlantean store models) animate through a real VRM rig — a VRMA idle clip
   // looped by default, advanced (mixer + spring bones) each frame here. Parallel to the plain-GLB
@@ -3472,7 +3477,7 @@ function createTellusWorld(
     thing: GeneratedThing | undefined,
     mode: GeneratedMotionMode,
     vehicle: VehicleMode | null = null,
-    options: { ignoreExplicit?: boolean } = {},
+    options: GeneratedClipOptions = {},
   ): THREE.AnimationClip | undefined => {
     if (clips.length === 0) return undefined;
     const wanted = options.ignoreExplicit ? "" : thing?.animation?.trim();
@@ -3481,6 +3486,18 @@ function createTellusWorld(
         clips.find((c) => c.name?.toLowerCase() === wanted.toLowerCase())
       : undefined;
     if (wantedClip) return wantedClip;
+    const rejectGeneratedClip = (clip: THREE.AnimationClip) =>
+      badGeneratedClip(clip) || animationMetadataHasBlockingIssue(metadataForGeneratedClip(thing, clip.name));
+    const findAny = (fragments: string[]) =>
+      clips.find((clip) => generatedClipNameIncludes(clip, fragments) && !rejectGeneratedClip(clip));
+    if ((mode === "walk" || mode === "run") && options.movementHints?.length) {
+      const hintedMovement = findAny(options.movementHints);
+      if (hintedMovement) return hintedMovement;
+    }
+    if (mode === "idle" && options.preferSit) {
+      const seated = findAny(["sit", "sitting", "seated", "resting"]);
+      if (seated) return seated;
+    }
     const effectiveMode =
       (mode === "walk" || mode === "run") && vehicle === "air"
         ? "fly"
@@ -3491,9 +3508,15 @@ function createTellusWorld(
       selectAnimationClipByIntent(clips, effectiveMode, {
         actor: animationActorKindForThing(thing, vehicle),
         metadataForClip: (clip) => metadataForGeneratedClip(thing, clip.name),
-        reject: (clip) =>
-          badGeneratedClip(clip) || animationMetadataHasBlockingIssue(metadataForGeneratedClip(thing, clip.name)),
-      }) ?? clips.find((c) => !badGeneratedClip(c)) ?? clips[0]
+        reject: rejectGeneratedClip,
+      }) ??
+      (mode === "walk" ? findAny(["walk", "trot", "crawl", "creep", "slither"]) : undefined) ??
+      (mode === "run" ? findAny(["run", "gallop", "canter", "dash"]) : undefined) ??
+      findAny(["idle"]) ??
+      findAny(["stand"]) ??
+      findAny(["walk"]) ??
+      clips.find((c) => !rejectGeneratedClip(c)) ??
+      clips[0]
     );
   };
 
@@ -3502,7 +3525,7 @@ function createTellusWorld(
     model: THREE.Object3D,
     mode: GeneratedMotionMode,
     vehicle: VehicleMode | null = null,
-    options: { ignoreExplicit?: boolean } = {},
+    options: GeneratedClipOptions = {},
   ) => {
     const clips = generatedModelClips(model);
     const clip = selectGeneratedClip(clips, thingById(id), mode, vehicle, options);
@@ -3587,6 +3610,32 @@ function createTellusWorld(
     playGeneratedClip(thing.id, model, mode, vehicleMode(thing), { ignoreExplicit: true });
     mountedAnimationThingId = thing.id;
     mountedAnimationMode = mode;
+  };
+
+  const petMovementHintsForThing = (thing: GeneratedThing): string[] => {
+    const label = `${thing.prompt} ${thing.animation ?? ""} ${thing.modelUrl ?? ""}`.toLowerCase();
+    if (/\b(snake|serpent|eel|worm|slug|slither)\b/.test(label)) {
+      return ["slither", "crawl", "creep", "swim", "walk"];
+    }
+    if (/\b(bird|bat|butterfly|dragonfly|wing|winged|fly|flying|flap)\b/.test(label)) {
+      return ["fly", "flying", "flap", "glide", "hover", "soar", "walk"];
+    }
+    if (/\b(fish|shark|dolphin|whale|ray|aquatic|swim|swimming)\b/.test(label)) {
+      return ["swim", "swimming", "paddle", "float", "dive"];
+    }
+    return [];
+  };
+
+  const updatePetAnimation = (thing: GeneratedThing, mode: GeneratedMotionMode) => {
+    if (petAnimationModes.get(thing.id) === mode) return;
+    const model = generatedMeshes.get(thing.id);
+    if (!model || model.userData.loadedModelUrl !== thing.modelUrl) return;
+    playGeneratedClip(thing.id, model, mode, vehicleMode(thing), {
+      ignoreExplicit: true,
+      movementHints: mode === "idle" ? undefined : petMovementHintsForThing(thing),
+      preferSit: mode === "idle",
+    });
+    petAnimationModes.set(thing.id, mode);
   };
 
   const startGeneratedAnimation = (id: string, model: THREE.Object3D) => {
@@ -4678,6 +4727,8 @@ function createTellusWorld(
   };
 
   const petLastPublishAt = new Map<string, number>();
+  const petAnimationModes = new Map<string, GeneratedMotionMode>();
+  const lastPetOwnerPosition = { x: visitorPosition.x, z: visitorPosition.z };
   const localPetThings = (): GeneratedThing[] =>
     generated.filter((thing) => thing.petOwnerId === petOwnerId && thing.id !== sailingThingId);
 
@@ -4699,6 +4750,13 @@ function createTellusWorld(
 
   const syncPetsToOwner = (delta: number, forceTeleport = false) => {
     const pets = localPetThings();
+    const ownerMoveDistance = Math.hypot(
+      visitorPosition.x - lastPetOwnerPosition.x,
+      visitorPosition.z - lastPetOwnerPosition.z,
+    );
+    const ownerMoving = !forceTeleport && ownerMoveDistance > 0.04;
+    lastPetOwnerPosition.x = visitorPosition.x;
+    lastPetOwnerPosition.z = visitorPosition.z;
     if (pets.length === 0) return;
     const nowMs = performance.now();
     let changed = false;
@@ -4711,33 +4769,45 @@ function createTellusWorld(
       const distance = Math.hypot(dx, dz);
       const shouldSnap = forceTeleport || distance > 70;
       const shouldMove = shouldSnap || distance > 0.28;
-      if (!shouldMove) continue;
       const previous = { ...pet.position };
-      if (shouldSnap || delta <= 0) {
-        pet.position = target;
-      } else {
-        const speed = scaledPlayerSpeed() * (sailingThingId ? 1.85 : 1.35);
-        const step = Math.min(distance, Math.max(6, speed) * delta);
-        const t = distance > 0 ? step / distance : 1;
-        pet.position = {
-          x: pet.position.x + dx * t,
-          y: target.y,
-          z: pet.position.z + dz * t,
-        };
+      if (shouldMove) {
+        if (shouldSnap || delta <= 0) {
+          pet.position = target;
+        } else {
+          const speed = scaledPlayerSpeed() * (sailingThingId ? 1.85 : 1.35);
+          const step = Math.min(distance, Math.max(6, speed) * delta);
+          const t = distance > 0 ? step / distance : 1;
+          pet.position = {
+            x: pet.position.x + dx * t,
+            y: target.y,
+            z: pet.position.z + dz * t,
+          };
+        }
+        const mdx = pet.position.x - previous.x;
+        const mdz = pet.position.z - previous.z;
+        if (Math.hypot(mdx, mdz) > 0.001) {
+          pet.rotationY = Math.atan2(mdx, mdz);
+        }
+        updateThingMeshPosition(pet);
+        refreshInstancedThingMatrix(pet);
+        const lastPublished = petLastPublishAt.get(pet.id) ?? 0;
+        if (forceTeleport || nowMs - lastPublished > 320) {
+          petLastPublishAt.set(pet.id, nowMs);
+          publishGeneratedThing(pet);
+        }
+        changed = true;
       }
-      const mdx = pet.position.x - previous.x;
-      const mdz = pet.position.z - previous.z;
-      if (Math.hypot(mdx, mdz) > 0.001) {
-        pet.rotationY = Math.atan2(mdx, mdz);
-      }
-      updateThingMeshPosition(pet);
-      refreshInstancedThingMatrix(pet);
-      const lastPublished = petLastPublishAt.get(pet.id) ?? 0;
-      if (forceTeleport || nowMs - lastPublished > 320) {
-        petLastPublishAt.set(pet.id, nowMs);
-        publishGeneratedThing(pet);
-      }
-      changed = true;
+      const movedThisFrame = Math.hypot(
+        pet.position.x - previous.x,
+        pet.position.z - previous.z,
+      ) > 0.001;
+      const moving = !forceTeleport && (ownerMoving || movedThisFrame || distance > 0.6);
+      const mode: GeneratedMotionMode = moving
+        ? distance > (sailingThingId ? 5.5 : 8)
+          ? "run"
+          : "walk"
+        : "idle";
+      updatePetAnimation(pet, mode);
     }
     if (changed) publish();
   };
@@ -5153,6 +5223,7 @@ function createTellusWorld(
     if (!thing) return;
     thing.petOwnerId = isPet ? petOwnerId : undefined;
     petLastPublishAt.delete(id);
+    petAnimationModes.delete(id);
     if (isPet) {
       uninstanceThing(id);
       syncPetsToOwner(0, false);
