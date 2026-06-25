@@ -80,7 +80,9 @@ export function createChunkTerrainGeometry(
       positions.push(lx, py, lz);
       colors.push(color.r, color.g, color.b);
       uvs.push(wx / CHUNK_SPAN, wz / CHUNK_SPAN);
-      paintCodes.push(paintCode);
+      // Carry the code of the APPLIED paint (0 when the biome owns the vertex), so the material's
+      // per-kind pattern matches the vertex color and biome terrain stays pattern-free.
+      paintCodes.push(kind ? terrainPaintCode(kind) : 0);
     }
   }
 

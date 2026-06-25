@@ -473,20 +473,21 @@ export function terrainVertexColor(
 ): THREE.Color {
   const color = terrainColors[kind].clone();
   if (kind === "flowers") {
-    const flowerNoise = rand(seed * 3 + Math.floor(x * 19) + Math.floor(z * 23));
-    const blossom =
-      flowerNoise > 0.68
-        ? new THREE.Color(0xf0a7d2)
-        : flowerNoise > 0.38
-          ? new THREE.Color(0xf3dc6c)
-          : new THREE.Color(0xcfc7ff);
-    color.lerp(blossom, 0.42);
+    color.lerp(new THREE.Color(0x5f9438), 0.58);
   } else if (kind === "rock") {
     const pebble = rand(seed * 5 + 7919);
     color.lerp(
       pebble > 0.66 ? new THREE.Color(0xa8956a) : new THREE.Color(0x46505a),
       0.24,
     );
+  } else if (kind === "meadow" || kind === "grass") {
+    // De-crayola the flat green: scatter each vertex's tone between a warmer yellow-green and a
+    // cooler olive so the field reads natural rather than uniform candy green. Grass leans drier
+    // (toward straw/khaki) than meadow.
+    const t = rand(seed * 7 + Math.floor(x * 23) + Math.floor(z * 29));
+    const warm = kind === "grass" ? new THREE.Color(0xc4b878) : new THREE.Color(0x86a352);
+    const cool = kind === "grass" ? new THREE.Color(0x8f9a52) : new THREE.Color(0x5f7c44);
+    color.lerp(t > 0.5 ? warm : cool, 0.18 + Math.abs(t - 0.5) * 0.34);
   }
   const noise = 0.9 + rand(seed + Math.floor(x * 13) + Math.floor(z * 17)) * 0.18;
   return color.multiplyScalar(noise);
