@@ -437,7 +437,7 @@ function createTellusWorld(
         pending: worldModelLoadQueue.length,
         queuedUnique: queuedWorldModelLoads.size,
         active: activeWorldModelLoads,
-        maxActive: MAX_WORLD_MODEL_LOADS,
+        maxActive: generatedModelLoadConcurrency(),
         pumpDelayMs: WORLD_MODEL_LOAD_PUMP_DELAY_MS,
       },
       loads: {
@@ -4275,7 +4275,15 @@ function createTellusWorld(
     });
   };
 
-  const MAX_WORLD_MODEL_LOADS = 1;
+  const generatedModelLoadConcurrency = (): number => {
+    try {
+      const stored = Number(window.localStorage.getItem("tellus.generated.maxLoads"));
+      if (Number.isFinite(stored) && stored > 0) return clamp(Math.round(stored), 1, 5);
+    } catch {
+      // Storage can be unavailable in private/embedded contexts; use the conservative default.
+    }
+    return 3;
+  };
   const WORLD_MODEL_LOAD_PUMP_DELAY_MS = 120;
   let activeWorldModelLoads = 0;
   const worldModelLoadQueue: string[] = [];
@@ -4385,7 +4393,8 @@ function createTellusWorld(
 
   const pumpWorldModelLoadQueue = () => {
     if (destroyed) return;
-    while (activeWorldModelLoads < MAX_WORLD_MODEL_LOADS && worldModelLoadQueue.length > 0) {
+    const maxWorldModelLoads = generatedModelLoadConcurrency();
+    while (activeWorldModelLoads < maxWorldModelLoads && worldModelLoadQueue.length > 0) {
       sortWorldModelLoadQueue();
       const id = worldModelLoadQueue.shift();
       if (!id) return;
