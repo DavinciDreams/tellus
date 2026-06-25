@@ -72,6 +72,8 @@ export interface WorldGeneratedThing {
   /** Embedded animation clip to loop on the placed model ("" / absent = the default
    * idle-ish heuristic pick). Rides generated.upsert + snapshot/patches like any other field. */
   animation?: string;
+  /** Companion ownership. Pets follow their owner and are separate from mounts. */
+  petOwnerId?: string;
   updatedAt: string;
 }
 
@@ -326,6 +328,7 @@ export function isWorldGeneratedThing(value: unknown): value is WorldGeneratedTh
     (value.modelUrl === undefined || typeof value.modelUrl === "string") &&
     (value.pipelineId === undefined || typeof value.pipelineId === "string") &&
     (value.animation === undefined || typeof value.animation === "string") &&
+    (value.petOwnerId === undefined || typeof value.petOwnerId === "string") &&
     (value.generationStatus === undefined ||
       value.generationStatus === "local" ||
       value.generationStatus === "queued" ||

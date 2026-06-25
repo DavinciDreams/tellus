@@ -410,6 +410,7 @@ function createTellusWorld(
   let worldSocketClosedByDestroy = false;
   const visitorId = tellusVisitorId();
   const userId = tellusUserId();
+  const petOwnerId = userId || visitorId;
   const remoteVisitorMeshes = new Map<string, THREE.Group>();
   const remoteVisitors = new Map<string, WorldPresence>();
   // Rigged VRM avatar upgrades, keyed by visitorId (the local player's rig uses its own visitorId
@@ -1464,6 +1465,7 @@ function createTellusWorld(
           Math.round(thing.position.y * 2),
           Math.round(thing.position.z * 2),
           Math.round((thing.rotationY ?? 0) * 20),
+          thing.petOwnerId ?? "",
         ].join(":"),
       )
       .join("|");
@@ -2493,6 +2495,7 @@ function createTellusWorld(
   // loadedModelUrl) and it isn't animated. Selection/duplicate-count gating is applied separately.
   const isInstanceCandidate = (thing: GeneratedThing): boolean => {
     if (thing.id === sailingThingId) return false;
+    if (thing.petOwnerId) return false;
     if (!thing.modelUrl || thing.generationStatus !== "ready") return false;
     const mesh = generatedMeshes.get(thing.id);
     if (!mesh) return false;
@@ -3229,6 +3232,7 @@ function createTellusWorld(
     // "" = explicit "default" (mirrors presence.avatarId): a mid-rollout server that doesn't know
     // the field yet echoes it back ABSENT, and absent must mean "keep what you have", not "clear".
     animation: thing.animation ?? "",
+    petOwnerId: thing.petOwnerId,
     updatedAt: new Date().toISOString(),
   });
 
@@ -3670,6 +3674,7 @@ function createTellusWorld(
       }
       existing.color = normalized.color;
       existing.assetStoreModelId = normalized.assetStoreModelId ?? existing.assetStoreModelId;
+      existing.petOwnerId = normalized.petOwnerId;
       // animation wire convention (mirrors presence.avatarId): "" = explicit default, a non-empty
       // string = explicit clip, ABSENT = a mid-rollout server stripped the field — keep ours
       // (otherwise our own upsert's echo would wipe a just-picked clip).
@@ -3715,6 +3720,7 @@ function createTellusWorld(
       pipelineId: normalized.pipelineId,
       generationStatus: normalized.generationStatus,
       animation: normalized.animation || undefined, // "" (explicit default) → unset internally
+      petOwnerId: normalized.petOwnerId,
     };
     generated.push(thing);
     const mesh = shouldShowGenerationSwirl(thing)
@@ -3955,6 +3961,71 @@ function createTellusWorld(
     return true;
   };
 
+  const petLastPublishAt = new Map<string, number>();
+  const localPetThings = (): GeneratedThing[] =>
+    generated.filter((thing) => thing.petOwnerId === petOwnerId && thing.id !== sailingThingId);
+
+  const petFollowTarget = (thing: GeneratedThing, index: number): Vec3 => {
+    const row = Math.floor(index / 2);
+    const side = index % 2 === 0 ? -1 : 1;
+    const distance = (sailingThingId ? 5.4 : 3.4) + row * 1.2;
+    const lateral = side * (1.15 + row * 0.2);
+    const behindX = -Math.sin(yaw) * distance;
+    const behindZ = -Math.cos(yaw) * distance;
+    const rightX = Math.cos(yaw) * lateral;
+    const rightZ = -Math.sin(yaw) * lateral;
+    const x = visitorPosition.x + behindX + rightX;
+    const z = visitorPosition.z + behindZ + rightZ;
+    return vehicleMode(thing)
+      ? movedVehiclePosition(thing, x, z, thing.position)
+      : groundedPosition(x, z, thing.position);
+  };
+
+  const syncPetsToOwner = (delta: number, forceTeleport = false) => {
+    const pets = localPetThings();
+    if (pets.length === 0) return;
+    const nowMs = performance.now();
+    let changed = false;
+    for (let index = 0; index < pets.length; index++) {
+      const pet = pets[index];
+      if (ambientPhysics.has(pet.id)) continue;
+      const target = petFollowTarget(pet, index);
+      const dx = target.x - pet.position.x;
+      const dz = target.z - pet.position.z;
+      const distance = Math.hypot(dx, dz);
+      const shouldSnap = forceTeleport || distance > 70;
+      const shouldMove = shouldSnap || distance > 1.1;
+      if (!shouldMove) continue;
+      const previous = { ...pet.position };
+      if (shouldSnap || delta <= 0) {
+        pet.position = target;
+      } else {
+        const speed = scaledPlayerSpeed() * (sailingThingId ? 1.85 : 1.35);
+        const step = Math.min(distance, Math.max(6, speed) * delta);
+        const t = distance > 0 ? step / distance : 1;
+        pet.position = {
+          x: pet.position.x + dx * t,
+          y: target.y,
+          z: pet.position.z + dz * t,
+        };
+      }
+      const mdx = pet.position.x - previous.x;
+      const mdz = pet.position.z - previous.z;
+      if (Math.hypot(mdx, mdz) > 0.001) {
+        pet.rotationY = Math.atan2(mdx, mdz);
+      }
+      updateThingMeshPosition(pet);
+      refreshInstancedThingMatrix(pet);
+      const lastPublished = petLastPublishAt.get(pet.id) ?? 0;
+      if (forceTeleport || nowMs - lastPublished > 320) {
+        petLastPublishAt.set(pet.id, nowMs);
+        publishGeneratedThing(pet);
+      }
+      changed = true;
+    }
+    if (changed) publish();
+  };
+
   const warpTo = (x: number, z: number) => {
     // clearVisitorSpawnPosition nudges off other players AND off the nearest portal so you don't land
     // on top of someone or inside a trigger volume.
@@ -3965,6 +4036,7 @@ function createTellusWorld(
     playerVy = 0;
     moveHoldStartMs = 0;
     armPortalArrivalGrace();
+    syncPetsToOwner(0, true);
     sendPresenceUpdate(true);
     publish();
   };
@@ -4343,6 +4415,29 @@ function createTellusWorld(
       text: "stepped back onto Tellus.",
     });
     sendPresenceUpdate(true);
+    publish();
+  };
+
+  const setGeneratedPet = (id: string, isPet: boolean) => {
+    const thing = thingById(id);
+    if (!thing) return;
+    thing.petOwnerId = isPet ? petOwnerId : undefined;
+    petLastPublishAt.delete(id);
+    if (isPet) {
+      uninstanceThing(id);
+      syncPetsToOwner(0, false);
+    } else if (thing.modelUrl) {
+      reevaluateInstanceGroup(thing.modelUrl);
+    }
+    addLog({
+      agentId: "visitor",
+      agentName: "Visitor",
+      tool: "interact",
+      text: isPet
+        ? `${thing.prompt} is now following you.`
+        : `${thing.prompt} is no longer following you.`,
+    });
+    publishGeneratedThing(thing);
     publish();
   };
 
@@ -4986,6 +5081,7 @@ function createTellusWorld(
   };
   const solidForThing = (thing: GeneratedThing): RapierSolid | null => {
     if (thing.id === sailingThingId || ambientPhysics.has(thing.id)) return null;
+    if (thing.petOwnerId) return null;
     if (thing.id === draggingThingId) return null;
     const profile = runtimeProfileForThing(thing);
     if (
@@ -5035,6 +5131,7 @@ function createTellusWorld(
         // Pass through: the vehicle you're riding, ambient-physics props (their own collision),
         // and the thing you're actively dragging (else it shoves you around as you place it).
         if (thing.id === sailingThingId || ambientPhysics.has(thing.id)) continue;
+        if (thing.petOwnerId) continue;
         if (thing.id === draggingThingId) continue;
         const fp = thingFootprint(thing);
         // Skip tiny/flat items you should be able to walk over (rugs, coins, low debris).
@@ -5990,6 +6087,7 @@ function createTellusWorld(
         sendPresenceUpdate();
       }
     }
+    syncPetsToOwner(delta);
     // Keep the minimap view-cone from driving React during camera-only motion. Presence still carries yaw-ish
     // movement updates when the player actually moves; a future minimap overlay can subscribe outside React.
     if (Math.abs(yaw - lastConeYaw) > 0.02 && now - lastConePublishMs > 1000) {
@@ -7050,6 +7148,7 @@ function createTellusWorld(
     moveGeneratedToWater,
     boardGenerated,
     disembark,
+    setGeneratedPet,
     sculptTerrain,
     importGeneratedThings,
     setSkyboxUrl,
@@ -8935,6 +9034,42 @@ function App(): React.ReactElement {
       z: z + dz * PORTAL_ARRIVAL_EXIT_OFFSET,
     };
   };
+  const transferPetThings = (
+    pets: GeneratedThing[],
+    arrival: { x: number; z: number } | null,
+  ): WorldGeneratedThing[] =>
+    pets.map((thing, index) => {
+      const angle = Math.PI + (index % 2 === 0 ? -0.45 : 0.45);
+      const row = Math.floor(index / 2);
+      const distance = 3.6 + row * 1.2;
+      const position = arrival
+        ? {
+            x: arrival.x + Math.sin(angle) * distance,
+            y: thing.position.y,
+            z: arrival.z + Math.cos(angle) * distance,
+          }
+        : { ...thing.position };
+      return {
+        id: thing.id,
+        kind: thing.kind,
+        prompt: thing.prompt,
+        creatorId: thing.creatorId,
+        ownerUserId: thing.ownerUserId,
+        position,
+        rotationX: thing.rotationX,
+        rotationY: thing.rotationY,
+        rotationZ: thing.rotationZ,
+        scale: thing.scale,
+        color: thing.color,
+        assetStoreModelId: thing.assetStoreModelId,
+        modelUrl: thing.modelUrl,
+        pipelineId: thing.modelUrl ? undefined : thing.pipelineId,
+        generationStatus: thing.modelUrl ? "ready" : thing.generationStatus,
+        animation: thing.animation ?? "",
+        petOwnerId: thing.petOwnerId,
+        updatedAt: new Date().toISOString(),
+      };
+    });
   // TELLUS INFINITY: when the scene reports a world.portal.entered, switch to the target world and warp to the
   // portal's spawn once the new scene is up (best-effort delayed warp — the world reloads async on the id change).
   useEffect(() => {
@@ -8943,14 +9078,24 @@ function App(): React.ReactElement {
     if (ps.sceneUrl) {
       pendingInteriorSceneUrlsRef.current[ps.toWorldId] = ps.sceneUrl;
     }
-    switchWorld(ps.toWorldId);
-    if (ps.spawn) {
-      const { x, z } = ps.spawn;
-      if (isChunkedWorldId(ps.toWorldId) && Math.hypot(x, z) < 1) return;
-      const arrival = portalArrivalPosition(x, z);
-      const t = window.setTimeout(() => worldRef.current?.warpTo(arrival.x, arrival.z), 1400);
-      return () => window.clearTimeout(t);
+    const ownerId = snapshot.userId || snapshot.visitorId || tellusUserId();
+    const pets = snapshot.generated.filter(
+      (thing) => thing.petOwnerId === ownerId && thing.id !== snapshot.sailingThingId,
+    );
+    const arrival =
+      ps.spawn && !(isChunkedWorldId(ps.toWorldId) && Math.hypot(ps.spawn.x, ps.spawn.z) < 1)
+        ? portalArrivalPosition(ps.spawn.x, ps.spawn.z)
+        : null;
+    const petTransfers = transferPetThings(pets, arrival);
+    for (const pet of pets) {
+      worldRef.current?.deleteGenerated(pet.id);
     }
+    switchWorld(ps.toWorldId);
+    const t = window.setTimeout(() => {
+      if (petTransfers.length > 0) worldRef.current?.importGeneratedThings(petTransfers);
+      if (arrival) worldRef.current?.warpTo(arrival.x, arrival.z);
+    }, 1400);
+    return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.portalSwitch]);
   // Transient status line next to the world controls (reuses the create-note slot + its auto-clear).
@@ -9608,6 +9753,8 @@ function App(): React.ReactElement {
             typeof item.creatorId === "string" ? item.creatorId : "visitor",
           ownerUserId:
             typeof item.ownerUserId === "string" ? item.ownerUserId : undefined,
+          petOwnerId:
+            typeof item.petOwnerId === "string" ? item.petOwnerId : undefined,
           position: {
             x: position.x,
             y: position.y,
@@ -9958,6 +10105,9 @@ function App(): React.ReactElement {
     : [];
   const selectedThingVehicleMode = selectedThing ? vehicleMode(selectedThing) : null;
   const selectedThingIsMount = selectedThing ? isMountThing(selectedThing) : false;
+  const localPetOwnerId = snapshot.userId || snapshot.visitorId || tellusUserId();
+  const selectedThingIsLocalPet =
+    Boolean(activeSelectedThing?.petOwnerId) && activeSelectedThing?.petOwnerId === localPetOwnerId;
   const mapRadius = OCEAN_RADIUS * 0.42;
   // The minimap maps world (x,z) -> a [0,1] fraction. Chunked worlds use a local window centered
   // on the player/spawn so terrain and water features are readable instead of microscopic.
@@ -12166,6 +12316,19 @@ function App(): React.ReactElement {
                   {snapshot.sailingThingId === activeSelectedThing.id
                     ? "Dismount"
                     : "Ride"}
+                </button>
+                <button
+                  type="button"
+                  className="selected-name-action"
+                  title={selectedThingIsLocalPet ? "Stop this companion from following you" : "Make this asset your pet companion"}
+                  onClick={() =>
+                    worldRef.current?.setGeneratedPet(
+                      activeSelectedThing.id,
+                      !selectedThingIsLocalPet,
+                    )
+                  }
+                >
+                  {selectedThingIsLocalPet ? "Unpet" : "Pet"}
                 </button>
                 <button
                   type="button"

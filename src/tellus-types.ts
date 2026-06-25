@@ -171,6 +171,8 @@ export interface GeneratedThing {
   /** Embedded clip name to loop on the loaded model ("" / absent = the default idle-ish
    * heuristic pick). Synced over generated.upsert; missing clips fall back to the heuristic. */
   animation?: string;
+  /** Local companion ownership. Pets are independent from mounts and follow their owner everywhere. */
+  petOwnerId?: string;
 }
 
 export interface AssetLibraryModel {
@@ -291,6 +293,7 @@ export interface TellusWorldApi {
   moveGeneratedToWater(id: string): void;
   boardGenerated(id: string): void;
   disembark(): void;
+  setGeneratedPet(id: string, isPet: boolean): void;
   sculptTerrain(mode: TerrainEditMode): void;
   importGeneratedThings(things: WorldGeneratedThing[]): void;
   setSkyboxUrl(url: string): Promise<string | null>;
