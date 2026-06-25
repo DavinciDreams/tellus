@@ -155,13 +155,13 @@ export const instantMeshTargetLabels: Record<InstantMeshTarget, string> = {
   local: "Local",
 };
 export const terrainColors: Record<TerrainKind, THREE.Color> = {
-  meadow: new THREE.Color(0x5fa22e),
-  grass: new THREE.Color(0x74b83a),
+  meadow: new THREE.Color(0x76985a),
+  grass: new THREE.Color(0x9fa657),
   rock: new THREE.Color(0x6f7467),
   snow: new THREE.Color(0xd4e7e2),
   beach: new THREE.Color(0xf6dcbd),
   dirt: new THREE.Color(0x8a7241),
-  flowers: new THREE.Color(0xb8b24a),
+  flowers: new THREE.Color(0x6daa35),
   stone: new THREE.Color(0x8c8d86),
   brick: new THREE.Color(0x9b4e3d),
   water: new THREE.Color(0x256f92),

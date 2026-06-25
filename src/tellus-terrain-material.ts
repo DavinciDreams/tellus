@@ -2,19 +2,94 @@ import * as THREE from "three";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import { ktx2Loader } from "./tellus-generation-client";
 import {
+  abs,
   attribute,
   color,
   float,
+  Fn,
+  fract,
   mix,
+  mx_cell_noise_float,
   mx_fractal_noise_float,
   mx_noise_float,
   normalWorld,
   positionWorld,
   smoothstep,
-  texture,
-  uv,
+  step,
+  varying,
+  vec3,
   vertexColor,
 } from "three/tsl";
+
+// Paint codes (terrainPaintCode = terrainPaintKinds.indexOf(kind) + 1). Kept in sync with
+// terrainPaintKinds in tellus-constants.ts; only the patterned kinds need an explicit code here.
+const PAINT_MEADOW = 1;
+const PAINT_STONE = 7;
+const PAINT_BRICK = 8;
+const PAINT_GRASS = 9;
+
+// World-space pattern sizes (metres). Brick courses are wider than tall; stone cells are chunky.
+const BRICK_W = 1.6;
+const BRICK_H = 0.7;
+const STONE_SCALE = 0.9;
+
+// Meadow/grass green variation: broad per-area hue/value drift that de-crayolas the flat base green.
+// Meadow drifts warm-yellow-green ↔ cool-olive; grass drifts drier toward straw/khaki.
+const GREEN_VAR_SCALE = 0.06; // world-space frequency of the drift field
+const GREEN_VAR_STRENGTH = 0.14; // ± value swing
+const GRASS_DRY_STRENGTH = 0.1; // extra warm/straw lift for the grass paint
+
+/**
+ * Brick-course pattern in world XZ. Returns a multiplier (~0.55 mortar groove .. 1.15 face highlight).
+ * Alternate rows are offset by half a brick (running bond). No textures — pure ALU on world position.
+ */
+const brickPattern = Fn(([px, pz]: [ReturnType<typeof float>, ReturnType<typeof float>]) => {
+  const row = pz.div(BRICK_H).floor();
+  const offset = row.mod(2).mul(BRICK_W * 0.5); // running bond: every other row shifts half a brick
+  const u = fract(px.add(offset).div(BRICK_W));
+  const v = fract(pz.div(BRICK_H));
+  // Mortar grooves: dark band near each cell edge. e* = normalised distance from cell centre.
+  const eu = abs(u.sub(0.5)).mul(2); // 0 centre -> 1 edge
+  const ev = abs(v.sub(0.5)).mul(2);
+  const mortar = step(0.86, eu).max(step(0.72, ev)); // 1 in the groove band, else 0
+  // Per-brick value variation so the field isn't uniform.
+  const brickId = px.add(offset).div(BRICK_W).floor().add(row.mul(7.0));
+  const vary = mx_noise_float(vec3(brickId.mul(0.13), row.mul(0.31), float(0))).mul(0.12);
+  return mix(float(1).add(vary), float(0.55), mortar);
+});
+
+/** Stone pattern: irregular cracked cells via cell noise + faint dark hairline cracks. */
+const stonePattern = Fn(([px, pz]: [ReturnType<typeof float>, ReturnType<typeof float>]) => {
+  const p = vec3(px.mul(STONE_SCALE), pz.mul(STONE_SCALE), float(0));
+  const cell = mx_cell_noise_float(p); // ~[0,1], roughly constant within a cell
+  const cracks = mx_fractal_noise_float(p.mul(3.1), 2, 2.0, 0.5); // ~[-1,1] fine fracture
+  const crackDark = step(0.62, abs(cracks)).mul(0.28); // dark hairline cracks
+  const tone = float(0.82).add(cell.mul(0.32)); // per-cell light/dark variation
+  return tone.sub(crackDark);
+});
+
+/**
+ * Green variation grain for meadow/grass — returns a per-channel RGB multiplier (vec3 ~[0.85,1.12])
+ * that drifts hue + value across the surface so the flat base green stops reading as uniform crayola.
+ * `dry` (0 meadow, 1 grass) biases the drift toward warm straw/khaki highlights.
+ */
+const greenVariation = Fn(
+  ([px, pz, dry]: [ReturnType<typeof float>, ReturnType<typeof float>, ReturnType<typeof float>]) => {
+    const drift = mx_fractal_noise_float(
+      vec3(px.mul(GREEN_VAR_SCALE), pz.mul(GREEN_VAR_SCALE), float(0)),
+      3,
+      2.0,
+      0.5,
+    ); // ~[-1,1] broad clumps
+    const v = drift.mul(GREEN_VAR_STRENGTH); // shared value swing
+    const warm = drift.add(dry.mul(GRASS_DRY_STRENGTH)); // grass biases warm/straw
+    // Warm side → push R+G (yellow/straw), drop B; cool side → push B (olive), drop R.
+    const r = float(1).add(v).add(warm.mul(0.06));
+    const g = float(1).add(v).add(abs(warm).mul(0.02));
+    const b = float(1).add(v.mul(0.7)).sub(warm.mul(0.07));
+    return vec3(r, g, b);
+  },
+);
 
 // ── Procedural terrain detail ────────────────────────────────────────────────────────────────────
 // The terrain mesh carries a flat per-vertex base color (terrainVertexColor). On its own that reads
@@ -43,10 +118,7 @@ const DETAIL = {
 } as const;
 
 /** WebGPU path: a TSL node graph that tints the vertex color with procedural detail. */
-function buildDetailColorNode(
-  paintTextures?: { stone: THREE.Texture; brick: THREE.Texture },
-  textureRepeat = 34,
-) {
+function buildDetailColorNode() {
   const wp = positionWorld;
 
   // Fractal mottling — two octaves at different scales summed into a roughly [-1,1] signal.
@@ -68,31 +140,53 @@ function buildDetailColorNode(
   );
   const coolTint = color(0x223044).mul(heightT.mul(DETAIL.heightLift));
 
-  // Apply: base vertex color, lifted/darkened by grain, darkened by slope, then cool-tinted up high.
+  // Per-kind procedural pattern from the per-vertex paint code (terrainPaintCode; 0 = auto/biome).
+  // step() bands isolate exact codes without branches. brick(8)/stone(7) multiply a structural
+  // pattern; meadow(1)/grass(9) get a green/khaki variation grain that de-crayolas the flat green.
+  // Exact-match bands: each is 1 ONLY for its code. step(lo) - step(hi) is the [lo,hi) window, so
+  // codes don't leak into higher patterns (previously code 9/grass also triggered the brick band).
+  // FLAT interpolation: a triangle straddling two paint codes must not interpolate the code (that
+  // would sweep through other bands at the seam → a dark brick/stone ring around painted patches).
+  const paintCode = float(varying(attribute("tellusPaintCode", "float")).setInterpolation("flat"));
+  const band = (code: number) =>
+    step(code - 0.5, paintCode).sub(step(code + 0.5, paintCode));
+  const isMeadow = band(PAINT_MEADOW);
+  const isStone = band(PAINT_STONE);
+  const isBrick = band(PAINT_BRICK);
+  const isGrass = band(PAINT_GRASS);
+
+  const structPattern = float(1)
+    .mul(isBrick.oneMinus().mul(isStone.oneMinus())) // 1 where neither structural pattern applies
+    .add(brickPattern(wp.x, wp.z).mul(isBrick))
+    .add(stonePattern(wp.x, wp.z).mul(isStone));
+
+  // Apply: base vertex color, grain, slope, structural pattern, then cool-tinted up high.
   const base = vertexColor();
-  const litColor = base.mul(grain.add(1).sub(slopeDark));
+  const litColor = base.mul(grain.add(1).sub(slopeDark)).mul(structPattern);
   let detailed = mix(litColor, litColor.add(coolTint), heightT);
 
-  if (paintTextures) {
-    const paintCode = float(attribute("tellusPaintCode", "float"));
-    const tiledUv = uv().mul(textureRepeat);
-    const stoneMask = smoothstep(0.18, 0.72, paintCode.sub(7).abs()).oneMinus();
-    const brickMask = smoothstep(0.18, 0.72, paintCode.sub(8).abs()).oneMinus();
-    const stoneColor = texture(paintTextures.stone, tiledUv).rgb;
-    const brickColor = texture(paintTextures.brick, tiledUv).rgb;
-    detailed = mix(detailed, detailed.mul(stoneColor).mul(1.35), stoneMask);
-    detailed = mix(detailed, detailed.mul(brickColor).mul(1.25), brickMask);
-  }
+  // Green/khaki variation for meadow + grass (RGB multiplier). dry = 1 for grass, 0 for meadow.
+  const greenMask = isMeadow.max(isGrass);
+  const greenMul = greenVariation(wp.x, wp.z, isGrass);
+  detailed = mix(detailed, detailed.mul(greenMul), greenMask);
 
   return detailed;
 }
 
 /** GLSL injected into MeshStandardMaterial for the WebGL fallback — mirrors buildDetailColorNode(). */
-const WEBGL_VARYING = "varying vec3 vTellusWorldPos;\nvarying vec3 vTellusWorldNormal;";
+// vTellusPaintCode is FLAT (non-interpolated): otherwise a triangle straddling e.g. grass(9) and
+// meadow(1) yields fragments whose interpolated code sweeps through 7/8, lighting the stone/brick
+// bands → a dark brick/stone ring around painted patches. flat = one integer code per triangle.
+const WEBGL_VARYING =
+  "varying vec3 vTellusWorldPos;\nvarying vec3 vTellusWorldNormal;\nflat varying float vTellusPaintCode;";
+
+// Declares the per-vertex paint code attribute (geometries without it default the varying to 0).
+const WEBGL_VERTEX_HEAD = "attribute float tellusPaintCode;";
 
 const WEBGL_VERTEX_TAIL = `
   vTellusWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
   vTellusWorldNormal = normalize(mat3(modelMatrix) * objectNormal);
+  vTellusPaintCode = tellusPaintCode;
 `;
 
 // Hash-based value noise + 3-octave fractal — cheap, no textures. Matches the macro/micro feel of the
@@ -119,47 +213,41 @@ float tellusFractal(vec3 x){
   for(int i=0;i<3;i++){ a += tellusNoise(x) * amp; x *= 2.0; amp *= 0.5; }
   return a;
 }
-`;
-
-const WEBGL_GRASS_MASK = `
-float tellusTerrainGrassMask(vec3 c){
-  vec3 grassColor = vec3(0.4549, 0.7216, 0.2275);
-  float d = distance(c, grassColor);
-  return 1.0 - smoothstep(0.025, 0.105, d);
+// Mirrors brickPattern()/stonePattern()/greenVariation() in the WebGPU node graph. Sizes/strengths
+// match the TSL constants so the two renderers stay visually consistent.
+float tellusBrick(float px, float pz){
+  float BW = ${BRICK_W.toFixed(3)}, BH = ${BRICK_H.toFixed(3)};
+  float row = floor(pz / BH);
+  float offset = mod(row, 2.0) * BW * 0.5;
+  float u = fract((px + offset) / BW);
+  float v = fract(pz / BH);
+  float eu = abs(u - 0.5) * 2.0;
+  float ev = abs(v - 0.5) * 2.0;
+  float mortar = max(step(0.86, eu), step(0.72, ev));
+  float brickId = floor((px + offset) / BW) + row * 7.0;
+  float vary = tellusNoise(vec3(brickId * 0.13, row * 0.31, 0.0)) * 0.12;
+  return mix(1.0 + vary, 0.55, mortar);
 }
-`;
-
-const WEBGL_MASKED_MAP_FRAGMENT = `
-#ifdef USE_MAP
-  vec4 sampledDiffuseColor = texture2D( map, vMapUv );
-  #ifdef DECODE_VIDEO_TEXTURE
-    sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
-  #endif
-  float tellusGrassMask = tellusTerrainGrassMask(vColor.rgb);
-  diffuseColor.rgb *= mix(vec3(1.0), sampledDiffuseColor.rgb, tellusGrassMask);
-  diffuseColor.a *= sampledDiffuseColor.a;
-#endif
-`;
-
-const WEBGL_MASKED_NORMAL_FRAGMENT_MAPS = `
-#ifdef USE_NORMALMAP_OBJECTSPACE
-  vec3 objectNormalMap = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
-  objectNormalMap.xy *= tellusTerrainGrassMask(vColor.rgb);
-  normal = objectNormalMap;
-  #ifdef FLIP_SIDED
-    normal = - normal;
-  #endif
-  #ifdef DOUBLE_SIDED
-    normal = normal * faceDirection;
-  #endif
-  normal = normalize( normalMatrix * normal );
-#elif defined( USE_NORMALMAP_TANGENTSPACE )
-  vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
-  mapN.xy *= normalScale * tellusTerrainGrassMask(vColor.rgb);
-  normal = normalize( tbn * mapN );
-#elif defined( USE_BUMPMAP )
-  normal = perturbNormalArb( - vViewPosition, normal, dHdxy_fwd(), faceDirection );
-#endif
+float tellusStone(float px, float pz){
+  float S = ${STONE_SCALE.toFixed(3)};
+  vec3 p = vec3(px * S, pz * S, 0.0);
+  vec3 cellId = floor(p) + vec3(tellusHash(floor(p)), tellusHash(floor(p) + 3.7), 0.0);
+  float cell = tellusHash(floor(cellId));
+  float cracks = tellusFractal(p * 3.1);
+  float crackDark = step(0.62, abs(cracks)) * 0.28;
+  return (0.82 + cell * 0.32) - crackDark;
+}
+// Green/khaki variation grain (RGB multiplier). dry: 0 meadow, 1 grass (drifts toward straw/khaki).
+vec3 tellusGreenVar(float px, float pz, float dry){
+  float GS = ${GREEN_VAR_SCALE.toFixed(4)}, GV = ${GREEN_VAR_STRENGTH.toFixed(4)}, GD = ${GRASS_DRY_STRENGTH.toFixed(4)};
+  float drift = tellusFractal(vec3(px * GS, pz * GS, 0.0));
+  float v = drift * GV;
+  float warm = drift + dry * GD;
+  float r = 1.0 + v + warm * 0.06;
+  float g = 1.0 + v + abs(warm) * 0.02;
+  float b = 1.0 + v * 0.7 - warm * 0.07;
+  return vec3(r, g, b);
+}
 `;
 
 function webglColorPatch(): string {
@@ -173,7 +261,18 @@ function webglColorPatch(): string {
     float slopeDark = (1.0 - flatness) * ${d.slopeStrength.toFixed(4)};
     float heightT = smoothstep(${d.heightStart.toFixed(2)}, ${(d.heightStart + d.heightRange).toFixed(2)}, vTellusWorldPos.y);
     vec3 coolTint = vec3(0.133, 0.188, 0.267) * (heightT * ${d.heightLift.toFixed(4)});
-    diffuseColor.rgb *= (1.0 + grain - slopeDark);
+    // Exact-match bands (step(lo)-step(hi) = [lo,hi) window) so codes don't leak into higher patterns.
+    float isMeadow = step(${(PAINT_MEADOW - 0.5).toFixed(1)}, vTellusPaintCode) - step(${(PAINT_MEADOW + 0.5).toFixed(1)}, vTellusPaintCode);
+    float isStone = step(${(PAINT_STONE - 0.5).toFixed(1)}, vTellusPaintCode) - step(${(PAINT_STONE + 0.5).toFixed(1)}, vTellusPaintCode);
+    float isBrick = step(${(PAINT_BRICK - 0.5).toFixed(1)}, vTellusPaintCode) - step(${(PAINT_BRICK + 0.5).toFixed(1)}, vTellusPaintCode);
+    float isGrass = step(${(PAINT_GRASS - 0.5).toFixed(1)}, vTellusPaintCode) - step(${(PAINT_GRASS + 0.5).toFixed(1)}, vTellusPaintCode);
+    float pattern = (1.0 - isBrick) * (1.0 - isStone)
+      + tellusBrick(vTellusWorldPos.x, vTellusWorldPos.z) * isBrick
+      + tellusStone(vTellusWorldPos.x, vTellusWorldPos.z) * isStone;
+    diffuseColor.rgb *= (1.0 + grain - slopeDark) * pattern;
+    float greenMask = max(isMeadow, isGrass);
+    vec3 greenMul = tellusGreenVar(vTellusWorldPos.x, vTellusWorldPos.z, isGrass);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * greenMul, greenMask);
     diffuseColor.rgb += coolTint * heightT;
   }
   `;
@@ -183,27 +282,14 @@ export interface TerrainMaterialOptions {
   roughness?: number;
   pbrDetail?: boolean;
   textureRepeat?: number;
+  // Optional explicit base albedo/normal/roughness maps. When omitted the base map is the cheap
+  // procedural canvas grain (makeTerrainAlbedoTexture/makeTerrainNormalTexture) — no image assets.
   textureUrls?: {
     albedo?: string;
     normal?: string;
     roughness?: string;
   };
-  paintTextureUrls?: {
-    stone?: string;
-    brick?: string;
-  };
 }
-
-const DEFAULT_TERRAIN_TEXTURE_URLS: Required<NonNullable<TerrainMaterialOptions["textureUrls"]>> = {
-  albedo: "/terrain-textures/stylized-grass1/albedo.png",
-  normal: "/terrain-textures/stylized-grass1/normal.png",
-  roughness: "/terrain-textures/stylized-grass1/roughness.png",
-};
-
-const DEFAULT_PAINT_TEXTURE_URLS: Required<NonNullable<TerrainMaterialOptions["paintTextureUrls"]>> = {
-  stone: "/terrain-textures/stone-rock064/albedo.png",
-  brick: "/terrain-textures/brick-bricks028/albedo.png",
-};
 
 const terrainTextureLoader = new THREE.TextureLoader();
 const generatedTerrainTextures = new Map<string, THREE.Texture>();
@@ -300,71 +386,11 @@ function makeTerrainNormalTexture(): THREE.Texture | null {
   generatedTerrainTextures.set("normal", texture);
   return texture;
 }
-
-function makePaintAlbedoTexture(kind: "stone" | "brick"): THREE.Texture {
-  const cached = generatedTerrainTextures.get(`paint-${kind}`);
-  if (cached) return cached;
-  if (typeof document === "undefined") return new THREE.Texture();
-  const size = 256;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    const empty = new THREE.CanvasTexture(canvas);
-    generatedTerrainTextures.set(`paint-${kind}`, empty);
-    return empty;
-  }
-  const image = ctx.createImageData(size, size);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const n = seededNoise(x * 0.18 + (kind === "brick" ? 11 : 3), y * 0.18 - 7);
-      const n2 = seededNoise(x * 0.72 - 5, y * 0.72 + 19);
-      const mortar = kind === "brick" && (((x + Math.floor(y / 28) * 22) % 64) < 4 || y % 28 < 4);
-      const chip = kind === "stone" && n2 > 0.78;
-      const i = (y * size + x) * 4;
-      if (kind === "brick") {
-        image.data[i] = mortar ? 146 : 150 + Math.round(n * 34);
-        image.data[i + 1] = mortar ? 132 : 74 + Math.round(n * 18);
-        image.data[i + 2] = mortar ? 118 : 58 + Math.round(n * 12);
-      } else {
-        const base = chip ? 150 : 110 + Math.round(n * 46);
-        image.data[i] = base + 6;
-        image.data[i + 1] = base + 4;
-        image.data[i + 2] = base;
-      }
-      image.data[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(image, 0, 0);
-  const texture = new THREE.CanvasTexture(canvas);
-  generatedTerrainTextures.set(`paint-${kind}`, texture);
-  return texture;
-}
-
 async function loadTerrainTexture(url: string, repeat: number, colorSpace?: THREE.ColorSpace): Promise<THREE.Texture> {
   const texture = url.toLowerCase().endsWith(".ktx2")
     ? await ktx2Loader.loadAsync(url)
     : await terrainTextureLoader.loadAsync(url);
   return prepareRepeatTexture(texture, repeat, colorSpace);
-}
-
-function loadIntoTerrainTexture(
-  target: THREE.Texture,
-  url: string | undefined,
-  repeat: number,
-  colorSpace?: THREE.ColorSpace,
-  label = "texture",
-): void {
-  if (!url) return;
-  void loadTerrainTexture(url, repeat, colorSpace)
-    .then((texture) => {
-      target.copy(texture);
-      prepareRepeatTexture(target, repeat, colorSpace);
-      target.needsUpdate = true;
-      texture.dispose();
-    })
-    .catch((error) => console.warn(`Tellus terrain ${label} texture failed`, error));
 }
 
 function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMaterialOptions): void {
@@ -382,8 +408,10 @@ function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMateria
   withMaps.roughness = options.roughness ?? 0.9;
   material.needsUpdate = true;
 
-  const urls = options.textureUrls ?? DEFAULT_TERRAIN_TEXTURE_URLS;
-  if (urls.albedo) {
+  // Only load image maps if a caller explicitly supplies them; default keeps the procedural canvas
+  // base (previously this defaulted to a stylized-grass image that smeared over all terrain).
+  const urls = options.textureUrls;
+  if (urls?.albedo) {
     void loadTerrainTexture(urls.albedo, repeat, THREE.SRGBColorSpace)
       .then((texture) => {
         withMaps.map = texture;
@@ -391,7 +419,7 @@ function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMateria
       })
       .catch((error) => console.warn("Tellus terrain albedo texture failed", error));
   }
-  if (urls.normal) {
+  if (urls?.normal) {
     void loadTerrainTexture(urls.normal, repeat)
       .then((texture) => {
         withMaps.normalMap = texture;
@@ -400,7 +428,7 @@ function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMateria
       })
       .catch((error) => console.warn("Tellus terrain normal texture failed", error));
   }
-  if (urls.roughness) {
+  if (urls?.roughness) {
     void loadTerrainTexture(urls.roughness, repeat)
       .then((texture) => {
         withMaps.roughnessMap = texture;
@@ -408,119 +436,6 @@ function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMateria
       })
       .catch((error) => console.warn("Tellus terrain roughness texture failed", error));
   }
-}
-
-const WEBGL_MASKED_TERRAIN_MAP_FRAGMENT = `
-#ifdef USE_MAP
-  vec4 sampledDiffuseColor = texture2D( map, vMapUv );
-  #ifdef DECODE_VIDEO_TEXTURE
-    sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
-  #endif
-  float tellusGrassMask = 1.0 - smoothstep(0.18, 0.72, abs(vTellusPaintCode - 9.0));
-  diffuseColor.rgb *= mix(vec3(1.0), sampledDiffuseColor.rgb, tellusGrassMask);
-  diffuseColor.a *= sampledDiffuseColor.a;
-#endif
-`;
-
-const WEBGL_MASKED_TERRAIN_NORMAL_FRAGMENT_MAPS = `
-#ifdef USE_NORMALMAP_OBJECTSPACE
-  vec3 objectNormalMap = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
-  float tellusGrassNormalMask = 1.0 - smoothstep(0.18, 0.72, abs(vTellusPaintCode - 9.0));
-  objectNormalMap.xy *= tellusGrassNormalMask;
-  normal = objectNormalMap;
-  #ifdef FLIP_SIDED
-    normal = - normal;
-  #endif
-  #ifdef DOUBLE_SIDED
-    normal = normal * faceDirection;
-  #endif
-  normal = normalize( normalMatrix * normal );
-#elif defined( USE_NORMALMAP_TANGENTSPACE )
-  vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
-  float tellusGrassNormalMask = 1.0 - smoothstep(0.18, 0.72, abs(vTellusPaintCode - 9.0));
-  mapN.xy *= normalScale * tellusGrassNormalMask;
-  normal = normalize( tbn * mapN );
-#elif defined( USE_BUMPMAP )
-  normal = perturbNormalArb( - vViewPosition, normal, dHdxy_fwd(), faceDirection );
-#endif
-`;
-
-function applyPaintTextureBlend(material: THREE.MeshStandardMaterial, options: TerrainMaterialOptions): void {
-  const repeat = options.textureRepeat ?? 34;
-  const urls = options.paintTextureUrls ?? DEFAULT_PAINT_TEXTURE_URLS;
-  const paintTextures: {
-    stone: THREE.Texture | null;
-    brick: THREE.Texture | null;
-  } = {
-    stone: material.map,
-    brick: material.map,
-  };
-  const shaders = new Set<THREE.WebGLProgramParametersWithUniforms>();
-
-  const updateShaderUniforms = () => {
-    for (const shader of shaders) {
-      shader.uniforms.tellusStoneAlbedoMap.value = paintTextures.stone ?? material.map;
-      shader.uniforms.tellusBrickAlbedoMap.value = paintTextures.brick ?? material.map;
-    }
-  };
-
-  if (urls.stone) {
-    void loadTerrainTexture(urls.stone, repeat, THREE.SRGBColorSpace)
-      .then((texture) => {
-        paintTextures.stone = texture;
-        updateShaderUniforms();
-      })
-      .catch((error) => console.warn("Tellus terrain stone texture failed", error));
-  }
-  if (urls.brick) {
-    void loadTerrainTexture(urls.brick, repeat, THREE.SRGBColorSpace)
-      .then((texture) => {
-        paintTextures.brick = texture;
-        updateShaderUniforms();
-      })
-      .catch((error) => console.warn("Tellus terrain brick texture failed", error));
-  }
-
-  material.onBeforeCompile = (shader) => {
-    shaders.add(shader);
-    shader.uniforms.tellusStoneAlbedoMap = { value: paintTextures.stone ?? material.map };
-    shader.uniforms.tellusBrickAlbedoMap = { value: paintTextures.brick ?? material.map };
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        "#include <common>",
-        "#include <common>\nattribute float tellusPaintCode;\nvarying float vTellusPaintCode;",
-      )
-      .replace(
-        "#include <begin_vertex>",
-        "#include <begin_vertex>\nvTellusPaintCode = tellusPaintCode;",
-      );
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        "#include <common>",
-        "#include <common>\nuniform sampler2D tellusStoneAlbedoMap;\nuniform sampler2D tellusBrickAlbedoMap;\nvarying float vTellusPaintCode;",
-      )
-      .replace(
-        "#include <map_fragment>",
-        WEBGL_MASKED_TERRAIN_MAP_FRAGMENT,
-      )
-      .replace(
-        "#include <normal_fragment_maps>",
-        WEBGL_MASKED_TERRAIN_NORMAL_FRAGMENT_MAPS,
-      )
-      .replace(
-        "#include <color_fragment>",
-        `#include <color_fragment>
-  {
-    float tellusStoneMask = 1.0 - smoothstep(0.18, 0.72, abs(vTellusPaintCode - 7.0));
-    float tellusBrickMask = 1.0 - smoothstep(0.18, 0.72, abs(vTellusPaintCode - 8.0));
-    vec3 tellusStoneColor = texture2D(tellusStoneAlbedoMap, vMapUv).rgb;
-    vec3 tellusBrickColor = texture2D(tellusBrickAlbedoMap, vMapUv).rgb;
-    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * tellusStoneColor * 1.35, tellusStoneMask);
-    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * tellusBrickColor * 1.25, tellusBrickMask);
-  }`,
-      );
-  };
-  material.customProgramCacheKey = () => "tellus-terrain-paint-texture-blend";
 }
 
 /**
@@ -536,19 +451,11 @@ export function createTerrainMaterial(
   const roughness = options.roughness ?? 0.9;
 
   if (useWebGPU) {
-    const repeat = options.textureRepeat ?? 34;
-    const urls = options.paintTextureUrls ?? DEFAULT_PAINT_TEXTURE_URLS;
-    const paintTextures = {
-      stone: prepareRepeatTexture(makePaintAlbedoTexture("stone"), repeat, THREE.SRGBColorSpace),
-      brick: prepareRepeatTexture(makePaintAlbedoTexture("brick"), repeat, THREE.SRGBColorSpace),
-    };
-    loadIntoTerrainTexture(paintTextures.stone, urls.stone, repeat, THREE.SRGBColorSpace, "stone");
-    loadIntoTerrainTexture(paintTextures.brick, urls.brick, repeat, THREE.SRGBColorSpace, "brick");
     const material = new MeshStandardNodeMaterial();
     material.vertexColors = true;
     material.roughness = roughness;
     material.metalness = 0;
-    material.colorNode = buildDetailColorNode(paintTextures, repeat);
+    material.colorNode = buildDetailColorNode();
     return material;
   }
 
@@ -559,7 +466,6 @@ export function createTerrainMaterial(
       metalness: 0,
     });
     applyTerrainPbrDetail(material, options);
-    applyPaintTextureBlend(material, options);
     return material;
   }
 
@@ -572,7 +478,7 @@ export function createTerrainMaterial(
     shader.vertexShader = shader.vertexShader
       .replace(
         "#include <common>",
-        `#include <common>\n${WEBGL_VARYING}`,
+        `#include <common>\n${WEBGL_VARYING}\n${WEBGL_VERTEX_HEAD}`,
       )
       .replace(
         "#include <project_vertex>",
@@ -581,15 +487,7 @@ export function createTerrainMaterial(
     shader.fragmentShader = shader.fragmentShader
       .replace(
         "#include <common>",
-        `#include <common>\n${WEBGL_VARYING}\n${WEBGL_NOISE}\n${WEBGL_GRASS_MASK}`,
-      )
-      .replace(
-        "#include <map_fragment>",
-        WEBGL_MASKED_MAP_FRAGMENT,
-      )
-      .replace(
-        "#include <normal_fragment_maps>",
-        WEBGL_MASKED_NORMAL_FRAGMENT_MAPS,
+        `#include <common>\n${WEBGL_VARYING}\n${WEBGL_NOISE}`,
       )
       .replace(
         "#include <color_fragment>",
