@@ -312,11 +312,13 @@ export interface TerrainMaterialOptions {
 
 const terrainTextureLoader = new THREE.TextureLoader();
 const generatedTerrainTextures = new Map<string, THREE.Texture>();
-const BIOME_LITE_TEXTURE_UNITS = 2; // moss + rock albedo samplers, tinted per paint kind
+const BIOME_LITE_TEXTURE_UNITS = 4; // moss, sand, gravel, flagstone albedo samplers
 const ESTIMATED_NINE_SAMPLER_UNITS = 11; // base albedo + normal + 9 paint albedo maps
 const BIOME_LITE_TEXTURE_URLS = {
   moss: "/terrain-textures/moss002/albedo.png",
+  sand: "/terrain-textures/sand-ground-0024/albedo.jpg",
   rock: "/terrain-textures/gravel041/albedo.png",
+  flagstone: "/terrain-textures/cracked-ground031/albedo.png",
 } as const;
 
 function terrainImageTexturesRequested(): boolean {
@@ -366,7 +368,7 @@ export function terrainTextureDiagnostics(
   const reason = !requestedImageTextures
     ? "Procedural terrain detail is active."
     : supportsBiomeLitePaint
-      ? "Biome-lite terrain textures are active: moss, sand, and dirt albedos stay below the WebGL sampler cap."
+      ? "Biome-lite terrain textures are active: moss, sand, gravel, and flagstone albedos stay below the WebGL sampler cap."
       : "This WebGL renderer does not report enough fragment texture units for the biome-lite texture path.";
 
   return {
@@ -505,14 +507,18 @@ function applyBiomeLiteTerrainOverlay(
   const fallback = whiteTerrainTexture();
   const paintTextures: Record<keyof typeof BIOME_LITE_TEXTURE_URLS, THREE.Texture> = {
     moss: fallback,
+    sand: fallback,
     rock: fallback,
+    flagstone: fallback,
   };
   const shaders = new Set<Parameters<NonNullable<THREE.MeshStandardMaterial["onBeforeCompile"]>>[0]>();
 
   const updateShaderUniforms = () => {
     for (const shader of shaders) {
       shader.uniforms.tellusMossAlbedoMap.value = paintTextures.moss;
+      shader.uniforms.tellusSandAlbedoMap.value = paintTextures.sand;
       shader.uniforms.tellusRockAlbedoMap.value = paintTextures.rock;
+      shader.uniforms.tellusFlagstoneAlbedoMap.value = paintTextures.flagstone;
     }
   };
 
@@ -529,7 +535,9 @@ function applyBiomeLiteTerrainOverlay(
     shaders.add(shader);
     shader.uniforms.tellusBiomeTextureScale = { value: textureScale };
     shader.uniforms.tellusMossAlbedoMap = { value: paintTextures.moss };
+    shader.uniforms.tellusSandAlbedoMap = { value: paintTextures.sand };
     shader.uniforms.tellusRockAlbedoMap = { value: paintTextures.rock };
+    shader.uniforms.tellusFlagstoneAlbedoMap = { value: paintTextures.flagstone };
     shader.vertexShader = shader.vertexShader
       .replace(
         "#include <common>",
@@ -546,7 +554,9 @@ function applyBiomeLiteTerrainOverlay(
 ${WEBGL_VARYING}
 uniform float tellusBiomeTextureScale;
 uniform sampler2D tellusMossAlbedoMap;
+uniform sampler2D tellusSandAlbedoMap;
 uniform sampler2D tellusRockAlbedoMap;
+uniform sampler2D tellusFlagstoneAlbedoMap;
 float tellusPaintBand(float code){
   return step(code - 0.5, vTellusPaintCode) - step(code + 0.5, vTellusPaintCode);
 }`,
@@ -561,25 +571,33 @@ float tellusPaintBand(float code){
     float grassMask = tellusPaintBand(${PAINT_GRASS.toFixed(1)});
     float mossMask = meadowMask + flowersMask + grassMask;
     float sandMask = tellusPaintBand(${PAINT_BEACH.toFixed(1)});
-    float dirtMask =
-      tellusPaintBand(${PAINT_DIRT.toFixed(1)}) +
-      tellusPaintBand(${PAINT_ROCK.toFixed(1)});
-    float paintMask = clamp(mossMask + sandMask + dirtMask, 0.0, 1.0);
+    float dirtMask = tellusPaintBand(${PAINT_DIRT.toFixed(1)});
+    float rockMask = tellusPaintBand(${PAINT_ROCK.toFixed(1)});
+    float flagstoneMask =
+      tellusPaintBand(${PAINT_STONE.toFixed(1)}) +
+      tellusPaintBand(${PAINT_BRICK.toFixed(1)});
+    float paintMask = clamp(mossMask + sandMask + dirtMask + rockMask + flagstoneMask, 0.0, 1.0);
     vec3 mossSample = texture2D(tellusMossAlbedoMap, tellusPaintUv).rgb;
+    vec3 sandSample = texture2D(tellusSandAlbedoMap, tellusPaintUv).rgb;
     vec3 rockSample = texture2D(tellusRockAlbedoMap, tellusPaintUv).rgb;
+    vec3 flagstoneSample = texture2D(tellusFlagstoneAlbedoMap, tellusPaintUv).rgb;
     vec3 meadowAlbedo = mossSample * vec3(0.96, 1.03, 0.96);
     vec3 flowersAlbedo = mossSample * vec3(1.04, 1.08, 1.08);
     vec3 grassAlbedo = mossSample * vec3(1.08, 1.12, 0.82);
-    vec3 sandAlbedo = rockSample * vec3(1.46, 1.25, 0.88);
-    vec3 dirtAlbedo = rockSample * vec3(0.76, 0.56, 0.42);
+    vec3 sandAlbedo = sandSample * vec3(1.04, 0.98, 0.86);
+    vec3 dirtAlbedo = sandSample * vec3(0.70, 0.50, 0.36);
     vec3 rockAlbedo = rockSample * vec3(0.82, 0.86, 0.82);
+    vec3 flagstoneAlbedo = flagstoneSample * vec3(0.80, 0.82, 0.78);
+    vec3 brickFlagstoneAlbedo = flagstoneSample * vec3(1.12, 0.64, 0.52);
     vec3 biomeAlbedo =
       meadowAlbedo * meadowMask +
       flowersAlbedo * flowersMask +
       grassAlbedo * grassMask +
       sandAlbedo * sandMask +
-      dirtAlbedo * tellusPaintBand(${PAINT_DIRT.toFixed(1)}) +
-      rockAlbedo * tellusPaintBand(${PAINT_ROCK.toFixed(1)}) +
+      dirtAlbedo * dirtMask +
+      rockAlbedo * rockMask +
+      flagstoneAlbedo * tellusPaintBand(${PAINT_STONE.toFixed(1)}) +
+      brickFlagstoneAlbedo * tellusPaintBand(${PAINT_BRICK.toFixed(1)}) +
       vec3(1.0) * (1.0 - paintMask);
     diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb, biomeAlbedo, 0.68), paintMask);
   }`,
