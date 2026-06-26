@@ -1514,7 +1514,12 @@ function createTellusWorld(
   const exitInterior = () => {
     if (!interiorObject) return;
     disposePortalPreview();
-    setInteriorWallDoorPlacement(null);
+    wallDoorPlacement = null;
+    if (wallDoorPlacementGhost) {
+      portalMarkerGroup.remove(wallDoorPlacementGhost);
+      disposeObject(wallDoorPlacementGhost);
+      wallDoorPlacementGhost = null;
+    }
     scene.remove(interiorObject);
     disposeObject(interiorObject);
     interiorObject = null;
@@ -1578,6 +1583,12 @@ function createTellusWorld(
   // Set on spawn/warp/interior-entry; blocks portal auto-enter until the player is clear of ALL
   // portals once (prevents the "spawn on the door → bounce back" loop, robust to async portal load).
   let portalSpawnGuard = false;
+  // Must be initialized before realtime connects; interior snapshots can arrive while this factory is still running.
+  const armPortalArrivalGrace = () => {
+    insidePortalId = null;
+    lastPortalEnterAt = performance.now();
+    portalSpawnGuard = true;
+  };
   const makePortalMarker = (interior: boolean, pending = false): THREE.Object3D => {
     const g = new THREE.Group();
     const color = pending ? 0x9b7cff : interior ? 0xffc84f : 0xffdc3d;
@@ -5053,15 +5064,6 @@ function createTellusWorld(
   // doesn't immediately re-trigger it. The portal only re-arms once the player steps OUT of its radius
   // (updatePortals resets insidePortalId to null on !nearId). Without this you get the "spawn on the
   // door → move → bounce back → spawn on the door" loop.
-  const armPortalArrivalGrace = () => {
-    insidePortalId = null;
-    lastPortalEnterAt = performance.now();
-    // One-shot spawn protection: block ALL portal auto-enter until the player has been clear of every
-    // portal radius at least once. This is robust even when the destination world's portals load
-    // asynchronously AFTER spawn (the snapshot-at-spawn check alone would miss a late-loading return
-    // portal and you'd bounce straight back).
-    portalSpawnGuard = true;
-  };
 
   if (options.initialInteriorSceneUrl) {
     applyInterior(options.initialInteriorSceneUrl);
