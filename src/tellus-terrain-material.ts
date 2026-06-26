@@ -423,9 +423,9 @@ function makeTerrainAlbedoTexture(): THREE.Texture | null {
     for (let x = 0; x < size; x++) {
       const n1 = seededNoise(x * 0.08, y * 0.08);
       const n2 = seededNoise(x * 0.31 + 17, y * 0.31 - 9);
-      const blade = Math.max(0, 1 - Math.abs(((x * 0.22 + y * 0.045 + n1 * 3) % 8) - 4) / 4);
-      const value = 202 + Math.round(n1 * 22 + n2 * 18 + blade * 12);
-      const greenLift = Math.round(blade * 10 + n2 * 5);
+      const n3 = seededNoise(x * 0.73 - 29, y * 0.67 + 31);
+      const value = 204 + Math.round(n1 * 18 + n2 * 14 + n3 * 8);
+      const greenLift = Math.round(n2 * 6 + n3 * 3);
       const i = (y * size + x) * 4;
       image.data[i] = Math.max(165, Math.min(245, value - 4));
       image.data[i + 1] = Math.max(170, Math.min(255, value + greenLift));
@@ -449,8 +449,8 @@ function makeTerrainNormalTexture(): THREE.Texture | null {
     for (let x = 0; x < size; x++) {
       const n1 = seededNoise(x * 0.08, y * 0.08);
       const n2 = seededNoise(x * 0.32 + 41, y * 0.32 + 13);
-      const blade = Math.max(0, 1 - Math.abs(((x * 0.22 + y * 0.045 + n1 * 3) % 8) - 4) / 4);
-      height[y * size + x] = n1 * 0.45 + n2 * 0.25 + blade * 0.65;
+      const n3 = seededNoise(x * 0.72 - 19, y * 0.68 + 37);
+      height[y * size + x] = n1 * 0.36 + n2 * 0.24 + n3 * 0.14;
     }
   }
   const canvas = document.createElement("canvas");
