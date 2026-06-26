@@ -312,7 +312,7 @@ export interface TerrainMaterialOptions {
 
 const terrainTextureLoader = new THREE.TextureLoader();
 const generatedTerrainTextures = new Map<string, THREE.Texture>();
-const BIOME_LITE_TEXTURE_UNITS = 5; // base albedo + normal + moss/sand/dirt paint albedos
+const BIOME_LITE_TEXTURE_UNITS = 3; // moss/sand/dirt paint albedos; base maps stay off in this mode
 const ESTIMATED_NINE_SAMPLER_UNITS = 11; // base albedo + normal + 9 paint albedo maps
 const BIOME_LITE_TEXTURE_URLS = {
   moss: "/terrain-textures/moss002/albedo.png",
@@ -584,22 +584,25 @@ float tellusPaintBand(float code){
 
 function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMaterialOptions): void {
   const repeat = options.textureRepeat ?? 34;
+  const useBiomeLiteTextures = terrainImageTexturesRequested();
   const withMaps = material as THREE.MeshStandardMaterial & {
     normalScale?: THREE.Vector2;
   };
-  const albedo = makeTerrainAlbedoTexture();
-  const normal = makeTerrainNormalTexture();
-  if (albedo) withMaps.map = prepareRepeatTexture(albedo, repeat, THREE.SRGBColorSpace);
-  if (normal) {
-    withMaps.normalMap = prepareRepeatTexture(normal, repeat);
-    withMaps.normalScale = new THREE.Vector2(0.1, 0.1);
+  if (!useBiomeLiteTextures) {
+    const albedo = makeTerrainAlbedoTexture();
+    const normal = makeTerrainNormalTexture();
+    if (albedo) withMaps.map = prepareRepeatTexture(albedo, repeat, THREE.SRGBColorSpace);
+    if (normal) {
+      withMaps.normalMap = prepareRepeatTexture(normal, repeat);
+      withMaps.normalScale = new THREE.Vector2(0.1, 0.1);
+    }
   }
   withMaps.roughness = options.roughness ?? 0.9;
   material.needsUpdate = true;
 
   // Only load image maps if a caller explicitly supplies them; default keeps the procedural canvas
   // base (previously this defaulted to a stylized-grass image that smeared over all terrain).
-  const urls = options.textureUrls;
+  const urls = useBiomeLiteTextures ? undefined : options.textureUrls;
   if (urls?.albedo) {
     void loadTerrainTexture(urls.albedo, repeat, THREE.SRGBColorSpace)
       .then((texture) => {

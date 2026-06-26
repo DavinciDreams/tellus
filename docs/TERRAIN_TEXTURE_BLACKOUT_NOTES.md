@@ -39,7 +39,10 @@ localStorage.setItem("tellus.terrainImageTextures", "1")
 location.reload()
 ```
 
-The current trial path uses three paint albedo samplers:
+The current trial path uses three paint albedo samplers and disables the old
+shared procedural base albedo/normal maps while active. That avoids the
+all-terrain striped/tiling pattern that looked like sand dunes under every
+paint kind.
 
 - moss for meadow, flowers, and grass
 - sand for beach
