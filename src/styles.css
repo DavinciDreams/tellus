@@ -3331,6 +3331,11 @@ textarea::placeholder {
   background: var(--hud-bg-soft);
 }
 
+.terrain-swatch.active {
+  border-color: var(--hud-accent);
+  box-shadow: 0 0 0 1px var(--hud-accent);
+}
+
 .terrain-swatch-preview {
   display: block;
   aspect-ratio: 1;

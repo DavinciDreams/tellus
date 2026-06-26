@@ -2149,6 +2149,7 @@ function createTellusWorld(
   let pointerX = 0;
   let pointerY = 0;
   let pointerTravel = 0;
+  let terrainBrushMode: TerrainEditMode | null = null;
   const pointerNdc = new THREE.Vector2();
   const raycaster = new THREE.Raycaster();
 
@@ -3115,21 +3116,12 @@ function createTellusWorld(
     xIndex: number,
     zIndex: number,
     falloff: number,
-    paintCode: number,
-    center: Vec3,
+    _paintCode: number,
+    _center: Vec3,
   ): boolean => {
-    if (falloff >= 0.58) return true;
-    if (falloff <= 0.06) return false;
-    const seed =
-      Math.sin(
-        xIndex * 12.9898 +
-          zIndex * 78.233 +
-          paintCode * 37.719 +
-          Math.round(center.x * 2) * 0.217 +
-          Math.round(center.z * 2) * 0.311,
-      ) * 43758.5453;
-    const noise = seed - Math.floor(seed);
-    return noise < falloff * 0.92;
+    void xIndex;
+    void zIndex;
+    return falloff >= 0.18;
   };
 
   const sculptTerrainAt = (
@@ -3282,12 +3274,20 @@ function createTellusWorld(
     });
   };
 
-  const sculptTerrain = (mode: TerrainEditMode) => {
+  const sculptTerrainAtWorldPoint = (mode: TerrainEditMode, center: Vec3) => {
     if (isChunked) {
-      sendChunkedSculpt(mode, visitorPosition);
+      sendChunkedSculpt(mode, center);
       return;
     }
-    sculptTerrainAt(mode, visitorPosition, "visitor", "Visitor");
+    sculptTerrainAt(mode, center, "visitor", "Visitor");
+  };
+
+  const setTerrainBrush = (mode: TerrainEditMode | null) => {
+    terrainBrushMode = mode;
+  };
+
+  const sculptTerrain = (mode: TerrainEditMode) => {
+    sculptTerrainAtWorldPoint(mode, visitorPosition);
   };
 
   // The browser-NPC "pause AI" gate is gone; visitor-driven generation is never paused.
@@ -7439,6 +7439,17 @@ function createTellusWorld(
       }
       setMoveMode(null); // target vanished — drop the mode
     }
+    const pointerFromUi =
+      event.target instanceof HTMLElement &&
+      Boolean(event.target.closest("button, input, select, textarea, .tool-card"));
+    if (terrainBrushMode && !interiorObject && !pointerFromUi && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const target = dragGroundTarget(event);
+      if (target) {
+        event.preventDefault();
+        sculptTerrainAtWorldPoint(terrainBrushMode, target);
+        return;
+      }
+    }
     // Object grab: Ctrl/Cmd + drag on a mouse picks up ANY object (auto-selecting it); plain drag is
     // ALWAYS camera orbit so the two never fight. Touch (no modifier keys) keeps the old rule: press
     // the already-selected object to drag it.
@@ -8557,6 +8568,7 @@ function createTellusWorld(
     boardGenerated,
     disembark,
     setGeneratedPet,
+    setTerrainBrush,
     sculptTerrain,
     importGeneratedThings,
     setSkyboxUrl,
@@ -8860,6 +8872,12 @@ function App(): React.ReactElement {
     remoteVisitors: [],
   });
   const [prompt, setPrompt] = useState("");
+  const [terrainBrushMode, setTerrainBrushMode] = useState<TerrainEditMode | null>(null);
+  const selectTerrainBrush = (mode: TerrainEditMode) => {
+    const next = terrainBrushMode === mode ? null : mode;
+    setTerrainBrushMode(next);
+    worldRef.current?.setTerrainBrush(next);
+  };
   // Live Tellus account (null when logged out). World deletion is ultimately
   // server-gated; the world list carries can_delete for owners/admins.
   const account = useTellusAuth();
@@ -14864,72 +14882,72 @@ function App(): React.ReactElement {
           <div className="terrain-material-swatches">
             <button
               type="button"
-              className="terrain-swatch meadow"
-              onClick={() => worldRef.current?.sculptTerrain("meadow")}
+              className={`terrain-swatch meadow ${terrainBrushMode === "meadow" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("meadow")}
             >
               <span className="terrain-swatch-preview" />
               <span>Meadow</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch grass"
-              onClick={() => worldRef.current?.sculptTerrain("grass")}
+              className={`terrain-swatch grass ${terrainBrushMode === "grass" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("grass")}
             >
               <span className="terrain-swatch-preview" />
               <span>Grass</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch beach"
-              onClick={() => worldRef.current?.sculptTerrain("beach")}
+              className={`terrain-swatch beach ${terrainBrushMode === "beach" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("beach")}
             >
               <span className="terrain-swatch-preview" />
               <span>Beach</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch dirt"
-              onClick={() => worldRef.current?.sculptTerrain("dirt")}
+              className={`terrain-swatch dirt ${terrainBrushMode === "dirt" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("dirt")}
             >
               <span className="terrain-swatch-preview" />
               <span>Dirt</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch pebbles"
-              onClick={() => worldRef.current?.sculptTerrain("rock")}
+              className={`terrain-swatch pebbles ${terrainBrushMode === "rock" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("rock")}
             >
               <span className="terrain-swatch-preview" />
               <span>Pebbles</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch snow"
-              onClick={() => worldRef.current?.sculptTerrain("snow")}
+              className={`terrain-swatch snow ${terrainBrushMode === "snow" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("snow")}
             >
               <span className="terrain-swatch-preview" />
               <span>Snow</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch flowers"
-              onClick={() => worldRef.current?.sculptTerrain("flowers")}
+              className={`terrain-swatch flowers ${terrainBrushMode === "flowers" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("flowers")}
             >
               <span className="terrain-swatch-preview" />
               <span>Flowers</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch stone"
-              onClick={() => worldRef.current?.sculptTerrain("stone")}
+              className={`terrain-swatch stone ${terrainBrushMode === "stone" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("stone")}
             >
               <span className="terrain-swatch-preview" />
               <span>Stone Slabs</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch brick"
-              onClick={() => worldRef.current?.sculptTerrain("brick")}
+              className={`terrain-swatch brick ${terrainBrushMode === "brick" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("brick")}
             >
               <span className="terrain-swatch-preview" />
               <span>Brick</span>

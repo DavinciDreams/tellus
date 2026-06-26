@@ -302,6 +302,7 @@ export interface TellusWorldApi {
   boardGenerated(id: string): void;
   disembark(): void;
   setGeneratedPet(id: string, isPet: boolean): void;
+  setTerrainBrush(mode: TerrainEditMode | null): void;
   sculptTerrain(mode: TerrainEditMode): void;
   importGeneratedThings(things: WorldGeneratedThing[]): void;
   setSkyboxUrl(url: string): Promise<string | null>;

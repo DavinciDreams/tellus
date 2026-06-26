@@ -422,7 +422,11 @@ export function createChunkRenderer(
         const z = chunkZ0 + (zi / CHUNK_SEGMENTS) * CHUNK_SPAN;
         for (let xi = 0; xi < CHUNK_VERTEX_COUNT; xi++) {
           const x = chunkX0 + (xi / CHUNK_SEGMENTS) * CHUNK_SPAN;
-          if ((x - worldX) ** 2 + (z - worldZ) ** 2 > radiusSq) continue;
+          const distanceSq = (x - worldX) ** 2 + (z - worldZ) ** 2;
+          if (distanceSq > radiusSq) continue;
+          const falloff =
+            (1 + Math.cos((Math.sqrt(distanceSq) / radius) * Math.PI)) * 0.5;
+          if (falloff < 0.18) continue;
           const index = zi * CHUNK_VERTEX_COUNT + xi;
           if (paint[index] === paintCode) continue;
           paint[index] = paintCode;

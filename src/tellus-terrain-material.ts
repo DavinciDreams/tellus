@@ -559,6 +559,9 @@ float tellusBrickMortar(vec2 f){
   vec2 edge = min(f, 1.0 - f);
   return 1.0 - step(0.075, min(edge.x, edge.y));
 }
+float tellusHash2(vec2 p){
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
 vec3 tellusRunningBondBrick(vec2 worldPos){
   vec2 brickUv = vec2(worldPos.x / 1.08, worldPos.y / 0.42);
   brickUv.x += floor(brickUv.y) * 0.5;
@@ -582,6 +585,16 @@ vec3 tellusStoneSlabs(vec2 worldPos){
   float chip = fract(sin(dot(cell, vec2(23.17, 31.91))) * 43758.5453);
   vec3 slab = mix(vec3(0.42, 0.43, 0.42), vec3(0.72, 0.74, 0.70), chip);
   return mix(slab, vec3(0.30, 0.31, 0.30), mortar);
+}
+vec3 tellusRockSurface(vec2 worldPos, vec3 base){
+  vec2 cell = floor(worldPos * 0.82);
+  vec2 fineCell = floor(worldPos * 3.7);
+  float slab = tellusHash2(cell);
+  float grain = tellusHash2(fineCell);
+  float seam = step(0.86, abs(sin(worldPos.x * 1.7 + slab * 4.0))) *
+    step(0.76, abs(sin(worldPos.y * 1.3 + slab * 5.0)));
+  vec3 rock = base * mix(0.72, 1.18, slab) * mix(0.92, 1.08, grain);
+  return mix(rock, rock * 0.48, seam * 0.42);
 }`,
       )
       .replace(
@@ -607,7 +620,7 @@ vec3 tellusStoneSlabs(vec2 worldPos){
     vec3 grassAlbedo = mossSample * vec3(1.08, 1.12, 0.82);
     vec3 sandAlbedo = sandSample * vec3(1.04, 0.98, 0.86);
     vec3 dirtAlbedo = sandSample * vec3(0.70, 0.50, 0.36);
-    vec3 rockAlbedo = rockSample * vec3(0.82, 0.86, 0.82);
+    vec3 rockAlbedo = tellusRockSurface(vTellusWorldPos.xz, rockSample * vec3(0.82, 0.86, 0.82));
     vec3 cobblestoneAlbedo = tellusStoneSlabs(vTellusWorldPos.xz);
     vec3 brickAlbedo = tellusRunningBondBrick(vTellusWorldPos.xz);
     vec3 biomeAlbedo =

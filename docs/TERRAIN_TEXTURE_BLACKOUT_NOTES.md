@@ -46,7 +46,8 @@ striped/tiling pattern that looked like sand dunes under every paint kind.
 - moss for meadow, flowers, and grass, with per-paint tinting to keep the
   labels visually distinct without adding more samplers
 - sand for beach and dirt, with dirt using an earthy tint
-- gravel tinted cool grey for rock/pebbles
+- gravel tinted cool grey for rock/pebbles, with procedural mottling and
+  fracture variation
 - procedural varied gray stone slabs for paths, patios, and stone circles
 - procedural red running-bond brick for brick paths
 
