@@ -4430,13 +4430,6 @@ function createTellusWorld(
   const footprintGroundY = (thing: GeneratedThing): number | null =>
     footprintGroundYAt(thing, thing.position.x, thing.position.z);
 
-  const liveGroundYAt = (x: number, z: number): number | null => {
-    const rendered = renderedTerrainHeightAt(x, z);
-    if (rendered !== null && Number.isFinite(rendered)) return rendered;
-    const analytic = groundHeightAt(x, z);
-    return analytic !== null && Number.isFinite(analytic) ? analytic : null;
-  };
-
   const liveGroundOffsetFrom = (thing: GeneratedThing): number | null => {
     const groundY = footprintGroundY(thing);
     return groundY !== null && Number.isFinite(groundY)
@@ -5532,6 +5525,17 @@ function createTellusWorld(
       : groundedPositionForCurrentSurface(x, z, thing.position);
   };
 
+  const liftPetToRenderedTerrain = (pet: GeneratedThing): boolean => {
+    if (isFreeMovingVehicle(pet)) return false;
+    const liveGround = footprintGroundY(pet);
+    if (liveGround === null || !Number.isFinite(liveGround)) return false;
+    if (liveGround <= pet.position.y + 0.05) return false;
+    pet.position = { ...pet.position, y: liveGround };
+    updateThingMeshPosition(pet);
+    refreshInstancedThingMatrix(pet);
+    return true;
+  };
+
   const syncPetsToOwner = (delta: number, forceTeleport = false) => {
     const pets = localPetThings();
     const ownerMoveDistance = Math.hypot(
@@ -5568,6 +5572,7 @@ function createTellusWorld(
             z: pet.position.z + dz * t,
           };
         }
+        liftPetToRenderedTerrain(pet);
         const mdx = pet.position.x - previous.x;
         const mdz = pet.position.z - previous.z;
         if (Math.hypot(mdx, mdz) > 0.001) {
