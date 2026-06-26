@@ -4108,6 +4108,26 @@ function createTellusWorld(
     return null;
   };
 
+  const lowestInteriorFloorHeightAt = (x: number, z: number): number | null => {
+    if (!interiorObject) return null;
+    const clamped = clampInteriorPlacementXZ(x, z);
+    terrainRayOrigin.set(clamped.x, 32, clamped.z);
+    terrainRaycaster.set(terrainRayOrigin, terrainRayDirection);
+    terrainRaycaster.far = 80;
+    const hits = terrainRaycaster.intersectObject(interiorObject, true);
+    let lowest: number | null = null;
+    for (const h of hits) {
+      const n = h.face?.normal;
+      if (!n) continue;
+      const worldN = n.clone().applyNormalMatrix(
+        new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld),
+      );
+      if (worldN.y <= 0.45) continue;
+      if (lowest === null || h.point.y < lowest) lowest = h.point.y;
+    }
+    return lowest;
+  };
+
   const interiorPlacementPosition = (x: number, z: number, referenceY = visitorPosition.y): Vec3 => {
     const clamped = clampInteriorPlacementXZ(x, z);
     return {
@@ -4205,6 +4225,31 @@ function createTellusWorld(
       : isIntentionallyOffsetFromGround(thing);
   };
 
+  const interiorVisiblePlacementForThing = (thing: GeneratedThing): Vec3 => {
+    const referenceFloorY =
+      interiorFloorHeightAt(thing.position.x, thing.position.z, visitorPosition.y) ??
+      interiorPlacementPosition(thing.position.x, thing.position.z, visitorPosition.y).y;
+    const lowestFloorY = lowestInteriorFloorHeightAt(thing.position.x, thing.position.z);
+    const floorY =
+      lowestFloorY !== null && referenceFloorY - lowestFloorY > 4.75
+        ? lowestFloorY
+        : referenceFloorY;
+    const offset = thing.position.y - floorY;
+    const intentionalOffset = Math.abs(offset) > 0.35 && Math.abs(offset) <= 2.5;
+    return {
+      ...thing.position,
+      y: intentionalOffset ? floorY + offset : floorY,
+    };
+  };
+
+  const repairInteriorThingPosition = (thing: GeneratedThing): boolean => {
+    if (!interiorObject || isFreeMovingVehicle(thing)) return false;
+    const fixed = interiorVisiblePlacementForThing(thing);
+    if (Math.abs(fixed.y - thing.position.y) <= 0.05) return false;
+    thing.position = fixed;
+    return true;
+  };
+
   const runtimeProfileForThing = (
     thing: GeneratedThing,
     options: { mounted?: boolean; includeRenderedGround?: boolean } = {},
@@ -4230,6 +4275,12 @@ function createTellusWorld(
       updateSelectionIndicator();
       return;
     }
+    if (interiorObject) {
+      placeObjectAboveGround(mesh, interiorVisiblePlacementForThing(thing), 0.04);
+      refreshInstancedThingMatrix(thing);
+      updateSelectionIndicator();
+      return;
+    }
     // Chunked worlds: the stored thing.position.y may have been grounded against the flat base
     // (sampleHeight returns null until the owning chunk streams in), so once the sculpted chunk loads
     // the asset would sit BELOW the surface. Re-sample the live rendered ground here so the model's
@@ -4241,7 +4292,7 @@ function createTellusWorld(
     // updateThingMeshPosition (incl. once per asset during the load storm) and being thrown away — the
     // cause of the multi-second load freeze with many assets. Skip it entirely outside chunked worlds.
     const liveGround =
-      (isChunked || interiorObject) && !isVisiblyOffsetFromLiveGround(thing) ? footprintGroundY(thing) : null;
+      isChunked && !isVisiblyOffsetFromLiveGround(thing) ? footprintGroundY(thing) : null;
     const placeAt =
       liveGround !== null && Number.isFinite(liveGround)
         ? { ...thing.position, y: liveGround }
@@ -4690,6 +4741,9 @@ function createTellusWorld(
           generatedMeshes.set(id, model);
           startGeneratedAnimation(id, model);
           scene.add(model);
+          if (interiorObject && !isFreeMovingVehicle(current)) {
+            placeObjectAboveGround(model, interiorVisiblePlacementForThing(current), 0.04);
+          }
           updateThingMeshPosition(current);
           syncTransformControls();
           reevaluateInstanceGroup(modelUrl);
@@ -4855,6 +4909,7 @@ function createTellusWorld(
         existing.animationClips = normalized.animationClips;
       }
       applyGenerationState(existing, normalized);
+      const repairedInteriorPosition = repairInteriorThingPosition(existing);
       ensureGeneratedVisual(existing);
       updateThingMeshPosition(existing);
       // A remote animation pick on an already-loaded model restarts the loop in place (a model
@@ -4868,7 +4923,7 @@ function createTellusWorld(
       loadRemoteGeneratedModel(existing);
       reconcileRemoteGeneratedManifest(existing);
       reconcileFailedAssetStorePrompt(existing);
-      if (healedPending) {
+      if (healedPending || repairedInteriorPosition) {
         publishGeneratedThing(existing);
       }
       return;
@@ -4894,6 +4949,7 @@ function createTellusWorld(
       animationClips: normalized.animationClips,
     };
     generated.push(thing);
+    const repairedInteriorPosition = repairInteriorThingPosition(thing);
     const mesh = shouldShowGenerationSwirl(thing)
       ? createGenerationSwirl(thing)
       : createGeneratedMesh(thing);
@@ -4904,7 +4960,7 @@ function createTellusWorld(
     loadRemoteGeneratedModel(thing);
     reconcileRemoteGeneratedManifest(thing);
     reconcileFailedAssetStorePrompt(thing);
-    if (healedPending) {
+    if (healedPending || repairedInteriorPosition) {
       publishGeneratedThing(thing);
     }
   };
@@ -6060,6 +6116,9 @@ function createTellusWorld(
         generatedMeshes.set(thing.id, modelObject);
         startGeneratedAnimation(thing.id, modelObject); // VRM idle / embedded clip starts looping
         scene.add(modelObject);
+        if (interiorObject && !isFreeMovingVehicle(thing)) {
+          placeObjectAboveGround(modelObject, interiorVisiblePlacementForThing(thing), 0.04);
+        }
         updateThingMeshPosition(thing);
         syncTransformControls();
         publish();
