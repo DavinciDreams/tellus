@@ -4430,6 +4430,13 @@ function createTellusWorld(
   const footprintGroundY = (thing: GeneratedThing): number | null =>
     footprintGroundYAt(thing, thing.position.x, thing.position.z);
 
+  const liveGroundYAt = (x: number, z: number): number | null => {
+    const rendered = renderedTerrainHeightAt(x, z);
+    if (rendered !== null && Number.isFinite(rendered)) return rendered;
+    const analytic = groundHeightAt(x, z);
+    return analytic !== null && Number.isFinite(analytic) ? analytic : null;
+  };
+
   const liveGroundOffsetFrom = (thing: GeneratedThing): number | null => {
     const groundY = footprintGroundY(thing);
     return groundY !== null && Number.isFinite(groundY)
