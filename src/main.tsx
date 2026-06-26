@@ -4374,7 +4374,14 @@ function createTellusWorld(
     if (transformControlsHelper) transformControlsHelper.visible = true;
   };
 
-  const worldGeneratedThing = (thing: GeneratedThing): WorldGeneratedThing => ({
+  const pendingGeneratedUpsertAt = new Map<string, number>();
+
+  const generatedUpdateTime = (thing: Pick<WorldGeneratedThing, "updatedAt">): number => {
+    const ms = Date.parse(thing.updatedAt);
+    return Number.isFinite(ms) ? ms : 0;
+  };
+
+  const worldGeneratedThing = (thing: GeneratedThing, updatedAt = new Date().toISOString()): WorldGeneratedThing => ({
     id: thing.id,
     kind: thing.kind,
     prompt: thing.prompt,
@@ -4399,7 +4406,7 @@ function createTellusWorld(
     // "" = explicit "not a pet". ABSENT from a mid-rollout server means "keep local value".
     petOwnerId: thing.petOwnerId ?? "",
     animationClips: thing.animationClips,
-    updatedAt: new Date().toISOString(),
+    updatedAt,
   });
 
   const resolveAssetBackedModel = (
@@ -4544,11 +4551,13 @@ function createTellusWorld(
 
   const publishGeneratedThing = (thing: GeneratedThing) => {
     saveGeneratedPlacementSnapshot();
+    const updatedAt = new Date().toISOString();
+    pendingGeneratedUpsertAt.set(thing.id, Date.parse(updatedAt));
     if (!tellusWorldBackendAvailable) return;
     const action = {
       type: "generated.upsert",
       visitorId,
-      thing: worldGeneratedThing(thing),
+      thing: worldGeneratedThing(thing, updatedAt),
     };
     if (worldSocket?.readyState === WebSocket.OPEN) {
       worldSocket.send(JSON.stringify(action));
@@ -4876,6 +4885,14 @@ function createTellusWorld(
     const normalized = normalizeGeneratedThing(remote);
     const existing = thingById(normalized.id);
     if (existing) {
+      const remoteUpdatedAt = generatedUpdateTime(normalized);
+      const pendingUpdatedAt = pendingGeneratedUpsertAt.get(existing.id) ?? 0;
+      if (remoteUpdatedAt > 0 && pendingUpdatedAt > 0 && remoteUpdatedAt < pendingUpdatedAt) {
+        return;
+      }
+      if (remoteUpdatedAt >= pendingUpdatedAt) {
+        pendingGeneratedUpsertAt.delete(existing.id);
+      }
       const locallyRidden = existing.id === sailingThingId;
       existing.kind = normalized.kind as GeneratedKind;
       existing.prompt = normalized.prompt;
