@@ -107,6 +107,24 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
   let staticBody: RigidBody | null = null;
   const staticColliders = new Map<string, Collider[]>();
 
+  const safeRemoveCollider = (collider: Collider): void => {
+    try {
+      world.removeCollider(collider, false);
+    } catch (error) {
+      // Rapier can throw "recursive use of an object" during teardown if a collider has already been
+      // detached by a body/world free path. Treat removal as best-effort; stale JS handles are dropped.
+      console.warn("Tellus Rapier collider removal skipped", error);
+    }
+  };
+
+  const safeRemoveRigidBody = (body: RigidBody): void => {
+    try {
+      world.removeRigidBody(body);
+    } catch (error) {
+      console.warn("Tellus Rapier static body removal skipped", error);
+    }
+  };
+
   const ensureStaticBody = (): RigidBody => {
     if (!staticBody) {
       staticBody = world.createRigidBody(RigidBodyDesc.fixed());
@@ -117,8 +135,8 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
   const removeStaticId = (id: string) => {
     const list = staticColliders.get(id);
     if (!list) return;
-    for (const collider of list) world.removeCollider(collider, false);
     staticColliders.delete(id);
+    for (const collider of list) safeRemoveCollider(collider);
     collisionWorldDirty = true;
   };
 
@@ -160,8 +178,8 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
   const removeSolid = (id: string) => {
     const entry = colliders.get(id);
     if (!entry) return;
-    world.removeCollider(entry.collider, false);
     colliders.delete(id);
+    safeRemoveCollider(entry.collider);
     collisionWorldDirty = true;
   };
 
@@ -332,7 +350,7 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
       if (disposed || failed) return;
       for (const id of [...staticColliders.keys()]) removeStaticId(id);
       if (staticBody) {
-        world.removeRigidBody(staticBody);
+        safeRemoveRigidBody(staticBody);
         staticBody = null;
       }
       collisionWorldDirty = true;
@@ -345,15 +363,19 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
     },
     dispose() {
       disposed = true;
-      controller.free();
-      for (const entry of colliders.values()) world.removeCollider(entry.collider, false);
       colliders.clear();
-      // Interior statics + their shared body are owned by `world`; world.free() releases them, but
-      // drop our references so a post-dispose hasStatics() reports clean.
       staticColliders.clear();
       staticBody = null;
-      world.removeCollider(playerCollider, false);
-      world.free();
+      try {
+        controller.free();
+      } catch (error) {
+        console.warn("Tellus Rapier controller disposal skipped", error);
+      }
+      try {
+        world.free();
+      } catch (error) {
+        console.warn("Tellus Rapier world disposal skipped", error);
+      }
     },
   };
 
