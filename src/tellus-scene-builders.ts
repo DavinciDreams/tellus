@@ -199,16 +199,63 @@ function resolvedWaterSettings(settings?: Partial<WaterSettings>): WaterSettings
   };
 }
 
-export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): THREE.MeshBasicMaterial {
+export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): THREE.ShaderMaterial {
   const water = resolvedWaterSettings(settings);
   const palette = WATER_STYLE_COLORS[water.style];
-  return new THREE.MeshBasicMaterial({
-    color: new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.38),
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uDeepColor: { value: new THREE.Color(palette.deep) },
+      uShallowColor: { value: new THREE.Color(palette.shallow) },
+      uFoamColor: { value: new THREE.Color(palette.foam) },
+      uTintColor: { value: new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.38) },
+      uOpacity: { value: water.opacity },
+      uWaveStrength: { value: water.waveStrength },
+    },
+    vertexShader: `
+      varying vec2 vWorldXZ;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldXZ = worldPosition.xz;
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform vec3 uDeepColor;
+      uniform vec3 uShallowColor;
+      uniform vec3 uFoamColor;
+      uniform vec3 uTintColor;
+      uniform float uOpacity;
+      uniform float uWaveStrength;
+      varying vec2 vWorldXZ;
+
+      float waveLine(vec2 p, vec2 dir, float scale, float speed, float width) {
+        float v = sin(dot(p, normalize(dir)) * scale + uTime * speed);
+        return smoothstep(1.0 - width, 1.0, v);
+      }
+
+      void main() {
+        vec2 p = vWorldXZ * 0.018;
+        float wave = waveLine(p, vec2(1.0, 0.35), 7.4, 0.85, 0.18);
+        wave += waveLine(p, vec2(-0.25, 1.0), 10.8, 0.62, 0.13) * 0.68;
+        wave += waveLine(p + wave * 0.08, vec2(0.75, -0.65), 17.0, 1.15, 0.09) * 0.38;
+        float broad = sin((p.x * 2.1 + p.y * 1.3) + uTime * 0.28) * 0.5 + 0.5;
+        float surface = clamp((wave * (0.28 + uWaveStrength * 0.36)) + broad * 0.34, 0.0, 1.0);
+        vec3 water = mix(uDeepColor, uShallowColor, surface);
+        float foam = smoothstep(0.74, 1.0, surface) * (0.38 + uWaveStrength * 0.22);
+        water = mix(water, uFoamColor, foam);
+        water = mix(water, uTintColor, 0.18);
+        gl_FragColor = vec4(water, uOpacity);
+      }
+    `,
     transparent: true,
-    opacity: water.opacity,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
+  material.userData.tellusWaterShader = true;
+  return material;
 }
 
 export function createOceanSurface(

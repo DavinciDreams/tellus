@@ -7109,6 +7109,14 @@ function createTellusWorld(
       }
       oceanMaterial.color.copy(oceanColor);
       oceanMaterial.opacity = (0.58 + daylight * 0.14) * mood.opacity;
+    } else if (oceanMaterial instanceof THREE.ShaderMaterial && oceanMaterial.userData.tellusWaterShader) {
+      if (mood.oceanTint && mood.oceanTintStrength) {
+        oceanColor.lerp(mood.oceanTint, mood.oceanTintStrength);
+      }
+      oceanMaterial.uniforms.uTintColor?.value.copy(oceanColor);
+      if (oceanMaterial.uniforms.uOpacity) {
+        oceanMaterial.uniforms.uOpacity.value = (0.58 + daylight * 0.14) * mood.opacity;
+      }
     }
   };
 
@@ -7421,6 +7429,10 @@ function createTellusWorld(
       tickAvatarScale(mesh, delta);
     }
     syncMeshes(now);
+    const oceanMaterial = ocean.material;
+    if (oceanMaterial instanceof THREE.ShaderMaterial && oceanMaterial.userData.tellusWaterShader) {
+      oceanMaterial.uniforms.uTime.value = now * 0.001;
+    }
     tickSharedStatic(now);
     updateSelectionIndicator(now);
     syncTransformControls();
