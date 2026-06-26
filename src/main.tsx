@@ -726,8 +726,8 @@ function createTellusWorld(
       return null;
     }
   })();
-  // WebGL is useful for testing guarded terrain image textures without touching browser WebGPU flags.
-  const useWebGPU = rendererPreference !== "webgl" && "gpu" in navigator;
+  // WebGL is the default while terrain image textures are WebGL-only; WebGPU remains opt-in.
+  const useWebGPU = rendererPreference === "webgpu" && "gpu" in navigator;
   // Visual terrain density (decoupled from the synced 97² sculpt grid). FIXED vertex budget no
   // matter the world scale — bigger worlds stretch the same ~50K-vertex mesh instead of multiplying
   // it (operator: range over thickness; worlds get larger for less).
