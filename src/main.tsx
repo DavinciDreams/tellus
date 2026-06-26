@@ -4089,36 +4089,18 @@ function createTellusWorld(
     return fp;
   };
 
-  const renderedTerrainHeightAt = (x: number, z: number): number | null => {
+  const renderedTerrainHeightAt = (x: number, z: number, referenceY = visitorPosition.y): number | null => {
+    if (interiorObject) return interiorFloorHeightAt(x, z, referenceY);
     terrainRayTargets.length = 0;
     if (terrain.visible) terrainRayTargets.push(terrain);
     const chunkTerrain = scene.getObjectByName("tellus-chunk-terrain");
     if (chunkTerrain) terrainRayTargets.push(chunkTerrain);
-    // In an interior the real floor is the room's solid meshes — add them as ray targets so furniture
-    // rests on the actual floor/mezzanine surface (footprintGroundY) instead of the y=0 flat base.
-    if (interiorObject) terrainRayTargets.push(interiorObject);
     if (terrainRayTargets.length === 0) return null;
     terrainRayOrigin.set(x, 480, z);
     terrainRaycaster.set(terrainRayOrigin, terrainRayDirection);
     terrainRaycaster.far = 780;
-    if (!interiorObject) {
-      // Outdoor fast path: nearest (highest) hit is the surface.
-      const hit = terrainRaycaster.intersectObjects(terrainRayTargets, true)[0];
-      return hit ? hit.point.y : null;
-    }
-    // Interior: a top-down ray hits the CEILING before the floor, so take the highest UP-FACING
-    // surface (face normal world-Y > 0) — a floor/mezzanine/stair tread, never a ceiling underside.
-    const hits = terrainRaycaster.intersectObjects(terrainRayTargets, true);
-    for (const h of hits) {
-      const n = h.face?.normal;
-      if (!n) return h.point.y; // terrain hit (no per-face cull needed) — first is highest
-      // Transform the face normal into world space to test its vertical component.
-      const worldN = n.clone().applyNormalMatrix(
-        new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld),
-      );
-      if (worldN.y > 0.3) return h.point.y;
-    }
-    return null;
+    const hit = terrainRaycaster.intersectObjects(terrainRayTargets, true)[0];
+    return hit ? hit.point.y : null;
   };
 
   // Highest terrain height under a thing's footprint. With the wider terrain height variability,
@@ -4127,9 +4109,10 @@ function createTellusWorld(
   // footprint radius and taking the MAX rests the object ON the surface instead of inside it. Returns
   // null only when no sample resolves (async terrain not loaded yet).
   const footprintGroundY = (thing: GeneratedThing): number | null => {
-    let bestRendered: number | null = renderedTerrainHeightAt(thing.position.x, thing.position.z);
+    const referenceY = interiorObject ? visitorPosition.y : thing.position.y;
+    let bestRendered: number | null = renderedTerrainHeightAt(thing.position.x, thing.position.z, referenceY);
     let bestAnalytic = interiorObject
-      ? interiorFloorHeightAt(thing.position.x, thing.position.z, thing.position.y)
+      ? interiorFloorHeightAt(thing.position.x, thing.position.z, referenceY)
       : groundHeightAt(thing.position.x, thing.position.z);
     const fp = thingFootprint(thing);
     const r = Math.min(fp?.radius ?? 0, 6);
@@ -4138,7 +4121,7 @@ function createTellusWorld(
         const a = (i / 8) * Math.PI * 2;
         const x = thing.position.x + Math.cos(a) * r;
         const z = thing.position.z + Math.sin(a) * r;
-        const rendered = renderedTerrainHeightAt(x, z);
+        const rendered = renderedTerrainHeightAt(x, z, referenceY);
         if (
           rendered !== null &&
           Number.isFinite(rendered) &&
@@ -4147,7 +4130,7 @@ function createTellusWorld(
           bestRendered = rendered;
         }
         const analytic = interiorObject
-          ? interiorFloorHeightAt(x, z, thing.position.y)
+          ? interiorFloorHeightAt(x, z, referenceY)
           : groundHeightAt(x, z);
         if (
           analytic !== null &&
@@ -8672,7 +8655,7 @@ function createTellusWorld(
     const roomSceneUrl = sceneUrl?.trim() || GENERATED_INTERIOR_SCENE_URL;
     const x = Math.round(visitorPosition.x);
     const z = Math.round(visitorPosition.z);
-    const y = groundHeightAt(x, z) ?? visitorPosition.y ?? SEA_LEVEL;
+    const y = groundedPositionForCurrentSurface(x, z, visitorPosition).y;
     sendPortalUpsert({
       id: makeId("door"),
       worldId: runtimeConfig.worldId,
