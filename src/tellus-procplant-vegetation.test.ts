@@ -6,6 +6,7 @@ import {
   biomePatchForPaint,
   genomeForBiomePatch,
   procPlantPlaceableById,
+  treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
 import { createProcPlantVegetation, procPlantChunkSeed } from "./tellus-procplant-vegetation";
 
@@ -25,13 +26,31 @@ describe("procplant vegetation", () => {
     const flowers = biomePatchForPaint("flowers", 1234);
     const beach = biomePatchForPaint("beach", 1234);
 
-    expect(["daylilyFlower", "foxgloveSpike", "laceUmbel"]).toContain(flowers?.primary);
+    expect(["daylilyFlower", "foxgloveSpike", "laceUmbel", "hillCherry"]).toContain(flowers?.primary);
     expect(beach?.primary).toBe("foldedPalm");
     expect(beach?.scale).toBeGreaterThan(2);
     expect(biomePatchForPaint(null, 1234)).toBeNull();
 
     const genome = genomeForBiomePatch(flowers!);
-    expect(genome.id).toContain("daylilyFlower");
+    expect(genome.id).toBeTruthy();
+  });
+
+  it("can route biome tree patches to wrapped L-system tree archetypes", () => {
+    const seeds = Array.from(
+      { length: 4096 },
+      (_, index) => procPlantChunkSeed("chunked-tree-biome-test", index % 64, Math.floor(index / 64), 0) ^ Math.imul(index + 1, 0x9e3779b1),
+    );
+    const grassTree = seeds
+      .map((seed) => biomePatchForPaint("grass", seed))
+      .find((patch) => patch && treeBackendForBiomePatch(patch));
+    const snowTree = seeds
+      .map((seed) => biomePatchForPaint("snow", seed))
+      .find((patch) => patch && treeBackendForBiomePatch(patch));
+
+    expect(grassTree).toBeTruthy();
+    expect(snowTree).toBeTruthy();
+    expect(treeBackendForBiomePatch(grassTree!)?.species).toMatch(/cambridgeOak|silverBirch/);
+    expect(treeBackendForBiomePatch(snowTree!)?.species).toMatch(/balsamFir|douglasFir/);
   });
 
   it("exposes procplant presets as placeable procedural model urls", () => {

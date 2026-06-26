@@ -5,7 +5,9 @@ import {
   biomePatchForPaint,
   environmentForBiomePatch,
   genomeForBiomePatch,
+  treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
+import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 import {
   buildProcPlantInstancedParts,
   createProcPlantConiferSprayGeometry,
@@ -87,6 +89,27 @@ const DEFAULT_CHUNK_SIZE = 12;
 const DEFAULT_MAX_RING = 2;
 const MAX_LOD0_PLANTS = 16;
 const MAX_LOD1_PLANTS = 6;
+
+const buildBiomeTreeTemplate = (
+  species: string,
+  seed: number,
+  options: {
+    leafScaleMultiplier?: number;
+    maxLeaves?: number;
+    maxStems?: number;
+    maxBranchDepth?: number;
+  } = {},
+): ProcPlantTemplate =>
+  treeTemplateFromSpecies(species, seed, {
+    radialSegments: 3,
+    branchSamples: 1,
+    branchCaps: false,
+    maxBranchDepth: options.maxBranchDepth ?? 2,
+    maxStems: options.maxStems ?? 42,
+    maxLeaves: options.maxLeaves ?? 170,
+    leafScaleMultiplier: options.leafScaleMultiplier ?? 2,
+    swayFrom: 0.3,
+  });
 
 const manualPlacementStorageKey = (worldId: string): string =>
   `tellus.procplants.manual.${worldId}`;
@@ -284,7 +307,7 @@ export function createProcPlantVegetation(
   const manualPlacementChunks = new Map<string, string>();
   const queued = new Set<string>();
   const rebuildQueue: string[] = [];
-  const stemMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const stemMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   const organMaterial = new THREE.MeshLambertMaterial({
     color: 0xffffff,
     side: THREE.DoubleSide,
@@ -368,6 +391,19 @@ export function createProcPlantVegetation(
       const paint = options.samplePaint(x, z);
       const patch = biomePatchForPaint(paint, seed ^ Math.imul(i + 1, 0x9e3779b1));
       if (!patch || rand() > patch.density * densityMultiplier * (chunk.lod === 0 ? 1 : 0.58)) continue;
+      const treeBackend = treeBackendForBiomePatch(patch);
+      if (treeBackend?.kind === "lsystem") {
+        const template = buildBiomeTreeTemplate(treeBackend.species, patch.seed ^ i, treeBackend);
+        const scale = patch.scale * THREE.MathUtils.lerp(0.86, 1.16, rand());
+        const matrix = new THREE.Matrix4()
+          .makeRotationY(rand() * Math.PI * 2)
+          .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
+          .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02, z));
+        stemTemplates.push({ template, matrix });
+        chunk.stats.plants++;
+        chunk.stats.stemTriangles += template.idx.length / 3;
+        continue;
+      }
       const genome = genomeForBiomePatch(patch);
       const env = environmentForBiomePatch(patch);
       const built = buildProcPlantInstancedParts(genome, patch.seed ^ i, env);

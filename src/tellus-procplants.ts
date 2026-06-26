@@ -16,6 +16,7 @@ export type ProcPlantHabit =
   | "tropical"
   | "shrub"
   | "vine"
+  | "tree"
   | "conifer"
   | "palm";
 
@@ -73,6 +74,12 @@ export interface ProcPlantGenome {
     pinnae: number;
     leafletPairs: number;
     arch: number;
+  };
+  tree?: {
+    crown: "rounded" | "columnar" | "umbrella" | "propRoot";
+    crownStart: number;
+    leafClusterScale: number;
+    exposedTrunk: number;
   };
   lightResponse: {
     shadeAvoidance: number;
@@ -906,21 +913,153 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       phototropism: 0.16,
     },
   },
+  oakCanopy: {
+    id: "oakCanopy",
+    habit: "tree",
+    nodeCount: 18,
+    internode: { base: 0.18, tip: 0.08, curve: 1.28 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.34, tip: 0.2, curve: 1.05 },
+    branchAngle: { mean: 0.68, spread: 0.32, depthDecay: 0.72 },
+    apicalDominance: 0.34,
+    leaf: {
+      shape: "ovate",
+      length: { base: 0.26, tip: 0.2, curve: 0.9 },
+      widthRatio: 0.54,
+      density: { base: 0.68, tip: 0.92, curve: 0.78 },
+      curl: 0.09,
+      serration: 0.12,
+      venation: 0.66,
+      colorA: 0x2a5426,
+      colorB: 0x83a94d,
+    },
+    tree: {
+      crown: "rounded",
+      crownStart: 0.34,
+      leafClusterScale: 1.05,
+      exposedTrunk: 0.28,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.42,
+      leafBoostInShade: 0.18,
+      branchSuppressionInShade: 0.18,
+      phototropism: 0.12,
+    },
+  },
+  birchGrove: {
+    id: "birchGrove",
+    habit: "tree",
+    nodeCount: 20,
+    internode: { base: 0.2, tip: 0.09, curve: 1.12 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.18, tip: 0.14, curve: 1 },
+    branchAngle: { mean: 0.46, spread: 0.22, depthDecay: 0.76 },
+    apicalDominance: 0.64,
+    leaf: {
+      shape: "round",
+      length: { base: 0.18, tip: 0.13, curve: 0.9 },
+      widthRatio: 0.68,
+      density: { base: 0.48, tip: 0.82, curve: 0.72 },
+      curl: 0.06,
+      serration: 0.22,
+      venation: 0.58,
+      colorA: 0x4b7034,
+      colorB: 0xb6c95e,
+    },
+    tree: {
+      crown: "columnar",
+      crownStart: 0.42,
+      leafClusterScale: 0.82,
+      exposedTrunk: 0.5,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.58,
+      leafBoostInShade: 0.16,
+      branchSuppressionInShade: 0.26,
+      phototropism: 0.2,
+    },
+  },
+  acaciaUmbrella: {
+    id: "acaciaUmbrella",
+    habit: "tree",
+    nodeCount: 15,
+    internode: { base: 0.18, tip: 0.075, curve: 1.25 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.14, tip: 0.34, curve: 0.78 },
+    branchAngle: { mean: 0.92, spread: 0.28, depthDecay: 0.74 },
+    apicalDominance: 0.42,
+    leaf: {
+      shape: "round",
+      length: { base: 0.13, tip: 0.1, curve: 0.9 },
+      widthRatio: 0.58,
+      density: { base: 0.36, tip: 0.86, curve: 0.58 },
+      curl: 0.08,
+      serration: 0.03,
+      venation: 0.36,
+      colorA: 0x385d2c,
+      colorB: 0xa6b75f,
+    },
+    tree: {
+      crown: "umbrella",
+      crownStart: 0.56,
+      leafClusterScale: 1.14,
+      exposedTrunk: 0.56,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.5,
+      leafBoostInShade: 0.08,
+      branchSuppressionInShade: 0.2,
+      phototropism: 0.1,
+    },
+  },
+  mangroveRoots: {
+    id: "mangroveRoots",
+    habit: "tree",
+    nodeCount: 15,
+    internode: { base: 0.14, tip: 0.075, curve: 1.15 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.28, tip: 0.18, curve: 1.1 },
+    branchAngle: { mean: 0.72, spread: 0.25, depthDecay: 0.72 },
+    apicalDominance: 0.38,
+    leaf: {
+      shape: "ovate",
+      length: { base: 0.22, tip: 0.17, curve: 0.88 },
+      widthRatio: 0.5,
+      density: { base: 0.62, tip: 0.88, curve: 0.82 },
+      curl: 0.1,
+      serration: 0.02,
+      venation: 0.58,
+      colorA: 0x24573b,
+      colorB: 0x82ad5a,
+    },
+    tree: {
+      crown: "propRoot",
+      crownStart: 0.36,
+      leafClusterScale: 0.96,
+      exposedTrunk: 0.32,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.34,
+      leafBoostInShade: 0.24,
+      branchSuppressionInShade: 0.18,
+      phototropism: 0.12,
+    },
+  },
   blueSpruce: {
     id: "blueSpruce",
     habit: "conifer",
-    nodeCount: 15,
-    internode: { base: 0.2, tip: 0.09, curve: 1.25 },
+    nodeCount: 18,
+    internode: { base: 0.22, tip: 0.085, curve: 1.28 },
     phyllotaxisAngle: GOLDEN_ANGLE,
-    branchChance: { base: 0.12, tip: 0.04, curve: 1.25 },
-    branchAngle: { mean: 0.72, spread: 0.18, depthDecay: 0.7 },
-    apicalDominance: 0.78,
+    branchChance: { base: 0.22, tip: 0.08, curve: 1.18 },
+    branchAngle: { mean: 0.82, spread: 0.2, depthDecay: 0.72 },
+    apicalDominance: 0.72,
     leaf: {
       shape: "linear",
-      length: { base: 0.7, tip: 0.36, curve: 1.1 },
-      widthRatio: 0.22,
-      density: { base: 0.78, tip: 0.58, curve: 1 },
-      curl: 0.12,
+      length: { base: 0.78, tip: 0.32, curve: 1.15 },
+      widthRatio: 0.18,
+      density: { base: 0.92, tip: 0.68, curve: 0.95 },
+      curl: 0.18,
       serration: 0,
       venation: 0.08,
       colorA: 0x263f32,
@@ -931,6 +1070,60 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       leafBoostInShade: 0.12,
       branchSuppressionInShade: 0.18,
       phototropism: 0.08,
+    },
+  },
+  alpineFir: {
+    id: "alpineFir",
+    habit: "conifer",
+    nodeCount: 20,
+    internode: { base: 0.2, tip: 0.07, curve: 1.42 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.28, tip: 0.1, curve: 1.32 },
+    branchAngle: { mean: 0.74, spread: 0.16, depthDecay: 0.74 },
+    apicalDominance: 0.82,
+    leaf: {
+      shape: "linear",
+      length: { base: 0.62, tip: 0.24, curve: 1.2 },
+      widthRatio: 0.16,
+      density: { base: 0.95, tip: 0.7, curve: 1.08 },
+      curl: 0.22,
+      serration: 0,
+      venation: 0.06,
+      colorA: 0x1f392e,
+      colorB: 0x6b8a63,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.22,
+      leafBoostInShade: 0.16,
+      branchSuppressionInShade: 0.12,
+      phototropism: 0.05,
+    },
+  },
+  redwoodSpire: {
+    id: "redwoodSpire",
+    habit: "conifer",
+    nodeCount: 24,
+    internode: { base: 0.24, tip: 0.08, curve: 1.22 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.16, tip: 0.06, curve: 1.18 },
+    branchAngle: { mean: 0.58, spread: 0.16, depthDecay: 0.78 },
+    apicalDominance: 0.9,
+    leaf: {
+      shape: "linear",
+      length: { base: 0.56, tip: 0.22, curve: 1.12 },
+      widthRatio: 0.18,
+      density: { base: 0.78, tip: 0.58, curve: 1 },
+      curl: 0.12,
+      serration: 0,
+      venation: 0.06,
+      colorA: 0x264735,
+      colorB: 0x78965e,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.36,
+      leafBoostInShade: 0.12,
+      branchSuppressionInShade: 0.12,
+      phototropism: 0.06,
     },
   },
   foldedPalm: {
@@ -1020,6 +1213,7 @@ export const hybridizePlantGenomes = (
     flower: pick(a.flower, b.flower),
     grass: pick(a.grass, b.grass),
     fern: pick(a.fern, b.fern),
+    tree: pick(a.tree, b.tree),
     lightResponse: {
       shadeAvoidance: THREE.MathUtils.lerp(
         a.lightResponse.shadeAvoidance,
@@ -1129,7 +1323,9 @@ export const buildProcPlantGraph = (
       ? 0.055
       : genome.habit === "conifer"
         ? 0.045
-        : genome.habit === "shrub"
+        : genome.habit === "tree"
+          ? 0.052
+          : genome.habit === "shrub"
           ? 0.035
           : genome.habit === "vine"
             ? 0.012
@@ -1188,17 +1384,31 @@ export const buildProcPlantGraph = (
       const organDir = rotateFromAxis(direction, azimuth, Math.PI / 2.6);
       const organRight = right.applyAxisAngle(direction, azimuth).normalize();
       const density = curve(genome.leaf.density, t) * (1 + shade * genome.lightResponse.leafBoostInShade);
-      if (genome.habit === "conifer" && t > 0.16 && rng() < density) {
-        const downSweep = Math.PI / 2.15 + t * 0.34;
-        organs.push({
-          kind: "coniferSpray",
-          position,
-          direction: rotateFromAxis(direction, azimuth, downSweep),
-          right: organRight,
-          scale: curve(genome.leaf.length, t) * (1.15 - t * 0.35) * (0.9 + rng() * 0.22),
-          t,
-        });
-      } else if (genome.habit !== "palm" && rng() < density || genome.habit === "tropical") {
+      if (genome.habit === "conifer" && t > 0.12 && rng() < density) {
+        const downSweep = Math.PI / 2.05 + t * 0.52 + depth * 0.14;
+        const sprayCount = depth === 0 && t < 0.88 ? 2 : 1;
+        for (let s = 0; s < sprayCount; s++) {
+          const sprayYaw = azimuth + s * Math.PI + (rng() - 0.5) * 0.12;
+          organs.push({
+            kind: "coniferSpray",
+            position,
+            direction: rotateFromAxis(direction, sprayYaw, downSweep),
+            right: organRight.clone().applyAxisAngle(direction, s * Math.PI).normalize(),
+            scale:
+              curve(genome.leaf.length, t) *
+              (1.12 - t * 0.38) *
+              Math.pow(0.78, depth) *
+              (0.84 + rng() * 0.24) *
+              (s === 0 ? 1 : 0.82),
+            t,
+          });
+        }
+      } else if (
+        (genome.habit !== "palm" &&
+          (genome.habit !== "tree" || t > (genome.tree?.crownStart ?? 0.42)) &&
+          rng() < density) ||
+        genome.habit === "tropical"
+      ) {
         organs.push({
           kind: "leaf",
           position,
@@ -1838,6 +2048,84 @@ export const buildProcPlantGraph = (
   }
 
   growAxis(0, 0, genome.nodeCount, 1);
+
+  if (genome.habit === "tree" && genome.tree) {
+    const crownStart = genome.tree.crownStart;
+    const crownNodes = stems.filter((node) => node.t >= crownStart || node.depth > 0);
+    const crownLeafChance =
+      genome.tree.crown === "umbrella"
+        ? 0.52
+        : genome.tree.crown === "columnar"
+          ? 0.36
+          : 0.46;
+    for (const node of crownNodes) {
+      const t = THREE.MathUtils.clamp((node.t - crownStart) / Math.max(0.001, 1 - crownStart), 0, 1);
+      const crownBulk =
+        genome.tree.crown === "umbrella"
+          ? Math.sin(t * Math.PI) * 0.5 + 0.5
+          : genome.tree.crown === "columnar"
+            ? 0.72 + 0.28 * t
+            : Math.sin(t * Math.PI) * 0.72 + 0.28;
+      const clusters = Math.max(1, Math.round(genome.tree.leafClusterScale * crownBulk * (node.depth === 0 ? 1 : 1.35)));
+      for (let c = 0; c < clusters; c++) {
+        if (rng() > crownLeafChance + env.moisture * 0.16) continue;
+        const azimuth = (node.index + c * 0.62) * genome.phyllotaxisAngle + (rng() - 0.5) * 0.22;
+        const outward =
+          genome.tree.crown === "umbrella"
+            ? 1.18 + rng() * 0.16
+            : genome.tree.crown === "columnar"
+              ? 0.84 + rng() * 0.18
+              : 0.95 + rng() * 0.28;
+        const position = node.position
+          .clone()
+          .add(rotateFromAxis(node.direction, azimuth, outward).multiplyScalar(0.05 + rng() * 0.08));
+        const { right } = tangentBasis(node.direction);
+        organs.push({
+          kind: "leaf",
+          position,
+          direction: rotateFromAxis(node.direction, azimuth, outward),
+          right: right.applyAxisAngle(node.direction, azimuth).normalize(),
+          scale:
+            curve(genome.leaf.length, node.t) *
+            genome.tree.leafClusterScale *
+            (0.72 + rng() * 0.42) *
+            (genome.tree.crown === "umbrella" ? 1.12 : 1),
+          t: node.t,
+        });
+      }
+    }
+
+    if (genome.tree.crown === "propRoot") {
+      const roots = 7;
+      for (let i = 0; i < roots; i++) {
+        const t = i / Math.max(1, roots - 1);
+        const azimuth = i * genome.phyllotaxisAngle + (rng() - 0.5) * 0.2;
+        const rootDir = rotateFromAxis(UP, azimuth, 1.08 + rng() * 0.18);
+        const rootStart: StemNode = {
+          position: new THREE.Vector3(0, 0.08 + t * 0.12, 0),
+          direction: rootDir,
+          radius: root.radius * (0.42 + rng() * 0.16),
+          depth: 1,
+          t,
+          index: stems.length,
+        };
+        stems.push(rootStart);
+        segments.push([root.index, rootStart.index]);
+        const rootEnd: StemNode = {
+          position: rootStart.position
+            .clone()
+            .add(new THREE.Vector3(Math.cos(azimuth), -0.12 - rng() * 0.08, Math.sin(azimuth)).multiplyScalar(0.42 + rng() * 0.18)),
+          direction: rootDir,
+          radius: rootStart.radius * 0.55,
+          depth: 1,
+          t,
+          index: stems.length,
+        };
+        stems.push(rootEnd);
+        segments.push([rootStart.index, rootEnd.index]);
+      }
+    }
+  }
 
   if (genome.habit === "palm") {
     const tip = stems.reduce((best, node) => (node.position.y > best.position.y ? node : best), stems[0]);
@@ -2630,81 +2918,15 @@ export const createProcPlantConiferSprayGeometry = (): THREE.BufferGeometry => {
   const indices: number[] = [];
   const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
     const base = positions.length / 3;
-    const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize();
-    for (const p of [a, b, c, d]) {
+    const normal = new THREE.Vector3().subVectors(d, a).cross(new THREE.Vector3().subVectors(c, a)).normalize();
+    for (const p of [a, d, c, b]) {
       positions.push(p.x, p.y, p.z);
       normals.push(normal.x, normal.y, normal.z);
     }
     indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
   };
 
-  const widthAt = (t: number, width: number) => {
-    const lobe = Math.sin(Math.PI * Math.min(1, t * 0.92 + 0.04)) ** 0.55;
-    return Math.max(0.006, lobe * width * (1 - t * 0.42));
-  };
-
-  const addMidrib = (
-    yOffset: number,
-    length: number,
-    xOffset: number,
-    zOffset: number,
-    lean: number,
-    ridge: number,
-  ) => {
-    const rows = 5;
-    for (let i = 0; i < rows; i++) {
-      const t0 = i / rows;
-      const t1 = (i + 1) / rows;
-      const y0 = yOffset + t0 * length;
-      const y1 = yOffset + t1 * length;
-      const x0 = xOffset + (t0 - 0.4) * lean;
-      const x1 = xOffset + (t1 - 0.4) * lean;
-      const w0 = 0.012 * (1 - t0 * 0.72);
-      const w1 = 0.012 * (1 - t1 * 0.72);
-      const z0 = zOffset + Math.sin(t0 * Math.PI) * ridge - t0 * t0 * 0.075 + 0.01;
-      const z1 = zOffset + Math.sin(t1 * Math.PI) * ridge - t1 * t1 * 0.075 + 0.01;
-      addQuad(
-        new THREE.Vector3(x0 - w0, y0, z0),
-        new THREE.Vector3(x0 + w0, y0, z0),
-        new THREE.Vector3(x1 + w1, y1, z1),
-        new THREE.Vector3(x1 - w1, y1, z1),
-      );
-    }
-  };
-
-  const addVeins = (
-    yOffset: number,
-    length: number,
-    width: number,
-    xOffset: number,
-    zOffset: number,
-    lean: number,
-    ridge: number,
-    side = 1,
-  ) => {
-    const veinCount = 4;
-    for (let i = 1; i <= veinCount; i++) {
-      const t0 = (i + 0.25) / (veinCount + 1);
-      const t1 = Math.min(0.96, t0 + 0.12);
-      const sweep0 = xOffset + (t0 - 0.4) * lean;
-      const sweep1 = xOffset + (t1 - 0.4) * lean;
-      const spread0 = widthAt(t0, width) * 0.22 * side;
-      const spread1 = widthAt(t1, width) * (0.72 + (i % 2) * 0.12) * side;
-      const y0 = yOffset + t0 * length;
-      const y1 = yOffset + t1 * length;
-      const z0 = zOffset + Math.sin(t0 * Math.PI) * ridge - t0 * t0 * 0.075 + 0.013;
-      const z1 = zOffset + Math.sin(t1 * Math.PI) * ridge * 0.34 - t1 * t1 * 0.075 - 0.004;
-      const thickness = 0.006 * (1 - t0 * 0.45);
-      addQuad(
-        new THREE.Vector3(sweep0 + spread0, y0 - thickness, z0),
-        new THREE.Vector3(sweep0 + spread0 + thickness * side, y0 + thickness, z0),
-        new THREE.Vector3(sweep1 + spread1 + thickness * side, y1 + thickness * 0.7, z1),
-        new THREE.Vector3(sweep1 + spread1, y1 - thickness * 0.7, z1),
-      );
-    }
-  };
-
-  const addFoldedBlade = (
+  const addNeedlePlate = (
     width: number,
     length: number,
     yOffset: number,
@@ -2712,18 +2934,19 @@ export const createProcPlantConiferSprayGeometry = (): THREE.BufferGeometry => {
     zOffset: number,
     lean: number,
     ridge: number,
+    droop: number,
   ) => {
-    const rows = 8;
+    const rows = 4;
     const left: THREE.Vector3[] = [];
     const center: THREE.Vector3[] = [];
     const right: THREE.Vector3[] = [];
     for (let i = 0; i <= rows; i++) {
       const t = i / rows;
       const y = yOffset + t * length;
-      const widthNow = widthAt(t, width);
+      const widthNow = Math.max(0.004, width * Math.sin(Math.PI * Math.min(1, t * 0.94 + 0.03)) * (1 - t * 0.56));
       const sweep = (t - 0.4) * lean;
-      const edgeSag = zOffset - t * t * 0.075;
-      const centerRise = zOffset + Math.sin(t * Math.PI) * ridge - t * t * 0.075;
+      const edgeSag = -(zOffset - t * t * droop);
+      const centerRise = -(zOffset + Math.sin(t * Math.PI) * ridge - t * t * droop);
       left.push(new THREE.Vector3(xOffset + sweep - widthNow, y, edgeSag));
       center.push(new THREE.Vector3(xOffset + sweep, y, centerRise));
       right.push(new THREE.Vector3(xOffset + sweep + widthNow, y, edgeSag));
@@ -2732,12 +2955,13 @@ export const createProcPlantConiferSprayGeometry = (): THREE.BufferGeometry => {
       addQuad(left[i], center[i], center[i + 1], left[i + 1]);
       addQuad(center[i], right[i], right[i + 1], center[i + 1]);
     }
-    addMidrib(yOffset, length, xOffset, zOffset, lean, ridge);
-    addVeins(yOffset, length, width, xOffset, zOffset, lean, ridge, -1);
-    addVeins(yOffset, length, width, xOffset, zOffset, lean, ridge, 1);
   };
 
-  addFoldedBlade(0.38, 1.08, 0, 0, 0, 0.035, 0.09);
+  addNeedlePlate(0.085, 1.02, 0, 0, 0, 0.02, 0.035, 0.11);
+  addNeedlePlate(0.06, 0.82, 0.08, -0.075, -0.022, -0.035, 0.025, 0.12);
+  addNeedlePlate(0.06, 0.82, 0.12, 0.08, -0.026, 0.04, 0.025, 0.12);
+  addNeedlePlate(0.045, 0.62, 0.22, -0.12, -0.042, -0.035, 0.018, 0.1);
+  addNeedlePlate(0.045, 0.62, 0.26, 0.13, -0.048, 0.035, 0.018, 0.1);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
