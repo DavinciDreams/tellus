@@ -510,7 +510,13 @@ declare global {
     // DEV-ONLY interior physics test hooks (no server portal needed). Strip before ship.
     __tellusEnterInterior?: () => void;
     __tellusExitInterior?: () => void;
-    __tellusPerf?: () => { fps: number; vegetation: unknown };
+    __tellusPerf?: () => {
+      fps: number;
+      vegetation: unknown;
+      procplants?: unknown;
+      generatedAssets?: unknown;
+      terrainTextures?: unknown;
+    };
     __tellusAssetLodUrls?: (assetIdOrUrl: string) => {
       assetId: string;
       gameOptimized: string;

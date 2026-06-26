@@ -21,6 +21,21 @@ import {
   vertexColor,
 } from "three/tsl";
 
+export type TerrainTextureRuntimeMode =
+  | "procedural"
+  | "atlas-textures"
+  | "nine-sampler-textures";
+
+export interface TerrainTextureDiagnostics {
+  renderer: "webgpu" | "webgl" | "unknown";
+  requestedImageTextures: boolean;
+  activeMode: TerrainTextureRuntimeMode;
+  maxTextureImageUnits: number | null;
+  estimatedNineSamplerUnits: number;
+  supportsNineSamplerPaint: boolean;
+  reason: string;
+}
+
 // Paint codes (terrainPaintCode = terrainPaintKinds.indexOf(kind) + 1). Kept in sync with
 // terrainPaintKinds in tellus-constants.ts; only the patterned kinds need an explicit code here.
 const PAINT_MEADOW = 1;
@@ -293,6 +308,72 @@ export interface TerrainMaterialOptions {
 
 const terrainTextureLoader = new THREE.TextureLoader();
 const generatedTerrainTextures = new Map<string, THREE.Texture>();
+const ESTIMATED_NINE_SAMPLER_UNITS = 11; // base albedo + normal + 9 paint albedo maps
+
+function terrainImageTexturesRequested(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem("tellus.terrainImageTextures") === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function terrainTextureDiagnostics(
+  renderer: THREE.WebGLRenderer | unknown,
+  useWebGPU: boolean,
+): TerrainTextureDiagnostics {
+  const requestedImageTextures = terrainImageTexturesRequested();
+  if (useWebGPU) {
+    return {
+      renderer: "webgpu",
+      requestedImageTextures,
+      activeMode: "procedural",
+      maxTextureImageUnits: null,
+      estimatedNineSamplerUnits: ESTIMATED_NINE_SAMPLER_UNITS,
+      supportsNineSamplerPaint: false,
+      reason: requestedImageTextures
+        ? "WebGPU terrain image textures are disabled because prior TSL texture-node attempts blanked the world."
+        : "Procedural terrain detail is active.",
+    };
+  }
+
+  const webgl = renderer instanceof THREE.WebGLRenderer ? renderer : null;
+  const maxTextureImageUnits =
+    webgl?.capabilities?.maxTextures ??
+    webgl?.getContext().getParameter(webgl.getContext().MAX_TEXTURE_IMAGE_UNITS) ??
+    null;
+  const supportsNineSamplerPaint =
+    typeof maxTextureImageUnits === "number" &&
+    maxTextureImageUnits >= ESTIMATED_NINE_SAMPLER_UNITS;
+  const activeMode = requestedImageTextures
+    ? supportsNineSamplerPaint
+      ? "nine-sampler-textures"
+      : "atlas-textures"
+    : "procedural";
+  const reason = !requestedImageTextures
+    ? "Procedural terrain detail is active."
+    : supportsNineSamplerPaint
+      ? "This WebGL renderer reports enough fragment texture units for the old nine-sampler paint experiment."
+      : "The old nine-sampler paint texture path can exceed this WebGL renderer's fragment texture units; use an atlas/single-sampler path.";
+
+  return {
+    renderer: webgl ? "webgl" : "unknown",
+    requestedImageTextures,
+    activeMode,
+    maxTextureImageUnits,
+    estimatedNineSamplerUnits: ESTIMATED_NINE_SAMPLER_UNITS,
+    supportsNineSamplerPaint,
+    reason,
+  };
+}
+
+export function shouldUseTerrainImageTextures(
+  renderer: THREE.WebGLRenderer | unknown,
+  useWebGPU: boolean,
+): boolean {
+  return terrainTextureDiagnostics(renderer, useWebGPU).activeMode !== "procedural";
+}
 
 function prepareRepeatTexture(
   texture: THREE.Texture,
