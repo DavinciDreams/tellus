@@ -1707,13 +1707,37 @@ function createTellusWorld(
     g.add(glow, visual, left, right, top, threshold);
     return g;
   };
+  const interiorDoorSpawnForSceneUrl = (sceneUrl: string): Vec3 => {
+    const spec = interiorRoomSpecForSceneUrl(sceneUrl);
+    const depth = typeof spec.depth === "number" && Number.isFinite(spec.depth) ? spec.depth : 18;
+    return { x: 0, y: 0, z: -Math.max(2.5, depth / 2 - 2.2) };
+  };
   const isWallDoorPortal = (p: WorldPortal): boolean =>
-    Boolean(interiorObject && p.target.kind === "world" && typeof p.rotation?.y === "number");
+    Boolean(interiorObject && p.target.kind === "world");
+  const isDoorSurfacePortal = (p: WorldPortal): boolean =>
+    Boolean(isWallDoorPortal(p) || p.target.kind === "interior" || typeof p.rotation?.y === "number");
   const portalAnchorPosition = (p: WorldPortal): Vec3 => {
     const anchor = p.anchorThingId
       ? generated.find((thing) => thing.id === p.anchorThingId)
       : undefined;
     return anchor?.position ?? p.position;
+  };
+  const portalDoorSurfacePose = (p: WorldPortal): { position: Vec3; rotationY: number } => {
+    const position = portalAnchorPosition(p);
+    if (!interiorObject || !isWallDoorPortal(p)) {
+      return { position, rotationY: typeof p.rotation?.y === "number" ? p.rotation.y : 0 };
+    }
+    if (typeof p.rotation?.y === "number") {
+      return { position, rotationY: p.rotation.y };
+    }
+    const bounds = interiorPlacementBounds(1.4);
+    if (!bounds) return { position: interiorPlacementPosition(position.x, position.z), rotationY: 0 };
+    const x = clamp(position.x, bounds.minX, bounds.maxX);
+    const z = bounds.minZ;
+    return {
+      position: { x, y: interiorFloorHeightAt(x, z, visitorPosition.y) ?? Math.max(0, visitorPosition.y), z },
+      rotationY: 0,
+    };
   };
   const markPortalReady = (p: WorldPortal) => {
     const wasPending = pendingPortalIds.delete(p.id);
@@ -1761,9 +1785,9 @@ function createTellusWorld(
     for (const p of worldPortals) {
       seen.add(p.id);
       const pending = pendingPortalIds.has(p.id);
-      const wallDoor = isWallDoorPortal(p);
-      const markerKey = wallDoor
-        ? `wall-door:${pending ? "pending" : "ready"}`
+      const doorSurface = isDoorSurfacePortal(p);
+      const markerKey = doorSurface
+        ? `door-surface:${pending ? "pending" : "ready"}`
         : `${p.target.kind === "interior" ? "interior" : "world"}:${pending ? "pending" : "ready"}`;
       let marker = portalMarkers.get(p.id);
       if (marker && marker.userData.portalMarkerKey !== markerKey) {
@@ -1773,7 +1797,8 @@ function createTellusWorld(
         marker = undefined;
       }
       if (!marker) {
-        marker = wallDoor ? makeWallDoorMarker(pending) : makePortalMarker(p.target.kind === "interior", pending);
+        marker = doorSurface ? makeWallDoorMarker(pending) : makePortalMarker(p.target.kind === "interior", pending);
+        marker.userData.portalMarkerKey = markerKey;
         portalMarkers.set(p.id, marker);
         portalMarkerGroup.add(marker);
       }
@@ -1781,10 +1806,11 @@ function createTellusWorld(
       marker.traverse((child) => {
         child.userData.portalId = p.id;
       });
-      const position = portalAnchorPosition(p);
-      const y = wallDoor ? position.y : portalGroundY(p) + 0.05;
+      const pose = doorSurface ? portalDoorSurfacePose(p) : null;
+      const position = pose?.position ?? portalAnchorPosition(p);
+      const y = pose ? position.y : portalGroundY(p) + 0.05;
       marker.position.set(position.x, y, position.z);
-      marker.rotation.y = wallDoor ? p.rotation?.y ?? 0 : 0;
+      marker.rotation.y = pose?.rotationY ?? 0;
       const triggerRing = marker.children.find((child) => child.userData.portalTriggerRing);
       if (triggerRing) {
         const r = Math.max(1.2, p.radius);
@@ -1798,10 +1824,30 @@ function createTellusWorld(
       portalMarkers.delete(id);
     }
   };
-  // Called each frame: auto-enter when the player stands in a portal's trigger volume.
+  const doorSurfacePortalContainsVisitor = (p: WorldPortal): boolean => {
+    const pose = portalDoorSurfacePose(p);
+    const dx = visitorPosition.x - pose.position.x;
+    const dz = visitorPosition.z - pose.position.z;
+    const normalX = Math.sin(pose.rotationY);
+    const normalZ = Math.cos(pose.rotationY);
+    const rightX = Math.cos(pose.rotationY);
+    const rightZ = -Math.sin(pose.rotationY);
+    const forward = dx * normalX + dz * normalZ;
+    const lateral = dx * rightX + dz * rightZ;
+    const halfWidth = Math.max(0.85, Math.min(1.35, p.radius * 0.62));
+    return (
+      Math.abs(lateral) <= halfWidth &&
+      forward >= -0.42 &&
+      forward <= 0.72 &&
+      visitorPosition.y >= pose.position.y - 0.35 &&
+      visitorPosition.y <= pose.position.y + 3.35
+    );
+  };
+
+  // Called each frame: auto-enter when the player crosses a portal doorway surface.
   const updatePortals = (now: number) => {
     for (const marker of portalMarkers.values()) {
-      if (marker.userData.portalMarkerKey?.startsWith?.("wall-door:")) {
+      if (marker.userData.portalMarkerKey?.startsWith?.("door-surface:")) {
         const face = marker.children.find((child) => child.userData.portalDoorFace);
         if (face) {
           const mat = (face as THREE.Mesh).material;
@@ -1824,9 +1870,10 @@ function createTellusWorld(
     let nearId: string | null = null;
     for (const p of worldPortals) {
       if (pendingPortalIds.has(p.id)) continue;
-      const position = portalAnchorPosition(p);
-      const d = Math.hypot(visitorPosition.x - position.x, visitorPosition.z - position.z);
-      if (d <= Math.max(1.2, p.radius)) {
+      const near = isDoorSurfacePortal(p)
+        ? doorSurfacePortalContainsVisitor(p)
+        : distance2D(visitorPosition, portalAnchorPosition(p)) <= Math.max(1.2, p.radius);
+      if (near) {
         nearId = p.id;
         break;
       }
@@ -8626,7 +8673,8 @@ function createTellusWorld(
       worldId: runtimeConfig.worldId,
       label: (label || target).slice(0, 48),
       position: { x, y, z },
-      radius: 2.2,
+      radius: 1.7,
+      rotation: { x: 0, y: yaw, z: 0 },
       target: { kind: "world", worldId: target },
       ...(anchor ? { anchorThingId: anchor.id } : {}),
     });
@@ -8653,21 +8701,39 @@ function createTellusWorld(
   const createDoorHere = (label?: string, sceneUrl?: string) => {
     const interiorId = `interior-${runtimeConfig.worldId}-${makeId("room").slice(0, 12)}`;
     const roomSceneUrl = sceneUrl?.trim() || GENERATED_INTERIOR_SCENE_URL;
-    const x = Math.round(visitorPosition.x);
-    const z = Math.round(visitorPosition.z);
+    const target = {
+      kind: "interior" as const,
+      worldId: interiorId,
+      spawn: interiorDoorSpawnForSceneUrl(roomSceneUrl),
+      sceneUrl: roomSceneUrl,
+    };
+    if (interiorObject) {
+      const bounds = interiorPlacementBounds(1.4);
+      const x = bounds ? clamp(visitorPosition.x, bounds.minX, bounds.maxX) : visitorPosition.x;
+      const z = bounds?.minZ ?? visitorPosition.z;
+      const y = interiorFloorHeightAt(x, z, visitorPosition.y) ?? Math.max(0, visitorPosition.y);
+      sendPortalUpsert({
+        id: makeId("door"),
+        worldId: runtimeConfig.worldId,
+        label: (label || "Door").slice(0, 48),
+        position: { x, y, z },
+        radius: 1.7,
+        rotation: { x: 0, y: 0, z: 0 },
+        target,
+      });
+      return;
+    }
+    const x = Math.round(visitorPosition.x + Math.sin(yaw) * 1.4);
+    const z = Math.round(visitorPosition.z + Math.cos(yaw) * 1.4);
     const y = groundedPositionForCurrentSurface(x, z, visitorPosition).y;
     sendPortalUpsert({
       id: makeId("door"),
       worldId: runtimeConfig.worldId,
       label: (label || "Door").slice(0, 48),
       position: { x, y, z },
-      radius: 2.2,
-      target: {
-        kind: "interior",
-        worldId: interiorId,
-        spawn: { x: 0, y: 0, z: 2 },
-        sceneUrl: roomSceneUrl,
-      },
+      radius: 1.7,
+      rotation: { x: 0, y: yaw, z: 0 },
+      target,
     });
   };
 
