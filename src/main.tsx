@@ -2152,6 +2152,29 @@ function createTellusWorld(
   let terrainBrushMode: TerrainEditMode | null = null;
   const pointerNdc = new THREE.Vector2();
   const raycaster = new THREE.Raycaster();
+  const terrainBrushPreviewRadius = TERRAIN_SCULPT_RADIUS * WORLD_SCALE * 0.68;
+  const terrainBrushPreview = new THREE.Mesh(
+    new THREE.RingGeometry(terrainBrushPreviewRadius * 0.96, terrainBrushPreviewRadius, 96),
+    new THREE.MeshBasicMaterial({
+      color: 0xffef9a,
+      transparent: true,
+      opacity: 0.92,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  terrainBrushPreview.name = "tellus-terrain-brush-preview";
+  terrainBrushPreview.rotation.x = -Math.PI / 2;
+  terrainBrushPreview.renderOrder = 80;
+  terrainBrushPreview.visible = false;
+  scene.add(terrainBrushPreview);
+  const hideTerrainBrushPreview = () => {
+    terrainBrushPreview.visible = false;
+  };
+  const isPointerFromUi = (target: EventTarget | null): boolean =>
+    target instanceof HTMLElement &&
+    Boolean(target.closest("button, input, select, textarea, .tool-card"));
 
   const snapshot = (): TellusSnapshot => ({
     generated: generated.map((thing) => ({
@@ -3284,6 +3307,7 @@ function createTellusWorld(
 
   const setTerrainBrush = (mode: TerrainEditMode | null) => {
     terrainBrushMode = mode;
+    if (!mode) hideTerrainBrushPreview();
   };
 
   const sculptTerrain = (mode: TerrainEditMode) => {
@@ -7439,13 +7463,12 @@ function createTellusWorld(
       }
       setMoveMode(null); // target vanished — drop the mode
     }
-    const pointerFromUi =
-      event.target instanceof HTMLElement &&
-      Boolean(event.target.closest("button, input, select, textarea, .tool-card"));
-    if (terrainBrushMode && !interiorObject && !pointerFromUi && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (terrainBrushMode && !interiorObject && !isPointerFromUi(event.target) && !event.ctrlKey && !event.metaKey && !event.altKey) {
       const target = dragGroundTarget(event);
       if (target) {
         event.preventDefault();
+        terrainBrushPreview.position.set(target.x, target.y + 0.08, target.z);
+        terrainBrushPreview.visible = true;
         sculptTerrainAtWorldPoint(terrainBrushMode, target);
         return;
       }
@@ -7497,6 +7520,10 @@ function createTellusWorld(
       if (Math.hypot(dx, dz) < 0.05) return;
       moveGenerated(draggingThingId, dx, dz, target.y);
       dragMoved = true;
+      return;
+    }
+    if (terrainBrushMode) {
+      updateTerrainBrushPreview(event);
       return;
     }
     if (transformDragging || !isDragging) return;
@@ -7635,6 +7662,27 @@ function createTellusWorld(
   // ── Explicit Move mode: a UI toggle (no modifier needed — works on every platform incl. touch).
   // While active for the selected object, ANY press/drag on the world repositions it (click =
   // teleport there, drag = carry); camera orbit is suspended until the mode is toggled off. ──
+  const updateTerrainBrushPreview = (event: PointerEvent) => {
+    if (
+      !terrainBrushMode ||
+      interiorObject ||
+      isPointerFromUi(event.target) ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey
+    ) {
+      hideTerrainBrushPreview();
+      return;
+    }
+    const target = dragGroundTarget(event);
+    if (!target) {
+      hideTerrainBrushPreview();
+      return;
+    }
+    terrainBrushPreview.position.set(target.x, target.y + 0.08, target.z);
+    terrainBrushPreview.visible = true;
+  };
+
   let moveModeThingId: string | null = null;
   const wallDoorTargetFromPointer = (event: PointerEvent): { position: Vec3; rotationY: number } | null => {
     if (!interiorObject) return null;
@@ -7762,6 +7810,7 @@ function createTellusWorld(
     transformDragging = false;
     draggingThingId = null;
     isDragging = false;
+    hideTerrainBrushPreview();
     container.style.cursor = moveModeThingId ? "move" : "";
   };
   const handleWheel = (event: WheelEvent) => {
@@ -8746,6 +8795,9 @@ function createTellusWorld(
         material.map?.dispose();
         material.dispose();
       }
+      scene.remove(terrainBrushPreview);
+      terrainBrushPreview.geometry.dispose();
+      disposeMaterial(terrainBrushPreview.material);
       resizeObserver?.disconnect();
       transformControls?.detach();
       transformControls?.dispose();
@@ -14935,14 +14987,6 @@ function App(): React.ReactElement {
             >
               <span className="terrain-swatch-preview" />
               <span>Flowers</span>
-            </button>
-            <button
-              type="button"
-              className={`terrain-swatch stone ${terrainBrushMode === "stone" ? "active" : ""}`}
-              onClick={() => selectTerrainBrush("stone")}
-            >
-              <span className="terrain-swatch-preview" />
-              <span>Stone Slabs</span>
             </button>
             <button
               type="button"
