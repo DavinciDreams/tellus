@@ -47,7 +47,7 @@ striped/tiling pattern that looked like sand dunes under every paint kind.
   labels visually distinct without adding more samplers
 - sand for beach and dirt, with dirt using an earthy tint
 - gravel tinted cool grey for rock/pebbles
-- cracked flagstone for stone and brick-style hardscape paths, patios, and
+- true fieldstone for stone and brick-style hardscape paths, patios, and
   stone circles
 
 Snow, stone, and brick stay on the existing procedural/color path for now.

@@ -318,7 +318,7 @@ const BIOME_LITE_TEXTURE_URLS = {
   moss: "/terrain-textures/moss002/albedo.png",
   sand: "/terrain-textures/sand-ground-0024/albedo.jpg",
   rock: "/terrain-textures/gravel041/albedo.png",
-  flagstone: "/terrain-textures/cracked-ground031/albedo.png",
+  flagstone: "/terrain-textures/true-fieldstone/albedo.png",
 } as const;
 
 function terrainImageTexturesRequested(): boolean {
