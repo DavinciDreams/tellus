@@ -2837,6 +2837,8 @@ function createTellusWorld(
         if (typeof sceneUrl === "string" && sceneUrl) {
           profileInteriorSceneUrl = sceneUrl;
           applyInterior(sceneUrl);
+        } else if (runtimeConfig.worldId.startsWith("interior-") && !interiorObject) {
+          applyInterior(profileInteriorSceneUrl || GENERATED_INTERIOR_SCENE_URL);
         } else if (
           interiorObject &&
           !runtimeConfig.worldId.startsWith("interior-") &&
@@ -8381,8 +8383,9 @@ function createTellusWorld(
     });
     return portalId;
   };
-  const createDoorHere = (label?: string) => {
+  const createDoorHere = (label?: string, sceneUrl?: string) => {
     const interiorId = `interior-${runtimeConfig.worldId}-${makeId("room").slice(0, 12)}`;
+    const roomSceneUrl = sceneUrl?.trim() || GENERATED_INTERIOR_SCENE_URL;
     const x = Math.round(visitorPosition.x);
     const z = Math.round(visitorPosition.z);
     const y = groundHeightAt(x, z) ?? visitorPosition.y ?? SEA_LEVEL;
@@ -8396,7 +8399,7 @@ function createTellusWorld(
         kind: "interior",
         worldId: interiorId,
         spawn: { x: 0, y: 0, z: 2 },
-        sceneUrl: GENERATED_INTERIOR_SCENE_URL,
+        sceneUrl: roomSceneUrl,
       },
     });
   };
@@ -9862,6 +9865,8 @@ function App(): React.ReactElement {
   const [newWorldWaterSettings, setNewWorldWaterSettings] = useState<WaterSettings>(
     runtimeConfig.waterSettings,
   );
+  const [doorInteriorTemplate, setDoorInteriorTemplate] =
+    useState<WorldTemplateId>("interior-studio");
   const [advancedWorldTemplatesOpen, setAdvancedWorldTemplatesOpen] = useState(false);
   const [currentWorldTemplate, setCurrentWorldTemplate] = useState<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
@@ -9896,6 +9901,7 @@ function App(): React.ReactElement {
   const [savingWorld, setSavingWorld] = useState(false);
   const pendingDeleteTimerRef = useRef<number | undefined>(undefined);
   const KNOWN_WORLDS_KEY = "tellus.knownWorlds";
+  const LAST_EXTERIOR_WORLD_KEY = "tellus.lastExteriorWorldId";
   const WORLD_PROFILES_KEY = "tellus.worldProfiles";
   const HIDDEN_WORLDS_KEY = "tellus.hiddenWorlds";
   const ACTIVE_WORLD_KEY = "tellus.activeWorldId";
@@ -10565,8 +10571,14 @@ function App(): React.ReactElement {
   const switchWorld = (id: string) => {
     const next = canonicalWorldId(id);
     if (!next || next === activeWorldId) return;
+    const current = activeWorldId ?? runtimeConfig.worldId;
     rememberWorld(next);
     try {
+      if (next.startsWith("interior-") && current && !current.startsWith("interior-")) {
+        window.localStorage.setItem(LAST_EXTERIOR_WORLD_KEY, canonicalWorldId(current));
+      } else if (!next.startsWith("interior-")) {
+        window.localStorage.setItem(LAST_EXTERIOR_WORLD_KEY, next);
+      }
       window.localStorage.setItem(ACTIVE_WORLD_KEY, next);
     } catch {
       /* ignore */
@@ -10672,6 +10684,25 @@ function App(): React.ReactElement {
       setWorldCreateNote(null);
       worldCreateNoteTimerRef.current = undefined;
     }, ms);
+  };
+  const exitInteriorWorld = () => {
+    const fallback =
+      worlds.find((worldId) => worldId && !worldId.startsWith("interior-")) ??
+      canonicalWorldId(runtimeConfig.worldId);
+    let target = fallback;
+    try {
+      const stored = window.localStorage.getItem(LAST_EXTERIOR_WORLD_KEY);
+      if (stored?.trim() && !canonicalWorldId(stored).startsWith("interior-")) {
+        target = canonicalWorldId(stored);
+      }
+    } catch {
+      /* ignore */
+    }
+    if (!target || target === canonicalWorldId(activeWorldId ?? runtimeConfig.worldId)) {
+      showWorldNote("No exterior world to return to", 3500);
+      return;
+    }
+    switchWorld(target);
   };
   const disarmDeleteWorld = () => {
     if (pendingDeleteTimerRef.current !== undefined) {
@@ -11885,6 +11916,9 @@ function App(): React.ReactElement {
       window.clearInterval(interval);
     };
   }, [chatTab, currentWorldId, worldChatOpen, worlds.join("\n")]);
+  const doorInteriorOptions = WORLD_CREATION_TEMPLATES.filter((option) =>
+    isInteriorWorldTemplate(option.id),
+  );
   const portalTargetOptions = worlds.filter((worldId) => worldId && worldId !== currentWorldId);
   useEffect(() => {
     if (portalTargetWorldId && portalTargetOptions.includes(portalTargetWorldId)) return;
@@ -13826,13 +13860,55 @@ function App(): React.ReactElement {
                 );
               })}
               {/* Create at your feet (owner-only — the server rejects otherwise; the rejection shows in the log). */}
+              {currentWorldId.startsWith("interior-") && (
+                <button
+                  type="button"
+                  title="Return to the last exterior world"
+                  onClick={exitInteriorWorld}
+                  style={{ ...portalBtn, marginTop: 6, borderColor: "rgba(255,207,106,0.65)" }}
+                >
+                  {"<-"} Exit interior
+                </button>
+              )}
+              <select
+                value={doorInteriorTemplate}
+                aria-label="Door interior room type"
+                title="Door interior room type"
+                onChange={(event) =>
+                  setDoorInteriorTemplate(parseWorldTemplateId(event.target.value, "interior-studio"))
+                }
+                style={{
+                  width: "100%",
+                  marginTop: 6,
+                  background: "rgba(0,0,0,0.45)",
+                  color: "inherit",
+                  border: "1px solid rgba(255,207,106,0.45)",
+                  borderRadius: 8,
+                  padding: "4px 6px",
+                  font: "inherit",
+                }}
+              >
+                {doorInteriorOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    Door opens to {option.label}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
-                title="Open a door to a fresh interior room at your position"
-                onClick={() => worldRef.current?.createDoorHere(window.prompt("Door label?", "Door") || "Door")}
-                style={{ ...portalBtn, marginTop: 6, borderColor: "rgba(255,207,106,0.5)" }}
+                title="Create a door to the selected interior room type"
+                onClick={() => {
+                  const sceneUrl =
+                    generatedInteriorSceneUrlForTemplate(doorInteriorTemplate) ??
+                    GENERATED_INTERIOR_SCENE_URL;
+                  worldRef.current?.createDoorHere(
+                    `${worldDisplayName(currentWorldId)} ${worldTemplateLabel(doorInteriorTemplate)} door`,
+                    sceneUrl,
+                  );
+                }}
+                style={{ ...portalBtn, marginTop: 4, borderColor: "rgba(255,207,106,0.5)" }}
               >
-                ＋ Door here
+                Door to {worldTemplateLabel(doorInteriorTemplate)}
               </button>
               <button
                 type="button"

@@ -274,7 +274,7 @@ export interface TellusWorldApi {
   startInteriorWallDoorPlacement(targetWorldId?: string | null, label?: string): void;
   updatePortalTarget(portalId: string, targetWorldId: string): void;
   deletePortal(portalId: string): void;
-  createDoorHere(label?: string): void;
+  createDoorHere(label?: string, sceneUrl?: string): void;
   generate(request: GenerateRequest): GeneratedThing;
   addLibraryAsset(
     model: AssetLibraryModel,
