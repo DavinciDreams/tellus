@@ -2708,10 +2708,10 @@ function createTellusWorld(
       refreshDistantIslandGeometry(spec);
     }
     updatePondSurfacePosition();
-    visitorPosition = groundedPosition(visitorPosition.x, visitorPosition.z, visitorPosition);
+    visitorPosition = groundedPositionForCurrentSurface(visitorPosition.x, visitorPosition.z, visitorPosition);
     for (const thing of generated) {
       if (!isFreeMovingVehicle(thing) && !isIntentionallyOffsetFromGround(thing)) {
-        thing.position = groundedPosition(thing.position.x, thing.position.z, thing.position);
+        thing.position = groundedPositionForCurrentSurface(thing.position.x, thing.position.z, thing.position);
         updateThingMeshPosition(thing);
       }
     }
@@ -2991,6 +2991,23 @@ function createTellusWorld(
       } catch {
         return;
       }
+      if ((parsed as { type?: string } | null)?.type === "world.snapshot") {
+        // Establish the active room before applying snapshot assets, so their first mount/ground pass
+        // samples the interior floor instead of the outdoor terrain fallback.
+        const sceneUrl = (parsed as { sceneUrl?: unknown }).sceneUrl;
+        if (typeof sceneUrl === "string" && sceneUrl) {
+          profileInteriorSceneUrl = sceneUrl;
+          applyInterior(sceneUrl);
+        } else if (runtimeConfig.worldId.startsWith("interior-") && !interiorObject) {
+          applyInterior(profileInteriorSceneUrl || GENERATED_INTERIOR_SCENE_URL);
+        } else if (
+          interiorObject &&
+          !runtimeConfig.worldId.startsWith("interior-") &&
+          !profileInteriorSceneUrl
+        ) {
+          exitInterior();
+        }
+      }
       const terrainState = terrainFromWorldPatch(parsed);
       if (terrainState) {
         applyRemoteTerrainState(terrainState);
@@ -3025,22 +3042,6 @@ function createTellusWorld(
       if ((parsed as { type?: string } | null)?.type === "world.snapshot") {
         const snapshotPortals = portalsFromWorldPatch(parsed);
         if (snapshotPortals) mergePortalSnapshot(snapshotPortals);
-        // Phase 3: an interior snapshot carries a sceneUrl → render the GLB room instead of terrain.
-        // A snapshot WITHOUT a sceneUrl while an interior is mounted means we left the room (switched
-        // back to an outdoor world in the same scene) — tear the room + its physics statics down.
-        const sceneUrl = (parsed as { sceneUrl?: unknown }).sceneUrl;
-        if (typeof sceneUrl === "string" && sceneUrl) {
-          profileInteriorSceneUrl = sceneUrl;
-          applyInterior(sceneUrl);
-        } else if (runtimeConfig.worldId.startsWith("interior-") && !interiorObject) {
-          applyInterior(profileInteriorSceneUrl || GENERATED_INTERIOR_SCENE_URL);
-        } else if (
-          interiorObject &&
-          !runtimeConfig.worldId.startsWith("interior-") &&
-          !profileInteriorSceneUrl
-        ) {
-          exitInterior();
-        }
         // Phase 4: a tiles world carries a tileSetUrl → mount the 3D tileset as the render substrate.
         const tileUrl = (parsed as { tileSetUrl?: unknown }).tileSetUrl;
         if (typeof tileUrl === "string" && tileUrl) mountTileset(tileUrl);
@@ -3299,7 +3300,7 @@ function createTellusWorld(
     }
 
     if (!paintCode) {
-      visitorPosition = groundedPosition(visitorPosition.x, visitorPosition.z, visitorPosition);
+      visitorPosition = groundedPositionForCurrentSurface(visitorPosition.x, visitorPosition.z, visitorPosition);
       for (const thing of generated) {
         if (!isFreeMovingVehicle(thing) && !isIntentionallyOffsetFromGround(thing)) {
           groundThingToRenderedSurface(thing);
@@ -4068,6 +4069,11 @@ function createTellusWorld(
     };
   };
 
+  const groundedPositionForCurrentSurface = (x: number, z: number, fallback?: Vec3): Vec3 =>
+    interiorObject
+      ? interiorPlacementPosition(x, z, fallback?.y ?? visitorPosition.y)
+      : groundedPosition(x, z, fallback);
+
   const thingFootprint = (thing: GeneratedThing): { radius: number; height: number } | null => {
     const mesh = generatedMeshes.get(thing.id);
     if (!mesh) return null;
@@ -4122,7 +4128,9 @@ function createTellusWorld(
   // null only when no sample resolves (async terrain not loaded yet).
   const footprintGroundY = (thing: GeneratedThing): number | null => {
     let bestRendered: number | null = renderedTerrainHeightAt(thing.position.x, thing.position.z);
-    let bestAnalytic = groundHeightAt(thing.position.x, thing.position.z);
+    let bestAnalytic = interiorObject
+      ? interiorFloorHeightAt(thing.position.x, thing.position.z, thing.position.y)
+      : groundHeightAt(thing.position.x, thing.position.z);
     const fp = thingFootprint(thing);
     const r = Math.min(fp?.radius ?? 0, 6);
     if (r >= 0.25) {
@@ -4138,7 +4146,9 @@ function createTellusWorld(
         ) {
           bestRendered = rendered;
         }
-        const analytic = groundHeightAt(x, z);
+        const analytic = interiorObject
+          ? interiorFloorHeightAt(x, z, thing.position.y)
+          : groundHeightAt(x, z);
         if (
           analytic !== null &&
           Number.isFinite(analytic) &&
@@ -4201,7 +4211,7 @@ function createTellusWorld(
     // updateThingMeshPosition (incl. once per asset during the load storm) and being thrown away — the
     // cause of the multi-second load freeze with many assets. Skip it entirely outside chunked worlds.
     const liveGround =
-      isChunked && !isVisiblyOffsetFromLiveGround(thing) ? footprintGroundY(thing) : null;
+      (isChunked || interiorObject) && !isVisiblyOffsetFromLiveGround(thing) ? footprintGroundY(thing) : null;
     const placeAt =
       liveGround !== null && Number.isFinite(liveGround)
         ? { ...thing.position, y: liveGround }
@@ -4222,11 +4232,11 @@ function createTellusWorld(
     thing.position =
       rendered !== null && Number.isFinite(rendered)
         ? { ...thing.position, y: rendered }
-        : groundedPosition(thing.position.x, thing.position.z, thing.position);
+        : groundedPositionForCurrentSurface(thing.position.x, thing.position.z, thing.position);
   };
 
   const regroundClassicTerrainActorsAndThings = () => {
-    visitorPosition = groundedPosition(visitorPosition.x, visitorPosition.z, visitorPosition);
+    visitorPosition = groundedPositionForCurrentSurface(visitorPosition.x, visitorPosition.z, visitorPosition);
     for (const thing of generated) {
       if (!isFreeMovingVehicle(thing) && !isIntentionallyOffsetFromGround(thing)) {
         groundThingToRenderedSurface(thing);
@@ -4650,6 +4660,7 @@ function createTellusWorld(
           generatedMeshes.set(id, model);
           startGeneratedAnimation(id, model);
           scene.add(model);
+          updateThingMeshPosition(current);
           syncTransformControls();
           reevaluateInstanceGroup(modelUrl);
           publish();
@@ -5050,7 +5061,7 @@ function createTellusWorld(
     const targetX = thing.position.x - offset.x * 3.2;
     const targetZ = thing.position.z - offset.z * 3.2;
     if (!moveMountedUnitTo(targetX, targetZ)) {
-      visitorPosition = groundedPosition(targetX, targetZ, visitorPosition);
+      visitorPosition = groundedPositionForCurrentSurface(targetX, targetZ, visitorPosition);
     }
     updateSelectionIndicator();
     syncTransformControls();
@@ -5105,7 +5116,7 @@ function createTellusWorld(
     const z = visitorPosition.z + behindZ + rightZ;
     return vehicleMode(thing)
       ? movedVehiclePosition(thing, x, z, thing.position)
-      : groundedPosition(x, z, thing.position);
+      : groundedPositionForCurrentSurface(x, z, thing.position);
   };
 
   const syncPetsToOwner = (delta: number, forceTeleport = false) => {
@@ -5230,7 +5241,7 @@ function createTellusWorld(
                 y: thing.position.y,
                 z: thing.position.z + dz,
               }
-            : groundedPosition(
+            : groundedPositionForCurrentSurface(
                 thing.position.x + dx,
                 thing.position.z + dz,
                 thing.position,
@@ -5272,7 +5283,7 @@ function createTellusWorld(
       ownerUserId: userId,
       position: interiorObject
         ? interiorPlacementPosition(source.position.x + offset, source.position.z + offset, source.position.y)
-        : groundedPosition(
+        : groundedPositionForCurrentSurface(
             source.position.x + offset,
             source.position.z + offset,
             source.position,
@@ -5375,7 +5386,7 @@ function createTellusWorld(
     thing.position =
       groundY !== null && Number.isFinite(groundY)
         ? { ...thing.position, y: groundY }
-        : groundedPosition(thing.position.x, thing.position.z, {
+        : groundedPositionForCurrentSurface(thing.position.x, thing.position.z, {
             ...thing.position,
             y: Math.min(thing.position.y, 0),
           });
@@ -5420,7 +5431,7 @@ function createTellusWorld(
     syncTransformControls();
     if (sailingThingId === id) {
       sailingThingId = undefined;
-      visitorPosition = groundedPosition(
+      visitorPosition = groundedPositionForCurrentSurface(
         thing.position.x,
         thing.position.z,
         visitorPosition,
@@ -5540,7 +5551,7 @@ function createTellusWorld(
           boat.position.z,
         );
       } else if (mode === "air") {
-        visitorPosition = groundedPosition(
+        visitorPosition = groundedPositionForCurrentSurface(
           boat.position.x,
           boat.position.z,
           visitorPosition,
@@ -5561,7 +5572,7 @@ function createTellusWorld(
         );
       } else if (shoreDirection.lengthSq() > 0.001) {
         shoreDirection.normalize();
-        visitorPosition = groundedPosition(
+        visitorPosition = groundedPositionForCurrentSurface(
           shoreDirection.x * (WORLD_RADIUS - 2),
           shoreDirection.z * (WORLD_RADIUS - 2),
           visitorPosition,
@@ -5770,6 +5781,7 @@ function createTellusWorld(
           generatedMeshes.set(thing.id, model);
           startGeneratedAnimation(thing.id, model);
           scene.add(model);
+          updateThingMeshPosition(thing);
           syncTransformControls();
           addLog({
             agentId: "world",
@@ -5884,6 +5896,7 @@ function createTellusWorld(
           generatedMeshes.set(thing.id, model);
           startGeneratedAnimation(thing.id, model);
           scene.add(model);
+          updateThingMeshPosition(thing);
           syncTransformControls();
           addLog({
             agentId: "world",
@@ -6017,6 +6030,7 @@ function createTellusWorld(
         generatedMeshes.set(thing.id, modelObject);
         startGeneratedAnimation(thing.id, modelObject); // VRM idle / embedded clip starts looping
         scene.add(modelObject);
+        updateThingMeshPosition(thing);
         syncTransformControls();
         publish();
       })
