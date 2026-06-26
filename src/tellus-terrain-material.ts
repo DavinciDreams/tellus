@@ -559,32 +559,29 @@ float tellusBrickMortar(vec2 f){
   vec2 edge = min(f, 1.0 - f);
   return 1.0 - step(0.075, min(edge.x, edge.y));
 }
-vec3 tellusHerringboneBrick(vec2 worldPos){
-  vec2 cell = floor(worldPos * 0.48);
-  float flip = mod(cell.x + cell.y, 2.0);
-  vec2 p = flip < 0.5 ? worldPos : worldPos.yx;
-  vec2 brickUv = vec2(p.x / 1.45, p.y / 0.34);
+vec3 tellusRunningBondBrick(vec2 worldPos){
+  vec2 brickUv = vec2(worldPos.x / 1.08, worldPos.y / 0.42);
   brickUv.x += floor(brickUv.y) * 0.5;
   vec2 f = fract(brickUv);
   float mortar = tellusBrickMortar(f);
   float worn = fract(sin(dot(floor(brickUv), vec2(17.13, 41.77))) * 43758.5453);
-  vec3 redBrick = mix(vec3(0.46, 0.105, 0.075), vec3(0.70, 0.20, 0.13), worn);
-  vec3 paleBrick = mix(vec3(0.78, 0.70, 0.58), vec3(0.94, 0.86, 0.70), worn);
-  vec3 brick = mix(redBrick, paleBrick, step(0.5, mod(floor(brickUv.x) + floor(brickUv.y), 3.0)));
-  return mix(brick, vec3(0.76, 0.70, 0.62), mortar);
+  vec3 brick = mix(vec3(0.38, 0.08, 0.055), vec3(0.68, 0.18, 0.10), worn);
+  return mix(brick, vec3(0.54, 0.48, 0.42), mortar);
 }
-vec3 tellusCobblestone(vec2 worldPos){
-  vec2 p = worldPos * 0.62;
-  vec2 cell = floor(p);
-  vec2 f = fract(p);
-  f.x += step(0.5, mod(cell.y, 2.0)) * 0.5;
-  f = fract(f);
+vec3 tellusStoneSlabs(vec2 worldPos){
+  float rowH = 0.72;
+  float row = floor(worldPos.y / rowH);
+  float rowRand = fract(sin(row * 31.71) * 43758.5453);
+  float tileW = mix(0.78, 1.48, rowRand);
+  float offset = fract(sin(row * 11.13) * 9173.31) * tileW;
+  vec2 slabUv = vec2((worldPos.x + offset) / tileW, worldPos.y / rowH);
+  vec2 cell = floor(slabUv);
+  vec2 f = fract(slabUv);
   vec2 edge = min(f, 1.0 - f);
-  float mortar = 1.0 - step(0.09, min(edge.x, edge.y));
+  float mortar = 1.0 - step(0.07, min(edge.x, edge.y));
   float chip = fract(sin(dot(cell, vec2(23.17, 31.91))) * 43758.5453);
-  vec3 pale = mix(vec3(0.68, 0.66, 0.60), vec3(0.92, 0.88, 0.76), chip);
-  vec3 cool = pale * vec3(0.94, 0.96, 1.0);
-  return mix(cool, vec3(0.58, 0.56, 0.52), mortar);
+  vec3 slab = mix(vec3(0.42, 0.43, 0.42), vec3(0.72, 0.74, 0.70), chip);
+  return mix(slab, vec3(0.30, 0.31, 0.30), mortar);
 }`,
       )
       .replace(
@@ -611,8 +608,8 @@ vec3 tellusCobblestone(vec2 worldPos){
     vec3 sandAlbedo = sandSample * vec3(1.04, 0.98, 0.86);
     vec3 dirtAlbedo = sandSample * vec3(0.70, 0.50, 0.36);
     vec3 rockAlbedo = rockSample * vec3(0.82, 0.86, 0.82);
-    vec3 cobblestoneAlbedo = tellusCobblestone(vTellusWorldPos.xz);
-    vec3 brickAlbedo = tellusHerringboneBrick(vTellusWorldPos.xz);
+    vec3 cobblestoneAlbedo = tellusStoneSlabs(vTellusWorldPos.xz);
+    vec3 brickAlbedo = tellusRunningBondBrick(vTellusWorldPos.xz);
     vec3 biomeAlbedo =
       meadowAlbedo * meadowMask +
       flowersAlbedo * flowersMask +
