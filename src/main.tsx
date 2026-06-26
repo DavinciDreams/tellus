@@ -987,6 +987,8 @@ function createTellusWorld(
     liveGroup: THREE.Group;
     presenceMarkers: Map<string, THREE.Object3D>;
     generatedMarkers: Map<string, THREE.Object3D>;
+    viewerTexture?: THREE.Texture;
+    viewerFrameUrl?: string;
   };
   let portalPreview: PortalPreview | null = null;
   // Guards the ONE-TIME interior trimesh bake (see ensureInteriorStatics). Declared here (before
@@ -1252,6 +1254,50 @@ function createTellusWorld(
     }
   };
 
+  const setPortalPreviewViewerFrame = (preview: PortalPreview, src: string) => {
+    if (!src || preview !== portalPreview) return;
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      if (preview !== portalPreview) return;
+      preview.viewerTexture?.dispose();
+      const texture = new THREE.Texture(image);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+      preview.viewerTexture = texture;
+      preview.material.map = texture;
+      preview.material.needsUpdate = true;
+      if (preview.viewerFrameUrl) {
+        URL.revokeObjectURL(preview.viewerFrameUrl);
+        preview.viewerFrameUrl = undefined;
+      }
+      if (src.startsWith("blob:")) preview.viewerFrameUrl = src;
+    };
+    image.onerror = () => {
+      if (src.startsWith("blob:")) URL.revokeObjectURL(src);
+    };
+    image.src = src;
+  };
+
+  const applyPortalPreviewViewerMessage = (preview: PortalPreview, data: unknown): boolean => {
+    if (data instanceof Blob) {
+      setPortalPreviewViewerFrame(preview, URL.createObjectURL(data));
+      return true;
+    }
+    if (!isRecord(data)) return false;
+    const type = typeof data.type === "string" ? data.type : "";
+    const image =
+      typeof data.dataUrl === "string" ? data.dataUrl :
+      typeof data.imageUrl === "string" ? data.imageUrl :
+      typeof data.jpeg === "string" ? `data:image/jpeg;base64,${data.jpeg}` :
+      typeof data.png === "string" ? `data:image/png;base64,${data.png}` :
+      "";
+    if (!image) return false;
+    if (type && !/preview|viewer|frame/i.test(type)) return false;
+    setPortalPreviewViewerFrame(preview, image);
+    return true;
+  };
+
   const connectPortalPreviewLive = (preview: PortalPreview) => {
     let socket: WebSocket;
     try {
@@ -1261,9 +1307,20 @@ function createTellusWorld(
     }
     preview.socket = socket;
     socket.onmessage = (event) => {
-      if (preview !== portalPreview || typeof event.data !== "string") return;
+      if (preview !== portalPreview) return;
+      if (event.data instanceof ArrayBuffer) {
+        applyPortalPreviewViewerMessage(preview, new Blob([event.data], { type: "image/jpeg" }));
+        return;
+      }
+      if (event.data instanceof Blob) {
+        applyPortalPreviewViewerMessage(preview, event.data);
+        return;
+      }
+      if (typeof event.data !== "string") return;
       try {
-        applyPortalPreviewPatch(preview, JSON.parse(event.data) as WorldPatch);
+        const parsed = JSON.parse(event.data) as unknown;
+        if (applyPortalPreviewViewerMessage(preview, parsed)) return;
+        applyPortalPreviewPatch(preview, parsed as WorldPatch);
       } catch {
         // The static doorway scene remains useful if a mid-rollout backend sends something unexpected.
       }
@@ -1301,6 +1358,8 @@ function createTellusWorld(
     portalPreview.plane.geometry.dispose();
     portalPreview.material.dispose();
     portalPreview.renderTarget.dispose();
+    portalPreview.viewerTexture?.dispose();
+    if (portalPreview.viewerFrameUrl) URL.revokeObjectURL(portalPreview.viewerFrameUrl);
     disposeObject(portalPreview.scene);
     portalPreview = null;
   };
@@ -1355,6 +1414,7 @@ function createTellusWorld(
 
   const renderPortalPreview = () => {
     if (!renderer || !portalPreview) return;
+    if (portalPreview.material.map !== portalPreview.renderTarget.texture) return;
     const previousTarget = renderer.getRenderTarget() as THREE.WebGLRenderTarget | null;
     renderer.setRenderTarget(portalPreview.renderTarget);
     renderer.render(portalPreview.scene, portalPreview.camera);
