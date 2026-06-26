@@ -39,7 +39,7 @@ localStorage.setItem("tellus.terrainImageTextures", "1")
 location.reload()
 ```
 
-The current trial path uses four albedo samplers and disables the old shared
+The current trial path uses three albedo samplers and disables the old shared
 procedural base albedo/normal maps while active. That avoids the all-terrain
 striped/tiling pattern that looked like sand dunes under every paint kind.
 
@@ -47,8 +47,8 @@ striped/tiling pattern that looked like sand dunes under every paint kind.
   labels visually distinct without adding more samplers
 - sand for beach and dirt, with dirt using an earthy tint
 - gravel tinted cool grey for rock/pebbles
-- true fieldstone for flagstone paths, patios, and stone circles
-- procedural red/pale herringbone for brick paths, with no extra texture sampler
+- procedural pale cobblestone for paths, patios, and stone circles
+- procedural red/pale herringbone for brick paths
 
 Snow, stone, and brick stay on the existing procedural/color path for now.
 WebGL renderers that do not have enough texture units should use an atlas or
