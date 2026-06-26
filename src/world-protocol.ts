@@ -127,6 +127,17 @@ export interface WorldPortal {
   anchorThingId?: string;
 }
 
+export interface WorldProcPlantPlacement {
+  id: string;
+  presetId: string;
+  seed: number;
+  position: Vec3;
+  scale: number;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export type WorldAction =
   | {
       type: "presence.update";
@@ -175,6 +186,16 @@ export type WorldAction =
       portalId: string;
     }
   | {
+      type: "procplant.upsert";
+      visitorId: string;
+      placement: WorldProcPlantPlacement;
+    }
+  | {
+      type: "procplant.delete";
+      visitorId: string;
+      id: string;
+    }
+  | {
       type: "world.chat";
       visitorId: string;
       message: WorldChatMessage;
@@ -198,6 +219,8 @@ export type WorldPatch =
       sceneUrl?: string;
       // Phase 4 tiles: a 3D Tileset url the client mounts as the render substrate (gameplay = baked chunks).
       tileSetUrl?: string;
+      // Chunked procedural plant placements (manual scatter, persisted/broadcast by Hyades).
+      procPlantPlacements?: WorldProcPlantPlacement[];
     }
   | {
       type: "presence.updated";
@@ -219,6 +242,16 @@ export type WorldPatch =
     }
   | {
       type: "generated.deleted";
+      id: string;
+      actorId: string;
+    }
+  | {
+      type: "procplant.updated";
+      placement: WorldProcPlantPlacement;
+      actorId: string;
+    }
+  | {
+      type: "procplant.deleted";
       id: string;
       actorId: string;
     }
@@ -439,6 +472,37 @@ export function portalDeletedFromWorldPatch(parsed: unknown): string | null {
   return typeof parsed.portalId === "string" ? parsed.portalId : null;
 }
 
+export function isWorldProcPlantPlacement(value: unknown): value is WorldProcPlantPlacement {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.length > 0 &&
+    typeof value.presetId === "string" &&
+    value.presetId.length > 0 &&
+    typeof value.seed === "number" &&
+    Number.isFinite(value.seed) &&
+    isVec3(value.position) &&
+    typeof value.scale === "number" &&
+    Number.isFinite(value.scale)
+  );
+}
+
+export function procPlantPlacementsFromWorldPatch(parsed: unknown): WorldProcPlantPlacement[] | null {
+  if (!isRecord(parsed)) return null;
+  if (parsed.type === "world.snapshot" && Array.isArray(parsed.procPlantPlacements)) {
+    return parsed.procPlantPlacements.filter(isWorldProcPlantPlacement);
+  }
+  if (parsed.type === "procplant.updated" && isWorldProcPlantPlacement(parsed.placement)) {
+    return [parsed.placement];
+  }
+  return null;
+}
+
+export function procPlantDeletedFromWorldPatch(parsed: unknown): string | null {
+  if (!isRecord(parsed) || parsed.type !== "procplant.deleted") return null;
+  return typeof parsed.id === "string" ? parsed.id : null;
+}
+
 export interface PortalEntered {
   portalId: string;
   fromWorldId: string;
@@ -606,6 +670,12 @@ export function isWorldAction(value: unknown): value is WorldAction {
   }
   if (value.type === "world.portal.delete" || value.type === "portal.delete") {
     return typeof value.portalId === "string";
+  }
+  if (value.type === "procplant.upsert") {
+    return isWorldProcPlantPlacement(value.placement);
+  }
+  if (value.type === "procplant.delete") {
+    return typeof value.id === "string";
   }
   if (value.type === "world.chat") {
     return isWorldChatMessage(value.message);

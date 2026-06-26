@@ -51,7 +51,9 @@ export interface ProcPlantVegetationStats {
 export interface ProcPlantVegetationSystem {
   update(px: number, pz: number, playerY: number, fps: number, nowMs: number): void;
   notifyTerrainChanged(): void;
-  placeManualPlant(placement: ProcPlantManualPlacement): boolean;
+  placeManualPlant(placement: ProcPlantManualPlacement, options?: { persist?: boolean }): boolean;
+  replaceManualPlants(placements: ProcPlantManualPlacement[], options?: { persist?: boolean }): void;
+  removeManualPlant(id: string, options?: { persist?: boolean }): boolean;
   stats(): ProcPlantVegetationStats;
   dispose(): void;
 }
@@ -307,6 +309,11 @@ export function createProcPlantVegetation(
     enqueue(key);
   };
 
+  const enqueueAllActive = () => {
+    terrainRev++;
+    for (const key of active.keys()) enqueue(key);
+  };
+
   const saveManualPlacements = () => {
     if (typeof window === "undefined") return;
     try {
@@ -519,16 +526,37 @@ export function createProcPlantVegetation(
   return {
     update,
     notifyTerrainChanged: () => {
-      terrainRev++;
-      for (const key of active.keys()) enqueue(key);
+      enqueueAllActive();
     },
-    placeManualPlant: (placement) => {
+    placeManualPlant: (placement, writeOptions = {}) => {
       if (disposed) return false;
       const normalized = normalizeManualPlacement(placement);
       if (!normalized) return false;
+      const previousKey = manualPlacementChunks.get(normalized.id);
       rememberManualPlacement(normalized);
-      saveManualPlacements();
+      if (previousKey && previousKey !== manualPlacementChunks.get(normalized.id)) enqueue(previousKey);
+      if (writeOptions.persist !== false) saveManualPlacements();
       return true;
+    },
+    replaceManualPlants: (placements, writeOptions = {}) => {
+      if (disposed) return;
+      manualPlacements.clear();
+      manualPlacementChunks.clear();
+      enqueueAllActive();
+      for (const placement of placements) {
+        const normalized = normalizeManualPlacement(placement);
+        if (normalized) rememberManualPlacement(normalized);
+      }
+      if (writeOptions.persist !== false) saveManualPlacements();
+    },
+    removeManualPlant: (id, writeOptions = {}) => {
+      if (disposed) return false;
+      const key = manualPlacementChunks.get(id);
+      const removed = manualPlacements.delete(id);
+      manualPlacementChunks.delete(id);
+      if (key) enqueue(key);
+      if (removed && writeOptions.persist !== false) saveManualPlacements();
+      return removed;
     },
     stats,
     dispose: () => {

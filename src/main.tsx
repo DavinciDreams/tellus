@@ -124,6 +124,8 @@ import {
   portalsFromWorldPatch,
   portalDeletedFromWorldPatch,
   portalEnteredFromWorldPatch,
+  procPlantDeletedFromWorldPatch,
+  procPlantPlacementsFromWorldPatch,
   biomeCellsFromWorldPatch,
   biomeCellsFromSnapshot,
   dedupePresenceForDisplay,
@@ -135,6 +137,7 @@ import {
   type WorldChatChannel,
   type WorldChatMessage,
   type WorldPortal,
+  type WorldProcPlantPlacement,
   type PortalEntered,
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
@@ -878,6 +881,8 @@ function createTellusWorld(
           lod2: 0,
         }),
         placeManualPlant: () => false,
+        replaceManualPlants: () => undefined,
+        removeManualPlant: () => false,
         dispose: () => undefined,
       };
   const ambientPhysics = createAmbientPhysics({
@@ -1992,6 +1997,37 @@ function createTellusWorld(
     generatedAssets: generatedAssetPerfStats(),
   });
 
+  const procPlantPlacementFromWorld = (
+    placement: WorldProcPlantPlacement,
+  ): Parameters<typeof procplants.placeManualPlant>[0] => ({
+    id: placement.id,
+    presetId: placement.presetId,
+    seed: placement.seed >>> 0,
+    x: placement.position.x,
+    z: placement.position.z,
+    scale: placement.scale,
+  });
+
+  const publishProcPlantPlacement = (placement: WorldProcPlantPlacement) => {
+    if (!tellusWorldBackendAvailable) return;
+    const frame = {
+      type: "procplant.upsert",
+      visitorId,
+      placement,
+    };
+    if (worldSocket?.readyState === WebSocket.OPEN) {
+      worldSocket.send(JSON.stringify(frame));
+      return;
+    }
+    void fetch(tellusWorldHttpUrl("action"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(frame),
+    }).catch((error) => {
+      console.warn("Tellus procplant sync failed", error);
+    });
+  };
+
   let yaw = 0.72;
   let pitch = -0.28;
   let zoom = 33;
@@ -2820,6 +2856,19 @@ function createTellusWorld(
       const remoteThings = generatedFromWorldPatch(parsed);
       if (remoteThings) {
         applyRemoteGeneratedThings(remoteThings);
+      }
+      const remoteProcPlants = procPlantPlacementsFromWorldPatch(parsed);
+      if (remoteProcPlants) {
+        const placements = remoteProcPlants.map(procPlantPlacementFromWorld);
+        if ((parsed as { type?: string } | null)?.type === "world.snapshot") {
+          procplants.replaceManualPlants(placements);
+        } else {
+          for (const placement of placements) procplants.placeManualPlant(placement);
+        }
+      }
+      const deletedProcPlant = procPlantDeletedFromWorldPatch(parsed);
+      if (deletedProcPlant) {
+        procplants.removeManualPlant(deletedProcPlant);
       }
       const chatMessages = worldChatFromWorldPatch(parsed);
       if (chatMessages) {
@@ -5909,6 +5958,15 @@ function createTellusWorld(
     });
     if (!placed) return null;
     procplants.notifyTerrainChanged();
+    publishProcPlantPlacement({
+      id,
+      presetId: option.procPlantPresetId,
+      seed,
+      position: location,
+      scale,
+      createdBy: visitorId,
+      updatedAt: new Date().toISOString(),
+    });
     return {
       id,
       archetypeId: option.id,
