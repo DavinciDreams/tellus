@@ -322,11 +322,11 @@ const BIOME_LITE_TEXTURE_URLS = {
 } as const;
 
 function terrainImageTexturesRequested(): boolean {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") return true;
   try {
-    return window.localStorage.getItem("tellus.terrainImageTextures") === "1";
+    return window.localStorage.getItem("tellus.terrainImageTextures") !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 

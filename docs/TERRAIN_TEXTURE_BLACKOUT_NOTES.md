@@ -24,18 +24,20 @@ normal maps compress poorly.
 image terrain textures were requested, the WebGL texture-unit cap when known,
 and whether the old nine-sampler paint approach is safe on that renderer.
 
-Image terrain textures are considered opt-in via:
+Image terrain textures are now on by default for WebGL. If terrain goes black
+on a weak or unusual renderer, disable the image overlay with:
 
 ```js
-localStorage.setItem("tellus.terrainImageTextures", "1")
+localStorage.setItem("tellus.terrainImageTextures", "0")
+location.reload()
 ```
 
 WebGPU still reports procedural-only because that was the known blackout path.
-To force the safer WebGL trial path in a browser that normally boots WebGPU:
+To re-enable the safer WebGL biome-lite path after disabling it:
 
 ```js
 localStorage.setItem("tellus.renderer", "webgl")
-localStorage.setItem("tellus.terrainImageTextures", "1")
+localStorage.removeItem("tellus.terrainImageTextures")
 location.reload()
 ```
 
