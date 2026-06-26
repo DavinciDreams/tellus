@@ -5182,11 +5182,16 @@ function createTellusWorld(
         }
       }
       const locallyRidden = existing.id === sailingThingId;
+      const nextPetOwnerId =
+        normalized.petOwnerId === undefined
+          ? existing.petOwnerId
+          : normalized.petOwnerId || undefined;
+      const locallyFollowedPet = nextPetOwnerId === petOwnerId;
       existing.kind = normalized.kind as GeneratedKind;
       existing.prompt = normalized.prompt;
       existing.creatorId = normalized.creatorId as AgentId | "visitor";
       existing.ownerUserId = normalized.ownerUserId;
-      if (!locallyRidden) {
+      if (!locallyRidden && !locallyFollowedPet) {
         existing.position = { ...normalized.position };
         existing.rotationX = normalized.rotationX ?? 0;
         existing.rotationY = normalized.rotationY;
@@ -5197,10 +5202,7 @@ function createTellusWorld(
       existing.assetStoreModelId = normalized.assetStoreModelId ?? existing.assetStoreModelId;
       // petOwnerId wire convention mirrors animation/avatar fields: "" clears, non-empty sets,
       // ABSENT means a mid-rollout backend stripped the field, so keep the local value.
-      existing.petOwnerId =
-        normalized.petOwnerId === undefined
-          ? existing.petOwnerId
-          : normalized.petOwnerId || undefined;
+      existing.petOwnerId = nextPetOwnerId;
       // animation wire convention (mirrors presence.avatarId): "" = explicit default, a non-empty
       // string = explicit clip, ABSENT = a mid-rollout server stripped the field — keep ours
       // (otherwise our own upsert's echo would wipe a just-picked clip).
