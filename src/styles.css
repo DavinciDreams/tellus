@@ -3296,6 +3296,42 @@ textarea::placeholder {
   padding-top: 10px;
 }
 
+.terrain-subtitle-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.terrain-subtitle-row.with-rule {
+  border-top: 1px solid var(--hud-border-soft);
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.terrain-brush-clear {
+  align-items: center;
+  background: rgb(0 0 0 / 22%);
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 6px;
+  color: var(--hud-gold-bright);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 4px;
+  line-height: 1;
+  min-height: 24px;
+  padding: 4px 6px;
+  text-transform: uppercase;
+}
+
+.terrain-brush-clear:hover {
+  background: var(--hud-bg-soft);
+  border-color: var(--hud-border);
+}
+
 .terrain-height-actions {
   margin-bottom: 2px;
 }
@@ -3329,6 +3365,11 @@ textarea::placeholder {
 .terrain-swatch:hover {
   border-color: var(--hud-border);
   background: var(--hud-bg-soft);
+}
+
+.terrain-swatch.active {
+  border-color: var(--hud-accent);
+  box-shadow: 0 0 0 1px var(--hud-accent);
 }
 
 .terrain-swatch-preview {

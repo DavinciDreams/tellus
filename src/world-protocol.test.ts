@@ -5,6 +5,9 @@ import {
   isTellusTerrainState,
   isWorldAction,
   isWorldGeneratedThing,
+  isWorldProcPlantPlacement,
+  procPlantDeletedFromWorldPatch,
+  procPlantPlacementsFromWorldPatch,
   worldChatFromWorldPatch,
   biomeCellsFromSnapshot,
   biomeCellsFromWorldPatch,
@@ -68,6 +71,41 @@ describe("biome cell extraction", () => {
     // the diff extractor must NOT consume a snapshot (else it would merge instead of reset)
     expect(biomeCellsFromWorldPatch({ type: "world.snapshot", biomeCells: cells })).toBeNull();
     expect(biomeCellsFromWorldPatch({ type: "world.biome.patch", biomeCells: cells })).toHaveLength(3);
+  });
+});
+
+describe("procplant placement protocol", () => {
+  const placement = {
+    id: "procplant-1",
+    presetId: "daylilyFlower",
+    seed: 42,
+    position: { x: 1, y: 0, z: 2 },
+    scale: 1.1,
+  };
+
+  it("extracts snapshot, update, delete, and validates upsert actions", () => {
+    expect(isWorldProcPlantPlacement(placement)).toBe(true);
+    expect(
+      isWorldAction({
+        type: "procplant.upsert",
+        visitorId: "visitor-1",
+        placement,
+      }),
+    ).toBe(true);
+    expect(procPlantPlacementsFromWorldPatch({
+      type: "world.snapshot",
+      procPlantPlacements: [placement, { ...placement, id: "" }],
+    })).toEqual([placement]);
+    expect(procPlantPlacementsFromWorldPatch({
+      type: "procplant.updated",
+      placement,
+      actorId: "visitor-1",
+    })).toEqual([placement]);
+    expect(procPlantDeletedFromWorldPatch({
+      type: "procplant.deleted",
+      id: "procplant-1",
+      actorId: "visitor-1",
+    })).toBe("procplant-1");
   });
 });
 

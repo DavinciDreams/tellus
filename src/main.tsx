@@ -38,9 +38,11 @@ import {
 import * as THREE from "three";
 import { TilesRenderer } from "3d-tiles-renderer";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
+import { PROCPLANT_PLACEABLE_CATALOG, procPlantPlaceableById } from "./tellus-procplant-biomes";
+import { createProcPlantVegetation } from "./tellus-procplant-vegetation";
 import { createVegetation } from "./tellus-vegetation";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
-import { makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, MAX_LIVE_MIRRORS, liveMirrorCount, resetLiveMirrors } from "./tellus-procedural-assets";
+import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, MAX_LIVE_MIRRORS, liveMirrorCount, resetLiveMirrors } from "./tellus-procedural-assets";
 import {
   BUILDING_LIGHTING_OPTIONS,
   BUILDING_MATERIAL_OPTIONS,
@@ -122,6 +124,8 @@ import {
   portalsFromWorldPatch,
   portalDeletedFromWorldPatch,
   portalEnteredFromWorldPatch,
+  procPlantDeletedFromWorldPatch,
+  procPlantPlacementsFromWorldPatch,
   biomeCellsFromWorldPatch,
   biomeCellsFromSnapshot,
   dedupePresenceForDisplay,
@@ -133,18 +137,19 @@ import {
   type WorldChatChannel,
   type WorldChatMessage,
   type WorldPortal,
+  type WorldProcPlantPlacement,
   type PortalEntered,
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
-import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood, WaterSettings, WaterStyle } from "./tellus-types";
+import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, ProceduralAssetPlacement, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood, WaterSettings, WaterStyle } from "./tellus-types";
 import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { parseWaterSettings, runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig, worldApiUrl } from "./tellus-runtime-config";
-import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, toAssetId } from "./tellus-urls-identity";
+import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, assetStoreOptimizedAssetUrls, toAssetId } from "./tellus-urls-identity";
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
-import { createTerrainMaterial } from "./tellus-terrain-material";
+import { createTerrainMaterial, terrainTextureDiagnostics } from "./tellus-terrain-material";
 import { largeWorldBaseHeight, largeWorldTerrainKind, usesContinentalChunkedTerrain } from "./tellus-large-world-terrain";
 import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
 import { generateInteriorRoom, normalizeInteriorBiomeMaterial, type InteriorBiomeMaterial } from "./tellus-building";
@@ -416,6 +421,60 @@ function createTellusWorld(
     disabled: boolean; // a failure here disables the whole group, reverting to regular meshes
   }
   const instancePools = new Map<string, InstancePool>();
+  const generatedAssetPerfStats = () => {
+    let instancedThings = 0;
+    let instancedDraws = 0;
+    for (const pool of instancePools.values()) {
+      instancedThings += pool.thingToSlot.size;
+      instancedDraws += pool.instanced.length;
+    }
+    let visibleMeshes = 0;
+    for (const mesh of generatedMeshes.values()) {
+      if (mesh.visible) visibleMeshes += 1;
+    }
+    return {
+      things: generated.length,
+      mountedMeshes: generatedMeshes.size,
+      visibleMeshes,
+      queue: {
+        pending: worldModelLoadQueue.length,
+        queuedUnique: queuedWorldModelLoads.size,
+        active: activeWorldModelLoads,
+        maxActive: generatedModelLoadConcurrency(),
+        pumpDelayMs: WORLD_MODEL_LOAD_PUMP_DELAY_MS,
+      },
+      loads: {
+        enqueued: generatedModelLoadStats.enqueued,
+        started: generatedModelLoadStats.started,
+        loaded: generatedModelLoadStats.loaded,
+        failed: generatedModelLoadStats.failed,
+        retried: generatedModelLoadStats.retried,
+        lastMs: Math.round(generatedModelLoadStats.lastMs),
+        averageMs:
+          generatedModelLoadStats.loaded > 0
+            ? Math.round(generatedModelLoadStats.totalMs / generatedModelLoadStats.loaded)
+            : 0,
+        maxMs: Math.round(generatedModelLoadStats.maxMs),
+        lastQueueWaitMs: Math.round(generatedModelLoadStats.lastQueueWaitMs),
+        averageQueueWaitMs:
+          generatedModelLoadStats.started > 0
+            ? Math.round(generatedModelLoadStats.totalQueueWaitMs / generatedModelLoadStats.started)
+            : 0,
+        lastUrl: generatedModelLoadStats.lastUrl,
+      },
+      caches: {
+        generatedGltf: generatedGltfCache.size,
+        gltfObject: gltfObjectCache.size,
+      },
+      instancing: {
+        enabled: instancingEnabled(),
+        pools: instancePools.size,
+        instancedThings,
+        instancedDraws,
+        disabledUrls: instancingDisabledUrls.size,
+      },
+    };
+  };
   // Model URLs whose instancing hit an error once — never re-attempt for the session (they stay regular).
   const instancingDisabledUrls = new Set<string>();
   const skyboxTintMaterials = new Set<THREE.MeshBasicMaterial>();
@@ -660,8 +719,15 @@ function createTellusWorld(
   if (fallbackSky.material instanceof THREE.MeshBasicMaterial) {
     skyboxTintMaterials.add(fallbackSky.material);
   }
-  // ~500ms/frame stall is WebGPU-specific on this GPU. Set back to `"gpu" in navigator` after testing.
-  const useWebGPU = "gpu" in navigator;
+  const rendererPreference = (() => {
+    try {
+      return window.localStorage.getItem("tellus.renderer");
+    } catch {
+      return null;
+    }
+  })();
+  // WebGL is useful for testing guarded terrain image textures without touching browser WebGPU flags.
+  const useWebGPU = rendererPreference !== "webgl" && "gpu" in navigator;
   // Visual terrain density (decoupled from the synced 97² sculpt grid). FIXED vertex budget no
   // matter the world scale — bigger worlds stretch the same ~50K-vertex mesh instead of multiplying
   // it (operator: range over thickness; worlds get larger for less).
@@ -728,23 +794,40 @@ function createTellusWorld(
       return null;
     }
   })();
+  const procPlantPreference = (() => {
+    try {
+      return window.localStorage.getItem("tellus.procplants");
+    } catch {
+      return null;
+    }
+  })();
+  const procPlantDensityPreference = (() => {
+    try {
+      const value = Number(window.localStorage.getItem("tellus.procplants.density"));
+      return Number.isFinite(value) && value > 0 ? value : 1;
+    } catch {
+      return 1;
+    }
+  })();
+  const sampleVegetationHeight = isChunked
+    ? (x: number, z: number) => chunkRenderer?.sampleHeight(x, z) ?? SEA_LEVEL - 100
+    : terrainHeight;
+  const sampleVegetationPaint = isChunked
+    ? (x: number, z: number) => {
+        const painted = chunkRenderer?.samplePaint(x, z);
+        if (painted) return painted;
+        const kind = largeWorldTerrainKind(x, z);
+        return kind === "water" ? null : kind;
+      }
+    : centralTerrainPaintAt;
   const vegetationEnabled = vegetationPreference !== "0" && (isChunked || vegetationPreference === "1");
   const groundGrassEnabled = !isChunked && vegetationPreference === "1";
   const vegetation = vegetationEnabled
     ? createVegetation({
         scene,
         useWebGPU,
-        sampleHeight: isChunked
-          ? (x, z) => chunkRenderer?.sampleHeight(x, z) ?? SEA_LEVEL - 100
-          : terrainHeight,
-        samplePaint: isChunked
-          ? (x, z) => {
-              const painted = chunkRenderer?.samplePaint(x, z);
-              if (painted) return painted;
-              const kind = largeWorldTerrainKind(x, z);
-              return kind === "water" ? null : kind;
-            }
-          : centralTerrainPaintAt,
+        sampleHeight: sampleVegetationHeight,
+        samplePaint: sampleVegetationPaint,
         bounds: chunkedVegetationBounds,
         sectorsEnabled: !isChunked,
         grassOnly: false,
@@ -775,6 +858,38 @@ function createTellusWorld(
         notifyTerrainChanged: () => undefined,
         getTreeColliders: () => [],
         stats: () => ({ tier: 0, chunks: 0, grassIndices: 0, trees: 0, sectors: 0 }),
+        dispose: () => undefined,
+      };
+  const procplantsEnabled = procPlantPreference !== "0" && (isChunked || procPlantPreference === "1");
+  const procplants = procplantsEnabled
+    ? createProcPlantVegetation({
+        scene,
+        worldId: runtimeConfig.worldId,
+        sampleHeight: sampleVegetationHeight,
+        samplePaint: sampleVegetationPaint,
+        bounds: chunkedVegetationBounds,
+        densityMultiplier: procPlantDensityPreference,
+        isExcluded: (x, z, h) =>
+          waterFeatureContains(x, z, 0.6) &&
+          h < waterFeatureLevel() + 0.35,
+      })
+    : {
+        update: () => undefined,
+        notifyTerrainChanged: () => undefined,
+        stats: () => ({
+          chunks: 0,
+          plants: 0,
+          manualPlants: 0,
+          instances: 0,
+          stemTriangles: 0,
+          organDraws: 0,
+          lod0: 0,
+          lod1: 0,
+          lod2: 0,
+        }),
+        placeManualPlant: () => false,
+        replaceManualPlants: () => undefined,
+        removeManualPlant: () => false,
         dispose: () => undefined,
       };
   const ambientPhysics = createAmbientPhysics({
@@ -879,6 +994,8 @@ function createTellusWorld(
     liveGroup: THREE.Group;
     presenceMarkers: Map<string, THREE.Object3D>;
     generatedMarkers: Map<string, THREE.Object3D>;
+    viewerTexture?: THREE.Texture;
+    viewerFrameUrl?: string;
   };
   let portalPreview: PortalPreview | null = null;
   // Guards the ONE-TIME interior trimesh bake (see ensureInteriorStatics). Declared here (before
@@ -1144,6 +1261,50 @@ function createTellusWorld(
     }
   };
 
+  const setPortalPreviewViewerFrame = (preview: PortalPreview, src: string) => {
+    if (!src || preview !== portalPreview) return;
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      if (preview !== portalPreview) return;
+      preview.viewerTexture?.dispose();
+      const texture = new THREE.Texture(image);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+      preview.viewerTexture = texture;
+      preview.material.map = texture;
+      preview.material.needsUpdate = true;
+      if (preview.viewerFrameUrl) {
+        URL.revokeObjectURL(preview.viewerFrameUrl);
+        preview.viewerFrameUrl = undefined;
+      }
+      if (src.startsWith("blob:")) preview.viewerFrameUrl = src;
+    };
+    image.onerror = () => {
+      if (src.startsWith("blob:")) URL.revokeObjectURL(src);
+    };
+    image.src = src;
+  };
+
+  const applyPortalPreviewViewerMessage = (preview: PortalPreview, data: unknown): boolean => {
+    if (data instanceof Blob) {
+      setPortalPreviewViewerFrame(preview, URL.createObjectURL(data));
+      return true;
+    }
+    if (!isRecord(data)) return false;
+    const type = typeof data.type === "string" ? data.type : "";
+    const image =
+      typeof data.dataUrl === "string" ? data.dataUrl :
+      typeof data.imageUrl === "string" ? data.imageUrl :
+      typeof data.jpeg === "string" ? `data:image/jpeg;base64,${data.jpeg}` :
+      typeof data.png === "string" ? `data:image/png;base64,${data.png}` :
+      "";
+    if (!image) return false;
+    if (type && !/preview|viewer|frame/i.test(type)) return false;
+    setPortalPreviewViewerFrame(preview, image);
+    return true;
+  };
+
   const connectPortalPreviewLive = (preview: PortalPreview) => {
     let socket: WebSocket;
     try {
@@ -1153,9 +1314,20 @@ function createTellusWorld(
     }
     preview.socket = socket;
     socket.onmessage = (event) => {
-      if (preview !== portalPreview || typeof event.data !== "string") return;
+      if (preview !== portalPreview) return;
+      if (event.data instanceof ArrayBuffer) {
+        applyPortalPreviewViewerMessage(preview, new Blob([event.data], { type: "image/jpeg" }));
+        return;
+      }
+      if (event.data instanceof Blob) {
+        applyPortalPreviewViewerMessage(preview, event.data);
+        return;
+      }
+      if (typeof event.data !== "string") return;
       try {
-        applyPortalPreviewPatch(preview, JSON.parse(event.data) as WorldPatch);
+        const parsed = JSON.parse(event.data) as unknown;
+        if (applyPortalPreviewViewerMessage(preview, parsed)) return;
+        applyPortalPreviewPatch(preview, parsed as WorldPatch);
       } catch {
         // The static doorway scene remains useful if a mid-rollout backend sends something unexpected.
       }
@@ -1193,6 +1365,8 @@ function createTellusWorld(
     portalPreview.plane.geometry.dispose();
     portalPreview.material.dispose();
     portalPreview.renderTarget.dispose();
+    portalPreview.viewerTexture?.dispose();
+    if (portalPreview.viewerFrameUrl) URL.revokeObjectURL(portalPreview.viewerFrameUrl);
     disposeObject(portalPreview.scene);
     portalPreview = null;
   };
@@ -1247,6 +1421,7 @@ function createTellusWorld(
 
   const renderPortalPreview = () => {
     if (!renderer || !portalPreview) return;
+    if (portalPreview.material.map !== portalPreview.renderTarget.texture) return;
     const previousTarget = renderer.getRenderTarget() as THREE.WebGLRenderTarget | null;
     renderer.setRenderTarget(portalPreview.renderTarget);
     renderer.render(portalPreview.scene, portalPreview.camera);
@@ -1771,6 +1946,21 @@ function createTellusWorld(
     runtimeSkyboxUrl: runtimeConfig.skyboxUrl,
     chunkedWorldChunks: getChunkedWorldChunks(),
   });
+  window.__tellusAssetLodUrls = (assetIdOrUrl: string) => {
+    const assetId =
+      assetStoreIdFromModelUrl(assetIdOrUrl) ??
+      (assetIdOrUrl.trim() ? assetIdOrUrl.trim() : null);
+    if (!assetId) return null;
+    const urls = assetStoreOptimizedAssetUrls(assetId);
+    return {
+      assetId,
+      gameOptimized: worldApiUrl(urls.gameOptimized),
+      lod0: worldApiUrl(urls.lod0),
+      lod1: worldApiUrl(urls.lod1),
+      lod2: worldApiUrl(urls.lod2),
+      impostor: worldApiUrl(urls.impostor),
+    };
+  };
   const countSkinnedMeshes = (root: THREE.Object3D | undefined): number => {
     if (!root) return 0;
     let n = 0;
@@ -1866,8 +2056,45 @@ function createTellusWorld(
     applyInterior(GENERATED_INTERIOR_SCENE_URL);
   };
   window.__tellusExitInterior = () => exitInterior();
-  // DEV-ONLY perf readout: window.__tellusPerf() → { fps, vegetation: {tier, chunks, trees, grassTris} }.
-  window.__tellusPerf = () => ({ fps: fpsValue, vegetation: vegetation.stats() });
+  // DEV-ONLY perf readout: window.__tellusPerf() -> { fps, vegetation, procplants }.
+  window.__tellusPerf = () => ({
+    fps: fpsValue,
+    vegetation: vegetation.stats(),
+    procplants: procplants.stats(),
+    generatedAssets: generatedAssetPerfStats(),
+    terrainTextures: terrainTextureDiagnostics(renderer, useWebGPU),
+  });
+
+  const procPlantPlacementFromWorld = (
+    placement: WorldProcPlantPlacement,
+  ): Parameters<typeof procplants.placeManualPlant>[0] => ({
+    id: placement.id,
+    presetId: placement.presetId,
+    seed: placement.seed >>> 0,
+    x: placement.position.x,
+    z: placement.position.z,
+    scale: placement.scale,
+  });
+
+  const publishProcPlantPlacement = (placement: WorldProcPlantPlacement) => {
+    if (!tellusWorldBackendAvailable) return;
+    const frame = {
+      type: "procplant.upsert",
+      visitorId,
+      placement,
+    };
+    if (worldSocket?.readyState === WebSocket.OPEN) {
+      worldSocket.send(JSON.stringify(frame));
+      return;
+    }
+    void fetch(tellusWorldHttpUrl("action"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(frame),
+    }).catch((error) => {
+      console.warn("Tellus procplant sync failed", error);
+    });
+  };
 
   let yaw = 0.72;
   let pitch = -0.28;
@@ -1922,8 +2149,32 @@ function createTellusWorld(
   let pointerX = 0;
   let pointerY = 0;
   let pointerTravel = 0;
+  let terrainBrushMode: TerrainEditMode | null = null;
   const pointerNdc = new THREE.Vector2();
   const raycaster = new THREE.Raycaster();
+  const terrainBrushPreviewRadius = TERRAIN_SCULPT_RADIUS * WORLD_SCALE * 0.68;
+  const terrainBrushPreview = new THREE.Mesh(
+    new THREE.RingGeometry(terrainBrushPreviewRadius * 0.96, terrainBrushPreviewRadius, 96),
+    new THREE.MeshBasicMaterial({
+      color: 0xffef9a,
+      transparent: true,
+      opacity: 0.92,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  terrainBrushPreview.name = "tellus-terrain-brush-preview";
+  terrainBrushPreview.rotation.x = -Math.PI / 2;
+  terrainBrushPreview.renderOrder = 80;
+  terrainBrushPreview.visible = false;
+  scene.add(terrainBrushPreview);
+  const hideTerrainBrushPreview = () => {
+    terrainBrushPreview.visible = false;
+  };
+  const isPointerFromUi = (target: EventTarget | null): boolean =>
+    target instanceof HTMLElement &&
+    Boolean(target.closest("button, input, select, textarea, .tool-card"));
 
   const snapshot = (): TellusSnapshot => ({
     generated: generated.map((thing) => ({
@@ -2358,12 +2609,14 @@ function createTellusWorld(
       repaintCentralTerrainRegion(b.minX, b.minZ, b.maxX, b.maxZ);
       refreshFlowerPatches();
       vegetation.notifyTerrainChanged();
+      procplants.notifyTerrainChanged();
       return;
     }
     rebuildCentralTerrain();
     // Re-grow the procedural vegetation lazily wherever the terrain changed (local sculpt or remote
     // patch both funnel through here).
     vegetation.notifyTerrainChanged();
+    procplants.notifyTerrainChanged();
   };
   refreshFlowerPatches();
 
@@ -2696,6 +2949,19 @@ function createTellusWorld(
       if (remoteThings) {
         applyRemoteGeneratedThings(remoteThings);
       }
+      const remoteProcPlants = procPlantPlacementsFromWorldPatch(parsed);
+      if (remoteProcPlants) {
+        const placements = remoteProcPlants.map(procPlantPlacementFromWorld);
+        if ((parsed as { type?: string } | null)?.type === "world.snapshot") {
+          procplants.replaceManualPlants(placements);
+        } else {
+          for (const placement of placements) procplants.placeManualPlant(placement);
+        }
+      }
+      const deletedProcPlant = procPlantDeletedFromWorldPatch(parsed);
+      if (deletedProcPlant) {
+        procplants.removeManualPlant(deletedProcPlant);
+      }
       const chatMessages = worldChatFromWorldPatch(parsed);
       if (chatMessages) {
         mergeWorldChatMessages(chatMessages);
@@ -2712,6 +2978,8 @@ function createTellusWorld(
         if (typeof sceneUrl === "string" && sceneUrl) {
           profileInteriorSceneUrl = sceneUrl;
           applyInterior(sceneUrl);
+        } else if (runtimeConfig.worldId.startsWith("interior-") && !interiorObject) {
+          applyInterior(profileInteriorSceneUrl || GENERATED_INTERIOR_SCENE_URL);
         } else if (
           interiorObject &&
           !runtimeConfig.worldId.startsWith("interior-") &&
@@ -2871,21 +3139,12 @@ function createTellusWorld(
     xIndex: number,
     zIndex: number,
     falloff: number,
-    paintCode: number,
-    center: Vec3,
+    _paintCode: number,
+    _center: Vec3,
   ): boolean => {
-    if (falloff >= 0.58) return true;
-    if (falloff <= 0.06) return false;
-    const seed =
-      Math.sin(
-        xIndex * 12.9898 +
-          zIndex * 78.233 +
-          paintCode * 37.719 +
-          Math.round(center.x * 2) * 0.217 +
-          Math.round(center.z * 2) * 0.311,
-      ) * 43758.5453;
-    const noise = seed - Math.floor(seed);
-    return noise < falloff * 0.92;
+    void xIndex;
+    void zIndex;
+    return falloff >= 0.18;
   };
 
   const sculptTerrainAt = (
@@ -3038,12 +3297,21 @@ function createTellusWorld(
     });
   };
 
-  const sculptTerrain = (mode: TerrainEditMode) => {
+  const sculptTerrainAtWorldPoint = (mode: TerrainEditMode, center: Vec3) => {
     if (isChunked) {
-      sendChunkedSculpt(mode, visitorPosition);
+      sendChunkedSculpt(mode, center);
       return;
     }
-    sculptTerrainAt(mode, visitorPosition, "visitor", "Visitor");
+    sculptTerrainAt(mode, center, "visitor", "Visitor");
+  };
+
+  const setTerrainBrush = (mode: TerrainEditMode | null) => {
+    terrainBrushMode = mode;
+    if (!mode) hideTerrainBrushPreview();
+  };
+
+  const sculptTerrain = (mode: TerrainEditMode) => {
+    sculptTerrainAtWorldPoint(mode, visitorPosition);
   };
 
   // The browser-NPC "pause AI" gate is gone; visitor-driven generation is never paused.
@@ -3924,6 +4192,7 @@ function createTellusWorld(
     regroundClassicTerrainActorsAndThings();
     refreshFlowerPatches();
     vegetation.notifyTerrainChanged();
+    procplants.notifyTerrainChanged();
     publish();
   });
 
@@ -4149,12 +4418,34 @@ function createTellusWorld(
     });
   };
 
-  const MAX_WORLD_MODEL_LOADS = 1;
+  const generatedModelLoadConcurrency = (): number => {
+    try {
+      const stored = Number(window.localStorage.getItem("tellus.generated.maxLoads"));
+      if (Number.isFinite(stored) && stored > 0) return clamp(Math.round(stored), 1, 5);
+    } catch {
+      // Storage can be unavailable in private/embedded contexts; use the conservative default.
+    }
+    return 3;
+  };
   const WORLD_MODEL_LOAD_PUMP_DELAY_MS = 120;
   let activeWorldModelLoads = 0;
   const worldModelLoadQueue: string[] = [];
   const queuedWorldModelLoads = new Set<string>();
+  const worldModelLoadEnqueuedAt = new Map<string, number>();
   let worldModelLoadPumpScheduled = false;
+  const generatedModelLoadStats = {
+    enqueued: 0,
+    started: 0,
+    loaded: 0,
+    failed: 0,
+    retried: 0,
+    totalMs: 0,
+    lastMs: 0,
+    maxMs: 0,
+    lastQueueWaitMs: 0,
+    totalQueueWaitMs: 0,
+    lastUrl: "",
+  };
 
   const isDeadLegacyHyadesContentUrl = (url: string): boolean => {
     try {
@@ -4245,11 +4536,14 @@ function createTellusWorld(
 
   const pumpWorldModelLoadQueue = () => {
     if (destroyed) return;
-    while (activeWorldModelLoads < MAX_WORLD_MODEL_LOADS && worldModelLoadQueue.length > 0) {
+    const maxWorldModelLoads = generatedModelLoadConcurrency();
+    while (activeWorldModelLoads < maxWorldModelLoads && worldModelLoadQueue.length > 0) {
       sortWorldModelLoadQueue();
       const id = worldModelLoadQueue.shift();
       if (!id) return;
       queuedWorldModelLoads.delete(id);
+      const enqueuedAt = worldModelLoadEnqueuedAt.get(id);
+      worldModelLoadEnqueuedAt.delete(id);
       const thing = thingById(id);
       if (!thing?.modelUrl || thing.generationStatus !== "ready") continue;
       const modelUrl = thing.modelUrl;
@@ -4265,8 +4559,21 @@ function createTellusWorld(
       const currentMesh = generatedMeshes.get(thing.id);
       if (currentMesh?.userData.loadedModelUrl === modelUrl) continue;
       activeWorldModelLoads++;
+      const loadStartedAt = performance.now();
+      const queueWaitMs =
+        typeof enqueuedAt === "number" ? Math.max(0, loadStartedAt - enqueuedAt) : 0;
+      generatedModelLoadStats.started += 1;
+      generatedModelLoadStats.lastQueueWaitMs = queueWaitMs;
+      generatedModelLoadStats.totalQueueWaitMs += queueWaitMs;
+      generatedModelLoadStats.lastUrl = modelUrl;
       void loadGeneratedModel(modelUrl, thing, useWebGPU)
         .then((model) => {
+          const loadMs = Math.max(0, performance.now() - loadStartedAt);
+          generatedModelLoadStats.loaded += 1;
+          generatedModelLoadStats.totalMs += loadMs;
+          generatedModelLoadStats.lastMs = loadMs;
+          generatedModelLoadStats.maxMs = Math.max(generatedModelLoadStats.maxMs, loadMs);
+          generatedModelLoadStats.lastUrl = modelUrl;
           const current = thingById(id);
           if (destroyed || !current || current.modelUrl !== modelUrl) {
             disposeObject(model);
@@ -4294,6 +4601,11 @@ function createTellusWorld(
           publish();
         })
         .catch(async (error) => {
+          const loadMs = Math.max(0, performance.now() - loadStartedAt);
+          generatedModelLoadStats.failed += 1;
+          generatedModelLoadStats.lastMs = loadMs;
+          generatedModelLoadStats.maxMs = Math.max(generatedModelLoadStats.maxMs, loadMs);
+          generatedModelLoadStats.lastUrl = modelUrl;
           const current = thingById(id);
           console.warn("Remote generated model load failed", error);
           if (!current || current.modelUrl !== modelUrl) return;
@@ -4311,6 +4623,7 @@ function createTellusWorld(
             publishGeneratedThing(current);
           } else {
             transientModelLoadFailures.set(id, (transientModelLoadFailures.get(id) ?? 0) + 1);
+            generatedModelLoadStats.retried += 1;
             showTransientGeneratedLoadFailure(current, error);
             scheduleTransientModelRetry(id, modelUrl);
           }
@@ -4331,6 +4644,8 @@ function createTellusWorld(
     }
     if (queuedWorldModelLoads.has(thing.id)) return;
     queuedWorldModelLoads.add(thing.id);
+    worldModelLoadEnqueuedAt.set(thing.id, performance.now());
+    generatedModelLoadStats.enqueued += 1;
     worldModelLoadQueue.push(thing.id);
     scheduleWorldModelLoadPump();
   };
@@ -5678,50 +5993,130 @@ function createTellusWorld(
     return thing;
   };
 
-  const scatterProceduralAsset = (archetypeId: string, count?: number): GeneratedThing[] => {
+  const proceduralAssetOption = (archetypeId: string) => {
     const arch = PROCEDURAL_CATALOG.find((item) => item.id === archetypeId);
-    if (!arch) return [];
+    if (arch) {
+      return {
+        id: arch.id,
+        label: arch.label,
+        kind: arch.kind,
+        tree: arch.kind === "tree",
+        count: arch.kind === "tree" ? 5 : arch.kind === "flower" ? 14 : 10,
+        max: arch.kind === "tree" ? 9 : 24,
+        radius: arch.kind === "tree" ? 24 : 12,
+        minDistance: arch.kind === "tree" ? 7 : 3,
+        modelUrl: (seed: number) => makeProceduralModelUrl(arch.id, seed),
+        assetId: (seed: number) => `proc-${arch.id}-${seed.toString(16)}`,
+        scale: (variation = 1) =>
+          defaultScaleForRealisticKind(arch.kind, arch.label) * (arch.kind === "tree" ? 1.48 : 1) * variation,
+        description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
+        procPlantPresetId: undefined,
+      };
+    }
+    const procPlant = procPlantPlaceableById(archetypeId);
+    if (!procPlant) return null;
+    return {
+      id: procPlant.id,
+      label: procPlant.label,
+      kind: procPlant.kind,
+      tree: procPlant.kind === "tree",
+      count: procPlant.scatterCount,
+      max: procPlant.kind === "tree" ? 8 : 22,
+      radius: procPlant.scatterRadius,
+      minDistance: procPlant.kind === "tree" ? 6 : 2.5,
+      modelUrl: (seed: number) => makeProcPlantModelUrl(procPlant.presetId, seed),
+      assetId: (seed: number) => `procplant-${procPlant.presetId.toLowerCase()}-${seed.toString(16)}`,
+      scale: (variation = 1) => procPlant.scale * variation,
+      description: `${procPlant.label} procplant`,
+      procPlantPresetId: procPlant.presetId,
+    };
+  };
+
+  const placeProcPlantAsset = (
+    option: NonNullable<ReturnType<typeof proceduralAssetOption>>,
+    seed: number,
+    location: { x: number; y: number; z: number },
+    scale: number,
+  ): ProceduralAssetPlacement | null => {
+    if (!option.procPlantPresetId) return null;
+    const id = option.assetId(seed);
+    const placed = procplants.placeManualPlant({
+      id,
+      presetId: option.procPlantPresetId,
+      seed,
+      x: location.x,
+      z: location.z,
+      scale,
+    });
+    if (!placed) return null;
+    procplants.notifyTerrainChanged();
+    publishProcPlantPlacement({
+      id,
+      presetId: option.procPlantPresetId,
+      seed,
+      position: location,
+      scale,
+      createdBy: visitorId,
+      updatedAt: new Date().toISOString(),
+    });
+    return {
+      id,
+      archetypeId: option.id,
+      label: option.label,
+      chunkedVegetation: true,
+    };
+  };
+
+  const scatterProceduralAsset = (archetypeId: string, count?: number): ProceduralAssetPlacement[] => {
+    const option = proceduralAssetOption(archetypeId);
+    if (!option) return [];
     const rng = Math.random;
-    const isTree = arch.kind === "tree";
-    const proceduralScale = (variation = 1) =>
-      defaultScaleForRealisticKind(arch.kind, arch.label) * (isTree ? 1.48 : 1) * variation;
     const total = clamp(
-      Math.round(count ?? (isTree ? 5 : arch.kind === "flower" ? 14 : 10)),
+      Math.round(count ?? option.count),
       1,
-      isTree ? 9 : 24,
+      option.max,
     );
-    const radius = isTree ? 24 : 12;
-    const placed: GeneratedThing[] = [];
+    const placed: ProceduralAssetPlacement[] = [];
     for (let i = 0; i < total; i++) {
       const seed = (rng() * 0xffffffff) >>> 0;
       const angle = rng() * Math.PI * 2;
-      const distance = (isTree ? 7 : 3) + Math.sqrt(rng()) * radius;
+      const distance = option.minDistance + Math.sqrt(rng()) * option.radius;
       const location = {
         x: visitorPosition.x + Math.sin(angle) * distance,
         y: 0,
         z: visitorPosition.z + Math.cos(angle) * distance,
       };
-      placed.push(
-        addLibraryAsset(
-          {
-            id: `proc-${arch.id}-${seed.toString(16)}`,
-            name: arch.label,
-            description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
-            modelUrl: makeProceduralModelUrl(arch.id, seed),
-            source: "generated",
-          },
-          {
-            location,
-            scale: proceduralScale(0.82 + rng() * 0.42),
-          },
-        ),
+      const scale = option.scale(0.82 + rng() * 0.42);
+      const plantPlacement = placeProcPlantAsset(option, seed, location, scale);
+      if (plantPlacement) {
+        placed.push(plantPlacement);
+        continue;
+      }
+      const thing = addLibraryAsset(
+        {
+          id: option.assetId(seed),
+          name: option.label,
+          description: option.description,
+          modelUrl: option.modelUrl(seed),
+          source: "generated",
+        },
+        {
+          location,
+          scale,
+        },
       );
+      placed.push({
+        id: thing.id,
+        archetypeId: option.id,
+        label: option.label,
+        generatedThingId: thing.id,
+      });
     }
     addLog({
       agentId: "visitor",
       agentName: "Visitor",
       tool: "generate",
-      text: `scattered ${placed.length} ${arch.label}`,
+      text: `scattered ${placed.length} ${option.label}`,
     });
     publish();
     return placed;
@@ -6858,6 +7253,7 @@ function createTellusWorld(
       if (activeChunks !== lastActiveChunkCount) {
         lastActiveChunkCount = activeChunks;
         vegetation.notifyTerrainChanged();
+        procplants.notifyTerrainChanged();
         const mounted = sailingThingId ? thingById(sailingThingId) : undefined;
         if (mounted && !isFreeMovingVehicle(mounted) && !isVisiblyOffsetFromLiveGround(mounted)) {
           groundThingToRenderedSurface(mounted);
@@ -6912,6 +7308,7 @@ function createTellusWorld(
       pruneStaleRemotePresence(Date.now());
     }
     vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
+    procplants.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
     ambientPhysics.step(delta);
     try {
       renderPortalPreview();
@@ -7066,6 +7463,16 @@ function createTellusWorld(
       }
       setMoveMode(null); // target vanished — drop the mode
     }
+    if (terrainBrushMode && !interiorObject && !isPointerFromUi(event.target) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const target = dragGroundTarget(event);
+      if (target) {
+        event.preventDefault();
+        terrainBrushPreview.position.set(target.x, target.y + 0.08, target.z);
+        terrainBrushPreview.visible = true;
+        sculptTerrainAtWorldPoint(terrainBrushMode, target);
+        return;
+      }
+    }
     // Object grab: Ctrl/Cmd + drag on a mouse picks up ANY object (auto-selecting it); plain drag is
     // ALWAYS camera orbit so the two never fight. Touch (no modifier keys) keeps the old rule: press
     // the already-selected object to drag it.
@@ -7113,6 +7520,10 @@ function createTellusWorld(
       if (Math.hypot(dx, dz) < 0.05) return;
       moveGenerated(draggingThingId, dx, dz, target.y);
       dragMoved = true;
+      return;
+    }
+    if (terrainBrushMode) {
+      updateTerrainBrushPreview(event);
       return;
     }
     if (transformDragging || !isDragging) return;
@@ -7251,6 +7662,27 @@ function createTellusWorld(
   // ── Explicit Move mode: a UI toggle (no modifier needed — works on every platform incl. touch).
   // While active for the selected object, ANY press/drag on the world repositions it (click =
   // teleport there, drag = carry); camera orbit is suspended until the mode is toggled off. ──
+  const updateTerrainBrushPreview = (event: PointerEvent) => {
+    if (
+      !terrainBrushMode ||
+      interiorObject ||
+      isPointerFromUi(event.target) ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey
+    ) {
+      hideTerrainBrushPreview();
+      return;
+    }
+    const target = dragGroundTarget(event);
+    if (!target) {
+      hideTerrainBrushPreview();
+      return;
+    }
+    terrainBrushPreview.position.set(target.x, target.y + 0.08, target.z);
+    terrainBrushPreview.visible = true;
+  };
+
   let moveModeThingId: string | null = null;
   const wallDoorTargetFromPointer = (event: PointerEvent): { position: Vec3; rotationY: number } | null => {
     if (!interiorObject) return null;
@@ -7378,6 +7810,7 @@ function createTellusWorld(
     transformDragging = false;
     draggingThingId = null;
     isDragging = false;
+    hideTerrainBrushPreview();
     container.style.cursor = moveModeThingId ? "move" : "";
   };
   const handleWheel = (event: WheelEvent) => {
@@ -7667,12 +8100,20 @@ function createTellusWorld(
       }));
     },
     listProceduralAssets() {
-      return PROCEDURAL_CATALOG.map((entry) => ({
-        id: entry.id,
-        label: entry.label,
-        kind: entry.kind,
-        scatterable: true,
-      }));
+      return [
+        ...PROCEDURAL_CATALOG.map((entry) => ({
+          id: entry.id,
+          label: entry.label,
+          kind: entry.kind,
+          scatterable: true,
+        })),
+        ...PROCPLANT_PLACEABLE_CATALOG.map((entry) => ({
+          id: entry.id,
+          label: entry.label,
+          kind: entry.kind,
+          scatterable: true,
+        })),
+      ];
     },
     getChat(opts: { radius?: number; channel?: WorldChatChannel; recipientId?: string } = {}) {
       const messages = nearbyWorldChat(
@@ -7792,28 +8233,36 @@ function createTellusWorld(
           return { ok: true, assets: tellusAgent.listProceduralAssets() };
         case "placeProceduralAsset": {
           const archetypeId = typeof a.archetypeId === "string" ? a.archetypeId : typeof a.id === "string" ? a.id : "";
-          const arch = PROCEDURAL_CATALOG.find((item) => item.id === archetypeId);
-          if (!arch) return { ok: false, error: "placeProceduralAsset requires a valid archetypeId" };
+          const option = proceduralAssetOption(archetypeId);
+          if (!option) return { ok: false, error: "placeProceduralAsset requires a valid archetypeId" };
           const seed = typeof a.seed === "number" && Number.isFinite(a.seed)
             ? a.seed >>> 0
             : (Math.random() * 0xffffffff) >>> 0;
+          const location = nearToLocation(a.near);
+          const scale = typeof a.scale === "number"
+            ? a.scale
+            : option.scale();
+          const plantLocation =
+            typeof location === "string" ? { ...visitorPosition } : location;
+          const plantPlacement = placeProcPlantAsset(option, seed, plantLocation, scale);
+          if (plantPlacement) {
+            return { ok: true, id: plantPlacement.id, archetypeId: option.id, label: option.label, chunkedVegetation: true };
+          }
           const thing = addLibraryAsset(
             {
-              id: `proc-${arch.id}-${seed.toString(16)}`,
-              name: arch.label,
-              description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
-              modelUrl: makeProceduralModelUrl(arch.id, seed),
+              id: option.assetId(seed),
+              name: option.label,
+              description: option.description,
+              modelUrl: option.modelUrl(seed),
               source: "generated",
             },
             {
               creatorId: visitorId as GenerateRequest["creatorId"],
-              location: nearToLocation(a.near),
-              scale: typeof a.scale === "number"
-                ? a.scale
-                : defaultScaleForRealisticKind(arch.kind, arch.label) * (arch.kind === "tree" ? 1.48 : 1),
+              location,
+              scale,
             },
           );
-          return { ok: true, id: thing.id, archetypeId: arch.id, label: arch.label };
+          return { ok: true, id: thing.id, archetypeId: option.id, label: option.label };
         }
         case "scatterProceduralAsset": {
           const archetypeId = typeof a.archetypeId === "string" ? a.archetypeId : typeof a.id === "string" ? a.id : "";
@@ -7823,7 +8272,7 @@ function createTellusWorld(
             ok: true,
             archetypeId,
             count: placed.length,
-            ids: placed.map((thing) => thing.id),
+            ids: placed.map((placement) => placement.id),
           };
         }
         case "generate": {
@@ -8120,8 +8569,9 @@ function createTellusWorld(
     });
     return portalId;
   };
-  const createDoorHere = (label?: string) => {
+  const createDoorHere = (label?: string, sceneUrl?: string) => {
     const interiorId = `interior-${runtimeConfig.worldId}-${makeId("room").slice(0, 12)}`;
+    const roomSceneUrl = sceneUrl?.trim() || GENERATED_INTERIOR_SCENE_URL;
     const x = Math.round(visitorPosition.x);
     const z = Math.round(visitorPosition.z);
     const y = groundHeightAt(x, z) ?? visitorPosition.y ?? SEA_LEVEL;
@@ -8135,7 +8585,7 @@ function createTellusWorld(
         kind: "interior",
         worldId: interiorId,
         spawn: { x: 0, y: 0, z: 2 },
-        sceneUrl: GENERATED_INTERIOR_SCENE_URL,
+        sceneUrl: roomSceneUrl,
       },
     });
   };
@@ -8167,6 +8617,7 @@ function createTellusWorld(
     boardGenerated,
     disembark,
     setGeneratedPet,
+    setTerrainBrush,
     sculptTerrain,
     importGeneratedThings,
     setSkyboxUrl,
@@ -8243,6 +8694,8 @@ function createTellusWorld(
     setMoveMode,
     getAmbientStats: () => ({
       vegetation: vegetation.stats(),
+      procplants: procplants.stats(),
+      generatedAssets: generatedAssetPerfStats(),
       chunkTerrain: chunkRenderer?.stats() ?? null,
       physicsBodies: ambientPhysics.activeCount(),
       rapierSolids: rapierPhysics?.stats().solids ?? 0,
@@ -8255,6 +8708,7 @@ function createTellusWorld(
       }
       agentViewTarget?.dispose();
       vegetation.dispose();
+      procplants.dispose();
       chunkRenderer?.dispose();
       onTerrainTemplateLoaded(null);
       setChunkedHeightProvider(null);
@@ -8320,6 +8774,7 @@ function createTellusWorld(
       }
       delete window.__tellusAvatarDebug;
       delete window.__tellusWorldDebug;
+      delete window.__tellusAssetLodUrls;
       delete window.__tellusViewDebug;
       delete window.__tellusThingsDebug;
       delete window.__tellusMirrorDebug;
@@ -8340,6 +8795,9 @@ function createTellusWorld(
         material.map?.dispose();
         material.dispose();
       }
+      scene.remove(terrainBrushPreview);
+      terrainBrushPreview.geometry.dispose();
+      disposeMaterial(terrainBrushPreview.material);
       resizeObserver?.disconnect();
       transformControls?.detach();
       transformControls?.dispose();
@@ -8466,6 +8924,20 @@ function App(): React.ReactElement {
     remoteVisitors: [],
   });
   const [prompt, setPrompt] = useState("");
+  const [terrainBrushMode, setTerrainBrushMode] = useState<TerrainEditMode | null>(null);
+  const clearTerrainBrush = () => {
+    setTerrainBrushMode(null);
+    worldRef.current?.setTerrainBrush(null);
+  };
+  const selectTerrainBrush = (mode: TerrainEditMode) => {
+    if (terrainBrushMode === mode) {
+      clearTerrainBrush();
+      return;
+    }
+    const next = mode;
+    setTerrainBrushMode(next);
+    worldRef.current?.setTerrainBrush(next);
+  };
   // Live Tellus account (null when logged out). World deletion is ultimately
   // server-gated; the world list carries can_delete for owners/admins.
   const account = useTellusAuth();
@@ -9597,6 +10069,8 @@ function App(): React.ReactElement {
   const [newWorldWaterSettings, setNewWorldWaterSettings] = useState<WaterSettings>(
     runtimeConfig.waterSettings,
   );
+  const [doorInteriorTemplate, setDoorInteriorTemplate] =
+    useState<WorldTemplateId>("interior-studio");
   const [advancedWorldTemplatesOpen, setAdvancedWorldTemplatesOpen] = useState(false);
   const [currentWorldTemplate, setCurrentWorldTemplate] = useState<WorldTemplateId>(
     parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
@@ -9631,6 +10105,7 @@ function App(): React.ReactElement {
   const [savingWorld, setSavingWorld] = useState(false);
   const pendingDeleteTimerRef = useRef<number | undefined>(undefined);
   const KNOWN_WORLDS_KEY = "tellus.knownWorlds";
+  const LAST_EXTERIOR_WORLD_KEY = "tellus.lastExteriorWorldId";
   const WORLD_PROFILES_KEY = "tellus.worldProfiles";
   const HIDDEN_WORLDS_KEY = "tellus.hiddenWorlds";
   const ACTIVE_WORLD_KEY = "tellus.activeWorldId";
@@ -10300,8 +10775,14 @@ function App(): React.ReactElement {
   const switchWorld = (id: string) => {
     const next = canonicalWorldId(id);
     if (!next || next === activeWorldId) return;
+    const current = activeWorldId ?? runtimeConfig.worldId;
     rememberWorld(next);
     try {
+      if (next.startsWith("interior-") && current && !current.startsWith("interior-")) {
+        window.localStorage.setItem(LAST_EXTERIOR_WORLD_KEY, canonicalWorldId(current));
+      } else if (!next.startsWith("interior-")) {
+        window.localStorage.setItem(LAST_EXTERIOR_WORLD_KEY, next);
+      }
       window.localStorage.setItem(ACTIVE_WORLD_KEY, next);
     } catch {
       /* ignore */
@@ -10407,6 +10888,25 @@ function App(): React.ReactElement {
       setWorldCreateNote(null);
       worldCreateNoteTimerRef.current = undefined;
     }, ms);
+  };
+  const exitInteriorWorld = () => {
+    const fallback =
+      worlds.find((worldId) => worldId && !worldId.startsWith("interior-")) ??
+      canonicalWorldId(runtimeConfig.worldId);
+    let target = fallback;
+    try {
+      const stored = window.localStorage.getItem(LAST_EXTERIOR_WORLD_KEY);
+      if (stored?.trim() && !canonicalWorldId(stored).startsWith("interior-")) {
+        target = canonicalWorldId(stored);
+      }
+    } catch {
+      /* ignore */
+    }
+    if (!target || target === canonicalWorldId(activeWorldId ?? runtimeConfig.worldId)) {
+      showWorldNote("No exterior world to return to", 3500);
+      return;
+    }
+    switchWorld(target);
   };
   const disarmDeleteWorld = () => {
     if (pendingDeleteTimerRef.current !== undefined) {
@@ -11620,6 +12120,9 @@ function App(): React.ReactElement {
       window.clearInterval(interval);
     };
   }, [chatTab, currentWorldId, worldChatOpen, worlds.join("\n")]);
+  const doorInteriorOptions = WORLD_CREATION_TEMPLATES.filter((option) =>
+    isInteriorWorldTemplate(option.id),
+  );
   const portalTargetOptions = worlds.filter((worldId) => worldId && worldId !== currentWorldId);
   useEffect(() => {
     if (portalTargetWorldId && portalTargetOptions.includes(portalTargetWorldId)) return;
@@ -13561,13 +14064,55 @@ function App(): React.ReactElement {
                 );
               })}
               {/* Create at your feet (owner-only — the server rejects otherwise; the rejection shows in the log). */}
+              {currentWorldId.startsWith("interior-") && (
+                <button
+                  type="button"
+                  title="Return to the last exterior world"
+                  onClick={exitInteriorWorld}
+                  style={{ ...portalBtn, marginTop: 6, borderColor: "rgba(255,207,106,0.65)" }}
+                >
+                  {"<-"} Exit interior
+                </button>
+              )}
+              <select
+                value={doorInteriorTemplate}
+                aria-label="Door interior room type"
+                title="Door interior room type"
+                onChange={(event) =>
+                  setDoorInteriorTemplate(parseWorldTemplateId(event.target.value, "interior-studio"))
+                }
+                style={{
+                  width: "100%",
+                  marginTop: 6,
+                  background: "rgba(0,0,0,0.45)",
+                  color: "inherit",
+                  border: "1px solid rgba(255,207,106,0.45)",
+                  borderRadius: 8,
+                  padding: "4px 6px",
+                  font: "inherit",
+                }}
+              >
+                {doorInteriorOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    Door opens to {option.label}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
-                title="Open a door to a fresh interior room at your position"
-                onClick={() => worldRef.current?.createDoorHere(window.prompt("Door label?", "Door") || "Door")}
-                style={{ ...portalBtn, marginTop: 6, borderColor: "rgba(255,207,106,0.5)" }}
+                title="Create a door to the selected interior room type"
+                onClick={() => {
+                  const sceneUrl =
+                    generatedInteriorSceneUrlForTemplate(doorInteriorTemplate) ??
+                    GENERATED_INTERIOR_SCENE_URL;
+                  worldRef.current?.createDoorHere(
+                    `${worldDisplayName(currentWorldId)} ${worldTemplateLabel(doorInteriorTemplate)} door`,
+                    sceneUrl,
+                  );
+                }}
+                style={{ ...portalBtn, marginTop: 4, borderColor: "rgba(255,207,106,0.5)" }}
               >
-                ＋ Door here
+                Door to {worldTemplateLabel(doorInteriorTemplate)}
               </button>
               <button
                 type="button"
@@ -14393,76 +14938,82 @@ function App(): React.ReactElement {
               <ArrowDown size={18} />
             </button>
           </div>
-          <div className="terrain-subtitle with-rule">Materials</div>
+          <div className="terrain-subtitle-row with-rule">
+            <div className="terrain-subtitle">Materials</div>
+            {terrainBrushMode && (
+              <button
+                type="button"
+                className="terrain-brush-clear"
+                title="Exit paint mode"
+                aria-label="Exit paint mode"
+                onClick={clearTerrainBrush}
+              >
+                <X size={14} />
+                <span>Exit paint</span>
+              </button>
+            )}
+          </div>
           <div className="terrain-material-swatches">
             <button
               type="button"
-              className="terrain-swatch meadow"
-              onClick={() => worldRef.current?.sculptTerrain("meadow")}
+              className={`terrain-swatch meadow ${terrainBrushMode === "meadow" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("meadow")}
             >
               <span className="terrain-swatch-preview" />
               <span>Meadow</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch grass"
-              onClick={() => worldRef.current?.sculptTerrain("grass")}
+              className={`terrain-swatch grass ${terrainBrushMode === "grass" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("grass")}
             >
               <span className="terrain-swatch-preview" />
               <span>Grass</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch beach"
-              onClick={() => worldRef.current?.sculptTerrain("beach")}
+              className={`terrain-swatch beach ${terrainBrushMode === "beach" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("beach")}
             >
               <span className="terrain-swatch-preview" />
               <span>Beach</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch dirt"
-              onClick={() => worldRef.current?.sculptTerrain("dirt")}
+              className={`terrain-swatch dirt ${terrainBrushMode === "dirt" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("dirt")}
             >
               <span className="terrain-swatch-preview" />
               <span>Dirt</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch pebbles"
-              onClick={() => worldRef.current?.sculptTerrain("rock")}
+              className={`terrain-swatch pebbles ${terrainBrushMode === "rock" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("rock")}
             >
               <span className="terrain-swatch-preview" />
               <span>Pebbles</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch snow"
-              onClick={() => worldRef.current?.sculptTerrain("snow")}
+              className={`terrain-swatch snow ${terrainBrushMode === "snow" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("snow")}
             >
               <span className="terrain-swatch-preview" />
               <span>Snow</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch flowers"
-              onClick={() => worldRef.current?.sculptTerrain("flowers")}
+              className={`terrain-swatch flowers ${terrainBrushMode === "flowers" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("flowers")}
             >
               <span className="terrain-swatch-preview" />
               <span>Flowers</span>
             </button>
             <button
               type="button"
-              className="terrain-swatch stone"
-              onClick={() => worldRef.current?.sculptTerrain("stone")}
-            >
-              <span className="terrain-swatch-preview" />
-              <span>Stone</span>
-            </button>
-            <button
-              type="button"
-              className="terrain-swatch brick"
-              onClick={() => worldRef.current?.sculptTerrain("brick")}
+              className={`terrain-swatch brick ${terrainBrushMode === "brick" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("brick")}
             >
               <span className="terrain-swatch-preview" />
               <span>Brick</span>
@@ -14499,6 +15050,29 @@ function App(): React.ReactElement {
                   title={`Scatter ${arch.label}`}
                   aria-label={`Scatter ${arch.label}`}
                   onClick={() => worldRef.current?.scatterProceduralAsset(arch.id)}
+                >
+                  <Sprout size={13} />
+                </button>
+              </div>
+            ))}
+            {PROCPLANT_PLACEABLE_CATALOG.map((entry) => (
+              <div key={entry.id} className="terrain-scatter-tile">
+                <button
+                  type="button"
+                  className="terrain-scatter-place"
+                  title={`${entry.label} procplant — tap again for a new variation`}
+                  aria-label={entry.label}
+                  onClick={() => worldRef.current?.scatterProceduralAsset(entry.id, 1)}
+                >
+                  <span className="terrain-scatter-emoji" aria-hidden="true">{entry.emoji}</span>
+                  <span className="terrain-scatter-label">{entry.label}</span>
+                </button>
+                <button
+                  type="button"
+                  className="terrain-scatter-burst"
+                  title={`Scatter ${entry.label}`}
+                  aria-label={`Scatter ${entry.label}`}
+                  onClick={() => worldRef.current?.scatterProceduralAsset(entry.id)}
                 >
                   <Sprout size={13} />
                 </button>

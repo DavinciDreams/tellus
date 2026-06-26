@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { Reflector } from "three/examples/jsm/objects/Reflector.js";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import { reflector } from "three/tsl";
+import { procPlantPlaceableById } from "./tellus-procplant-biomes";
+import { buildProcPlantObject, procPlantPresets } from "./tellus-procplants";
 import { buildProceduralObject, proceduralArchetype } from "./tellus-veg-archetypes";
 import {
   buildProceduralBuildingModel,
@@ -35,6 +37,9 @@ export const sanitizeProceduralModelUrl = (url: string | undefined | null): stri
 export const makeProceduralModelUrl = (archetypeId: string, seed: number): string =>
   `${PROCEDURAL_URL_PREFIX}${archetypeId}?seed=${seed >>> 0}`;
 
+export const makeProcPlantModelUrl = (presetId: string, seed: number): string =>
+  `${PROCEDURAL_URL_PREFIX}procplant-${presetId.toLowerCase()}?seed=${seed >>> 0}`;
+
 export const makeProceduralBuildingModelUrl = (
   archetypeId: string,
   seed: number,
@@ -64,15 +69,19 @@ export const parseProceduralModelUrl = (
     lighting?: BuildingLightingStyle;
     roof?: boolean;
   };
+  procPlant?: {
+    presetId: string;
+  };
 } | null => {
   if (!isProceduralModelUrl(url)) return null;
   const rest = url.slice(PROCEDURAL_URL_PREFIX.length);
   const q = rest.indexOf("?");
   const archetypeId = (q >= 0 ? rest.slice(0, q) : rest).toLowerCase();
   const building = proceduralBuildingArchetype(archetypeId);
+  const procPlant = procPlantPlaceableById(archetypeId);
   // The mirror isn't a vegetation archetype (it builds a Reflector, not a template) — accept it here
   // so it rides the same procedural:// place/sync/clone pipeline.
-  if (archetypeId !== MIRROR_ARCHETYPE_ID && !building && !proceduralArchetype(archetypeId)) return null;
+  if (archetypeId !== MIRROR_ARCHETYPE_ID && !building && !procPlant && !proceduralArchetype(archetypeId)) return null;
   let seed = 1;
   let material: BuildingMaterialStyle | undefined;
   let lighting: BuildingLightingStyle | undefined;
@@ -99,6 +108,9 @@ export const parseProceduralModelUrl = (
       },
     };
   }
+  if (procPlant) {
+    return { archetypeId, seed, procPlant: { presetId: procPlant.presetId } };
+  }
   return { archetypeId, seed };
 };
 
@@ -121,6 +133,8 @@ export const buildProceduralModel = (
   if (!proto) {
     const built = parsed.building
       ? buildProceduralBuildingModel(parsed.building.recipeId, parsed.seed, parsed.building)
+      : parsed.procPlant
+        ? buildProcPlantObject(procPlantPresets[parsed.procPlant.presetId], parsed.seed)
       : buildProceduralObject(parsed.archetypeId, parsed.seed);
     if (!built) return null;
     proto = built;

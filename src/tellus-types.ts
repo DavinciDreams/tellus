@@ -274,7 +274,7 @@ export interface TellusWorldApi {
   startInteriorWallDoorPlacement(targetWorldId?: string | null, label?: string): void;
   updatePortalTarget(portalId: string, targetWorldId: string): void;
   deletePortal(portalId: string): void;
-  createDoorHere(label?: string): void;
+  createDoorHere(label?: string, sceneUrl?: string): void;
   generate(request: GenerateRequest): GeneratedThing;
   addLibraryAsset(
     model: AssetLibraryModel,
@@ -285,7 +285,7 @@ export interface TellusWorldApi {
       scale?: number;
     },
   ): GeneratedThing;
-  scatterProceduralAsset(archetypeId: string, count?: number): GeneratedThing[];
+  scatterProceduralAsset(archetypeId: string, count?: number): ProceduralAssetPlacement[];
   interact(request: InteractRequest): TellusLog;
   selectGenerated(id?: string): void;
   goToGenerated(id: string): void;
@@ -302,6 +302,7 @@ export interface TellusWorldApi {
   boardGenerated(id: string): void;
   disembark(): void;
   setGeneratedPet(id: string, isPet: boolean): void;
+  setTerrainBrush(mode: TerrainEditMode | null): void;
   sculptTerrain(mode: TerrainEditMode): void;
   importGeneratedThings(things: WorldGeneratedThing[]): void;
   setSkyboxUrl(url: string): Promise<string | null>;
@@ -380,6 +381,14 @@ export interface TellusWorldApi {
     rapierSolids: number;
   };
   destroy(): void;
+}
+
+export interface ProceduralAssetPlacement {
+  id: string;
+  archetypeId: string;
+  label: string;
+  generatedThingId?: string;
+  chunkedVegetation?: boolean;
 }
 
 export interface TellusRuntimeConfig {
@@ -502,7 +511,21 @@ declare global {
     // DEV-ONLY interior physics test hooks (no server portal needed). Strip before ship.
     __tellusEnterInterior?: () => void;
     __tellusExitInterior?: () => void;
-    __tellusPerf?: () => { fps: number; vegetation: unknown };
+    __tellusPerf?: () => {
+      fps: number;
+      vegetation: unknown;
+      procplants?: unknown;
+      generatedAssets?: unknown;
+      terrainTextures?: unknown;
+    };
+    __tellusAssetLodUrls?: (assetIdOrUrl: string) => {
+      assetId: string;
+      gameOptimized: string;
+      lod0: string;
+      lod1: string;
+      lod2: string;
+      impostor: string;
+    } | null;
     __tellusWorldDebug?: () => {
       worldId: string;
       runtimeTemplate: WorldTemplateId;
