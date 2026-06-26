@@ -14926,6 +14926,14 @@ function App(): React.ReactElement {
               <span className="terrain-swatch-preview" />
               <span>Flagstone</span>
             </button>
+            <button
+              type="button"
+              className="terrain-swatch brick"
+              onClick={() => worldRef.current?.sculptTerrain("brick")}
+            >
+              <span className="terrain-swatch-preview" />
+              <span>Brick</span>
+            </button>
           </div>
           <div className="terrain-subtitle with-rule">Scatter</div>
           <div className="terrain-scatter-grid">

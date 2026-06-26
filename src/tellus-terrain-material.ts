@@ -559,6 +559,24 @@ uniform sampler2D tellusRockAlbedoMap;
 uniform sampler2D tellusFlagstoneAlbedoMap;
 float tellusPaintBand(float code){
   return step(code - 0.5, vTellusPaintCode) - step(code + 0.5, vTellusPaintCode);
+}
+float tellusBrickMortar(vec2 f){
+  vec2 edge = min(f, 1.0 - f);
+  return 1.0 - step(0.075, min(edge.x, edge.y));
+}
+vec3 tellusHerringboneBrick(vec2 worldPos){
+  vec2 cell = floor(worldPos * 0.48);
+  float flip = mod(cell.x + cell.y, 2.0);
+  vec2 p = flip < 0.5 ? worldPos : worldPos.yx;
+  vec2 brickUv = vec2(p.x / 1.45, p.y / 0.34);
+  brickUv.x += floor(brickUv.y) * 0.5;
+  vec2 f = fract(brickUv);
+  float mortar = tellusBrickMortar(f);
+  float worn = fract(sin(dot(floor(brickUv), vec2(17.13, 41.77))) * 43758.5453);
+  vec3 redBrick = mix(vec3(0.46, 0.105, 0.075), vec3(0.70, 0.20, 0.13), worn);
+  vec3 paleBrick = mix(vec3(0.78, 0.70, 0.58), vec3(0.94, 0.86, 0.70), worn);
+  vec3 brick = mix(redBrick, paleBrick, step(0.5, mod(floor(brickUv.x) + floor(brickUv.y), 3.0)));
+  return mix(brick, vec3(0.76, 0.70, 0.62), mortar);
 }`,
       )
       .replace(
@@ -573,10 +591,9 @@ float tellusPaintBand(float code){
     float sandMask = tellusPaintBand(${PAINT_BEACH.toFixed(1)});
     float dirtMask = tellusPaintBand(${PAINT_DIRT.toFixed(1)});
     float rockMask = tellusPaintBand(${PAINT_ROCK.toFixed(1)});
-    float flagstoneMask =
-      tellusPaintBand(${PAINT_STONE.toFixed(1)}) +
-      tellusPaintBand(${PAINT_BRICK.toFixed(1)});
-    float paintMask = clamp(mossMask + sandMask + dirtMask + rockMask + flagstoneMask, 0.0, 1.0);
+    float stoneMask = tellusPaintBand(${PAINT_STONE.toFixed(1)});
+    float brickMask = tellusPaintBand(${PAINT_BRICK.toFixed(1)});
+    float paintMask = clamp(mossMask + sandMask + dirtMask + rockMask + stoneMask + brickMask, 0.0, 1.0);
     vec3 mossSample = texture2D(tellusMossAlbedoMap, tellusPaintUv).rgb;
     vec3 sandSample = texture2D(tellusSandAlbedoMap, tellusPaintUv).rgb;
     vec3 rockSample = texture2D(tellusRockAlbedoMap, tellusPaintUv).rgb;
@@ -588,7 +605,7 @@ float tellusPaintBand(float code){
     vec3 dirtAlbedo = sandSample * vec3(0.70, 0.50, 0.36);
     vec3 rockAlbedo = rockSample * vec3(0.82, 0.86, 0.82);
     vec3 flagstoneAlbedo = flagstoneSample * vec3(0.80, 0.82, 0.78);
-    vec3 brickFlagstoneAlbedo = flagstoneSample * vec3(1.12, 0.64, 0.52);
+    vec3 brickAlbedo = tellusHerringboneBrick(vTellusWorldPos.xz);
     vec3 biomeAlbedo =
       meadowAlbedo * meadowMask +
       flowersAlbedo * flowersMask +
@@ -596,8 +613,8 @@ float tellusPaintBand(float code){
       sandAlbedo * sandMask +
       dirtAlbedo * dirtMask +
       rockAlbedo * rockMask +
-      flagstoneAlbedo * tellusPaintBand(${PAINT_STONE.toFixed(1)}) +
-      brickFlagstoneAlbedo * tellusPaintBand(${PAINT_BRICK.toFixed(1)}) +
+      flagstoneAlbedo * stoneMask +
+      brickAlbedo * brickMask +
       vec3(1.0) * (1.0 - paintMask);
     diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb, biomeAlbedo, 0.68), paintMask);
   }`,
