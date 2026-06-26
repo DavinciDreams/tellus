@@ -42,6 +42,7 @@ const PAINT_MEADOW = 1;
 const PAINT_BEACH = 2;
 const PAINT_DIRT = 3;
 const PAINT_ROCK = 4;
+const PAINT_SNOW = 5;
 const PAINT_FLOWERS = 6;
 const PAINT_STONE = 7;
 const PAINT_BRICK = 8;
@@ -609,9 +610,10 @@ vec3 tellusRockSurface(vec2 worldPos, vec3 base){
     float sandMask = tellusPaintBand(${PAINT_BEACH.toFixed(1)});
     float dirtMask = tellusPaintBand(${PAINT_DIRT.toFixed(1)});
     float rockMask = tellusPaintBand(${PAINT_ROCK.toFixed(1)});
+    float snowMask = tellusPaintBand(${PAINT_SNOW.toFixed(1)});
     float stoneMask = tellusPaintBand(${PAINT_STONE.toFixed(1)});
     float brickMask = tellusPaintBand(${PAINT_BRICK.toFixed(1)});
-    float paintMask = clamp(mossMask + sandMask + dirtMask + rockMask + stoneMask + brickMask, 0.0, 1.0);
+    float paintMask = clamp(mossMask + sandMask + dirtMask + rockMask + snowMask + stoneMask + brickMask, 0.0, 1.0);
     vec3 mossSample = texture2D(tellusMossAlbedoMap, tellusPaintUv).rgb;
     vec3 sandSample = texture2D(tellusSandAlbedoMap, tellusPaintUv).rgb;
     vec3 rockSample = texture2D(tellusRockAlbedoMap, tellusPaintUv).rgb;
@@ -620,7 +622,11 @@ vec3 tellusRockSurface(vec2 worldPos, vec3 base){
     vec3 grassAlbedo = mossSample * vec3(1.08, 1.12, 0.82);
     vec3 sandAlbedo = sandSample * vec3(1.04, 0.98, 0.86);
     vec3 dirtAlbedo = sandSample * vec3(0.70, 0.50, 0.36);
-    vec3 rockAlbedo = tellusRockSurface(vTellusWorldPos.xz, rockSample * vec3(0.82, 0.86, 0.82));
+    vec3 pebbleAlbedo = rockSample * vec3(0.82, 0.86, 0.82);
+    float mountainRock = smoothstep(0.22, 0.58, 1.0 - clamp(vTellusWorldNormal.y, 0.0, 1.0));
+    vec3 rockAlbedo = mix(pebbleAlbedo, tellusRockSurface(vTellusWorldPos.xz, pebbleAlbedo), mountainRock);
+    float snowGrain = mix(0.88, 1.08, tellusHash2(floor(vTellusWorldPos.xz * 2.6)));
+    vec3 snowAlbedo = vec3(0.82, 0.91, 0.94) * snowGrain;
     vec3 cobblestoneAlbedo = tellusStoneSlabs(vTellusWorldPos.xz);
     vec3 brickAlbedo = tellusRunningBondBrick(vTellusWorldPos.xz);
     vec3 biomeAlbedo =
@@ -630,6 +636,7 @@ vec3 tellusRockSurface(vec2 worldPos, vec3 base){
       sandAlbedo * sandMask +
       dirtAlbedo * dirtMask +
       rockAlbedo * rockMask +
+      snowAlbedo * snowMask +
       cobblestoneAlbedo * stoneMask +
       brickAlbedo * brickMask +
       vec3(1.0) * (1.0 - paintMask);

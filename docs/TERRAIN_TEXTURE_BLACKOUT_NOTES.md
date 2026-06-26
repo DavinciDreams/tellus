@@ -46,12 +46,14 @@ striped/tiling pattern that looked like sand dunes under every paint kind.
 - moss for meadow, flowers, and grass, with per-paint tinting to keep the
   labels visually distinct without adding more samplers
 - sand for beach and dirt, with dirt using an earthy tint
-- gravel tinted cool grey for rock/pebbles, with procedural mottling and
-  fracture variation
+- gravel tinted cool grey for pebbles, with procedural mottling/fracture blended
+  in only on steeper mountain-rock slopes
+- procedural blue-white snow grain with no extra sampler
 - procedural varied gray stone slabs for paths, patios, and stone circles
 - procedural red running-bond brick for brick paths
 
-Snow stays on the existing procedural/color path for now.
+The material still stays under the WebGL sampler cap because snow and hardscapes
+are procedural.
 WebGL renderers that do not have enough texture units should use an atlas or
 other single-sampler paint texture path rather than separate samplers for every
 paint kind.
