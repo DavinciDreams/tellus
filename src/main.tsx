@@ -2141,6 +2141,7 @@ function createTellusWorld(
     // Whole-group toggle: body + TV + marker. Remote meshes are per-client, so this is local-only.
     visitor.visible = cameraMode !== "first";
   };
+  let updateCameraNow: (() => void) | null = null;
   const setCameraMode = (mode: CameraMode, options: { persist?: boolean } = {}) => {
     if (mode === cameraMode) return;
     cameraMode = mode;
@@ -2152,7 +2153,7 @@ function createTellusWorld(
       }
     }
     applyCameraModeVisibility();
-    updateCamera();
+    updateCameraNow?.();
     // Let the React HUD (the toolbelt Eye button) track mode flips that originate here (V key).
     window.dispatchEvent(new CustomEvent("tellus:camera-mode", { detail: mode }));
   };
@@ -7039,6 +7040,7 @@ function createTellusWorld(
     camera.lookAt(lookTarget);
     syncExternalSkyboxToCamera(camera.position);
   };
+  updateCameraNow = updateCamera;
 
   const setAgentViewport = (id: string | null) => {
     agentViewportVisitorId = id && id.trim() ? id.trim() : null;
