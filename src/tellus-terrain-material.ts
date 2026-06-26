@@ -23,7 +23,7 @@ import {
 
 export type TerrainTextureRuntimeMode =
   | "procedural"
-  | "atlas-textures"
+  | "biome-lite-textures"
   | "nine-sampler-textures";
 
 export interface TerrainTextureDiagnostics {
@@ -39,6 +39,10 @@ export interface TerrainTextureDiagnostics {
 // Paint codes (terrainPaintCode = terrainPaintKinds.indexOf(kind) + 1). Kept in sync with
 // terrainPaintKinds in tellus-constants.ts; only the patterned kinds need an explicit code here.
 const PAINT_MEADOW = 1;
+const PAINT_BEACH = 2;
+const PAINT_DIRT = 3;
+const PAINT_ROCK = 4;
+const PAINT_FLOWERS = 6;
 const PAINT_STONE = 7;
 const PAINT_BRICK = 8;
 const PAINT_GRASS = 9;
@@ -308,7 +312,13 @@ export interface TerrainMaterialOptions {
 
 const terrainTextureLoader = new THREE.TextureLoader();
 const generatedTerrainTextures = new Map<string, THREE.Texture>();
+const BIOME_LITE_TEXTURE_UNITS = 5; // base albedo + normal + moss/sand/dirt paint albedos
 const ESTIMATED_NINE_SAMPLER_UNITS = 11; // base albedo + normal + 9 paint albedo maps
+const BIOME_LITE_TEXTURE_URLS = {
+  moss: "/terrain-textures/moss002/albedo.png",
+  sand: "/terrain-textures/sand-ground-0024/albedo.jpg",
+  dirt: "/terrain-textures/ground048/albedo.png",
+} as const;
 
 function terrainImageTexturesRequested(): boolean {
   if (typeof window === "undefined") return false;
@@ -343,19 +353,22 @@ export function terrainTextureDiagnostics(
     webgl?.capabilities?.maxTextures ??
     webgl?.getContext().getParameter(webgl.getContext().MAX_TEXTURE_IMAGE_UNITS) ??
     null;
+  const supportsBiomeLitePaint =
+    typeof maxTextureImageUnits === "number" &&
+    maxTextureImageUnits >= BIOME_LITE_TEXTURE_UNITS;
   const supportsNineSamplerPaint =
     typeof maxTextureImageUnits === "number" &&
     maxTextureImageUnits >= ESTIMATED_NINE_SAMPLER_UNITS;
   const activeMode = requestedImageTextures
-    ? supportsNineSamplerPaint
-      ? "nine-sampler-textures"
-      : "atlas-textures"
+    ? supportsBiomeLitePaint
+      ? "biome-lite-textures"
+      : "procedural"
     : "procedural";
   const reason = !requestedImageTextures
     ? "Procedural terrain detail is active."
-    : supportsNineSamplerPaint
-      ? "This WebGL renderer reports enough fragment texture units for the old nine-sampler paint experiment."
-      : "The old nine-sampler paint texture path can exceed this WebGL renderer's fragment texture units; use an atlas/single-sampler path.";
+    : supportsBiomeLitePaint
+      ? "Biome-lite terrain textures are active: moss, sand, and dirt albedos stay below the WebGL sampler cap."
+      : "This WebGL renderer does not report enough fragment texture units for the biome-lite texture path.";
 
   return {
     renderer: webgl ? "webgl" : "unknown",
@@ -474,6 +487,101 @@ async function loadTerrainTexture(url: string, repeat: number, colorSpace?: THRE
   return prepareRepeatTexture(texture, repeat, colorSpace);
 }
 
+function whiteTerrainTexture(): THREE.Texture {
+  const cached = generatedTerrainTextures.get("white");
+  if (cached) return cached;
+  const texture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
+  texture.needsUpdate = true;
+  generatedTerrainTextures.set("white", texture);
+  return texture;
+}
+
+function applyBiomeLiteTerrainOverlay(
+  material: THREE.MeshStandardMaterial,
+  options: TerrainMaterialOptions,
+): void {
+  if (!terrainImageTexturesRequested()) return;
+  const repeat = options.textureRepeat ?? 34;
+  const textureScale = 0.16;
+  const fallback = whiteTerrainTexture();
+  const paintTextures: Record<keyof typeof BIOME_LITE_TEXTURE_URLS, THREE.Texture> = {
+    moss: fallback,
+    sand: fallback,
+    dirt: fallback,
+  };
+  const shaders = new Set<Parameters<NonNullable<THREE.MeshStandardMaterial["onBeforeCompile"]>>[0]>();
+
+  const updateShaderUniforms = () => {
+    for (const shader of shaders) {
+      shader.uniforms.tellusMossAlbedoMap.value = paintTextures.moss;
+      shader.uniforms.tellusSandAlbedoMap.value = paintTextures.sand;
+      shader.uniforms.tellusDirtAlbedoMap.value = paintTextures.dirt;
+    }
+  };
+
+  for (const key of Object.keys(BIOME_LITE_TEXTURE_URLS) as Array<keyof typeof BIOME_LITE_TEXTURE_URLS>) {
+    void loadTerrainTexture(BIOME_LITE_TEXTURE_URLS[key], repeat, THREE.SRGBColorSpace)
+      .then((texture) => {
+        paintTextures[key] = texture;
+        updateShaderUniforms();
+      })
+      .catch((error) => console.warn(`Tellus terrain ${key} texture failed`, error));
+  }
+
+  material.onBeforeCompile = (shader) => {
+    shaders.add(shader);
+    shader.uniforms.tellusBiomeTextureScale = { value: textureScale };
+    shader.uniforms.tellusMossAlbedoMap = { value: paintTextures.moss };
+    shader.uniforms.tellusSandAlbedoMap = { value: paintTextures.sand };
+    shader.uniforms.tellusDirtAlbedoMap = { value: paintTextures.dirt };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        `#include <common>\n${WEBGL_VARYING}\n${WEBGL_VERTEX_HEAD}`,
+      )
+      .replace(
+        "#include <project_vertex>",
+        `#include <project_vertex>\n${WEBGL_VERTEX_TAIL}`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+${WEBGL_VARYING}
+uniform float tellusBiomeTextureScale;
+uniform sampler2D tellusMossAlbedoMap;
+uniform sampler2D tellusSandAlbedoMap;
+uniform sampler2D tellusDirtAlbedoMap;
+float tellusPaintBand(float code){
+  return step(code - 0.5, vTellusPaintCode) - step(code + 0.5, vTellusPaintCode);
+}`,
+      )
+      .replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+  {
+    vec2 tellusPaintUv = vTellusWorldPos.xz * tellusBiomeTextureScale;
+    float mossMask =
+      tellusPaintBand(${PAINT_MEADOW.toFixed(1)}) +
+      tellusPaintBand(${PAINT_FLOWERS.toFixed(1)}) +
+      tellusPaintBand(${PAINT_GRASS.toFixed(1)});
+    float sandMask = tellusPaintBand(${PAINT_BEACH.toFixed(1)});
+    float dirtMask =
+      tellusPaintBand(${PAINT_DIRT.toFixed(1)}) +
+      tellusPaintBand(${PAINT_ROCK.toFixed(1)});
+    float paintMask = clamp(mossMask + sandMask + dirtMask, 0.0, 1.0);
+    vec3 biomeAlbedo =
+      texture2D(tellusMossAlbedoMap, tellusPaintUv).rgb * mossMask +
+      texture2D(tellusSandAlbedoMap, tellusPaintUv).rgb * sandMask +
+      texture2D(tellusDirtAlbedoMap, tellusPaintUv).rgb * dirtMask +
+      vec3(1.0) * (1.0 - paintMask);
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb, biomeAlbedo, 0.68), paintMask);
+  }`,
+      );
+  };
+  material.customProgramCacheKey = () => "tellus-terrain-biome-lite-textures";
+}
+
 function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMaterialOptions): void {
   const repeat = options.textureRepeat ?? 34;
   const withMaps = material as THREE.MeshStandardMaterial & {
@@ -516,6 +624,10 @@ function applyTerrainPbrDetail(material: THREE.Material, options: TerrainMateria
         material.needsUpdate = true;
       })
       .catch((error) => console.warn("Tellus terrain roughness texture failed", error));
+  }
+
+  if (material instanceof THREE.MeshStandardMaterial) {
+    applyBiomeLiteTerrainOverlay(material, options);
   }
 }
 

@@ -31,6 +31,21 @@ localStorage.setItem("tellus.terrainImageTextures", "1")
 ```
 
 WebGPU still reports procedural-only because that was the known blackout path.
+To force the safer WebGL trial path in a browser that normally boots WebGPU:
+
+```js
+localStorage.setItem("tellus.renderer", "webgl")
+localStorage.setItem("tellus.terrainImageTextures", "1")
+location.reload()
+```
+
+The current trial path uses three paint albedo samplers:
+
+- moss for meadow, flowers, and grass
+- sand for beach
+- dirt for dirt and rock
+
+Snow, stone, and brick stay on the existing procedural/color path for now.
 WebGL renderers that do not have enough texture units should use an atlas or
 other single-sampler paint texture path rather than separate samplers for every
 paint kind.

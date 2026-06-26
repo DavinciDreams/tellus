@@ -719,8 +719,15 @@ function createTellusWorld(
   if (fallbackSky.material instanceof THREE.MeshBasicMaterial) {
     skyboxTintMaterials.add(fallbackSky.material);
   }
-  // ~500ms/frame stall is WebGPU-specific on this GPU. Set back to `"gpu" in navigator` after testing.
-  const useWebGPU = "gpu" in navigator;
+  const rendererPreference = (() => {
+    try {
+      return window.localStorage.getItem("tellus.renderer");
+    } catch {
+      return null;
+    }
+  })();
+  // WebGL is useful for testing guarded terrain image textures without touching browser WebGPU flags.
+  const useWebGPU = rendererPreference !== "webgl" && "gpu" in navigator;
   // Visual terrain density (decoupled from the synced 97² sculpt grid). FIXED vertex budget no
   // matter the world scale — bigger worlds stretch the same ~50K-vertex mesh instead of multiplying
   // it (operator: range over thickness; worlds get larger for less).
