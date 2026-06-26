@@ -8925,8 +8925,16 @@ function App(): React.ReactElement {
   });
   const [prompt, setPrompt] = useState("");
   const [terrainBrushMode, setTerrainBrushMode] = useState<TerrainEditMode | null>(null);
+  const clearTerrainBrush = () => {
+    setTerrainBrushMode(null);
+    worldRef.current?.setTerrainBrush(null);
+  };
   const selectTerrainBrush = (mode: TerrainEditMode) => {
-    const next = terrainBrushMode === mode ? null : mode;
+    if (terrainBrushMode === mode) {
+      clearTerrainBrush();
+      return;
+    }
+    const next = mode;
     setTerrainBrushMode(next);
     worldRef.current?.setTerrainBrush(next);
   };
@@ -14930,7 +14938,21 @@ function App(): React.ReactElement {
               <ArrowDown size={18} />
             </button>
           </div>
-          <div className="terrain-subtitle with-rule">Materials</div>
+          <div className="terrain-subtitle-row with-rule">
+            <div className="terrain-subtitle">Materials</div>
+            {terrainBrushMode && (
+              <button
+                type="button"
+                className="terrain-brush-clear"
+                title="Exit paint mode"
+                aria-label="Exit paint mode"
+                onClick={clearTerrainBrush}
+              >
+                <X size={14} />
+                <span>Exit paint</span>
+              </button>
+            )}
+          </div>
           <div className="terrain-material-swatches">
             <button
               type="button"
