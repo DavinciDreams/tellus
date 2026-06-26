@@ -1914,6 +1914,7 @@ function createTellusWorld(
   setAvatarUserScale(visitor, localAvatarScale, true); // persisted size from the very first frame
   // Local locomotion state is derived per-frame from the position delta in animate().
   const lastLocalAvatarPos = { x: visitorPosition.x, z: visitorPosition.z };
+  let pointWalkTarget: Vec3 | null = null;
   // Diagnostics hooks (smoke tests / console) — mirror the other __tellus* hooks. The referenced
   // closures are defined later in this function; the arrow bodies only resolve them at call time.
   window.__tellusViewDebug = {
@@ -2169,8 +2170,49 @@ function createTellusWorld(
   terrainBrushPreview.renderOrder = 80;
   terrainBrushPreview.visible = false;
   scene.add(terrainBrushPreview);
+  const pointWalkMarkerRadius = 1.15 * WORLD_SCALE;
+  const pointWalkMarker = new THREE.Group();
+  pointWalkMarker.name = "tellus-point-walk-marker";
+  const pointWalkMarkerRing = new THREE.Mesh(
+    new THREE.RingGeometry(pointWalkMarkerRadius * 0.72, pointWalkMarkerRadius, 72),
+    new THREE.MeshBasicMaterial({
+      color: 0xffef9a,
+      transparent: true,
+      opacity: 0.88,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  pointWalkMarkerRing.rotation.x = -Math.PI / 2;
+  pointWalkMarkerRing.renderOrder = 78;
+  const pointWalkMarkerDot = new THREE.Mesh(
+    new THREE.CircleGeometry(pointWalkMarkerRadius * 0.18, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0xffef9a,
+      transparent: true,
+      opacity: 0.75,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  pointWalkMarkerDot.rotation.x = -Math.PI / 2;
+  pointWalkMarkerDot.renderOrder = 79;
+  pointWalkMarker.add(pointWalkMarkerRing, pointWalkMarkerDot);
+  pointWalkMarker.visible = false;
+  scene.add(pointWalkMarker);
   const hideTerrainBrushPreview = () => {
     terrainBrushPreview.visible = false;
+  };
+  const clearPointWalkTarget = () => {
+    pointWalkTarget = null;
+    pointWalkMarker.visible = false;
+  };
+  const setPointWalkTarget = (target: Vec3) => {
+    pointWalkTarget = target;
+    pointWalkMarker.position.set(target.x, target.y + 0.1, target.z);
+    pointWalkMarker.visible = true;
   };
   const isPointerFromUi = (target: EventTarget | null): boolean =>
     target instanceof HTMLElement &&
@@ -6383,10 +6425,33 @@ function createTellusWorld(
     const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
     const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     const movement = new THREE.Vector3();
+    const hasKeyboardMove =
+      keys.has("w") ||
+      keys.has("arrowup") ||
+      keys.has("s") ||
+      keys.has("arrowdown") ||
+      keys.has("a") ||
+      keys.has("arrowright") ||
+      keys.has("d") ||
+      keys.has("arrowleft");
+    if (hasKeyboardMove) clearPointWalkTarget();
     if (keys.has("w") || keys.has("arrowup")) movement.add(forward);
     if (keys.has("s") || keys.has("arrowdown")) movement.sub(forward);
     if (keys.has("a") || keys.has("arrowright")) movement.add(right);
     if (keys.has("d") || keys.has("arrowleft")) movement.sub(right);
+    let pointWalkStep: number | null = null;
+    if (!hasKeyboardMove && pointWalkTarget) {
+      const dx = pointWalkTarget.x - visitorPosition.x;
+      const dz = pointWalkTarget.z - visitorPosition.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance <= 0.6 * WORLD_SCALE) {
+        clearPointWalkTarget();
+      } else {
+        movement.set(dx / distance, 0, dz / distance);
+        pointWalkStep = distance;
+        yaw = Math.atan2(movement.x, movement.z);
+      }
+    }
     const hasInput = movement.lengthSq() > 0;
     const ascend = keys.has(" ");
     const descend = keys.has("c") || keys.has("shift");
@@ -6397,7 +6462,7 @@ function createTellusWorld(
       playerAirborne = true;
     }
     // Accelerating run: start/extend the hold while moving, reset it the moment input stops.
-    if (hasInput) {
+    if (hasInput && hasKeyboardMove) {
       if (moveHoldStartMs === 0) moveHoldStartMs = performance.now();
     } else {
       moveHoldStartMs = 0;
@@ -6420,7 +6485,11 @@ function createTellusWorld(
       const speed = scaledPlayerSpeed() *
         speedMultiplier *
         (sailingThingId ? MOUNT_SPEED_MULT : 1);
-      movement.normalize().multiplyScalar(speed * delta);
+      const step = pointWalkStep === null ? speed * delta : Math.min(speed * delta, pointWalkStep);
+      movement.normalize().multiplyScalar(step);
+      if (pointWalkStep !== null && step >= pointWalkStep - 0.001) {
+        clearPointWalkTarget();
+      }
     }
     if (sailingThingId) {
       playerAirborne = false;
@@ -7802,7 +7871,18 @@ function createTellusWorld(
       return;
     }
     if (isDragging && pointerTravel < 6) {
-      selectGeneratedAtPointer(event);
+      const pickedThingId = pickThingIdAtPointer(event);
+      selectGenerated(pickedThingId ?? undefined);
+      if (
+        !pickedThingId &&
+        !isPointerFromUi(event.target) &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
+        const target = dragGroundTarget(event);
+        if (target) setPointWalkTarget(target);
+      }
     }
     isDragging = false;
   };
@@ -8798,6 +8878,11 @@ function createTellusWorld(
       scene.remove(terrainBrushPreview);
       terrainBrushPreview.geometry.dispose();
       disposeMaterial(terrainBrushPreview.material);
+      scene.remove(pointWalkMarker);
+      pointWalkMarkerRing.geometry.dispose();
+      disposeMaterial(pointWalkMarkerRing.material);
+      pointWalkMarkerDot.geometry.dispose();
+      disposeMaterial(pointWalkMarkerDot.material);
       resizeObserver?.disconnect();
       transformControls?.detach();
       transformControls?.dispose();
