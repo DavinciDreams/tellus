@@ -45,12 +45,13 @@ striped/tiling pattern that looked like sand dunes under every paint kind.
 
 - moss for meadow, flowers, and grass, with per-paint tinting to keep the
   labels visually distinct without adding more samplers
-- sand for beach and dirt, with dirt using an earthy tint
+- procedural sand and dirt tints with light grain, because the sand texture read
+  too flat for the sampler cost
 - gravel tinted cool grey for rock/pebbles
-- procedural pale cobblestone for paths, patios, and stone circles
+- true fieldstone for paths, patios, and stone circles
 - procedural red/pale herringbone for brick paths
 
-Snow, stone, and brick stay on the existing procedural/color path for now.
+Snow stays on the existing procedural/color path for now.
 WebGL renderers that do not have enough texture units should use an atlas or
 other single-sampler paint texture path rather than separate samplers for every
 paint kind.
