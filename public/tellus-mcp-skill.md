@@ -78,6 +78,10 @@ describes the full surface.
     `d` distance, `dir` compass direction); `nearbyPortals` portals you can `enter_portal`.
   - **Recent chat is included** so you can coordinate from the same world context — there is no
     separate read-chat tool.
+- MCP perception is not limited to the browser camera. If a human/operator is watching an agent in
+  the Tellus app and the view feels too zoomed-in, the app viewer can switch between first- and
+  third-person camera modes with the Eye control or the `V` hotkey; third-person is usually better
+  for supervising navigation and placement.
 
 **`get_world_summary`** — a planning digest of the whole world: metadata, counts, your position,
 nearby portals, and the nearest assets (with ids).
@@ -112,6 +116,8 @@ understands (no args). Useful before a large build.
 **`sculpt_terrain`** — raise/lower/flatten or paint the ground **at your feet**.
 - args: `mode` ∈ `raise | lower | flatten | meadow | beach | dirt | rock | snow | flowers | stone | brick | grass`
   (the non-height modes repaint the ground), `size` (patch size `1`–`5`; `1` = one brush, `5` = a big patch; default `1`).
+- Terrain paint is semantic, not just color: chunked worlds use it for biome vegetation, so repainting
+  a beach/grass/flower/rock patch can regrow the procedural plant layer around that patch.
 
 **`sculpt_area`** — sculpt/paint a patch at an **absolute position you can see**, not just at your feet.
 - args: `mode` (same vocabulary as above), `x`, `z` (patch centre), `radius` (`6`–`64`, default `16`).
@@ -131,11 +137,15 @@ understands (no args). Useful before a large build.
 **`place_procedural_asset`** — place one procedural archetype, near you or at an absolute spot.
 - args: `archetypeId` (from `list_procedural_assets`, e.g. `douglasfir`, `pine`, `flower`, `rock`),
   optional `seed` (deterministic appearance), `x`/`z` (absolute; omit to place near you), `scale`.
+- Procplant entries from this tool persist through world state and render through the chunked vegetation
+  system, using LOD and instanced organ meshes instead of one full GLB per plant.
 
 **`scatter_procedural_asset`** — place a small natural cluster of one archetype around you.
 - args: `archetypeId`, optional `count` (defaults: trees `5`, flowers `14`, others `10`).
 - Prefer procedural assets over text `generate` for trees, flowers, rocks, and terrain dressing —
   they are instant, cheap, and reusable.
+- Use a lower `count` for feature trees or interiors, and a higher sparse `count` for flowers,
+  grasses, and groundcover. Scatter returns durable placements; it is not a temporary visual effect.
 
 **`find_reusable_assets`** — search this world's **already-placed** assets by text to reuse one.
 - args: `prompt` (e.g. `'garden bench'`, `'oak tree'`), `limit` (default `5`, max `8`), optional
@@ -160,9 +170,25 @@ a local/procedural placeholder).
 **`transform_asset`** — set a placed asset's **absolute** transform; leave a field `null` to keep it.
 - args: `targetId`, optional `x`, `z`, `y`, `rotationY` (radians), `scale`, and `ground` (snap to
   the terrain at the resulting x,z).
+- For shelves, raised platforms, or multi-floor interiors, set `y` and leave `ground` false/omitted;
+  set `ground: true` only when you explicitly want the asset snapped back to the floor/terrain.
 
 **`delete_asset`** — remove a placed asset from the world by id.
 - args: `targetId` (from `observe`/`list_assets_near`/`get_world_summary`).
+
+### Companions & mounts
+
+The shared Tellus action vocabulary supports pets and mounts for agents as well as humans. If your
+server's `tools/list` exposes these tools, use them with ids from `observe` or `list_assets_near`:
+
+**`mount_asset`** — ride a mountable placed animal or vehicle.
+- args: `targetId`.
+
+**`dismount`** — step off the current mount.
+- args: none.
+
+**`set_asset_pet`** — make a placed animal follow you as a companion, or clear that relationship.
+- args: `targetId`, `isPet` (`true` to follow, `false` to stop following).
 
 ### Portals (travel between worlds)
 

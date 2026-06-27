@@ -8348,7 +8348,7 @@ function createTellusWorld(
         })),
         chat: nearbyWorldChat(radius),
         nearbyChat: nearbyWorldChat(radius, "nearby"),
-        verbs: ["moveSelf", "findReusableAssets", "placeReusableAsset", "listProceduralAssets", "placeProceduralAsset", "scatterProceduralAsset", "generate", "sayChat", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "playAnimation", "listAnimations", "listAvatars", "setAvatar", "setAvatarScale"],
+        verbs: ["moveSelf", "findReusableAssets", "placeReusableAsset", "listProceduralAssets", "placeProceduralAsset", "scatterProceduralAsset", "generate", "sayChat", "sculptTerrain", "moveAsset", "rotateAsset", "scaleAsset", "moveAssetToWater", "mountAsset", "dismount", "setPet", "enterPortal", "playAnimation", "listAnimations", "listAvatars", "setAvatar", "setAvatarScale"],
         // A small default vocabulary for embodied agents. The full VRMA feed is available by category
         // through listAnimations so agents don't have to reason over hundreds of near-duplicate clips.
         animations: recommendedEmoteClipNamesSync(),
@@ -8642,6 +8642,66 @@ function createTellusWorld(
           if (typeof a.targetId !== "string") return { ok: false, error: "moveAssetToWater requires a targetId" };
           moveGeneratedToWater(a.targetId);
           return { ok: true };
+        }
+        case "mountAsset":
+        case "boardAsset": {
+          const targetId =
+            typeof a.targetId === "string"
+              ? a.targetId
+              : typeof a.assetId === "string"
+                ? a.assetId
+                : typeof a.id === "string"
+                  ? a.id
+                  : "";
+          if (!targetId.trim()) return { ok: false, error: "mountAsset requires a targetId" };
+          const thing = thingById(targetId.trim());
+          if (!thing) return { ok: false, error: "mountAsset target not found" };
+          const mode = vehicleMode(thing);
+          if (!mode) return { ok: false, error: "target is not mountable" };
+          boardGenerated(thing.id);
+          return { ok: true, mountedThingId: sailingThingId, mode };
+        }
+        case "dismount":
+        case "disembark": {
+          const mountedThingId = sailingThingId;
+          if (!mountedThingId) return { ok: false, error: "not mounted" };
+          disembark();
+          return { ok: true, dismountedThingId: mountedThingId };
+        }
+        case "setPet":
+        case "setAssetPet": {
+          const targetId =
+            typeof a.targetId === "string"
+              ? a.targetId
+              : typeof a.assetId === "string"
+                ? a.assetId
+                : typeof a.id === "string"
+                  ? a.id
+                  : "";
+          if (!targetId.trim()) return { ok: false, error: "setPet requires a targetId" };
+          const thing = thingById(targetId.trim());
+          if (!thing) return { ok: false, error: "setPet target not found" };
+          const isPet =
+            typeof a.isPet === "boolean"
+              ? a.isPet
+              : typeof a.pet === "boolean"
+                ? a.pet
+                : a.follow === false
+                  ? false
+                  : true;
+          setGeneratedPet(thing.id, isPet);
+          return { ok: true, id: thing.id, pet: isPet, petOwnerId: isPet ? petOwnerId : null };
+        }
+        case "enterPortal": {
+          const portalId =
+            typeof a.portalId === "string"
+              ? a.portalId
+              : typeof a.id === "string"
+                ? a.id
+                : "";
+          if (!portalId.trim()) return { ok: false, error: "enterPortal requires a portalId" };
+          enterPortal(portalId.trim());
+          return { ok: true, portalId: portalId.trim() };
         }
         case "playAnimation": {
           const targetId =
