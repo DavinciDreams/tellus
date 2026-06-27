@@ -164,6 +164,18 @@ a local/procedural placeholder).
 **`delete_asset`** — remove a placed asset from the world by id.
 - args: `targetId` (from `observe`/`list_assets_near`/`get_world_summary`).
 
+### Companions (mount & pet)
+
+**`mount_asset`** — ride a placed asset (a mount/vehicle). You become attached to it; your `mountedThingId`
+rides your presence so other clients see you on it. Returns your position + `mountedThingId`.
+- args: `targetId` (an `id` from `observe`/`list_assets_near`/`get_world_summary`).
+
+**`dismount`** — get off whatever you're currently riding (no-op if you're not mounted). No args.
+
+**`set_asset_pet`** — mark a placed asset as your pet/follower, or clear it. The pet assignment is **durable
+world state** (`petOwnerId` on the thing, visible in `list_assets_near`).
+- args: `targetId`, `isPet` (default `true`; `false` clears the pet ownership).
+
 ### Portals (travel between worlds)
 
 **`enter_portal`** — step through a nearby portal to travel to another world or interior.
