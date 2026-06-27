@@ -4,6 +4,7 @@ import {
   defaultScaleForRealisticKind,
   normalizeWorldThingAssetIdentity,
   STANDARD_HUMANOID_HEIGHT,
+  worldThingVehicleMode,
   worldThingTargetHeight,
 } from "./tellus-world-object-profile";
 import type { GeneratedThing } from "./tellus-types";
@@ -73,6 +74,25 @@ describe("world object runtime profile", () => {
     expect(profile.seatHeight).toBeGreaterThan(0.6);
     expect(profile.seatHeight).toBeLessThan(1);
     expect(profile.collisionRadius).toBeGreaterThan(0.45);
+  });
+
+  it("does not classify mountain dogs as mounts", () => {
+    expect(
+      worldThingVehicleMode(
+        thing({
+          kind: "animal",
+          prompt: "Realistic Bernese Mountain Dog companion",
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      worldThingVehicleMode(
+        thing({
+          kind: "animal",
+          prompt: "Rideable mountain horse",
+        }),
+      ),
+    ).toBe("ground");
   });
 
   it("preserves deliberate vertical offsets as elevated placement", () => {
