@@ -62,13 +62,17 @@ The browser HUD uses these APIs directly, so humans have a broad world capabilit
 - `rotateAsset`
 - `scaleAsset`
 - `moveAssetToWater`
+- `mountAsset`
+- `dismount`
+- `setPet`
 - `playAnimation`
 - `listAnimations`
 - `listAvatars`
 - `setAvatar`
 - `setAvatarScale`
 
-It currently omits ride/mount and dismount despite the lower-level player API having `boardGenerated` and `disembark`.
+This now covers the same companion basics as the player HUD: agents can ride mountable assets,
+dismount, and mark/unmark placed animals as pets by id.
 
 ### MCP path
 
@@ -446,6 +450,7 @@ Add or confirm:
 
 - `mount_asset` with `targetId`;
 - `dismount`;
+- `set_asset_pet` with `targetId` and `isPet`;
 - `enter_portal` with `portalId`;
 - `create_world` when token has scope;
 - `create_portal` / `update_portal` when token has scope;
@@ -464,8 +469,7 @@ MCP `tools/list` should be capability-aware. A token for a guest in `main` shoul
 
 ### Phase 2: Unify ride and portal actions
 
-- Add `mount_asset` and `dismount` to `window.tellusAgent`.
-- Add the same tools to MCP.
+- Confirm `mount_asset`, `dismount`, and `set_asset_pet` are exposed through MCP.
 - Add `enter_portal` to agent and MCP surfaces.
 - Ensure all three paths call the same action validation.
 
@@ -514,5 +518,6 @@ MCP `tools/list` should be capability-aware. A token for a guest in `main` shoul
 - Current map classification uses `visitor.visitorId.startsWith("agent:")`; this explains why `agent:*` actors show as agents and `mcp:*` actors may not.
 - Current MCP public docs say MCP identity is `mcp:<accountId>`.
 - Current browser player API has `boardGenerated(id)` and `disembark()`.
-- Current `window.tellusAgent` verb list omits board/dismount and portal entry.
+- Current `window.tellusAgent` exposes `mountAsset`, `dismount`, and `setPet`; MCP should mirror
+  those as `mount_asset`, `dismount`, and `set_asset_pet` where the server supports shared parity.
 - Current portals PRD already expects agents to call `enterPortal(portalId)`; this PRD extends that idea to all player actors.
