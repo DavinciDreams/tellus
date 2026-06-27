@@ -75,6 +75,12 @@ export interface ProcPlantGenome {
     leafletPairs: number;
     arch: number;
   };
+  foliage?: {
+    mass: number;
+    clusterDensity: number;
+    whorlDensity: number;
+    tipBias: number;
+  };
   tree?: {
     crown: "rounded" | "columnar" | "umbrella" | "propRoot";
     crownStart: number;
@@ -939,6 +945,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       leafClusterScale: 1.05,
       exposedTrunk: 0.28,
     },
+    foliage: { mass: 0.78, clusterDensity: 1.35, whorlDensity: 0.45, tipBias: 0.58 },
     lightResponse: {
       shadeAvoidance: 0.42,
       leafBoostInShade: 0.18,
@@ -972,6 +979,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       leafClusterScale: 0.82,
       exposedTrunk: 0.5,
     },
+    foliage: { mass: 0.58, clusterDensity: 1.02, whorlDensity: 0.36, tipBias: 0.72 },
     lightResponse: {
       shadeAvoidance: 0.58,
       leafBoostInShade: 0.16,
@@ -1005,6 +1013,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       leafClusterScale: 1.14,
       exposedTrunk: 0.56,
     },
+    foliage: { mass: 0.62, clusterDensity: 1.18, whorlDensity: 0.5, tipBias: 0.84 },
     lightResponse: {
       shadeAvoidance: 0.5,
       leafBoostInShade: 0.08,
@@ -1038,6 +1047,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       leafClusterScale: 0.96,
       exposedTrunk: 0.32,
     },
+    foliage: { mass: 0.72, clusterDensity: 1.22, whorlDensity: 0.44, tipBias: 0.62 },
     lightResponse: {
       shadeAvoidance: 0.34,
       leafBoostInShade: 0.24,
@@ -1065,6 +1075,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorA: 0x263f32,
       colorB: 0x6f8f74,
     },
+    foliage: { mass: 0.92, clusterDensity: 1.26, whorlDensity: 0.84, tipBias: 0.38 },
     lightResponse: {
       shadeAvoidance: 0.28,
       leafBoostInShade: 0.12,
@@ -1092,6 +1103,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorA: 0x1f392e,
       colorB: 0x6b8a63,
     },
+    foliage: { mass: 1.04, clusterDensity: 1.36, whorlDensity: 0.96, tipBias: 0.32 },
     lightResponse: {
       shadeAvoidance: 0.22,
       leafBoostInShade: 0.16,
@@ -1119,6 +1131,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorA: 0x264735,
       colorB: 0x78965e,
     },
+    foliage: { mass: 0.6, clusterDensity: 0.86, whorlDensity: 0.5, tipBias: 0.62 },
     lightResponse: {
       shadeAvoidance: 0.36,
       leafBoostInShade: 0.12,
@@ -1213,6 +1226,23 @@ export const hybridizePlantGenomes = (
     flower: pick(a.flower, b.flower),
     grass: pick(a.grass, b.grass),
     fern: pick(a.fern, b.fern),
+    foliage:
+      a.foliage || b.foliage
+        ? {
+            mass: THREE.MathUtils.lerp(a.foliage?.mass ?? 0.55, b.foliage?.mass ?? 0.55, alpha),
+            clusterDensity: THREE.MathUtils.lerp(
+              a.foliage?.clusterDensity ?? 1,
+              b.foliage?.clusterDensity ?? 1,
+              alpha,
+            ),
+            whorlDensity: THREE.MathUtils.lerp(
+              a.foliage?.whorlDensity ?? 0.45,
+              b.foliage?.whorlDensity ?? 0.45,
+              alpha,
+            ),
+            tipBias: THREE.MathUtils.lerp(a.foliage?.tipBias ?? 0.5, b.foliage?.tipBias ?? 0.5, alpha),
+          }
+        : undefined,
     tree: pick(a.tree, b.tree),
     lightResponse: {
       shadeAvoidance: THREE.MathUtils.lerp(
@@ -1339,6 +1369,45 @@ export const buildProcPlantGraph = (
     index: 0,
   };
   stems.push(root);
+  const foliageTraits = {
+    mass: genome.foliage?.mass ?? (genome.habit === "conifer" ? 0.84 : 0.55),
+    clusterDensity: genome.foliage?.clusterDensity ?? 1,
+    whorlDensity: genome.foliage?.whorlDensity ?? (genome.habit === "conifer" ? 0.82 : 0.42),
+    tipBias: genome.foliage?.tipBias ?? 0.5,
+  };
+  const addConiferFoliageMass = () => {
+    const trunkNodes = stems.filter((node) => node.depth === 0 && node.t > 0.12);
+    for (const node of trunkNodes) {
+      const t = node.t;
+      const crownEnvelope = Math.sin(Math.PI * THREE.MathUtils.clamp(t * 0.92 + 0.04, 0, 1));
+      const lowerShelf = THREE.MathUtils.smoothstep(1 - t, 0.05, 0.86);
+      const fill = THREE.MathUtils.clamp(
+        (0.38 + crownEnvelope * 0.48 + lowerShelf * 0.18) * foliageTraits.mass,
+        0,
+        1.65,
+      );
+      const whorls = Math.max(1, Math.round(1.4 + fill * 1.85 * foliageTraits.whorlDensity));
+      for (let w = 0; w < whorls; w++) {
+        const yaw = (node.index + w / whorls) * genome.phyllotaxisAngle + (Math.PI * 2 * w) / whorls;
+        const droop = Math.PI / 2.0 + t * 0.62 + (rng() - 0.5) * 0.12;
+        const branchDir = rotateFromAxis(node.direction, yaw, droop);
+        const scale =
+          curve(genome.leaf.length, t) *
+          (1.12 - t * 0.3) *
+          (0.78 + fill * 0.22) *
+          (0.78 + rng() * 0.22);
+        const offset = branchDir.clone().multiplyScalar(0.035 + fill * 0.025);
+        organs.push({
+          kind: "coniferSpray",
+          position: node.position.clone().add(offset),
+          direction: branchDir,
+          right: tangentBasis(node.direction).right.applyAxisAngle(node.direction, yaw).normalize(),
+          scale,
+          t,
+        });
+      }
+    }
+  };
   const growAxis = (
     startIndex: number,
     depth: number,
@@ -2049,6 +2118,10 @@ export const buildProcPlantGraph = (
 
   growAxis(0, 0, genome.nodeCount, 1);
 
+  if (genome.habit === "conifer") {
+    addConiferFoliageMass();
+  }
+
   if (genome.habit === "tree" && genome.tree) {
     const crownStart = genome.tree.crownStart;
     const crownNodes = stems.filter((node) => node.t >= crownStart || node.depth > 0);
@@ -2067,8 +2140,13 @@ export const buildProcPlantGraph = (
             ? 0.72 + 0.28 * t
             : Math.sin(t * Math.PI) * 0.72 + 0.28;
       const clusters = Math.max(1, Math.round(genome.tree.leafClusterScale * crownBulk * (node.depth === 0 ? 1 : 1.35)));
-      for (let c = 0; c < clusters; c++) {
-        if (rng() > crownLeafChance + env.moisture * 0.16) continue;
+      const massClusters = Math.max(
+        1,
+        Math.round(clusters * foliageTraits.clusterDensity * (0.76 + foliageTraits.mass * 0.56)),
+      );
+      for (let c = 0; c < massClusters; c++) {
+        const tipBoost = THREE.MathUtils.lerp(1, t, foliageTraits.tipBias);
+        if (rng() > crownLeafChance * tipBoost + env.moisture * 0.16 + foliageTraits.mass * 0.12) continue;
         const azimuth = (node.index + c * 0.62) * genome.phyllotaxisAngle + (rng() - 0.5) * 0.22;
         const outward =
           genome.tree.crown === "umbrella"
@@ -2088,7 +2166,7 @@ export const buildProcPlantGraph = (
           scale:
             curve(genome.leaf.length, node.t) *
             genome.tree.leafClusterScale *
-            (0.72 + rng() * 0.42) *
+            (0.76 + foliageTraits.mass * 0.18 + rng() * 0.42) *
             (genome.tree.crown === "umbrella" ? 1.12 : 1),
           t: node.t,
         });
