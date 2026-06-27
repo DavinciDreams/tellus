@@ -231,55 +231,45 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
       uniform float uWaveStrength;
       varying vec2 vWorldXZ;
 
-      float hash(vec2 p) {
-        p = fract(p * vec2(123.34, 456.21));
-        p += dot(p, p + 45.32);
-        return fract(p.x * p.y);
+      vec2 hash2(vec2 p) {
+        p = vec2(
+          dot(p, vec2(127.1, 311.7)),
+          dot(p, vec2(269.5, 183.3))
+        );
+        return fract(sin(p) * 43758.5453123);
       }
 
-      float noise(vec2 p) {
+      float worley(vec2 p) {
         vec2 i = floor(p);
         vec2 f = fract(p);
-        f = f * f * (3.0 - 2.0 * f);
-        float a = hash(i);
-        float b = hash(i + vec2(1.0, 0.0));
-        float c = hash(i + vec2(0.0, 1.0));
-        float d = hash(i + vec2(1.0, 1.0));
-        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-      }
-
-      float fbm(vec2 p) {
-        float value = 0.0;
-        float amplitude = 0.5;
-        mat2 rotate = mat2(0.82, -0.57, 0.57, 0.82);
-        for (int i = 0; i < 4; i++) {
-          value += noise(p) * amplitude;
-          p = rotate * p * 2.05 + 13.7;
-          amplitude *= 0.5;
+        float nearest = 1.0;
+        for (int y = -1; y <= 1; y++) {
+          for (int x = -1; x <= 1; x++) {
+            vec2 cell = vec2(float(x), float(y));
+            vec2 point = hash2(i + cell);
+            point = 0.5 + 0.5 * sin(uTime * 0.32 + 6.2831 * point);
+            vec2 diff = cell + point - f;
+            nearest = min(nearest, dot(diff, diff));
+          }
         }
-        return value;
+        return 1.0 - smoothstep(0.02, 0.86, sqrt(nearest));
       }
 
       void main() {
-        vec2 p = vWorldXZ * 0.012;
-        float wave = 0.18 + uWaveStrength * 0.32;
-        vec2 flow = vec2(uTime * 0.035, uTime * -0.022);
-        float broad = fbm(p * 0.72 + flow);
-        vec2 warped = p + vec2(
-          fbm(p * 1.18 + broad + flow.yx) - 0.5,
-          fbm(p * 1.05 - broad - flow) - 0.5
-        ) * (0.34 + wave);
-        float cells = fbm(warped * (2.15 + wave * 1.25) + flow * 4.2);
-        float swell = sin(dot(warped, normalize(vec2(0.82, 0.31))) * (5.4 + wave * 2.1) + uTime * 0.72);
-        float ripple = sin(dot(warped + cells * 0.28, normalize(vec2(0.45, 0.89))) * (9.2 + wave * 2.7) - uTime * 0.48);
-        float softSwell = swell * 0.5 + 0.5;
-        float softRipple = ripple * 0.5 + 0.5;
-        float surface = clamp(broad * 0.34 + cells * 0.38 + softSwell * 0.18 + softRipple * 0.1, 0.0, 1.0);
+        float wave = 0.18 + uWaveStrength * 0.82;
+        vec2 waterUV = vWorldXZ;
+        float t = uTime * 0.62 * wave;
+        float broadFlow = worley(waterUV * (0.26 + wave * 0.1) + vec2(t * 0.52, -t * 0.31));
+        vec2 warpedUV = waterUV * (0.95 + wave * 0.4)
+          + vec2(broadFlow * (0.28 + wave * 0.1), broadFlow * -0.18)
+          + vec2(t, -t * 0.64);
+        float waveCells = worley(warpedUV);
+        float surface = clamp(waveCells * broadFlow * (0.86 + wave * 0.32), 0.0, 1.0);
+        surface = pow(surface, 0.72);
         vec3 water = mix(uDeepColor, uShallowColor, surface);
-        float foamMask = smoothstep(0.64, 0.94, cells) * smoothstep(0.42, 0.92, softSwell);
-        float foam = foamMask * (0.08 + uWaveStrength * 0.08);
+        float foam = smoothstep(0.58, 0.98, surface) * (0.12 * wave);
         water = mix(water, uFoamColor, foam);
-        water = mix(water, uTintColor, 0.14);
+        water = mix(water, uTintColor, 0.08);
         gl_FragColor = vec4(water, uOpacity);
       }
     `,
