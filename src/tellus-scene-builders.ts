@@ -214,10 +214,14 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
     },
     vertexShader: `
       varying vec2 vWorldXZ;
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
 
       void main() {
         vec4 worldPosition = modelMatrix * vec4(position, 1.0);
         vWorldXZ = worldPosition.xz;
+        vWorldPosition = worldPosition.xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
         gl_Position = projectionMatrix * viewMatrix * worldPosition;
       }
     `,
@@ -230,6 +234,8 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
       uniform float uOpacity;
       uniform float uWaveStrength;
       varying vec2 vWorldXZ;
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
 
       vec2 hash2(vec2 p) {
         p = vec2(
@@ -266,11 +272,20 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
         float waveCells = worley(warpedUV);
         float surface = clamp(waveCells * broadFlow * (0.86 + wave * 0.32), 0.0, 1.0);
         surface = pow(surface, 0.72);
+        vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+        float facing = clamp(dot(viewDir, normalize(vWorldNormal)), 0.0, 1.0);
+        float fresnel = pow(1.0 - facing, 2.35);
+        float horizon = smoothstep(0.16, 0.72, fresnel);
+        float glintCells = worley(waterUV * (1.8 + wave * 0.72) + vec2(-t * 0.42, t * 0.33));
+        float glint = smoothstep(0.72, 0.98, glintCells * broadFlow + horizon * 0.45);
         vec3 water = mix(uDeepColor, uShallowColor, surface);
         float foam = smoothstep(0.58, 0.98, surface) * (0.12 * wave);
         water = mix(water, uFoamColor, foam);
+        vec3 reflection = mix(vec3(0.52, 0.78, 0.98), uFoamColor, glint * 0.55);
+        water = mix(water, reflection, clamp(horizon * 0.46 + glint * 0.18, 0.0, 0.58));
         water = mix(water, uTintColor, 0.08);
-        gl_FragColor = vec4(water, uOpacity);
+        float alpha = clamp(uOpacity * (0.56 + surface * 0.26) + horizon * 0.14 + glint * 0.04, 0.32, uOpacity);
+        gl_FragColor = vec4(water, alpha);
       }
     `,
     transparent: true,
