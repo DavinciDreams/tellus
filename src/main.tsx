@@ -1735,7 +1735,7 @@ function createTellusWorld(
     const x = clamp(position.x, bounds.minX, bounds.maxX);
     const z = bounds.minZ;
     return {
-      position: { x, y: interiorFloorHeightAt(x, z, visitorPosition.y) ?? Math.max(0, visitorPosition.y), z },
+      position: { x, y: interiorPlacementFloorHeightAt(x, z, visitorPosition.y) ?? Math.max(0, visitorPosition.y), z },
       rotationY: 0,
     };
   };
@@ -1824,10 +1824,14 @@ function createTellusWorld(
       portalMarkers.delete(id);
     }
   };
-  const doorSurfacePortalContainsVisitor = (p: WorldPortal): boolean => {
+  const portalProbePositions = (): Vec3[] => {
+    const mounted = sailingThingId ? thingById(sailingThingId) : undefined;
+    return mounted ? [visitorPosition, mounted.position] : [visitorPosition];
+  };
+  const doorSurfacePortalContainsPoint = (p: WorldPortal, point: Vec3): boolean => {
     const pose = portalDoorSurfacePose(p);
-    const dx = visitorPosition.x - pose.position.x;
-    const dz = visitorPosition.z - pose.position.z;
+    const dx = point.x - pose.position.x;
+    const dz = point.z - pose.position.z;
     const normalX = Math.sin(pose.rotationY);
     const normalZ = Math.cos(pose.rotationY);
     const rightX = Math.cos(pose.rotationY);
@@ -1839,10 +1843,12 @@ function createTellusWorld(
       Math.abs(lateral) <= halfWidth &&
       forward >= -0.42 &&
       forward <= 0.72 &&
-      visitorPosition.y >= pose.position.y - 0.35 &&
-      visitorPosition.y <= pose.position.y + 3.35
+      point.y >= pose.position.y - 0.35 &&
+      point.y <= pose.position.y + 3.35
     );
   };
+  const doorSurfacePortalContainsVisitor = (p: WorldPortal): boolean =>
+    portalProbePositions().some((point) => doorSurfacePortalContainsPoint(p, point));
 
   // Called each frame: auto-enter when the player crosses a portal doorway surface.
   const updatePortals = (now: number) => {
@@ -1872,7 +1878,9 @@ function createTellusWorld(
       if (pendingPortalIds.has(p.id)) continue;
       const near = isDoorSurfacePortal(p)
         ? doorSurfacePortalContainsVisitor(p)
-        : distance2D(visitorPosition, portalAnchorPosition(p)) <= Math.max(1.2, p.radius);
+        : portalProbePositions().some(
+            (point) => distance2D(point, portalAnchorPosition(p)) <= Math.max(1.2, p.radius),
+          );
       if (near) {
         nearId = p.id;
         break;
@@ -4108,31 +4116,73 @@ function createTellusWorld(
     return null;
   };
 
-  const lowestInteriorFloorHeightAt = (x: number, z: number): number | null => {
-    if (!interiorObject) return null;
+  const interiorFloorHeightCandidatesAt = (x: number, z: number): number[] => {
+    if (!interiorObject) return [];
     const clamped = clampInteriorPlacementXZ(x, z);
     terrainRayOrigin.set(clamped.x, 32, clamped.z);
     terrainRaycaster.set(terrainRayOrigin, terrainRayDirection);
     terrainRaycaster.far = 80;
     const hits = terrainRaycaster.intersectObject(interiorObject, true);
-    let lowest: number | null = null;
+    const floors: number[] = [];
     for (const h of hits) {
+      const mesh = h.object as THREE.Mesh;
+      if (!mesh.isMesh || mesh.userData.collide !== true) continue;
       const n = h.face?.normal;
       if (!n) continue;
       const worldN = n.clone().applyNormalMatrix(
         new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld),
       );
       if (worldN.y <= 0.45) continue;
-      if (lowest === null || h.point.y < lowest) lowest = h.point.y;
+      if (!floors.some((y) => Math.abs(y - h.point.y) < 0.05)) {
+        floors.push(h.point.y);
+      }
     }
-    return lowest;
+    return floors.sort((a, b) => a - b);
+  };
+
+  const interiorAnalyticFloorHeightAt = (x: number, z: number, referenceY = visitorPosition.y): number | null => {
+    const raw = interiorObject?.children[0]?.userData.placementBounds ?? interiorObject?.userData.placementBounds;
+    if (!isRecord(raw)) return null;
+    const levels = typeof raw.levels === "number" && Number.isFinite(raw.levels)
+      ? Math.max(1, Math.floor(raw.levels))
+      : 1;
+    const levelHeight = typeof raw.levelHeight === "number" && Number.isFinite(raw.levelHeight)
+      ? Math.max(1, raw.levelHeight)
+      : 4;
+    if (levels <= 1) return 0;
+    // Upper generated-room floors are mezzanines in the far (+Z) half. Ground-floor placement remains
+    // valid everywhere, including under the open mezzanine void.
+    const upperAccessible = z >= 0;
+    const maxLevel = upperAccessible ? levels - 1 : 0;
+    const nearestLevel = clamp(Math.round(referenceY / levelHeight), 0, maxLevel);
+    return nearestLevel * levelHeight;
+  };
+
+  const interiorPlacementFloorHeightAt = (x: number, z: number, referenceY = visitorPosition.y): number | null => {
+    const referenceFloorY = interiorFloorHeightAt(x, z, referenceY);
+    const analyticFloorY = interiorAnalyticFloorHeightAt(x, z, referenceY);
+    const candidates = interiorFloorHeightCandidatesAt(x, z);
+    if (analyticFloorY !== null && candidates.length > 0) {
+      const nearAnalytic = candidates
+        .filter((y) => Math.abs(y - analyticFloorY) <= 0.65)
+        .sort((a, b) => Math.abs(a - analyticFloorY) - Math.abs(b - analyticFloorY))[0];
+      if (nearAnalytic !== undefined) return nearAnalytic;
+    }
+    if (
+      analyticFloorY !== null &&
+      referenceFloorY !== null &&
+      Math.abs(referenceFloorY - analyticFloorY) > 1.35
+    ) {
+      return analyticFloorY;
+    }
+    return referenceFloorY ?? analyticFloorY ?? candidates[0] ?? null;
   };
 
   const interiorPlacementPosition = (x: number, z: number, referenceY = visitorPosition.y): Vec3 => {
     const clamped = clampInteriorPlacementXZ(x, z);
     return {
       ...clamped,
-      y: interiorFloorHeightAt(clamped.x, clamped.z, referenceY) ?? Math.max(0, referenceY),
+      y: interiorPlacementFloorHeightAt(clamped.x, clamped.z, referenceY) ?? Math.max(0, referenceY),
     };
   };
 
@@ -4157,7 +4207,7 @@ function createTellusWorld(
   };
 
   const renderedTerrainHeightAt = (x: number, z: number, referenceY = visitorPosition.y): number | null => {
-    if (interiorObject) return interiorFloorHeightAt(x, z, referenceY);
+    if (interiorObject) return interiorPlacementFloorHeightAt(x, z, referenceY);
     terrainRayTargets.length = 0;
     if (terrain.visible) terrainRayTargets.push(terrain);
     const chunkTerrain = scene.getObjectByName("tellus-chunk-terrain");
@@ -4179,7 +4229,7 @@ function createTellusWorld(
     const referenceY = interiorObject ? visitorPosition.y : thing.position.y;
     let bestRendered: number | null = renderedTerrainHeightAt(thing.position.x, thing.position.z, referenceY);
     let bestAnalytic = interiorObject
-      ? interiorFloorHeightAt(thing.position.x, thing.position.z, referenceY)
+      ? interiorPlacementFloorHeightAt(thing.position.x, thing.position.z, referenceY)
       : groundHeightAt(thing.position.x, thing.position.z);
     const fp = thingFootprint(thing);
     const r = Math.min(fp?.radius ?? 0, 6);
@@ -4197,7 +4247,7 @@ function createTellusWorld(
           bestRendered = rendered;
         }
         const analytic = interiorObject
-          ? interiorFloorHeightAt(x, z, referenceY)
+          ? interiorPlacementFloorHeightAt(x, z, referenceY)
           : groundHeightAt(x, z);
         if (
           analytic !== null &&
@@ -4226,16 +4276,12 @@ function createTellusWorld(
   };
 
   const interiorVisiblePlacementForThing = (thing: GeneratedThing): Vec3 => {
-    const referenceFloorY =
-      interiorFloorHeightAt(thing.position.x, thing.position.z, visitorPosition.y) ??
-      interiorPlacementPosition(thing.position.x, thing.position.z, visitorPosition.y).y;
-    const lowestFloorY = lowestInteriorFloorHeightAt(thing.position.x, thing.position.z);
     const floorY =
-      lowestFloorY !== null && referenceFloorY - lowestFloorY > 4.75
-        ? lowestFloorY
-        : referenceFloorY;
+      interiorPlacementFloorHeightAt(thing.position.x, thing.position.z, visitorPosition.y) ??
+      Math.max(0, visitorPosition.y);
     const offset = thing.position.y - floorY;
-    const intentionalOffset = Math.abs(offset) > 0.35 && Math.abs(offset) <= 2.5;
+    const intentionalOffset =
+      Math.abs(offset) > 0.04 && Math.abs(offset) <= 8;
     return {
       ...thing.position,
       y: intentionalOffset ? floorY + offset : floorY,
@@ -4374,7 +4420,7 @@ function createTellusWorld(
     if (transformControlsHelper) transformControlsHelper.visible = true;
   };
 
-  const GENERATED_ECHO_GUARD_MS = 4_000;
+  const GENERATED_ECHO_GUARD_MS = 12_000;
   const GENERATED_DELETE_TOMBSTONE_MS = 10 * 60_000;
   const pendingGeneratedUpserts = new Map<
     string,
@@ -5298,9 +5344,11 @@ function createTellusWorld(
     const rightZ = -Math.sin(yaw) * lateral;
     const x = visitorPosition.x + behindX + rightX;
     const z = visitorPosition.z + behindZ + rightZ;
-    return vehicleMode(thing)
-      ? movedVehiclePosition(thing, x, z, thing.position)
-      : groundedPositionForCurrentSurface(x, z, thing.position);
+    const mode = vehicleMode(thing);
+    if (mode === "air" || mode === "water") {
+      return movedVehiclePosition(thing, x, z, thing.position);
+    }
+    return groundedPositionForCurrentSurface(x, z);
   };
 
   const syncPetsToOwner = (delta: number, forceTeleport = false) => {
@@ -5320,10 +5368,11 @@ function createTellusWorld(
       if (ambientPhysics.has(pet.id)) continue;
       const target = petFollowTarget(pet, index);
       const dx = target.x - pet.position.x;
+      const dy = target.y - pet.position.y;
       const dz = target.z - pet.position.z;
       const distance = Math.hypot(dx, dz);
       const shouldSnap = forceTeleport || distance > 70;
-      const shouldMove = shouldSnap || distance > 0.28;
+      const shouldMove = shouldSnap || distance > 0.28 || Math.abs(dy) > 0.08;
       const previous = { ...pet.position };
       if (shouldMove) {
         if (shouldSnap || delta <= 0) {
@@ -5400,7 +5449,9 @@ function createTellusWorld(
     const thing = thingById(id);
     if (!thing) return;
     const preserveCurrentY = draggingThingId === id && targetY === undefined;
-    const oldGroundY = groundHeightAt(thing.position.x, thing.position.z);
+    const oldGroundY = interiorObject
+      ? interiorPlacementFloorHeightAt(thing.position.x, thing.position.z, thing.position.y)
+      : groundHeightAt(thing.position.x, thing.position.z);
     const manualHeightOffset =
       oldGroundY !== null && Number.isFinite(oldGroundY)
         ? Math.max(0, thing.position.y - oldGroundY)
@@ -5437,7 +5488,9 @@ function createTellusWorld(
       sailingThingId !== id &&
       manualHeightOffset > 0
     ) {
-      const newGroundY = groundHeightAt(position.x, position.z);
+      const newGroundY = interiorObject
+        ? interiorPlacementFloorHeightAt(position.x, position.z, position.y)
+        : groundHeightAt(position.x, position.z);
       if (newGroundY !== null && Number.isFinite(newGroundY)) {
         position.y = newGroundY + manualHeightOffset;
       }
@@ -7987,7 +8040,7 @@ function createTellusWorld(
       const worldN = n.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld)).normalize();
       if (Math.abs(worldN.y) > 0.25) continue;
       const axisX = Math.abs(worldN.x) > Math.abs(worldN.z);
-      const floorY = interiorFloorHeightAt(h.point.x, h.point.z, visitorPosition.y) ?? Math.max(0, visitorPosition.y);
+      const floorY = interiorPlacementFloorHeightAt(h.point.x, h.point.z, visitorPosition.y) ?? Math.max(0, visitorPosition.y);
       const x = axisX
         ? h.point.x + Math.sign(worldN.x || 1) * 0.12
         : bounds
@@ -8883,7 +8936,7 @@ function createTellusWorld(
       const bounds = interiorPlacementBounds(1.4);
       const x = bounds ? clamp(visitorPosition.x, bounds.minX, bounds.maxX) : visitorPosition.x;
       const z = bounds?.minZ ?? visitorPosition.z;
-      const y = interiorFloorHeightAt(x, z, visitorPosition.y) ?? Math.max(0, visitorPosition.y);
+      const y = interiorPlacementFloorHeightAt(x, z, visitorPosition.y) ?? Math.max(0, visitorPosition.y);
       sendPortalUpsert({
         id: makeId("door"),
         worldId: runtimeConfig.worldId,
@@ -9211,6 +9264,12 @@ interface TerrainTuningDraft {
   ridge: number;
 }
 
+interface PendingPortalTransfer {
+  things: WorldGeneratedThing[];
+  mountedThingId?: string;
+  arrival: { x: number; z: number } | null;
+}
+
 const terrainTuningFromLandShape = (landShape?: LandShapeOverrides): TerrainTuningDraft => ({
   elevation: clamp(landShape?.baseOffset ?? 0, -4, 6),
   detail: clamp(landShape?.detail?.amplitude ?? 1, 0, 3),
@@ -9235,6 +9294,7 @@ const landShapeFromTerrainTuning = (
 function App(): React.ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const worldRef = useRef<TellusWorldApi | null>(null);
+  const pendingPortalTransfersRef = useRef<Record<string, PendingPortalTransfer>>({});
   const [snapshot, setSnapshot] = useState<TellusSnapshot>({
     generated: [],
     logs: [],
@@ -11171,9 +11231,44 @@ function App(): React.ReactElement {
         generationStatus: thing.modelUrl ? "ready" : thing.generationStatus,
         animation: thing.animation ?? "",
         petOwnerId: thing.petOwnerId,
+        animationClips: thing.animationClips,
         updatedAt: new Date().toISOString(),
       };
     });
+  const transferMountedThing = (
+    thing: GeneratedThing | undefined,
+    arrival: { x: number; z: number } | null,
+  ): WorldGeneratedThing | null => {
+    if (!thing) return null;
+    const position = arrival
+      ? {
+          x: arrival.x,
+          y: thing.position.y,
+          z: arrival.z,
+        }
+      : { ...thing.position };
+    return {
+      id: thing.id,
+      kind: thing.kind,
+      prompt: thing.prompt,
+      creatorId: thing.creatorId,
+      ownerUserId: thing.ownerUserId,
+      position,
+      rotationX: thing.rotationX,
+      rotationY: thing.rotationY,
+      rotationZ: thing.rotationZ,
+      scale: thing.scale,
+      color: thing.color,
+      assetStoreModelId: thing.assetStoreModelId,
+      modelUrl: thing.modelUrl,
+      pipelineId: thing.modelUrl ? undefined : thing.pipelineId,
+      generationStatus: thing.modelUrl ? "ready" : thing.generationStatus,
+      animation: thing.animation ?? "",
+      petOwnerId: thing.petOwnerId,
+      animationClips: thing.animationClips,
+      updatedAt: new Date().toISOString(),
+    };
+  };
   // TELLUS INFINITY: when the scene reports a world.portal.entered, switch to the target world and warp to the
   // portal's spawn once the new scene is up (best-effort delayed warp — the world reloads async on the id change).
   useEffect(() => {
@@ -11182,24 +11277,37 @@ function App(): React.ReactElement {
     if (ps.sceneUrl) {
       pendingInteriorSceneUrlsRef.current[ps.toWorldId] = ps.sceneUrl;
     }
-    const ownerId = snapshot.userId || snapshot.visitorId || tellusUserId();
-    const pets = snapshot.generated.filter(
-      (thing) => thing.petOwnerId === ownerId && thing.id !== snapshot.sailingThingId,
+    const ownerIds = new Set(
+      [snapshot.userId, snapshot.visitorId, tellusUserId(), tellusVisitorId()]
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
     );
+    const pets = snapshot.generated.filter(
+      (thing) => !!thing.petOwnerId && ownerIds.has(thing.petOwnerId) && thing.id !== snapshot.sailingThingId,
+    );
+    const mountedThing = snapshot.sailingThingId
+      ? snapshot.generated.find((thing) => thing.id === snapshot.sailingThingId)
+      : undefined;
     const arrival =
       ps.spawn && !(isChunkedWorldId(ps.toWorldId) && Math.hypot(ps.spawn.x, ps.spawn.z) < 1)
         ? portalArrivalPosition(ps.spawn.x, ps.spawn.z)
         : null;
     const petTransfers = transferPetThings(pets, arrival);
+    const mountedTransfer = transferMountedThing(mountedThing, arrival);
+    const transfers = mountedTransfer ? [...petTransfers, mountedTransfer] : petTransfers;
     for (const pet of pets) {
       worldRef.current?.deleteGenerated(pet.id);
     }
+    if (mountedThing) {
+      worldRef.current?.deleteGenerated(mountedThing.id);
+    }
+    if (transfers.length > 0 || arrival) {
+      pendingPortalTransfersRef.current[ps.toWorldId] = {
+        things: transfers,
+        mountedThingId: mountedTransfer?.id,
+        arrival,
+      };
+    }
     switchWorld(ps.toWorldId);
-    const t = window.setTimeout(() => {
-      if (petTransfers.length > 0) worldRef.current?.importGeneratedThings(petTransfers);
-      if (arrival) worldRef.current?.warpTo(arrival.x, arrival.z);
-    }, 1400);
-    return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.portalSwitch]);
   // Transient status line next to the world controls (reuses the create-note slot + its auto-clear).
@@ -12154,6 +12262,21 @@ function App(): React.ReactElement {
         world = createTellusWorld(container, setSnapshot, { initialInteriorSceneUrl });
         worldRef.current = world;
         const mountedWorld = world;
+        const portalTransfer = pendingPortalTransfersRef.current[activeWorldId];
+        if (portalTransfer) {
+          delete pendingPortalTransfersRef.current[activeWorldId];
+          window.setTimeout(() => {
+            if (cancelled || worldRef.current !== mountedWorld) return;
+            if (portalTransfer.things.length > 0) {
+              mountedWorld.importGeneratedThings(portalTransfer.things);
+            }
+            if (portalTransfer.mountedThingId) {
+              mountedWorld.boardGenerated(portalTransfer.mountedThingId);
+            } else if (portalTransfer.arrival) {
+              mountedWorld.warpTo(portalTransfer.arrival.x, portalTransfer.arrival.z);
+            }
+          }, 650);
+        }
         const sharedLocation = sharedLocationRef.current;
         if (
           sharedLocation &&

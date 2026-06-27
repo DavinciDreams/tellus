@@ -4,6 +4,8 @@ import { airMountTerms, groundMountTerms, waterMountTerms } from "./tellus-const
 import { assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl } from "./tellus-urls-identity";
 import { clamp, promptIncludesAny } from "./tellus-utils";
 
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // Tellus world units are meters-ish. This is the canonical ruler for authored/generated scale:
 // humanoids fit to this height, and world-object categories are sized as ratios from it.
 export const STANDARD_HUMANOID_HEIGHT = 1.8;
@@ -100,9 +102,11 @@ export function normalizeWorldThingAssetIdentity(
 
 export function worldThingVehicleMode(thing: Pick<GeneratedThing, "kind" | "prompt">): VehicleMode | null {
   const lower = thing.prompt.toLowerCase();
+  const hasVehicleTerm = (terms: readonly string[]): boolean =>
+    terms.some((term) => new RegExp(`(^|\\W)${escapeRegex(term)}(\\W|$)`, "i").test(lower));
   if (
     thing.kind === "balloon" ||
-    promptIncludesAny(lower, airMountTerms) ||
+    hasVehicleTerm(airMountTerms) ||
     lower.includes("balloon") ||
     lower.includes("airship") ||
     lower.includes("zeppelin") ||
@@ -113,7 +117,7 @@ export function worldThingVehicleMode(thing: Pick<GeneratedThing, "kind" | "prom
     return "air";
   }
   if (
-    promptIncludesAny(lower, waterMountTerms) ||
+    hasVehicleTerm(waterMountTerms) ||
     lower.includes("boat") ||
     lower.includes("ship") ||
     lower.includes("sail") ||
@@ -125,7 +129,7 @@ export function worldThingVehicleMode(thing: Pick<GeneratedThing, "kind" | "prom
     return "water";
   }
   if (
-    promptIncludesAny(lower, groundMountTerms) ||
+    hasVehicleTerm(groundMountTerms) ||
     lower.includes("vehicle") ||
     lower.includes("cart") ||
     lower.includes("wagon") ||
