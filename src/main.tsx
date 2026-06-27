@@ -4374,7 +4374,13 @@ function createTellusWorld(
     if (transformControlsHelper) transformControlsHelper.visible = true;
   };
 
-  const pendingGeneratedUpsertAt = new Map<string, number>();
+  const GENERATED_ECHO_GUARD_MS = 4_000;
+  const GENERATED_DELETE_TOMBSTONE_MS = 10 * 60_000;
+  const pendingGeneratedUpserts = new Map<
+    string,
+    { updatedAtMs: number; signature: string; expiresAtMs: number }
+  >();
+  const pendingGeneratedDeletes = new Map<string, { deletedAtMs: number; expiresAtMs: number }>();
 
   const generatedUpdateTime = (thing: Pick<WorldGeneratedThing, "updatedAt">): number => {
     const ms = Date.parse(thing.updatedAt);
@@ -4408,6 +4414,52 @@ function createTellusWorld(
     animationClips: thing.animationClips,
     updatedAt,
   });
+
+  const roundedGeneratedNumber = (value: number | undefined): number =>
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.round(value * 1000) / 1000
+      : 0;
+
+  const generatedThingSignature = (thing: WorldGeneratedThing): string =>
+    JSON.stringify({
+      kind: thing.kind,
+      prompt: thing.prompt,
+      creatorId: thing.creatorId,
+      ownerUserId: thing.ownerUserId ?? "",
+      position: {
+        x: roundedGeneratedNumber(thing.position.x),
+        y: roundedGeneratedNumber(thing.position.y),
+        z: roundedGeneratedNumber(thing.position.z),
+      },
+      rotationX: roundedGeneratedNumber(thing.rotationX),
+      rotationY: roundedGeneratedNumber(thing.rotationY),
+      rotationZ: roundedGeneratedNumber(thing.rotationZ),
+      scale: roundedGeneratedNumber(thing.scale),
+      color: thing.color,
+      assetStoreModelId: thing.assetStoreModelId ?? "",
+      modelUrl: thing.modelUrl ?? "",
+      pipelineId: thing.pipelineId ?? "",
+      generationStatus: thing.generationStatus ?? "",
+      animation: thing.animation ?? "",
+      petOwnerId: thing.petOwnerId ?? "",
+    });
+
+  const pruneGeneratedEchoGuards = (nowMs = Date.now()) => {
+    for (const [id, pending] of pendingGeneratedUpserts) {
+      if (pending.expiresAtMs <= nowMs) pendingGeneratedUpserts.delete(id);
+    }
+    for (const [id, pending] of pendingGeneratedDeletes) {
+      if (pending.expiresAtMs <= nowMs) pendingGeneratedDeletes.delete(id);
+    }
+  };
+
+  const markGeneratedDeletePending = (id: string, deletedAtMs = Date.now()) => {
+    pendingGeneratedUpserts.delete(id);
+    pendingGeneratedDeletes.set(id, {
+      deletedAtMs,
+      expiresAtMs: deletedAtMs + GENERATED_DELETE_TOMBSTONE_MS,
+    });
+  };
 
   const resolveAssetBackedModel = (
     modelUrl?: string,
@@ -4552,12 +4604,18 @@ function createTellusWorld(
   const publishGeneratedThing = (thing: GeneratedThing) => {
     saveGeneratedPlacementSnapshot();
     const updatedAt = new Date().toISOString();
-    pendingGeneratedUpsertAt.set(thing.id, Date.parse(updatedAt));
+    const wireThing = worldGeneratedThing(thing, updatedAt);
+    pendingGeneratedDeletes.delete(thing.id);
+    pendingGeneratedUpserts.set(thing.id, {
+      updatedAtMs: Date.parse(updatedAt),
+      signature: generatedThingSignature(wireThing),
+      expiresAtMs: Date.now() + GENERATED_ECHO_GUARD_MS,
+    });
     if (!tellusWorldBackendAvailable) return;
     const action = {
       type: "generated.upsert",
       visitorId,
-      thing: worldGeneratedThing(thing, updatedAt),
+      thing: wireThing,
     };
     if (worldSocket?.readyState === WebSocket.OPEN) {
       worldSocket.send(JSON.stringify(action));
@@ -4881,17 +4939,39 @@ function createTellusWorld(
   };
 
   const applyRemoteGeneratedThing = (remote: WorldGeneratedThing) => {
+    pruneGeneratedEchoGuards();
     const healedPending = isStalePendingGeneratedThing(remote);
     const normalized = normalizeGeneratedThing(remote);
+    const remoteUpdatedAt = generatedUpdateTime(normalized);
+    const pendingDelete = pendingGeneratedDeletes.get(normalized.id);
+    if (
+      pendingDelete &&
+      (remoteUpdatedAt === 0 || remoteUpdatedAt <= pendingDelete.deletedAtMs || Date.now() < pendingDelete.expiresAtMs)
+    ) {
+      return;
+    }
     const existing = thingById(normalized.id);
     if (existing) {
-      const remoteUpdatedAt = generatedUpdateTime(normalized);
-      const pendingUpdatedAt = pendingGeneratedUpsertAt.get(existing.id) ?? 0;
-      if (remoteUpdatedAt > 0 && pendingUpdatedAt > 0 && remoteUpdatedAt < pendingUpdatedAt) {
-        return;
-      }
-      if (remoteUpdatedAt >= pendingUpdatedAt) {
-        pendingGeneratedUpsertAt.delete(existing.id);
+      const pendingUpsert = pendingGeneratedUpserts.get(existing.id);
+      if (pendingUpsert) {
+        const remoteSignature = generatedThingSignature(normalized);
+        const remoteCompletesGeneration =
+          !existing.modelUrl &&
+          Boolean(normalized.modelUrl) &&
+          normalized.generationStatus === "ready";
+        if (remoteSignature === pendingUpsert.signature) {
+          pendingGeneratedUpserts.delete(existing.id);
+        } else if (remoteCompletesGeneration) {
+          pendingGeneratedUpserts.delete(existing.id);
+        } else if (
+          remoteUpdatedAt === 0 ||
+          remoteUpdatedAt < pendingUpsert.updatedAtMs ||
+          Date.now() < pendingUpsert.expiresAtMs
+        ) {
+          return;
+        } else {
+          pendingGeneratedUpserts.delete(existing.id);
+        }
       }
       const locallyRidden = existing.id === sailingThingId;
       existing.kind = normalized.kind as GeneratedKind;
@@ -5092,6 +5172,7 @@ function createTellusWorld(
   };
 
   const applyRemoteGeneratedDelete = (id: string) => {
+    markGeneratedDeletePending(id);
     const index = generated.findIndex((thing) => thing.id === id);
     if (index === -1) return;
     const [removed] = generated.splice(index, 1);
@@ -5519,6 +5600,9 @@ function createTellusWorld(
       if (!ok) return;
       for (const portal of anchoredPortals) sendPortalDelete(portal.id);
     }
+    const deletedAt = new Date().toISOString();
+    const deletedAtMs = Date.parse(deletedAt);
+    markGeneratedDeletePending(id, Number.isFinite(deletedAtMs) ? deletedAtMs : Date.now());
     const [thing] = generated.splice(index, 1);
     const deletedModelUrl = thing?.modelUrl;
     pendingGenerationControllers.get(id)?.abort();
@@ -5552,7 +5636,7 @@ function createTellusWorld(
       text: `deleted ${thing.kind}: ${thing.prompt}`,
     });
     if (tellusWorldBackendAvailable) {
-      const action = { type: "generated.delete", visitorId, id };
+      const action = { type: "generated.delete", visitorId, id, deletedAt };
       if (worldSocket?.readyState === WebSocket.OPEN) {
         worldSocket.send(JSON.stringify(action));
       } else {
