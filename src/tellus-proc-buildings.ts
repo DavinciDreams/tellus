@@ -84,7 +84,7 @@ export interface ProceduralBuildingDimensions {
 }
 
 export const PROCEDURAL_BUILDING_PREFIX = "building-";
-const SHARED_STONE_ALBEDO_URL = "/terrain-textures/shared-fieldstone-rubble/albedo.png";
+const SHARED_STONE_ALBEDO_URL = "/terrain-textures/shared-light-stone-tiles/albedo.jpg";
 const SIMPLE_HOUSE_STONE_SKIRT_HEIGHT = 0.95;
 const MEDIEVAL_STUCCO_COLOR = 0xd3c19a;
 const MEDIEVAL_TIMBER_COLOR = 0x4f3324;
