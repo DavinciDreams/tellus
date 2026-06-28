@@ -422,7 +422,7 @@ function addWallRelief(
   if (!framed) return;
 
   const bayCount = Math.min(5, Math.max(2, Math.floor(width / 2.4)));
-  const fullHeightPosts = recipe.id === "mansion";
+  const fullHeightPosts = recipe.id === "mansion" || recipe.id === "guild-hall";
   const bayPostHeight = fullHeightPosts ? height + 0.1 : height * 0.72;
   const bayPostY = fullHeightPosts ? yMid : 0.62 + height * 0.36;
   for (let i = 1; i < bayCount; i++) {
