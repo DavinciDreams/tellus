@@ -621,10 +621,9 @@ function addCathedralWindows(
   const rows = Math.max(1, floors - 1);
   const yStart = 4.2;
   const yStep = 2.65;
-  const frontCols = Math.max(3, Math.floor(width / 2.8));
-  const sideCols = Math.max(5, Math.floor(depth / 3.0));
-  const frontXs = evenPositions(frontCols, width - 2.0);
-  const sideZs = evenPositions(sideCols, depth - 2.2);
+  const frontXs = evenPositions(3, Math.max(1.2, width - 4.4));
+  const sideCols = Math.max(4, Math.floor((depth - 5.0) / 3.0));
+  const sideZs = evenPositions(sideCols, Math.max(1.6, depth - 5.0));
   for (let row = 0; row < rows; row++) {
     const y = yStart + row * yStep;
     for (const x of frontXs) {
