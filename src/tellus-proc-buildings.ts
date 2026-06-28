@@ -29,10 +29,13 @@ export type BuildingMaterialStyle =
   | "plaster"
   | "stucco"
   | "adobe"
+  | "desert-adobe"
   | "log-siding"
   | "cotswold-cottage"
   | "fieldstone-cottage"
   | "green-fieldstone-cottage"
+  | "brick-cottage"
+  | "white-tudor"
   | "cedar-shingle"
   | "weathered-shingle"
   | "blue-shingle"
@@ -89,6 +92,7 @@ const SLATE_ROOF_COLOR = 0x66717a;
 const ADOBE_WALL_COLOR = 0xb88755;
 const ADOBE_ROOF_COLOR = 0xa34c2f;
 const ADOBE_STONE_BASE_COLOR = 0xc2a772;
+const DESERT_ADOBE_WALL_COLOR = 0xbc8559;
 const LOG_WALL_COLOR = 0x7b5637;
 const LOG_DETAIL_COLOR = 0x4f3324;
 const LOG_ROOF_COLOR = 0x6b4a2f;
@@ -115,6 +119,10 @@ const COTTAGE_ROOF_DETAIL_COLOR = 0x2e2019;
 const GREEN_COTTAGE_ROOF_COLOR = 0x586a45;
 const GREEN_COTTAGE_ROOF_DETAIL_COLOR = 0x34402d;
 const GREEN_COTTAGE_TRIM_COLOR = 0x405137;
+const RIVER_BRICK_COLOR = 0xa75a3c;
+const RIVER_BRICK_DETAIL_COLOR = 0x643628;
+const WHITE_TUDOR_WALL_COLOR = 0xe8dfc7;
+const WHITE_TUDOR_TIMBER_COLOR = 0x35231a;
 const buildingTextureCache = new Map<string, THREE.Texture>();
 
 export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label: string }> = [
@@ -127,10 +135,13 @@ export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label
   { id: "plaster", label: "Plaster" },
   { id: "stucco", label: "Stucco" },
   { id: "adobe", label: "Adobe" },
+  { id: "desert-adobe", label: "Desert Adobe" },
   { id: "log-siding", label: "Log" },
   { id: "cotswold-cottage", label: "Cotswold" },
   { id: "fieldstone-cottage", label: "Fieldstone" },
   { id: "green-fieldstone-cottage", label: "Green Stone" },
+  { id: "brick-cottage", label: "River Brick" },
+  { id: "white-tudor", label: "White Tudor" },
   { id: "cedar-shingle", label: "Cedar" },
   { id: "weathered-shingle", label: "Weathered" },
   { id: "blue-shingle", label: "Blue Shingle" },
@@ -234,9 +245,10 @@ export const buildProceduralBuildingModel = (
   group.userData.proceduralBuilding = { recipeId, seed, material: materialStyle, lighting: options.lighting ?? "warm" };
 
   addFoundation(group, width, depth, recipe, mats);
-  if (recipe.id === "simple-house") {
+  const fullAdobe = fullAdobeStyle(materialStyle);
+  if (recipe.id === "simple-house" && !fullAdobe) {
     addSimpleHouseBody(group, width, depth, height, mats);
-  } else if (floors >= 3 && !rockOnlyBuilding(recipe.id)) {
+  } else if (floors >= 3 && !rockOnlyBuilding(recipe.id) && !fullAdobe) {
     addStoneFirstFloorBody(group, width, depth, height, floorHeight, mats);
   } else {
     addBuildingBlock(group, 0, width, depth, height, mats.wall);
@@ -306,6 +318,7 @@ function cottageStoneColor(style: BuildingMaterialStyle): number | null {
   if (style === "cotswold-cottage") return COTSWOLD_STONE_COLOR;
   if (style === "fieldstone-cottage") return FIELDSTONE_COTTAGE_COLOR;
   if (style === "green-fieldstone-cottage") return FIELDSTONE_COTTAGE_COLOR;
+  if (style === "brick-cottage") return RIVER_BRICK_COLOR;
   return null;
 }
 
@@ -321,6 +334,14 @@ function cottageRoofDetailColor(style: BuildingMaterialStyle): number {
   return style === "green-fieldstone-cottage" ? GREEN_COTTAGE_ROOF_DETAIL_COLOR : COTTAGE_ROOF_DETAIL_COLOR;
 }
 
+function usesSharedStoneWallTexture(style: BuildingMaterialStyle): boolean {
+  return style === "cotswold-cottage" || style === "fieldstone-cottage" || style === "green-fieldstone-cottage";
+}
+
+function fullAdobeStyle(style: BuildingMaterialStyle): boolean {
+  return style === "desert-adobe";
+}
+
 function materialPalette(style: Exclude<BuildingMaterialStyle, "auto">) {
   const palettes: Record<Exclude<BuildingMaterialStyle, "auto">, { wall: number; accent: number; roof: number; trim: number; foundation: number }> = {
     brick: { wall: 0x9b4f38, accent: 0x6e3329, roof: 0x5d2e2a, trim: 0xf0d2a2, foundation: 0x6d6558 },
@@ -331,10 +352,13 @@ function materialPalette(style: Exclude<BuildingMaterialStyle, "auto">) {
     plaster: { wall: 0xd9caa5, accent: 0x8d7758, roof: 0x6b3b36, trim: 0x4d3828, foundation: 0x777165 },
     stucco: { wall: 0xcfc2a0, accent: 0x8a806d, roof: 0x6b4a3a, trim: 0xf0e0bd, foundation: 0x747064 },
     adobe: { wall: ADOBE_WALL_COLOR, accent: MEDIEVAL_TIMBER_COLOR, roof: ADOBE_ROOF_COLOR, trim: MEDIEVAL_TIMBER_COLOR, foundation: ADOBE_STONE_BASE_COLOR },
+    "desert-adobe": { wall: DESERT_ADOBE_WALL_COLOR, accent: MEDIEVAL_TIMBER_COLOR, roof: ADOBE_ROOF_COLOR, trim: MEDIEVAL_TIMBER_COLOR, foundation: MEDIEVAL_TIMBER_COLOR },
     "log-siding": { wall: LOG_WALL_COLOR, accent: LOG_DETAIL_COLOR, roof: LOG_ROOF_COLOR, trim: LOG_DETAIL_COLOR, foundation: LOG_STONE_BASE_COLOR },
     "cotswold-cottage": { wall: COTSWOLD_STONE_COLOR, accent: COTTAGE_TRIM_COLOR, roof: COTTAGE_ROOF_COLOR, trim: COTTAGE_TRIM_COLOR, foundation: COTTAGE_TRIM_COLOR },
     "fieldstone-cottage": { wall: FIELDSTONE_COTTAGE_COLOR, accent: COTTAGE_TRIM_COLOR, roof: COTTAGE_ROOF_COLOR, trim: COTTAGE_TRIM_COLOR, foundation: COTTAGE_TRIM_COLOR },
     "green-fieldstone-cottage": { wall: FIELDSTONE_COTTAGE_COLOR, accent: GREEN_COTTAGE_TRIM_COLOR, roof: GREEN_COTTAGE_ROOF_COLOR, trim: GREEN_COTTAGE_TRIM_COLOR, foundation: GREEN_COTTAGE_TRIM_COLOR },
+    "brick-cottage": { wall: RIVER_BRICK_COLOR, accent: COTTAGE_TRIM_COLOR, roof: COTTAGE_ROOF_COLOR, trim: COTTAGE_TRIM_COLOR, foundation: COTTAGE_TRIM_COLOR },
+    "white-tudor": { wall: WHITE_TUDOR_WALL_COLOR, accent: WHITE_TUDOR_TIMBER_COLOR, roof: SLATE_ROOF_COLOR, trim: WHITE_TUDOR_TIMBER_COLOR, foundation: WHITE_TUDOR_TIMBER_COLOR },
     "cedar-shingle": { wall: CEDAR_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: CEDAR_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: CEDAR_STONE_BASE_COLOR },
     "weathered-shingle": { wall: WEATHERED_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: WEATHERED_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: CEDAR_STONE_BASE_COLOR },
     "blue-shingle": { wall: BLUE_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: BLUE_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: CEDAR_STONE_BASE_COLOR },
@@ -384,21 +408,52 @@ function createMaterials(
   const stone = materialStyle === "stone-ashlar" || materialStyle === "stone-rubble";
   const simpleHouse = recipeId === "simple-house";
   const rockOnly = rockOnlyBuilding(recipeId);
-  const adobeStyle = materialStyle === "adobe" && !rockOnly;
+  const adobeStyle = (materialStyle === "adobe" || materialStyle === "desert-adobe") && !rockOnly;
+  const fullAdobe = fullAdobeStyle(materialStyle) && !rockOnly;
   const logStyle = materialStyle === "log-siding" && !rockOnly;
   const plankStyle = materialStyle === "wood-plank" && !rockOnly;
   const cottageStone = !rockOnly ? cottageStoneColor(materialStyle) : null;
   const cottageStyle = cottageStone !== null;
+  const whiteTudorStyle = materialStyle === "white-tudor" && !rockOnly;
   const shingle = !rockOnly ? shinglePalette(materialStyle) : null;
   const shingleStyle = Boolean(shingle);
   const medievalStyle = Boolean(recipeId) && !rockOnly;
-  const wall = make(cottageStone ?? (shingle ? shingle.base : plankStyle ? PLANK_WALL_COLOR : logStyle ? LOG_WALL_COLOR : adobeStyle ? ADOBE_WALL_COLOR : medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall));
+  const wall = make(
+    cottageStone ??
+      (whiteTudorStyle
+        ? WHITE_TUDOR_WALL_COLOR
+        : shingle
+          ? shingle.base
+          : plankStyle
+            ? PLANK_WALL_COLOR
+          : logStyle
+            ? LOG_WALL_COLOR
+          : fullAdobe
+            ? DESERT_ADOBE_WALL_COLOR
+          : adobeStyle
+            ? ADOBE_WALL_COLOR
+          : medievalStyle
+            ? MEDIEVAL_STUCCO_COLOR
+          : palette.wall),
+  );
   const timberDetail = medievalStyle || rockOnly;
-  const accentColor = cottageStyle ? cottageTrimColor(materialStyle) : shingleStyle ? CEDAR_TRIM_COLOR : plankStyle ? PLANK_DETAIL_COLOR : logStyle ? LOG_DETAIL_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
+  const accentColor = whiteTudorStyle
+    ? WHITE_TUDOR_TIMBER_COLOR
+    : cottageStyle
+      ? cottageTrimColor(materialStyle)
+    : shingleStyle
+      ? CEDAR_TRIM_COLOR
+    : plankStyle
+      ? PLANK_DETAIL_COLOR
+    : logStyle
+      ? LOG_DETAIL_COLOR
+    : timberDetail
+      ? MEDIEVAL_TIMBER_COLOR
+    : palette.accent;
   const baseWallColor = simpleHouse
-    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : cottageStone ?? (shingleStyle ? CEDAR_STONE_BASE_COLOR : logStyle || plankStyle ? LOG_STONE_BASE_COLOR : 0x8b8d86)).lerp(new THREE.Color(0xffffff), adobeStyle || logStyle || plankStyle || shingleStyle || cottageStyle ? 0.06 : 0.08)
+    ? new THREE.Color(fullAdobe ? DESERT_ADOBE_WALL_COLOR : adobeStyle ? ADOBE_STONE_BASE_COLOR : cottageStone ?? (shingleStyle ? CEDAR_STONE_BASE_COLOR : logStyle || plankStyle ? LOG_STONE_BASE_COLOR : 0x8b8d86)).lerp(new THREE.Color(0xffffff), adobeStyle || logStyle || plankStyle || shingleStyle || cottageStyle ? 0.06 : 0.08)
     : adobeStyle
-      ? new THREE.Color(ADOBE_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.05)
+      ? new THREE.Color(fullAdobe ? DESERT_ADOBE_WALL_COLOR : ADOBE_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.05)
     : cottageStyle
       ? new THREE.Color(cottageStone).lerp(new THREE.Color(0xffffff), 0.12)
     : shingleStyle
@@ -412,7 +467,7 @@ function createMaterials(
   if (stone && !medievalStyle) {
     applySharedAlbedo(wall, SHARED_STONE_ALBEDO_URL, [2.2, 2.2]);
   }
-  if (cottageStyle) {
+  if (cottageStyle && usesSharedStoneWallTexture(materialStyle)) {
     applySharedAlbedo(wall, SHARED_STONE_ALBEDO_URL, simpleHouse ? [1.8, 1.25] : [2.3, 2.0]);
   }
   if (stone && rockOnly) {
@@ -428,7 +483,7 @@ function createMaterials(
     accent: make(accentColor),
     roof,
     roofDetail: make(roofDetailColor.getHex(), 0.92),
-    trim: make(cottageStyle ? cottageTrimColor(materialStyle) : shingleStyle ? CEDAR_TRIM_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.trim, 0.58),
+    trim: make(whiteTudorStyle ? WHITE_TUDOR_TIMBER_COLOR : cottageStyle ? cottageTrimColor(materialStyle) : shingleStyle ? CEDAR_TRIM_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.trim, 0.58),
     foundation,
     logDetail: make(LOG_DETAIL_COLOR, 0.86),
     logHighlight: make(0x9b7250, 0.82),
@@ -588,6 +643,7 @@ function addWallRelief(
     materialStyle === "plaster" ||
     materialStyle === "stucco" ||
     materialStyle === "log-siding" ||
+    materialStyle === "white-tudor" ||
     Boolean(shinglePalette(materialStyle)) ||
     recipe.id === "inn" ||
     recipe.id === "store" ||
