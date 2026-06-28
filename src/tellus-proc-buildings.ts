@@ -672,11 +672,15 @@ function addBuildingGridWindow(
   mats: ReturnType<typeof createMaterials>,
 ) {
   if (recipe.id === "cathedral") {
-    addNineLiteWindow(group, x, y + 0.18, z, rotationY, mats, mats.trim, 3, 5, 0.64, 1.72);
+    addNineLiteWindow(group, x, y + 0.58, z, rotationY, mats, mats.trim, 3, 5, 1.05, 2.55);
+    return;
+  }
+  if (recipe.id === "church") {
+    addNineLiteWindow(group, x, y + 0.34, z, rotationY, mats, mats.trim, 3, 4, 0.86, 1.95);
     return;
   }
   if (recipe.id === "chapel") {
-    addNineLiteWindow(group, x, y + 0.12, z, rotationY, mats, mats.trim, 3, 4, 0.62, 1.42);
+    addNineLiteWindow(group, x, y + 0.18, z, rotationY, mats, mats.trim, 3, 4, 0.72, 1.55);
     return;
   }
   addNineLiteWindow(group, x, y, z, rotationY, mats, mats.trim);
@@ -734,6 +738,7 @@ function addRoof(
   roof.position.set(0, 0.28 + height + roofHeight / 2, 0);
   roof.scale.z = depth / width;
   addMesh(group, roof);
+  addPyramidRoofCourses(group, width, depth, height, roofHeight, mats);
   if (rng() > 0.45) {
     addBox(group, [0.45, 0.9, 0.45], [width * 0.24, 0.28 + height + 0.55, depth * -0.14], mats.accent);
     addBox(group, [0.62, 0.18, 0.62], [width * 0.24, 0.28 + height + 1.08, depth * -0.14], mats.foundation);
@@ -900,6 +905,48 @@ function addRoofDetailBox(
   addMesh(group, mesh, false);
 }
 
+function addPyramidRoofCourses(
+  group: THREE.Group,
+  width: number,
+  depth: number,
+  height: number,
+  roofHeight: number,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const yBase = 0.28 + height;
+  const levels = Math.max(4, Math.floor(roofHeight / 0.34));
+  for (let i = 1; i <= levels; i++) {
+    const t = i / (levels + 1);
+    const y = yBase + t * roofHeight;
+    const sx = Math.max(0.4, width * 0.72 * (1 - t));
+    const sz = Math.max(0.4, depth * 0.72 * (1 - t));
+    addBox(group, [sx, 0.045, 0.055], [0, y, sz / 2], mats.roofDetail, false);
+    addBox(group, [sx, 0.045, 0.055], [0, y, -sz / 2], mats.roofDetail, false);
+    addBox(group, [0.055, 0.045, sz], [sx / 2, y, 0], mats.roofDetail, false);
+    addBox(group, [0.055, 0.045, sz], [-sx / 2, y, 0], mats.roofDetail, false);
+  }
+}
+
+function addTowerCapCourses(
+  group: THREE.Group,
+  x: number,
+  z: number,
+  towerSize: number,
+  yBase: number,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const levels = 3;
+  for (let i = 1; i <= levels; i++) {
+    const t = i / (levels + 1);
+    const y = yBase + t * 0.9;
+    const size = Math.max(0.18, towerSize * 0.72 * (1 - t));
+    addBox(group, [size, 0.04, 0.045], [x, y, z + size / 2], mats.roofDetail, false);
+    addBox(group, [size, 0.04, 0.045], [x, y, z - size / 2], mats.roofDetail, false);
+    addBox(group, [0.045, 0.04, size], [x + size / 2, y, z], mats.roofDetail, false);
+    addBox(group, [0.045, 0.04, size], [x - size / 2, y, z], mats.roofDetail, false);
+  }
+}
+
 function addDormer(
   group: THREE.Group,
   x: number,
@@ -935,6 +982,7 @@ function addFootprintDetails(
         const cap = new THREE.Mesh(new THREE.ConeGeometry(towerSize * 0.72, 0.9, 6), mats.roof);
         cap.position.set(x, 0.28 + height * 1.22 + 0.45, z);
         addMesh(group, cap);
+        addTowerCapCourses(group, x, z, towerSize, 0.28 + height * 1.22, mats);
       }
     }
   } else if (recipe.footprintStyle === "winged" || recipe.footprintStyle === "cruciform") {
