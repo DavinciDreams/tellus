@@ -422,11 +422,22 @@ function addWallRelief(
   if (!framed) return;
 
   const bayCount = Math.min(5, Math.max(2, Math.floor(width / 2.4)));
+  const fullHeightPosts = recipe.id === "mansion";
+  const bayPostHeight = fullHeightPosts ? height + 0.1 : height * 0.72;
+  const bayPostY = fullHeightPosts ? yMid : 0.62 + height * 0.36;
   for (let i = 1; i < bayCount; i++) {
     const x = (i / bayCount - 0.5) * (width - 1.05);
     if (Math.abs(x) < 0.8) continue;
-    addBox(group, [0.12, height * 0.72, 0.13], [x, 0.62 + height * 0.36, frontZ + 0.02], mats.accent, false);
-    addBox(group, [0.12, height * 0.72, 0.13], [x, 0.62 + height * 0.36, backZ - 0.02], mats.accent, false);
+    addBox(group, [0.12, bayPostHeight, 0.13], [x, bayPostY, frontZ + 0.02], mats.accent, false);
+    addBox(group, [0.12, bayPostHeight, 0.13], [x, bayPostY, backZ - 0.02], mats.accent, false);
+  }
+  if (fullHeightPosts) {
+    const sideBayCount = Math.min(5, Math.max(2, Math.floor(depth / 2.4)));
+    for (let i = 1; i < sideBayCount; i++) {
+      const z = (i / sideBayCount - 0.5) * (depth - 1.05);
+      addBox(group, [0.13, bayPostHeight, 0.12], [leftX - 0.02, bayPostY, z], mats.accent, false);
+      addBox(group, [0.13, bayPostHeight, 0.12], [rightX + 0.02, bayPostY, z], mats.accent, false);
+    }
   }
   for (let i = 0; i < bayCount; i++) {
     const x = ((i + 0.5) / bayCount - 0.5) * (width - 1.05);
