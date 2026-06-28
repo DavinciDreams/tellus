@@ -619,20 +619,20 @@ function addCathedralWindows(
   mats: ReturnType<typeof createMaterials>,
 ) {
   const rows = Math.max(1, floors - 1);
-  const yStart = 4.2;
-  const yStep = 2.65;
+  const yStart = 3.85;
+  const yStep = 2.18;
   const frontXs = evenPositions(3, Math.max(1.2, width - 4.4));
   const sideCols = Math.max(4, Math.floor((depth - 5.0) / 3.0));
   const sideZs = evenPositions(sideCols, Math.max(1.6, depth - 5.0));
   for (let row = 0; row < rows; row++) {
     const y = yStart + row * yStep;
     for (const x of frontXs) {
-      addNineLiteWindow(group, x, y + 0.34, depth / 2 + 0.07, 0, mats, mats.trim, 3, 4, 1.0, 2.1);
-      addNineLiteWindow(group, x, y + 0.34, -depth / 2 - 0.07, Math.PI, mats, mats.trim, 3, 4, 1.0, 2.1);
+      addNineLiteWindow(group, x, y, depth / 2 + 0.07, 0, mats, mats.trim, 3, 4, 1.0, 2.1);
+      addNineLiteWindow(group, x, y, -depth / 2 - 0.07, Math.PI, mats, mats.trim, 3, 4, 1.0, 2.1);
     }
     for (const z of sideZs) {
-      addNineLiteWindow(group, width / 2 + 0.07, y + 0.34, z, Math.PI / 2, mats, mats.trim, 3, 4, 1.0, 2.1);
-      addNineLiteWindow(group, -width / 2 - 0.07, y + 0.34, z, -Math.PI / 2, mats, mats.trim, 3, 4, 1.0, 2.1);
+      addNineLiteWindow(group, width / 2 + 0.07, y, z, Math.PI / 2, mats, mats.trim, 3, 4, 1.0, 2.1);
+      addNineLiteWindow(group, -width / 2 - 0.07, y, z, -Math.PI / 2, mats, mats.trim, 3, 4, 1.0, 2.1);
     }
   }
 }
