@@ -313,3 +313,54 @@ export function resolveRectObstacles(
   }
   return { x: px, z: pz };
 }
+
+export function resolveSweptRectObstacles(
+  fromX: number,
+  fromZ: number,
+  toX: number,
+  toZ: number,
+  radius: number,
+  obstacles: readonly ObstacleRect[],
+): { x: number; z: number } {
+  let hitT = 1;
+  for (const o of obstacles) {
+    const cos = Math.cos(o.yaw);
+    const sin = Math.sin(o.yaw);
+    const sx = fromX - o.x;
+    const sz = fromZ - o.z;
+    const ex = toX - o.x;
+    const ez = toZ - o.z;
+    const localStartX = sx * cos + sz * sin;
+    const localStartZ = -sx * sin + sz * cos;
+    const localEndX = ex * cos + ez * sin;
+    const localEndZ = -ex * sin + ez * cos;
+    const dx = localEndX - localStartX;
+    const dz = localEndZ - localStartZ;
+    const hx = o.hx + radius;
+    const hz = o.hz + radius;
+    const startsInside = Math.abs(localStartX) <= hx && Math.abs(localStartZ) <= hz;
+    if (startsInside) continue;
+
+    let tMin = 0;
+    let tMax = 1;
+    const testAxis = (start: number, delta: number, half: number): boolean => {
+      if (Math.abs(delta) < 1e-8) return Math.abs(start) <= half;
+      const inv = 1 / delta;
+      let t1 = (-half - start) * inv;
+      let t2 = (half - start) * inv;
+      if (t1 > t2) [t1, t2] = [t2, t1];
+      tMin = Math.max(tMin, t1);
+      tMax = Math.min(tMax, t2);
+      return tMin <= tMax;
+    };
+    if (!testAxis(localStartX, dx, hx)) continue;
+    if (!testAxis(localStartZ, dz, hz)) continue;
+    if (tMax >= 0 && tMin <= 1 && tMin < hitT) hitT = Math.max(0, tMin);
+  }
+  if (hitT >= 1) return { x: toX, z: toZ };
+  const safeT = Math.max(0, hitT - 0.03);
+  return {
+    x: fromX + (toX - fromX) * safeT,
+    z: fromZ + (toZ - fromZ) * safeT,
+  };
+}

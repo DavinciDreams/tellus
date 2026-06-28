@@ -30,6 +30,9 @@ export type BuildingMaterialStyle =
   | "stucco"
   | "adobe"
   | "log-siding"
+  | "cotswold-cottage"
+  | "fieldstone-cottage"
+  | "green-fieldstone-cottage"
   | "cedar-shingle"
   | "weathered-shingle"
   | "blue-shingle"
@@ -104,6 +107,14 @@ const BLUE_SHINGLE_COLOR = 0x6f8791;
 const BLUE_SHINGLE_DARK_COLOR = 0x465c65;
 const SAGE_SHINGLE_COLOR = 0x7f8a73;
 const SAGE_SHINGLE_DARK_COLOR = 0x4f5b48;
+const COTSWOLD_STONE_COLOR = 0xc9b47b;
+const FIELDSTONE_COTTAGE_COLOR = 0xa9aca5;
+const COTTAGE_TRIM_COLOR = 0x4d3323;
+const COTTAGE_ROOF_COLOR = 0x4a3024;
+const COTTAGE_ROOF_DETAIL_COLOR = 0x2e2019;
+const GREEN_COTTAGE_ROOF_COLOR = 0x586a45;
+const GREEN_COTTAGE_ROOF_DETAIL_COLOR = 0x34402d;
+const GREEN_COTTAGE_TRIM_COLOR = 0x405137;
 const buildingTextureCache = new Map<string, THREE.Texture>();
 
 export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label: string }> = [
@@ -111,12 +122,15 @@ export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label
   { id: "brick", label: "Brick" },
   { id: "stone-ashlar", label: "Ashlar" },
   { id: "stone-rubble", label: "Rubble" },
-  { id: "wood-plank", label: "Plank" },
+  { id: "wood-plank", label: "Chinked" },
   { id: "timber-frame", label: "Timber" },
   { id: "plaster", label: "Plaster" },
   { id: "stucco", label: "Stucco" },
   { id: "adobe", label: "Adobe" },
   { id: "log-siding", label: "Log" },
+  { id: "cotswold-cottage", label: "Cotswold" },
+  { id: "fieldstone-cottage", label: "Fieldstone" },
+  { id: "green-fieldstone-cottage", label: "Green Stone" },
   { id: "cedar-shingle", label: "Cedar" },
   { id: "weathered-shingle", label: "Weathered" },
   { id: "blue-shingle", label: "Blue Shingle" },
@@ -164,7 +178,9 @@ export const makeProceduralBuildingArchetypeId = (recipeId: ProceduralBuildingTy
 export const normalizeBuildingMaterial = (
   value: string | null | undefined,
 ): BuildingMaterialStyle | undefined =>
-  BUILDING_MATERIAL_OPTIONS.some((option) => option.id === value)
+  value === "stone-cottage"
+    ? "cotswold-cottage"
+    : BUILDING_MATERIAL_OPTIONS.some((option) => option.id === value)
     ? (value as BuildingMaterialStyle)
     : undefined;
 
@@ -229,7 +245,12 @@ export const buildProceduralBuildingModel = (
   addDoor(group, width, depth, recipe, mats);
   addWindows(group, width, depth, floors, recipe, mats, rng);
   addFootprintDetails(group, width, depth, height, recipe, mats, rng);
-  if (options.roof !== false) addRoof(group, width, depth, height, recipe, mats, rng);
+  if (options.roof !== false) {
+    addRoof(group, width, depth, height, recipe, mats, rng);
+    if (recipe.id === "simple-house") {
+      addSimpleHouseChimney(group, width, depth, height, recipe, mats);
+    }
+  }
   if (shinglePalette(materialStyle) && !rockOnlyBuilding(recipe.id)) {
     addShinglePorch(group, width, depth, recipe, mats);
   }
@@ -281,6 +302,25 @@ function shinglePalette(style: BuildingMaterialStyle): { base: number; dark: num
   return null;
 }
 
+function cottageStoneColor(style: BuildingMaterialStyle): number | null {
+  if (style === "cotswold-cottage") return COTSWOLD_STONE_COLOR;
+  if (style === "fieldstone-cottage") return FIELDSTONE_COTTAGE_COLOR;
+  if (style === "green-fieldstone-cottage") return FIELDSTONE_COTTAGE_COLOR;
+  return null;
+}
+
+function cottageTrimColor(style: BuildingMaterialStyle): number {
+  return style === "green-fieldstone-cottage" ? GREEN_COTTAGE_TRIM_COLOR : COTTAGE_TRIM_COLOR;
+}
+
+function cottageRoofColor(style: BuildingMaterialStyle): number {
+  return style === "green-fieldstone-cottage" ? GREEN_COTTAGE_ROOF_COLOR : COTTAGE_ROOF_COLOR;
+}
+
+function cottageRoofDetailColor(style: BuildingMaterialStyle): number {
+  return style === "green-fieldstone-cottage" ? GREEN_COTTAGE_ROOF_DETAIL_COLOR : COTTAGE_ROOF_DETAIL_COLOR;
+}
+
 function materialPalette(style: Exclude<BuildingMaterialStyle, "auto">) {
   const palettes: Record<Exclude<BuildingMaterialStyle, "auto">, { wall: number; accent: number; roof: number; trim: number; foundation: number }> = {
     brick: { wall: 0x9b4f38, accent: 0x6e3329, roof: 0x5d2e2a, trim: 0xf0d2a2, foundation: 0x6d6558 },
@@ -292,6 +332,9 @@ function materialPalette(style: Exclude<BuildingMaterialStyle, "auto">) {
     stucco: { wall: 0xcfc2a0, accent: 0x8a806d, roof: 0x6b4a3a, trim: 0xf0e0bd, foundation: 0x747064 },
     adobe: { wall: ADOBE_WALL_COLOR, accent: MEDIEVAL_TIMBER_COLOR, roof: ADOBE_ROOF_COLOR, trim: MEDIEVAL_TIMBER_COLOR, foundation: ADOBE_STONE_BASE_COLOR },
     "log-siding": { wall: LOG_WALL_COLOR, accent: LOG_DETAIL_COLOR, roof: LOG_ROOF_COLOR, trim: LOG_DETAIL_COLOR, foundation: LOG_STONE_BASE_COLOR },
+    "cotswold-cottage": { wall: COTSWOLD_STONE_COLOR, accent: COTTAGE_TRIM_COLOR, roof: COTTAGE_ROOF_COLOR, trim: COTTAGE_TRIM_COLOR, foundation: COTTAGE_TRIM_COLOR },
+    "fieldstone-cottage": { wall: FIELDSTONE_COTTAGE_COLOR, accent: COTTAGE_TRIM_COLOR, roof: COTTAGE_ROOF_COLOR, trim: COTTAGE_TRIM_COLOR, foundation: COTTAGE_TRIM_COLOR },
+    "green-fieldstone-cottage": { wall: FIELDSTONE_COTTAGE_COLOR, accent: GREEN_COTTAGE_TRIM_COLOR, roof: GREEN_COTTAGE_ROOF_COLOR, trim: GREEN_COTTAGE_TRIM_COLOR, foundation: GREEN_COTTAGE_TRIM_COLOR },
     "cedar-shingle": { wall: CEDAR_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: CEDAR_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: CEDAR_STONE_BASE_COLOR },
     "weathered-shingle": { wall: WEATHERED_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: WEATHERED_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: CEDAR_STONE_BASE_COLOR },
     "blue-shingle": { wall: BLUE_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: BLUE_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: CEDAR_STONE_BASE_COLOR },
@@ -344,16 +387,20 @@ function createMaterials(
   const adobeStyle = materialStyle === "adobe" && !rockOnly;
   const logStyle = materialStyle === "log-siding" && !rockOnly;
   const plankStyle = materialStyle === "wood-plank" && !rockOnly;
+  const cottageStone = !rockOnly ? cottageStoneColor(materialStyle) : null;
+  const cottageStyle = cottageStone !== null;
   const shingle = !rockOnly ? shinglePalette(materialStyle) : null;
   const shingleStyle = Boolean(shingle);
   const medievalStyle = Boolean(recipeId) && !rockOnly;
-  const wall = make(shingle ? shingle.base : plankStyle ? PLANK_WALL_COLOR : logStyle ? LOG_WALL_COLOR : adobeStyle ? ADOBE_WALL_COLOR : medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall);
+  const wall = make(cottageStone ?? (shingle ? shingle.base : plankStyle ? PLANK_WALL_COLOR : logStyle ? LOG_WALL_COLOR : adobeStyle ? ADOBE_WALL_COLOR : medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall));
   const timberDetail = medievalStyle || rockOnly;
-  const accentColor = shingleStyle ? CEDAR_TRIM_COLOR : plankStyle ? PLANK_DETAIL_COLOR : logStyle ? LOG_DETAIL_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
+  const accentColor = cottageStyle ? cottageTrimColor(materialStyle) : shingleStyle ? CEDAR_TRIM_COLOR : plankStyle ? PLANK_DETAIL_COLOR : logStyle ? LOG_DETAIL_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
   const baseWallColor = simpleHouse
-    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : shingleStyle ? CEDAR_STONE_BASE_COLOR : logStyle || plankStyle ? LOG_STONE_BASE_COLOR : 0x8b8d86).lerp(new THREE.Color(0xffffff), adobeStyle || logStyle || plankStyle || shingleStyle ? 0.06 : 0.08)
+    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : cottageStone ?? (shingleStyle ? CEDAR_STONE_BASE_COLOR : logStyle || plankStyle ? LOG_STONE_BASE_COLOR : 0x8b8d86)).lerp(new THREE.Color(0xffffff), adobeStyle || logStyle || plankStyle || shingleStyle || cottageStyle ? 0.06 : 0.08)
     : adobeStyle
       ? new THREE.Color(ADOBE_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.05)
+    : cottageStyle
+      ? new THREE.Color(cottageStone).lerp(new THREE.Color(0xffffff), 0.12)
     : shingleStyle
       ? new THREE.Color(CEDAR_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.1)
     : logStyle || plankStyle
@@ -365,19 +412,23 @@ function createMaterials(
   if (stone && !medievalStyle) {
     applySharedAlbedo(wall, SHARED_STONE_ALBEDO_URL, [2.2, 2.2]);
   }
+  if (cottageStyle) {
+    applySharedAlbedo(wall, SHARED_STONE_ALBEDO_URL, simpleHouse ? [1.8, 1.25] : [2.3, 2.0]);
+  }
   if (stone && rockOnly) {
     applySharedAlbedo(foundation, SHARED_STONE_ALBEDO_URL, [2.2, 2.2]);
   }
-  const roofTint = new THREE.Color(shingle ? shingle.base : logStyle || plankStyle ? LOG_ROOF_COLOR : adobeStyle ? ADOBE_ROOF_COLOR : SLATE_ROOF_COLOR);
+  const roofTint = new THREE.Color(cottageStyle ? cottageRoofColor(materialStyle) : shingle ? shingle.base : logStyle || plankStyle ? LOG_ROOF_COLOR : adobeStyle ? ADOBE_ROOF_COLOR : SLATE_ROOF_COLOR);
   const roof = make(roofTint.getHex(), 0.9);
-  const roofDetailColor = roofTint.clone().lerp(new THREE.Color(shingle ? shingle.dark : logStyle || plankStyle ? 0x322016 : adobeStyle ? 0x5f2418 : 0x252b31), 0.55);
+  roof.userData.cottage = cottageStyle;
+  const roofDetailColor = roofTint.clone().lerp(new THREE.Color(cottageStyle ? cottageRoofDetailColor(materialStyle) : shingle ? shingle.dark : logStyle || plankStyle ? 0x322016 : adobeStyle ? 0x5f2418 : 0x252b31), cottageStyle ? 0.55 : 0.55);
   return {
     wall,
     baseWall,
     accent: make(accentColor),
     roof,
     roofDetail: make(roofDetailColor.getHex(), 0.92),
-    trim: make(shingleStyle ? CEDAR_TRIM_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.trim, 0.58),
+    trim: make(cottageStyle ? cottageTrimColor(materialStyle) : shingleStyle ? CEDAR_TRIM_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.trim, 0.58),
     foundation,
     logDetail: make(LOG_DETAIL_COLOR, 0.86),
     logHighlight: make(0x9b7250, 0.82),
@@ -485,24 +536,26 @@ function addWallRelief(
   const leftX = -width / 2 - 0.07;
   const rightX = width / 2 + 0.07;
 
-  for (const x of [-width / 2 + 0.18, width / 2 - 0.18]) {
-    addBox(group, [postW, height + 0.1, 0.16], [x, yMid, frontZ], mats.accent, false);
-    addBox(group, [postW, height + 0.1, 0.16], [x, yMid, backZ], mats.accent, false);
-  }
-  for (const z of [-depth / 2 + 0.18, depth / 2 - 0.18]) {
-    addBox(group, [0.16, height + 0.1, postW], [leftX, yMid, z], mats.accent, false);
-    addBox(group, [0.16, height + 0.1, postW], [rightX, yMid, z], mats.accent, false);
-  }
+  if (!cottageStoneColor(materialStyle)) {
+    for (const x of [-width / 2 + 0.18, width / 2 - 0.18]) {
+      addBox(group, [postW, height + 0.1, 0.16], [x, yMid, frontZ], mats.accent, false);
+      addBox(group, [postW, height + 0.1, 0.16], [x, yMid, backZ], mats.accent, false);
+    }
+    for (const z of [-depth / 2 + 0.18, depth / 2 - 0.18]) {
+      addBox(group, [0.16, height + 0.1, postW], [leftX, yMid, z], mats.accent, false);
+      addBox(group, [0.16, height + 0.1, postW], [rightX, yMid, z], mats.accent, false);
+    }
 
-  addBox(group, [width + 0.18, 0.16, 0.16], [0, yTop - 0.18, frontZ], mats.trim, false);
-  addBox(group, [width + 0.18, 0.16, 0.16], [0, yTop - 0.18, backZ], mats.trim, false);
-  addBox(group, [0.16, 0.16, depth + 0.18], [leftX, yTop - 0.18, 0], mats.trim, false);
-  addBox(group, [0.16, 0.16, depth + 0.18], [rightX, yTop - 0.18, 0], mats.trim, false);
-  if (height > 3.2) {
-    addBox(group, [width + 0.1, 0.13, 0.13], [0, yBand, frontZ], mats.accent, false);
-    addBox(group, [width + 0.1, 0.13, 0.13], [0, yBand, backZ], mats.accent, false);
-    addBox(group, [0.13, 0.13, depth + 0.1], [leftX, yBand, 0], mats.accent, false);
-    addBox(group, [0.13, 0.13, depth + 0.1], [rightX, yBand, 0], mats.accent, false);
+    addBox(group, [width + 0.18, 0.16, 0.16], [0, yTop - 0.18, frontZ], mats.trim, false);
+    addBox(group, [width + 0.18, 0.16, 0.16], [0, yTop - 0.18, backZ], mats.trim, false);
+    addBox(group, [0.16, 0.16, depth + 0.18], [leftX, yTop - 0.18, 0], mats.trim, false);
+    addBox(group, [0.16, 0.16, depth + 0.18], [rightX, yTop - 0.18, 0], mats.trim, false);
+    if (height > 3.2) {
+      addBox(group, [width + 0.1, 0.13, 0.13], [0, yBand, frontZ], mats.accent, false);
+      addBox(group, [width + 0.1, 0.13, 0.13], [0, yBand, backZ], mats.accent, false);
+      addBox(group, [0.13, 0.13, depth + 0.1], [leftX, yBand, 0], mats.accent, false);
+      addBox(group, [0.13, 0.13, depth + 0.1], [rightX, yBand, 0], mats.accent, false);
+    }
   }
   if (materialStyle === "log-siding" && !rockOnlyBuilding(recipe.id)) {
     addLogSiding(group, width, depth, height, recipe, mats);
@@ -511,6 +564,7 @@ function addWallRelief(
   } else if (shinglePalette(materialStyle) && !rockOnlyBuilding(recipe.id)) {
     addCedarShingleSiding(group, width, depth, height, recipe, mats);
   }
+  if (cottageStoneColor(materialStyle)) return;
   if (recipe.id === "simple-house") {
     if (materialStyle === "log-siding") {
       addSimpleHouseLogTrim(group, width, depth, height, mats);
@@ -1268,16 +1322,18 @@ function addGabledRoof(
   const overhang = 0.95;
   const slope = Math.hypot(width / 2 + overhang, roofHeight);
   const angle = Math.atan2(roofHeight, width / 2 + overhang);
-  const left = new THREE.Mesh(new THREE.BoxGeometry(slope, 0.22, depth + overhang * 2), mats.roof);
+  const roofDepth = depth + overhang * 2;
+  const roofThickness = 0.22;
+  const left = new THREE.Mesh(new THREE.BoxGeometry(slope, roofThickness, roofDepth), mats.roof);
   left.position.set(-(width / 4 + overhang * 0.24), yBase + roofHeight / 2, 0);
   left.rotation.z = angle;
   addMesh(group, left);
-  const right = new THREE.Mesh(new THREE.BoxGeometry(slope, 0.22, depth + overhang * 2), mats.roof);
+  const right = new THREE.Mesh(new THREE.BoxGeometry(slope, roofThickness, roofDepth), mats.roof);
   right.position.set(width / 4 + overhang * 0.24, yBase + roofHeight / 2, 0);
   right.rotation.z = -angle;
   addMesh(group, right);
-  addRoofShingles(group, -(width / 4 + overhang * 0.24), yBase + roofHeight / 2, angle, slope, depth + overhang * 2, -1, mats);
-  addRoofShingles(group, width / 4 + overhang * 0.24, yBase + roofHeight / 2, -angle, slope, depth + overhang * 2, 1, mats);
+  addRoofShingles(group, -(width / 4 + overhang * 0.24), yBase + roofHeight / 2, angle, slope, roofDepth, -1, mats);
+  addRoofShingles(group, width / 4 + overhang * 0.24, yBase + roofHeight / 2, -angle, slope, roofDepth, 1, mats);
   addBox(group, [0.22, 0.18, depth + overhang * 2.12], [0, yBase + roofHeight + 0.02, 0], mats.trim, false);
   const gableEndBeamY = yBase + (recipe.id === "cathedral" ? 0.55 : 0.06);
   addBox(group, [width + overhang * 2, 0.16, 0.18], [0, gableEndBeamY, depth / 2 + overhang], mats.trim, false);
@@ -1295,6 +1351,27 @@ function addGabledRoof(
     gable.geometry.computeVertexNormals();
     addMesh(group, gable);
     addGableEndDetail(group, width, roofHeight, yBase, z, recipe, mats);
+  }
+}
+
+function addSimpleHouseChimney(
+  group: THREE.Group,
+  width: number,
+  depth: number,
+  height: number,
+  recipe: TellusBuildingRecipe,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const roofHeight = recipe.footprintStyle === "towered" || recipe.footprintStyle === "cruciform" ? 2.55 : 2.2;
+  const positions = [width * 0.24];
+  const z = -depth * 0.18;
+  const baseY = 0.28 + height + roofHeight * 0.48;
+  const chimneyHeight = Math.max(1.15, roofHeight * 0.62);
+
+  for (const x of positions) {
+    addBox(group, [0.52, chimneyHeight, 0.46], [x, baseY + chimneyHeight / 2, z], mats.baseWall, false);
+    addBox(group, [0.68, 0.18, 0.62], [x, baseY + chimneyHeight + 0.08, z], mats.baseWall, false);
+    addBox(group, [0.4, 0.08, 0.34], [x, baseY + chimneyHeight + 0.22, z], mats.roofDetail, false);
   }
 }
 
