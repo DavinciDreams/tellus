@@ -1,3 +1,4 @@
+import demigodResearchHandler from "./api/demigod-research";
 import generate3DHandler from "./api/generate-3d";
 import generatedAssetsHandler from "./api/generated-assets";
 import gradioFileHandler from "./api/gradio-file";
@@ -102,6 +103,9 @@ Bun.serve({
     }
     if (url.pathname.startsWith("/api/tellus-state")) {
       return withCors(await tellusStateHandler(request));
+    }
+    if (url.pathname.startsWith("/api/demigod-research")) {
+      return withCors(await demigodResearchHandler(request));
     }
     if (url.pathname.startsWith("/generated-assets/")) {
       return withCors(await generatedAssetsHandler(request));

@@ -14,6 +14,10 @@ import type {
   GeneratedThing,
   GenerationProvider,
 } from "./tellus-types";
+import type {
+  DemigodResearchRequest,
+  DemigodResearchResponse,
+} from "./tellus-demigod-types";
 import { PIXEL3D_PROVIDER } from "./tellus-constants";
 import { extractErrorMessage, readJsonResponse } from "./tellus-utils";
 import { runtimeConfig } from "./tellus-runtime-config";
@@ -387,4 +391,22 @@ export function cancelDirectGeneration(jobId?: string): void {
     method: "DELETE",
     keepalive: true,
   }).catch(() => undefined);
+}
+
+/**
+ * Research a historical/mythological figure into a DemigodProfile via POST /api/demigod-research.
+ * The route fetches sources + synthesizes the profile server-side (Wikipedia + the configured LLM),
+ * and always returns a usable profile (a Wikipedia-derived fallback when no LLM is configured).
+ */
+export async function researchDemigod(
+  request: DemigodResearchRequest,
+  signal?: AbortSignal,
+): Promise<DemigodResearchResponse> {
+  const response = await fetch(tellusApiUrl("/api/demigod-research"), {
+    method: "POST",
+    signal,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return readJsonResponse<DemigodResearchResponse>(response);
 }

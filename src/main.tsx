@@ -106,6 +106,10 @@ import { installSessionFetch } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseWorldTemplateId, templateForWorldId } from "./tellus-world-templates";
+import { researchDemigod } from "./tellus-generation-client";
+import type { DemigodProfile } from "./tellus-demigod-types";
+import { demigodProfileToPersona } from "./tellus-demigod-types";
+import { listPantheon, saveResearchedDemigod } from "./tellus-pantheon";
 import "./styles.css";
 
 // Attach X-Tellus-Session to every Hyades API call (agent endpoints, world meta PATCH, state, pay)
@@ -4754,6 +4758,15 @@ function App(): React.ReactElement {
   const [memoriesEditing, setMemoriesEditing] = useState(false);
   const [memoriesHistoryOpen, setMemoriesHistoryOpen] = useState(false);
   const [memoriesLog, setMemoriesLog] = useState<AgentMemoryEntry[] | null>(null);
+  // Pantheon: research a historical/mythological figure into a DemigodProfile, then ENACT it (write the
+  // rendered persona to /agent/persona) so the agent embodies that demigod. `pantheonList` is the merged
+  // seed + researched registry; `pantheonPreview` is the profile currently shown in the preview card.
+  const [pantheonOpen, setPantheonOpen] = useState(false);
+  const [pantheonQuery, setPantheonQuery] = useState("");
+  const [pantheonResearching, setPantheonResearching] = useState(false);
+  const [pantheonList, setPantheonList] = useState<DemigodProfile[]>(() => listPantheon());
+  const [pantheonPreview, setPantheonPreview] = useState<DemigodProfile | null>(null);
+  const [pantheonWarnings, setPantheonWarnings] = useState<string[]>([]);
   // PiP fallback: when the agent's avatar mesh isn't in the local scene (asleep/remote), the POV
   // viewport shows the latest server-held snapshot instead of a locally rendered view.
   const [agentAvatarPresent, setAgentAvatarPresent] = useState(true);
@@ -4964,6 +4977,55 @@ function App(): React.ReactElement {
       setAgentBusy(false);
     }
   }, [runAgentAction, agentPersonaDraft]);
+
+  // Pantheon — research a figure into a DemigodProfile (server route), persist it to the local
+  // pantheon, and show it in the preview card. The figure's domains/attitudes/edicts come back already
+  // synthesized; Enact (below) renders them to the agent's persona.
+  const onResearchDemigod = useCallback(async () => {
+    const name = pantheonQuery.trim();
+    if (!name || pantheonResearching) return;
+    setPantheonResearching(true);
+    setAgentError(null);
+    setPantheonWarnings([]);
+    try {
+      const { profile, warnings } = await researchDemigod({ name, depth: "comprehensive" });
+      const stored = saveResearchedDemigod(profile);
+      setPantheonList(listPantheon());
+      setPantheonPreview(stored);
+      setPantheonWarnings(warnings ?? []);
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Demigod research failed.");
+    } finally {
+      setPantheonResearching(false);
+    }
+  }, [pantheonQuery, pantheonResearching]);
+
+  // Enact a demigod: render its profile to a persona charter and save it via the SAME path as the
+  // personality editor (POST /agent/persona, replace:true), so the running agent embodies it at once.
+  // Mirrors the draft into the Personality field so the two views stay in sync.
+  const onEnactDemigod = useCallback(
+    async (profile: DemigodProfile, alsoDefault: boolean) => {
+      const persona = demigodProfileToPersona(profile);
+      setAgentPersonaDraft(persona);
+      const status = await runAgentAction("persona", { text: persona, replace: true });
+      if (!status) return;
+      if (alsoDefault) {
+        try {
+          const base = runtimeConfig.worldApiBase || runtimeConfig.apiBase || "";
+          await fetch(`${base}/api/tellus/user/default-persona?userId=${encodeURIComponent(tellusUserId())}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ text: persona }),
+          });
+        } catch {
+          // default-persona is a nicety; the per-world enact already succeeded.
+        }
+      }
+      setMemoriesEditing(false);
+      setMemoriesOpen(true);
+    },
+    [runAgentAction],
+  );
 
   // Edit history of the agent's self-section (its own `remember` writes + your persona saves).
   const loadMemoriesLog = useCallback(async () => {
@@ -6802,6 +6864,171 @@ function App(): React.ReactElement {
                           </span>
                         ))
                       )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            {/* Pantheon: research a historical/mythological figure into a demigod and ENACT it (writes
+                the rendered charter to /agent/persona, like the personality editor). */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <button
+                type="button"
+                onClick={() => setPantheonOpen((open) => !open)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "#dfe7d8",
+                  fontSize: 11,
+                  opacity: 0.85,
+                  textAlign: "left",
+                  padding: 0,
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                {pantheonOpen ? "▾" : "▸"} Pantheon — assign a demigod
+              </button>
+              {pantheonOpen && (
+                <>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <input
+                      value={pantheonQuery}
+                      onChange={(e) => setPantheonQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void onResearchDemigod();
+                      }}
+                      placeholder="Research a figure, e.g. Poseidon, Marie Curie…"
+                      style={{
+                        flex: 1,
+                        background: "rgba(0,0,0,0.4)",
+                        color: "#dfe7d8",
+                        border: "1px solid rgba(255,255,255,0.16)",
+                        borderRadius: 6,
+                        padding: "5px 8px",
+                        fontSize: 12,
+                        fontFamily: "inherit",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={pantheonResearching || !pantheonQuery.trim()}
+                      onClick={() => void onResearchDemigod()}
+                      style={{
+                        ...p2pBtnStyle(true),
+                        flex: "none",
+                        padding: "5px 10px",
+                        opacity: pantheonResearching || !pantheonQuery.trim() ? 0.6 : 1,
+                        cursor: pantheonResearching ? "default" : "pointer",
+                      }}
+                    >
+                      {pantheonResearching ? "Researching…" : "Research"}
+                    </button>
+                  </div>
+                  {/* Registry chips: seeds + anything you've researched. Click to preview. */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {pantheonList.map((demi) => (
+                      <button
+                        key={demi.id}
+                        type="button"
+                        onClick={() => {
+                          setPantheonPreview(demi);
+                          setPantheonWarnings([]);
+                        }}
+                        title={demi.oneLine}
+                        style={{
+                          ...agentChipStyle,
+                          cursor: "pointer",
+                          borderColor:
+                            pantheonPreview?.id === demi.id ? "#6fae46" : "rgba(255,255,255,0.18)",
+                        }}
+                      >
+                        {demi.name}
+                        {demi.epithet ? ` · ${demi.epithet}` : ""}
+                      </button>
+                    ))}
+                  </div>
+                  {pantheonWarnings.length > 0 && (
+                    <div style={{ fontSize: 10, color: "#e7c98a", opacity: 0.85 }}>
+                      {pantheonWarnings.join(" ")}
+                    </div>
+                  )}
+                  {pantheonPreview && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                        background: "rgba(0,0,0,0.3)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 6,
+                        padding: "8px 10px",
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#eef4e8" }}>
+                        {pantheonPreview.name}
+                        {pantheonPreview.epithet ? (
+                          <span style={{ fontWeight: 500, opacity: 0.8 }}> — {pantheonPreview.epithet}</span>
+                        ) : null}
+                      </div>
+                      {pantheonPreview.era && (
+                        <div style={{ fontSize: 10, opacity: 0.6 }}>{pantheonPreview.era}</div>
+                      )}
+                      {pantheonPreview.oneLine && (
+                        <div style={{ fontSize: 11, opacity: 0.85 }}>{pantheonPreview.oneLine}</div>
+                      )}
+                      {pantheonPreview.domains.length > 0 && (
+                        <div style={{ fontSize: 11 }}>
+                          <span style={{ opacity: 0.6 }}>Domains: </span>
+                          {pantheonPreview.domains.map((d) => d.name).join(", ")}
+                        </div>
+                      )}
+                      {pantheonPreview.attitudes.length > 0 && (
+                        <div style={{ fontSize: 11, opacity: 0.85 }}>
+                          <span style={{ opacity: 0.6 }}>Attitudes: </span>
+                          {pantheonPreview.attitudes.slice(0, 4).join("; ")}
+                        </div>
+                      )}
+                      {pantheonPreview.sources.length > 0 && (
+                        <div style={{ fontSize: 10, opacity: 0.55 }}>
+                          {pantheonPreview.sources.map((s, i) => (
+                            <React.Fragment key={s.url}>
+                              {i > 0 ? " · " : ""}
+                              <a
+                                href={s.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ color: "#9fc3e0" }}
+                              >
+                                {s.title}
+                              </a>
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+                        <button
+                          type="button"
+                          disabled={agentBusy}
+                          onClick={() => void onEnactDemigod(pantheonPreview, false)}
+                          style={{
+                            ...p2pBtnStyle(true),
+                            opacity: agentBusy ? 0.6 : 1,
+                            cursor: agentBusy ? "default" : "pointer",
+                          }}
+                        >
+                          {agentBusy ? "…" : "Enact in this world"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={agentBusy}
+                          title="Enact here AND save as your default persona — your agent in any new world starts as this demigod."
+                          onClick={() => void onEnactDemigod(pantheonPreview, true)}
+                          style={{ ...p2pBtnStyle(false), opacity: agentBusy ? 0.6 : 1 }}
+                        >
+                          Enact + default
+                        </button>
+                      </div>
                     </div>
                   )}
                 </>
