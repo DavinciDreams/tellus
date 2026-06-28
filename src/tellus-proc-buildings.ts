@@ -562,6 +562,10 @@ function addDoor(
   recipe: TellusBuildingRecipe,
   mats: ReturnType<typeof createMaterials>,
 ) {
+  if (recipe.id === "cathedral") {
+    addCathedralEntrance(group, width, depth, mats);
+    return;
+  }
   const arched = recipe.entranceArchChance >= 0.5;
   addBox(group, [1.15, 1.8, 0.12], [0, 1.18, depth / 2 + 0.065], mats.accent, false);
   addBox(group, [1.35, 0.16, 0.2], [0, 2.14, depth / 2 + 0.1], mats.trim, false);
@@ -573,6 +577,53 @@ function addDoor(
   }
   addBox(group, [0.12, 1.95, 0.22], [-0.72, 1.23, depth / 2 + 0.1], mats.trim, false);
   addBox(group, [0.12, 1.95, 0.22], [0.72, 1.23, depth / 2 + 0.1], mats.trim, false);
+}
+
+function addCathedralEntrance(
+  group: THREE.Group,
+  width: number,
+  depth: number,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const frontZ = depth / 2 + 0.11;
+  const stepZ = depth / 2 + 0.58;
+  for (let i = 0; i < 4; i++) {
+    addBox(group, [Math.min(width * 0.48, 4.8) - i * 0.28, 0.16, 0.56 + i * 0.18], [0, 0.08 + i * 0.14, stepZ + i * 0.12], mats.baseWall, false);
+  }
+  addBox(group, [2.15, 2.75, 0.18], [0, 1.67, frontZ], mats.accent, false);
+  addBox(group, [2.45, 0.18, 0.24], [0, 3.08, frontZ + 0.02], mats.trim, false);
+  addBox(group, [0.16, 2.92, 0.26], [-1.22, 1.68, frontZ + 0.02], mats.trim, false);
+  addBox(group, [0.16, 2.92, 0.26], [1.22, 1.68, frontZ + 0.02], mats.trim, false);
+  const arch = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.085, 8, 28, Math.PI), mats.trim);
+  arch.rotation.z = Math.PI;
+  arch.position.set(0, 3.02, frontZ + 0.04);
+  addMesh(group, arch, false);
+  addRosetteWindow(group, 0, 4.15, frontZ + 0.05, mats);
+}
+
+function addRosetteWindow(
+  group: THREE.Group,
+  x: number,
+  y: number,
+  z: number,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const radius = 0.62;
+  const glass = new THREE.Mesh(new THREE.CircleGeometry(radius, 32), mats.glass);
+  glass.position.set(x, y, z);
+  addMesh(group, glass, false);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.055, 8, 32), mats.trim);
+  ring.position.set(x, y, z + 0.02);
+  addMesh(group, ring, false);
+  const hub = new THREE.Mesh(new THREE.CircleGeometry(0.11, 18), mats.trim);
+  hub.position.set(x, y, z + 0.03);
+  addMesh(group, hub, false);
+  for (let i = 0; i < 12; i++) {
+    const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.035, radius * 1.7, 0.055), mats.trim);
+    spoke.position.set(x, y, z + 0.035);
+    spoke.rotation.z = (i / 12) * Math.PI;
+    addMesh(group, spoke, false);
+  }
 }
 
 function addWindows(
@@ -627,6 +678,7 @@ function addCathedralWindows(
   for (let row = 0; row < rows; row++) {
     const y = yStart + row * yStep;
     for (const x of frontXs) {
+      if (row === 0 && Math.abs(x) < 0.2) continue;
       addNineLiteWindow(group, x, y, depth / 2 + 0.07, 0, mats, mats.trim, 3, 4, 1.0, 2.1);
       addNineLiteWindow(group, x, y, -depth / 2 - 0.07, Math.PI, mats, mats.trim, 3, 4, 1.0, 2.1);
     }
