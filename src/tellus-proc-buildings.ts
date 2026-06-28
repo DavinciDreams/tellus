@@ -953,8 +953,8 @@ function addPyramidRoofCourses(
   const levels = Math.max(6, Math.floor(roofHeight / 0.26));
   const detailY = 0.08;
   const detailW = 0.09;
-  for (let i = 1; i <= levels; i++) {
-    const t = i / (levels + 1);
+  for (let i = 0; i <= levels; i++) {
+    const t = (i + 0.18) / (levels + 1.18);
     const y = yBase + t * roofHeight + 0.1;
     const sx = Math.max(0.55, width * 0.94 * (1 - t));
     const sz = Math.max(0.55, depth * 0.94 * (1 - t));
