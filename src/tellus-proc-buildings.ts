@@ -157,6 +157,8 @@ export const buildProceduralBuildingModel = (
   addFoundation(group, width, depth, recipe, mats);
   if (recipe.id === "simple-house") {
     addSimpleHouseBody(group, width, depth, height, mats);
+  } else if (floors >= 3 && !rockOnlyBuilding(recipe.id)) {
+    addStoneFirstFloorBody(group, width, depth, height, floorHeight, mats);
   } else {
     addBuildingBlock(group, 0, width, depth, height, mats.wall);
   }
@@ -267,27 +269,22 @@ function createMaterials(
     : new THREE.Color(palette.foundation).lerp(new THREE.Color(0xffffff), 0.32);
   const baseWall = make(baseWallColor.getHex(), 0.84);
   const foundation = make(medievalStyle ? MEDIEVAL_TIMBER_COLOR : palette.foundation, 0.82);
-  applySharedAlbedo(baseWall, SHARED_STONE_ALBEDO_URL, [1.65, 0.72]);
+  applySharedAlbedo(baseWall, SHARED_STONE_ALBEDO_URL, simpleHouse ? [1.65, 0.72] : [2.2, 1.6]);
   if (stone && !medievalStyle) {
     applySharedAlbedo(wall, SHARED_STONE_ALBEDO_URL, [2.2, 2.2]);
   }
   if (stone && rockOnly) {
     applySharedAlbedo(foundation, SHARED_STONE_ALBEDO_URL, [2.2, 2.2]);
   }
-  const slateRoof = medievalStyle;
-  const roofTint = slateRoof
-    ? new THREE.Color(SLATE_ROOF_COLOR).lerp(new THREE.Color(palette.foundation), simpleHouse ? 0.18 : 0.1)
-    : new THREE.Color(palette.roof).lerp(new THREE.Color(0xffffff), 0.38);
-  const roof = make(roofTint.getHex(), slateRoof ? 0.9 : 0.82);
-  const roofDetailColor = slateRoof
-    ? roofTint.clone().lerp(new THREE.Color(0x252b31), 0.55)
-    : new THREE.Color(palette.roof).lerp(new THREE.Color(0x1d1715), 0.28);
+  const roofTint = new THREE.Color(SLATE_ROOF_COLOR).lerp(new THREE.Color(palette.foundation), simpleHouse ? 0.18 : 0.08);
+  const roof = make(roofTint.getHex(), 0.9);
+  const roofDetailColor = roofTint.clone().lerp(new THREE.Color(0x252b31), 0.55);
   return {
     wall,
     baseWall,
     accent: make(accentColor),
     roof,
-    roofDetail: make(roofDetailColor.getHex(), slateRoof ? 0.92 : 0.84),
+    roofDetail: make(roofDetailColor.getHex(), 0.92),
     trim: make(medievalStyle ? MEDIEVAL_TIMBER_COLOR : rockOnly ? palette.accent : palette.trim, 0.58),
     foundation,
     glass: new THREE.MeshStandardMaterial({
@@ -348,6 +345,22 @@ function addSimpleHouseBody(
   mats: ReturnType<typeof createMaterials>,
 ) {
   const lowerHeight = Math.min(SIMPLE_HOUSE_STONE_SKIRT_HEIGHT, height * 0.36);
+  addBox(group, [width, lowerHeight, depth], [0, 0.28 + lowerHeight / 2, 0], mats.baseWall);
+  const upperHeight = Math.max(0, height - lowerHeight);
+  if (upperHeight > 0.05) {
+    addBox(group, [width, upperHeight, depth], [0, 0.28 + lowerHeight + upperHeight / 2, 0], mats.wall);
+  }
+}
+
+function addStoneFirstFloorBody(
+  group: THREE.Group,
+  width: number,
+  depth: number,
+  height: number,
+  floorHeight: number,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const lowerHeight = Math.min(floorHeight, height);
   addBox(group, [width, lowerHeight, depth], [0, 0.28 + lowerHeight / 2, 0], mats.baseWall);
   const upperHeight = Math.max(0, height - lowerHeight);
   if (upperHeight > 0.05) {
