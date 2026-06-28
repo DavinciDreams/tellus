@@ -277,7 +277,7 @@ function createMaterials(
   if (stone && rockOnly) {
     applySharedAlbedo(foundation, SHARED_STONE_ALBEDO_URL, [2.2, 2.2]);
   }
-  const roofTint = new THREE.Color(SLATE_ROOF_COLOR).lerp(new THREE.Color(palette.foundation), simpleHouse ? 0.18 : 0.08);
+  const roofTint = new THREE.Color(SLATE_ROOF_COLOR);
   const roof = make(roofTint.getHex(), 0.9);
   const roofDetailColor = roofTint.clone().lerp(new THREE.Color(0x252b31), 0.55);
   return {
@@ -719,7 +719,7 @@ function addRoof(
 ) {
   const roofHeight = recipe.footprintStyle === "towered" || recipe.footprintStyle === "cruciform" ? 2.55 : 2.2;
   if (recipe.footprintStyle !== "towered" && recipe.id !== "keep" && recipe.id !== "castle" && recipe.id !== "fortress") {
-    addGabledRoof(group, width, depth, height, roofHeight, mats);
+    addGabledRoof(group, width, depth, height, roofHeight, recipe, mats);
     if (rng() > 0.45) {
       addBox(group, [0.45, 0.9, 0.45], [width * 0.24, 0.28 + height + 0.55, depth * -0.14], mats.accent);
       addBox(group, [0.62, 0.18, 0.62], [width * 0.24, 0.28 + height + 1.08, depth * -0.14], mats.foundation);
@@ -746,6 +746,7 @@ function addGabledRoof(
   depth: number,
   height: number,
   roofHeight: number,
+  recipe: TellusBuildingRecipe,
   mats: ReturnType<typeof createMaterials>,
 ) {
   const yBase = 0.28 + height;
@@ -777,9 +778,78 @@ function addGabledRoof(
     gable.geometry.setIndex([0, 1, 2]);
     gable.geometry.computeVertexNormals();
     addMesh(group, gable);
-    addBox(group, [0.14, roofHeight * 0.9, 0.12], [-width * 0.25, yBase + roofHeight * 0.4, z + Math.sign(z) * 0.03], mats.accent, false);
-    addBox(group, [0.14, roofHeight * 0.9, 0.12], [width * 0.25, yBase + roofHeight * 0.4, z + Math.sign(z) * 0.03], mats.accent, false);
+    addGableEndDetail(group, width, roofHeight, yBase, z, recipe, mats);
   }
+}
+
+function fancyGableBuilding(recipe: TellusBuildingRecipe, width: number, roofHeight: number): boolean {
+  return (
+    width >= 10 ||
+    roofHeight >= 2.5 ||
+    recipe.id === "inn" ||
+    recipe.id === "mansion" ||
+    recipe.id === "manor" ||
+    recipe.id === "church" ||
+    recipe.id === "cathedral" ||
+    recipe.id === "guild-hall" ||
+    recipe.id === "town-hall"
+  );
+}
+
+function addGableEndDetail(
+  group: THREE.Group,
+  width: number,
+  roofHeight: number,
+  yBase: number,
+  z: number,
+  recipe: TellusBuildingRecipe,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const detailZ = z + Math.sign(z) * 0.04;
+  if (fancyGableBuilding(recipe, width, roofHeight)) {
+    const supportHeight = roofHeight * 0.86;
+    for (const x of [-width * 0.32, width * 0.32]) {
+      addBox(group, [0.14, supportHeight, 0.12], [x, yBase + supportHeight / 2, detailZ], mats.accent, false);
+    }
+    addHalfCircleGableWindow(group, 0, yBase + roofHeight * 0.48, detailZ, mats);
+    return;
+  }
+
+  const supportCount = width >= 8 ? 5 : width >= 6 ? 4 : 3;
+  const usableWidth = width * 0.64;
+  for (let i = 0; i < supportCount; i++) {
+    const t = i / (supportCount - 1);
+    const x = (t - 0.5) * usableWidth;
+    const localRoof = roofHeight * (1 - Math.abs(x) / (width / 2));
+    const supportHeight = Math.max(0.55, localRoof * 0.88);
+    addBox(group, [0.14, supportHeight, 0.12], [x, yBase + supportHeight / 2, detailZ], mats.accent, false);
+  }
+}
+
+function addHalfCircleGableWindow(
+  group: THREE.Group,
+  x: number,
+  y: number,
+  z: number,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const shape = new THREE.Shape();
+  const radius = 0.36;
+  const baseY = -0.18;
+  shape.moveTo(-radius, baseY);
+  shape.lineTo(-radius, 0);
+  shape.absarc(0, 0, radius, Math.PI, 0, true);
+  shape.lineTo(radius, baseY);
+  shape.lineTo(-radius, baseY);
+  const glass = new THREE.Mesh(new THREE.ShapeGeometry(shape), mats.glass);
+  glass.position.set(x, y, z);
+  addMesh(group, glass, false);
+  addBox(group, [radius * 2 + 0.16, 0.08, 0.08], [x, y + baseY - 0.02, z + Math.sign(z) * 0.015], mats.trim, false);
+  addBox(group, [0.08, 0.36, 0.08], [x - radius - 0.04, y + baseY + 0.16, z + Math.sign(z) * 0.015], mats.trim, false);
+  addBox(group, [0.08, 0.36, 0.08], [x + radius + 0.04, y + baseY + 0.16, z + Math.sign(z) * 0.015], mats.trim, false);
+  const arch = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.045, 8, 24, Math.PI), mats.trim);
+  arch.position.set(x, y, z + Math.sign(z) * 0.02);
+  addMesh(group, arch, false);
 }
 
 function addRoofShingles(
