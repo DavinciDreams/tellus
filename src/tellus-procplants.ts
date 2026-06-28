@@ -131,6 +131,97 @@ export interface ProcPlantStats {
   triangles: number;
 }
 
+export type ProcPlantBiomeId =
+  | "tropical-rain-forest"
+  | "temperate-rain-forest"
+  | "desert"
+  | "tundra"
+  | "taiga"
+  | "grassland"
+  | "savanna"
+  | "estuary"
+  | "coastal"
+  | "arctic-alpine";
+
+export type ProcPlantSubstrateKind =
+  | "sand"
+  | "clay"
+  | "silt"
+  | "loam"
+  | "limestone"
+  | "shale"
+  | "granite"
+  | "peat"
+  | "volcanic"
+  | "ice";
+
+export interface ProcPlantEcologySample {
+  biome?: ProcPlantBiomeId;
+  substrate: ProcPlantSubstrateKind;
+  elevation: number;
+  slope: number;
+  warmth: number;
+  moisture: number;
+  seasonality: number;
+  salinity: number;
+  wind: number;
+  light: number;
+}
+
+export interface ProcPlantEcologyProfile {
+  presetId: string;
+  dominance: number;
+  biomeAffinity: Partial<Record<ProcPlantBiomeId, number>>;
+  substrateAffinity: Partial<Record<ProcPlantSubstrateKind, number>>;
+  warmth: [number, number, number];
+  moisture: [number, number, number];
+  elevation: [number, number, number];
+  seasonality?: [number, number, number];
+  salinity?: [number, number, number];
+  wind?: [number, number, number];
+}
+
+export interface ProcPlantCommunityEntry {
+  presetId: string;
+  score: number;
+  genome: ProcPlantGenome;
+}
+
+export interface ProcPlantLodPackage {
+  level: 0 | 1 | 2 | 3;
+  label: "full" | "clustered" | "billboard-cross" | "impostor";
+  distance: number;
+  triangleBudget: number;
+  organBudget: number;
+}
+
+export interface ProcPlantRuntimePackage {
+  version: 1;
+  seed: number;
+  genomeId: string;
+  architecture: {
+    backend: "procplant-graph" | "weber-penn";
+    species?: string;
+    habit: ProcPlantHabit;
+  };
+  stats: ProcPlantStats;
+  wind: {
+    trunkSway: number;
+    branchSway: number;
+    leafFlutter: number;
+  };
+  lods: ProcPlantLodPackage[];
+  ecology?: ProcPlantEcologyProfile;
+}
+
+export interface ProcPlantForceField {
+  type: "direction" | "magnet" | "curl" | "avoid" | "surfaceFollow" | "windShape";
+  position?: THREE.Vector3;
+  direction?: THREE.Vector3;
+  radius: number;
+  strength: number;
+}
+
 export type ProcPlantInstanceKind =
   | "leaf"
   | "grassBlade"
@@ -3718,6 +3809,253 @@ export const buildProcPlantObject = (
   group.userData.procPlant = { genomeId: genome.id, seed };
   group.add(mesh);
   return group;
+};
+
+export const procPlantEcologyProfiles: Record<string, ProcPlantEcologyProfile> = {
+  furGrass: {
+    presetId: "furGrass",
+    dominance: 0.8,
+    biomeAffinity: { grassland: 1, savanna: 0.9, coastal: 0.65, tundra: 0.35, "arctic-alpine": 0.3 },
+    substrateAffinity: { loam: 1, silt: 0.8, sand: 0.65, clay: 0.6 },
+    warmth: [0.15, 0.62, 0.95],
+    moisture: [0.18, 0.55, 0.9],
+    elevation: [0, 0.28, 0.82],
+    wind: [0, 0.45, 1],
+  },
+  phiFern: {
+    presetId: "phiFern",
+    dominance: 0.42,
+    biomeAffinity: { "temperate-rain-forest": 1, "tropical-rain-forest": 0.86, estuary: 0.46, taiga: 0.35 },
+    substrateAffinity: { loam: 0.85, peat: 1, shale: 0.45, granite: 0.35 },
+    warmth: [0.28, 0.58, 0.92],
+    moisture: [0.55, 0.86, 1],
+    elevation: [0, 0.24, 0.7],
+  },
+  reedSedge: {
+    presetId: "reedSedge",
+    dominance: 0.58,
+    biomeAffinity: { estuary: 1, coastal: 0.72, grassland: 0.36, tundra: 0.32 },
+    substrateAffinity: { clay: 1, silt: 0.94, peat: 0.86, sand: 0.36 },
+    warmth: [0.12, 0.54, 0.92],
+    moisture: [0.62, 0.92, 1],
+    elevation: [0, 0.08, 0.35],
+    salinity: [0, 0.28, 0.78],
+  },
+  foldedPalm: {
+    presetId: "foldedPalm",
+    dominance: 0.68,
+    biomeAffinity: { "tropical-rain-forest": 1, coastal: 0.82, savanna: 0.46 },
+    substrateAffinity: { sand: 0.85, loam: 0.78, silt: 0.62, clay: 0.42 },
+    warmth: [0.62, 0.88, 1],
+    moisture: [0.34, 0.72, 1],
+    elevation: [0, 0.1, 0.42],
+    salinity: [0, 0.2, 0.64],
+  },
+  oakCanopy: {
+    presetId: "oakCanopy",
+    dominance: 0.92,
+    biomeAffinity: { grassland: 0.78, "temperate-rain-forest": 0.72, coastal: 0.34 },
+    substrateAffinity: { loam: 1, clay: 0.72, limestone: 0.84, shale: 0.48 },
+    warmth: [0.32, 0.58, 0.82],
+    moisture: [0.3, 0.55, 0.82],
+    elevation: [0, 0.22, 0.64],
+    seasonality: [0.2, 0.55, 0.95],
+  },
+  birchGrove: {
+    presetId: "birchGrove",
+    dominance: 0.74,
+    biomeAffinity: { taiga: 0.74, "temperate-rain-forest": 0.64, grassland: 0.42, "arctic-alpine": 0.32 },
+    substrateAffinity: { loam: 0.74, shale: 0.68, granite: 0.56, peat: 0.5, sand: 0.36 },
+    warmth: [0.12, 0.42, 0.72],
+    moisture: [0.28, 0.58, 0.9],
+    elevation: [0, 0.34, 0.82],
+    seasonality: [0.25, 0.72, 1],
+  },
+  acaciaUmbrella: {
+    presetId: "acaciaUmbrella",
+    dominance: 0.78,
+    biomeAffinity: { savanna: 1, desert: 0.38, grassland: 0.34 },
+    substrateAffinity: { sand: 0.72, clay: 0.62, loam: 0.52, limestone: 0.42 },
+    warmth: [0.56, 0.82, 1],
+    moisture: [0.12, 0.32, 0.62],
+    elevation: [0, 0.22, 0.58],
+    seasonality: [0.42, 0.82, 1],
+  },
+  mangroveRoots: {
+    presetId: "mangroveRoots",
+    dominance: 0.76,
+    biomeAffinity: { estuary: 1, coastal: 0.76, "tropical-rain-forest": 0.42 },
+    substrateAffinity: { clay: 0.92, silt: 1, peat: 0.74, sand: 0.46 },
+    warmth: [0.58, 0.82, 1],
+    moisture: [0.68, 0.94, 1],
+    elevation: [0, 0.04, 0.22],
+    salinity: [0.18, 0.52, 0.92],
+  },
+  blueSpruce: {
+    presetId: "blueSpruce",
+    dominance: 0.86,
+    biomeAffinity: { taiga: 1, "arctic-alpine": 0.76, "temperate-rain-forest": 0.48 },
+    substrateAffinity: { granite: 0.86, shale: 0.74, loam: 0.5, peat: 0.42 },
+    warmth: [0, 0.25, 0.58],
+    moisture: [0.28, 0.56, 0.86],
+    elevation: [0.12, 0.58, 1],
+    seasonality: [0.35, 0.72, 1],
+  },
+  alpineFir: {
+    presetId: "alpineFir",
+    dominance: 0.94,
+    biomeAffinity: { taiga: 1, "arctic-alpine": 0.92, "temperate-rain-forest": 0.34 },
+    substrateAffinity: { granite: 0.9, shale: 0.82, peat: 0.46, loam: 0.42 },
+    warmth: [0, 0.18, 0.5],
+    moisture: [0.3, 0.62, 0.94],
+    elevation: [0.22, 0.68, 1],
+    seasonality: [0.38, 0.78, 1],
+  },
+  redwoodSpire: {
+    presetId: "redwoodSpire",
+    dominance: 0.72,
+    biomeAffinity: { "temperate-rain-forest": 1, taiga: 0.42, coastal: 0.34 },
+    substrateAffinity: { loam: 0.8, shale: 0.66, granite: 0.5, peat: 0.44 },
+    warmth: [0.28, 0.52, 0.76],
+    moisture: [0.58, 0.86, 1],
+    elevation: [0, 0.34, 0.78],
+  },
+  desertRosette: {
+    presetId: "desertRosette",
+    dominance: 0.48,
+    biomeAffinity: { desert: 1, savanna: 0.38, coastal: 0.22 },
+    substrateAffinity: { sand: 1, limestone: 0.7, volcanic: 0.62, clay: 0.28 },
+    warmth: [0.45, 0.82, 1],
+    moisture: [0, 0.12, 0.36],
+    elevation: [0, 0.28, 0.8],
+  },
+};
+
+const rangeScore = (value: number, [min, ideal, max]: [number, number, number]) => {
+  if (value <= min || value >= max) return 0;
+  if (value === ideal) return 1;
+  return value < ideal
+    ? THREE.MathUtils.clamp((value - min) / Math.max(0.0001, ideal - min), 0, 1)
+    : THREE.MathUtils.clamp((max - value) / Math.max(0.0001, max - ideal), 0, 1);
+};
+
+export const scoreProcPlantForEcology = (
+  profile: ProcPlantEcologyProfile,
+  sample: ProcPlantEcologySample,
+): number => {
+  const biomeScore = sample.biome ? profile.biomeAffinity[sample.biome] ?? 0.12 : 0.55;
+  const substrateScore = profile.substrateAffinity[sample.substrate] ?? 0.18;
+  const climate =
+    rangeScore(sample.warmth, profile.warmth) *
+    rangeScore(sample.moisture, profile.moisture) *
+    rangeScore(sample.elevation, profile.elevation);
+  const season = profile.seasonality ? rangeScore(sample.seasonality, profile.seasonality) : 0.82;
+  const salinity = profile.salinity ? rangeScore(sample.salinity, profile.salinity) : 1 - sample.salinity * 0.45;
+  const wind = profile.wind ? rangeScore(sample.wind, profile.wind) : 1 - sample.wind * 0.22;
+  const light = THREE.MathUtils.lerp(0.45, 1.15, sample.light);
+  return Math.max(0, profile.dominance * biomeScore * substrateScore * climate * season * salinity * wind * light);
+};
+
+export const resolveProcPlantCommunity = (
+  sample: ProcPlantEcologySample,
+  limit = 6,
+): ProcPlantCommunityEntry[] =>
+  Object.values(procPlantEcologyProfiles)
+    .map((profile) => ({
+      presetId: profile.presetId,
+      score: scoreProcPlantForEcology(profile, sample),
+      genome: procPlantPresets[profile.presetId],
+    }))
+    .filter((entry): entry is ProcPlantCommunityEntry => Boolean(entry.genome) && entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+export const applyProcPlantForceFields = (
+  genome: ProcPlantGenome,
+  fields: ProcPlantForceField[],
+): ProcPlantGenome => {
+  if (fields.length === 0) return genome;
+  const realism = treeRealismTraits(genome);
+  for (const field of fields) {
+    const strength = THREE.MathUtils.clamp(field.strength, -1, 1);
+    if (field.type === "windShape" || field.type === "direction") {
+      realism.trunkBend = THREE.MathUtils.clamp(realism.trunkBend + Math.abs(strength) * 0.18, 0, 1);
+      realism.windFlex = THREE.MathUtils.clamp(realism.windFlex + Math.abs(strength) * 0.22, 0, 1);
+    } else if (field.type === "magnet") {
+      realism.crownSpread = THREE.MathUtils.clamp(realism.crownSpread + strength * 0.18, 0, 1);
+      realism.crownTaper = THREE.MathUtils.clamp(realism.crownTaper - strength * 0.12, 0, 1);
+    } else if (field.type === "avoid") {
+      realism.crownSpread = THREE.MathUtils.clamp(realism.crownSpread - Math.abs(strength) * 0.16, 0, 1);
+      realism.branchGnarl = THREE.MathUtils.clamp(realism.branchGnarl + Math.abs(strength) * 0.18, 0, 1);
+    } else if (field.type === "curl") {
+      realism.branchGnarl = THREE.MathUtils.clamp(realism.branchGnarl + Math.abs(strength) * 0.28, 0, 1);
+    }
+  }
+  return { ...genome, treeRealism: realism };
+};
+
+export const estimateProcPlantLods = (
+  stats: ProcPlantStats,
+  genome: ProcPlantGenome,
+): ProcPlantLodPackage[] => {
+  const treeScale = genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm" ? 1.5 : 0.75;
+  return [
+    {
+      level: 0,
+      label: "full",
+      distance: 0,
+      triangleBudget: Math.ceil(stats.triangles),
+      organBudget: stats.leaves + stats.flowers,
+    },
+    {
+      level: 1,
+      label: "clustered",
+      distance: 18 * treeScale,
+      triangleBudget: Math.ceil(stats.triangles * 0.48),
+      organBudget: Math.ceil((stats.leaves + stats.flowers) * 0.5),
+    },
+    {
+      level: 2,
+      label: "billboard-cross",
+      distance: 42 * treeScale,
+      triangleBudget: 32,
+      organBudget: 4,
+    },
+    {
+      level: 3,
+      label: "impostor",
+      distance: 86 * treeScale,
+      triangleBudget: 2,
+      organBudget: 1,
+    },
+  ];
+};
+
+export const buildProcPlantRuntimePackage = (
+  genome: ProcPlantGenome,
+  seed = 1,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantRuntimePackage => {
+  const built = buildProcPlantTemplate(genome, seed, env);
+  const realism = treeRealismTraits(genome);
+  return {
+    version: 1,
+    seed,
+    genomeId: genome.id,
+    architecture: {
+      backend: genome.weberPenn ? "weber-penn" : "procplant-graph",
+      species: genome.weberPenn?.species,
+      habit: genome.habit,
+    },
+    stats: built.stats,
+    wind: {
+      trunkSway: realism.windFlex * 0.24,
+      branchSway: realism.windFlex * 0.62,
+      leafFlutter: THREE.MathUtils.clamp(0.55 + realism.windFlex * 0.55, 0, 1),
+    },
+    lods: estimateProcPlantLods(built.stats, genome),
+    ecology: procPlantEcologyProfiles[genome.id],
+  };
 };
 
 export const procPlantPresetIds = Object.keys(procPlantPresets);

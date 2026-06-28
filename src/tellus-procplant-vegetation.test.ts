@@ -3,7 +3,9 @@ import * as THREE from "three";
 import { makeProcPlantModelUrl, parseProceduralModelUrl } from "./tellus-procedural-assets";
 import {
   buildProcPlantTemplate,
+  buildProcPlantRuntimePackage,
   procPlantPresets,
+  resolveProcPlantCommunity,
   type ProcPlantTemplate,
 } from "./tellus-procplants";
 import {
@@ -128,6 +130,48 @@ describe("procplant vegetation", () => {
     expect(templateBounds(broad).width).toBeGreaterThan(templateBounds(compact).width);
     expect(templateBounds(broad).depth).toBeGreaterThan(templateBounds(compact).depth);
     expect(broad.idx.length).toBe(compact.idx.length);
+  });
+
+  it("scores ecological communities for biome and substrate suitability", () => {
+    const taiga = resolveProcPlantCommunity({
+      biome: "taiga",
+      substrate: "granite",
+      elevation: 0.62,
+      slope: 0.22,
+      warmth: 0.2,
+      moisture: 0.62,
+      seasonality: 0.74,
+      salinity: 0,
+      wind: 0.28,
+      light: 0.72,
+    }, 4);
+    const estuary = resolveProcPlantCommunity({
+      biome: "estuary",
+      substrate: "silt",
+      elevation: 0.04,
+      slope: 0.04,
+      warmth: 0.74,
+      moisture: 0.92,
+      seasonality: 0.28,
+      salinity: 0.48,
+      wind: 0.36,
+      light: 0.76,
+    }, 4);
+
+    expect(taiga.map((entry) => entry.presetId)).toContain("alpineFir");
+    expect(estuary.map((entry) => entry.presetId)).toContain("mangroveRoots");
+    expect(taiga[0]?.score).toBeGreaterThan(0);
+    expect(estuary[0]?.score).toBeGreaterThan(0);
+  });
+
+  it("builds SpeedTree-like runtime packages with wind and LOD contracts", () => {
+    const runtime = buildProcPlantRuntimePackage(procPlantPresets.alpineFir, 123);
+
+    expect(runtime.architecture.backend).toBe("weber-penn");
+    expect(runtime.architecture.species).toBe("balsamFir");
+    expect(runtime.lods.map((lod) => lod.label)).toEqual(["full", "clustered", "billboard-cross", "impostor"]);
+    expect(runtime.wind.leafFlutter).toBeGreaterThan(runtime.wind.trunkSway);
+    expect(runtime.stats.triangles).toBeGreaterThan(0);
   });
 
   it("exposes procplant presets as placeable procedural model urls", () => {
