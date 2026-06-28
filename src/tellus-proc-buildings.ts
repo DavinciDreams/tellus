@@ -950,17 +950,37 @@ function addPyramidRoofCourses(
   mats: ReturnType<typeof createMaterials>,
 ) {
   const yBase = 0.28 + height;
-  const levels = Math.max(4, Math.floor(roofHeight / 0.34));
+  const levels = Math.max(6, Math.floor(roofHeight / 0.26));
+  const detailY = 0.08;
+  const detailW = 0.09;
   for (let i = 1; i <= levels; i++) {
     const t = i / (levels + 1);
-    const y = yBase + t * roofHeight;
-    const sx = Math.max(0.4, width * 0.72 * (1 - t));
-    const sz = Math.max(0.4, depth * 0.72 * (1 - t));
-    addBox(group, [sx, 0.045, 0.055], [0, y, sz / 2], mats.roofDetail, false);
-    addBox(group, [sx, 0.045, 0.055], [0, y, -sz / 2], mats.roofDetail, false);
-    addBox(group, [0.055, 0.045, sz], [sx / 2, y, 0], mats.roofDetail, false);
-    addBox(group, [0.055, 0.045, sz], [-sx / 2, y, 0], mats.roofDetail, false);
+    const y = yBase + t * roofHeight + 0.1;
+    const sx = Math.max(0.55, width * 0.94 * (1 - t));
+    const sz = Math.max(0.55, depth * 0.94 * (1 - t));
+    addBox(group, [sx, detailY, detailW], [0, y, sz / 2], mats.roofDetail, false);
+    addBox(group, [sx, detailY, detailW], [0, y, -sz / 2], mats.roofDetail, false);
+    addBox(group, [detailW, detailY, sz], [sx / 2, y, 0], mats.roofDetail, false);
+    addBox(group, [detailW, detailY, sz], [-sx / 2, y, 0], mats.roofDetail, false);
   }
+  addPyramidRoofSeam(group, width, depth, yBase, roofHeight, 1, mats);
+  addPyramidRoofSeam(group, width, depth, yBase, roofHeight, -1, mats);
+}
+
+function addPyramidRoofSeam(
+  group: THREE.Group,
+  width: number,
+  depth: number,
+  yBase: number,
+  roofHeight: number,
+  direction: 1 | -1,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const length = Math.hypot(width * 0.47, depth * 0.47);
+  const seam = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, length), mats.roofDetail);
+  seam.position.set(0, yBase + roofHeight * 0.48 + 0.14, 0);
+  seam.rotation.y = direction * Math.atan2(width, depth);
+  addMesh(group, seam, false);
 }
 
 function addTowerCapCourses(
