@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { makeProcPlantModelUrl, parseProceduralModelUrl } from "./tellus-procedural-assets";
 import {
+  buildProcPlantTemplate,
+  procPlantPresets,
+  type ProcPlantTemplate,
+} from "./tellus-procplants";
+import {
   PROCPLANT_PLACEABLE_CATALOG,
   biomePatchForPaint,
   genomeForBiomePatch,
@@ -10,6 +15,20 @@ import {
 } from "./tellus-procplant-biomes";
 import { createProcPlantVegetation, procPlantChunkSeed } from "./tellus-procplant-vegetation";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
+
+const templateBounds = (template: ProcPlantTemplate) => {
+  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  for (let i = 0; i < template.pos.length; i += 3) {
+    min.x = Math.min(min.x, template.pos[i]!);
+    min.y = Math.min(min.y, template.pos[i + 1]!);
+    min.z = Math.min(min.z, template.pos[i + 2]!);
+    max.x = Math.max(max.x, template.pos[i]!);
+    max.y = Math.max(max.y, template.pos[i + 1]!);
+    max.z = Math.max(max.z, template.pos[i + 2]!);
+  }
+  return { min, max, width: max.x - min.x, depth: max.z - min.z };
+};
 
 describe("procplant vegetation", () => {
   it("derives stable chunk seeds from world, chunk, and terrain revision", () => {
@@ -77,6 +96,38 @@ describe("procplant vegetation", () => {
 
     expect(full.idx.length).toBeGreaterThan(sparse.idx.length);
     expect(full.idx.length).toBeLessThanOrEqual(sparse.idx.length + 120 * 4 * 6);
+  });
+
+  it("applies procplant tree realism traits to Weber-Penn genomes", () => {
+    const baseGenome = procPlantPresets.oakCanopy;
+    const compact = buildProcPlantTemplate({
+      ...baseGenome,
+      treeRealism: {
+        crownSpread: 0,
+        crownTaper: 0.9,
+        trunkFlare: 0,
+        trunkBend: 0,
+        branchGnarl: 0,
+        windFlex: 0.2,
+        colorVariance: 0,
+      },
+    }, 99).template;
+    const broad = buildProcPlantTemplate({
+      ...baseGenome,
+      treeRealism: {
+        crownSpread: 1,
+        crownTaper: 0.15,
+        trunkFlare: 0.8,
+        trunkBend: 0.3,
+        branchGnarl: 0.5,
+        windFlex: 0.7,
+        colorVariance: 0.2,
+      },
+    }, 99).template;
+
+    expect(templateBounds(broad).width).toBeGreaterThan(templateBounds(compact).width);
+    expect(templateBounds(broad).depth).toBeGreaterThan(templateBounds(compact).depth);
+    expect(broad.idx.length).toBe(compact.idx.length);
   });
 
   it("exposes procplant presets as placeable procedural model urls", () => {

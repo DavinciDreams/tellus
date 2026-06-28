@@ -82,6 +82,15 @@ export interface ProcPlantGenome {
     whorlDensity: number;
     tipBias: number;
   };
+  treeRealism?: {
+    crownSpread: number;
+    crownTaper: number;
+    trunkFlare: number;
+    trunkBend: number;
+    branchGnarl: number;
+    windFlex: number;
+    colorVariance: number;
+  };
   weberPenn?: {
     species: SpeciesId;
     maxBranchDepth?: number;
@@ -959,6 +968,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       exposedTrunk: 0.28,
     },
     foliage: { mass: 0.78, clusterDensity: 1.35, whorlDensity: 0.45, tipBias: 0.58 },
+    treeRealism: { crownSpread: 0.78, crownTaper: 0.36, trunkFlare: 0.46, trunkBend: 0.16, branchGnarl: 0.32, windFlex: 0.42, colorVariance: 0.16 },
     weberPenn: {
       species: "cambridgeOak",
       maxBranchDepth: 3,
@@ -1002,6 +1012,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       exposedTrunk: 0.5,
     },
     foliage: { mass: 0.58, clusterDensity: 1.02, whorlDensity: 0.36, tipBias: 0.72 },
+    treeRealism: { crownSpread: 0.46, crownTaper: 0.22, trunkFlare: 0.24, trunkBend: 0.22, branchGnarl: 0.18, windFlex: 0.74, colorVariance: 0.18 },
     weberPenn: {
       species: "silverBirch",
       maxBranchDepth: 3,
@@ -1045,6 +1056,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       exposedTrunk: 0.56,
     },
     foliage: { mass: 0.62, clusterDensity: 1.18, whorlDensity: 0.5, tipBias: 0.84 },
+    treeRealism: { crownSpread: 0.92, crownTaper: 0.18, trunkFlare: 0.38, trunkBend: 0.18, branchGnarl: 0.28, windFlex: 0.5, colorVariance: 0.14 },
     weberPenn: {
       species: "sassafras",
       maxBranchDepth: 3,
@@ -1088,6 +1100,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       exposedTrunk: 0.32,
     },
     foliage: { mass: 0.72, clusterDensity: 1.22, whorlDensity: 0.44, tipBias: 0.62 },
+    treeRealism: { crownSpread: 0.68, crownTaper: 0.3, trunkFlare: 0.62, trunkBend: 0.24, branchGnarl: 0.36, windFlex: 0.48, colorVariance: 0.18 },
     weberPenn: {
       species: "blackTupelo",
       maxBranchDepth: 3,
@@ -1125,6 +1138,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorB: 0x6f8f74,
     },
     foliage: { mass: 0.92, clusterDensity: 1.26, whorlDensity: 0.84, tipBias: 0.38 },
+    treeRealism: { crownSpread: 0.38, crownTaper: 0.86, trunkFlare: 0.34, trunkBend: 0.14, branchGnarl: 0.18, windFlex: 0.58, colorVariance: 0.12 },
     weberPenn: {
       species: "smallPine",
       maxBranchDepth: 3,
@@ -1162,6 +1176,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorB: 0x6b8a63,
     },
     foliage: { mass: 1.04, clusterDensity: 1.36, whorlDensity: 0.96, tipBias: 0.32 },
+    treeRealism: { crownSpread: 0.34, crownTaper: 0.94, trunkFlare: 0.36, trunkBend: 0.1, branchGnarl: 0.16, windFlex: 0.5, colorVariance: 0.1 },
     weberPenn: {
       species: "balsamFir",
       maxBranchDepth: 3,
@@ -1199,6 +1214,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorB: 0x78965e,
     },
     foliage: { mass: 0.6, clusterDensity: 0.86, whorlDensity: 0.5, tipBias: 0.62 },
+    treeRealism: { crownSpread: 0.3, crownTaper: 0.82, trunkFlare: 0.42, trunkBend: 0.12, branchGnarl: 0.22, windFlex: 0.38, colorVariance: 0.1 },
     weberPenn: {
       species: "douglasFir",
       maxBranchDepth: 3,
@@ -1317,6 +1333,18 @@ export const hybridizePlantGenomes = (
               alpha,
             ),
             tipBias: THREE.MathUtils.lerp(a.foliage?.tipBias ?? 0.5, b.foliage?.tipBias ?? 0.5, alpha),
+          }
+        : undefined,
+    treeRealism:
+      a.treeRealism || b.treeRealism
+        ? {
+            crownSpread: THREE.MathUtils.lerp(a.treeRealism?.crownSpread ?? 0.5, b.treeRealism?.crownSpread ?? 0.5, alpha),
+            crownTaper: THREE.MathUtils.lerp(a.treeRealism?.crownTaper ?? 0.5, b.treeRealism?.crownTaper ?? 0.5, alpha),
+            trunkFlare: THREE.MathUtils.lerp(a.treeRealism?.trunkFlare ?? 0.35, b.treeRealism?.trunkFlare ?? 0.35, alpha),
+            trunkBend: THREE.MathUtils.lerp(a.treeRealism?.trunkBend ?? 0.12, b.treeRealism?.trunkBend ?? 0.12, alpha),
+            branchGnarl: THREE.MathUtils.lerp(a.treeRealism?.branchGnarl ?? 0.2, b.treeRealism?.branchGnarl ?? 0.2, alpha),
+            windFlex: THREE.MathUtils.lerp(a.treeRealism?.windFlex ?? 0.55, b.treeRealism?.windFlex ?? 0.55, alpha),
+            colorVariance: THREE.MathUtils.lerp(a.treeRealism?.colorVariance ?? 0.14, b.treeRealism?.colorVariance ?? 0.14, alpha),
           }
         : undefined,
     weberPenn: pick(a.weberPenn, b.weberPenn),
@@ -3243,6 +3271,24 @@ const isWeberPennConifer = (genome: ProcPlantGenome) => {
   );
 };
 
+const hashUnit = (value: number) => {
+  const raw = Math.sin(value * 12.9898) * 43758.5453123;
+  return raw - Math.floor(raw);
+};
+
+const treeRealismTraits = (genome: ProcPlantGenome) => {
+  const conifer = isWeberPennConifer(genome);
+  return {
+    crownSpread: genome.treeRealism?.crownSpread ?? (conifer ? 0.36 : 0.62),
+    crownTaper: genome.treeRealism?.crownTaper ?? (conifer ? 0.82 : 0.36),
+    trunkFlare: genome.treeRealism?.trunkFlare ?? 0.34,
+    trunkBend: genome.treeRealism?.trunkBend ?? (conifer ? 0.1 : 0.16),
+    branchGnarl: genome.treeRealism?.branchGnarl ?? (conifer ? 0.16 : 0.26),
+    windFlex: genome.treeRealism?.windFlex ?? (conifer ? 0.52 : 0.48),
+    colorVariance: genome.treeRealism?.colorVariance ?? 0.14,
+  };
+};
+
 const weberPennBakeOptions = (genome: ProcPlantGenome): BakeOptions => {
   const options = genome.weberPenn;
   return {
@@ -3366,21 +3412,65 @@ export const buildWeberPennProcPlantTemplate = (
   const sway = new Float32Array(totalVerts);
   const idx = new Uint32Array(totalIdx);
   const swayFrom = 0.25;
+  const realism = treeRealismTraits(genome);
+  const conifer = isWeberPennConifer(genome);
+  const bendDir = new THREE.Vector3(
+    Math.cos((seed >>> 0) * 0.017),
+    0,
+    Math.sin((seed >>> 0) * 0.017),
+  ).normalize();
+  const bendAmount = realism.trunkBend * (0.035 + (1 - THREE.MathUtils.clamp(env.moisture, 0, 1)) * 0.025);
+  const warpPosition = (x: number, y: number, z: number, vertexSeed: number, isLeaf: boolean) => {
+    const h = THREE.MathUtils.clamp(y, 0, 1);
+    const p = new THREE.Vector3(x, y, z);
+    const radial = new THREE.Vector3(p.x, 0, p.z);
+    const radius = radial.length();
+    if (radius > 0.0001) {
+      radial.normalize();
+      const crownT = THREE.MathUtils.smoothstep(h, conifer ? 0.08 : 0.22, 1);
+      const taperEnvelope = conifer
+        ? THREE.MathUtils.lerp(1.12, 0.36, h)
+        : THREE.MathUtils.lerp(0.72 + Math.sin(h * Math.PI) * 0.45, 1 - h * 0.18, realism.crownTaper);
+      const crownScale = 1 + crownT * realism.crownSpread * taperEnvelope * (isLeaf ? 0.24 : 0.11);
+      const flare = !isLeaf && h < 0.22 ? 1 + realism.trunkFlare * Math.pow(1 - h / 0.22, 2) * 0.34 : 1;
+      p.x *= crownScale * flare;
+      p.z *= crownScale * flare;
+      const gnarl = (hashUnit(vertexSeed) - 0.5) * realism.branchGnarl * (isLeaf ? 0.012 : 0.02) * (0.35 + crownT);
+      p.add(radial.multiplyScalar(gnarl));
+    }
+    p.add(bendDir.clone().multiplyScalar(Math.pow(h, 1.35) * bendAmount));
+    return p;
+  };
+  const varyColor = (color: THREE.Color, vertexSeed: number, amount = realism.colorVariance) => {
+    const out = color.clone();
+    const delta = (hashUnit(vertexSeed) - 0.5) * amount;
+    if (delta > 0) out.lerp(new THREE.Color(0xffffff), delta);
+    else out.lerp(new THREE.Color(0x050805), -delta * 0.8);
+    return out;
+  };
 
   for (let i = 0; i < branchVerts; i++) {
     const o = i * 3;
     const ny = (baked.branches.positions[o + 1]! - baseY) * scale;
-    pos[o] = (baked.branches.positions[o]! - cx) * scale;
-    pos[o + 1] = ny;
-    pos[o + 2] = (baked.branches.positions[o + 2]! - cz) * scale;
+    const warped = warpPosition(
+      (baked.branches.positions[o]! - cx) * scale,
+      ny,
+      (baked.branches.positions[o + 2]! - cz) * scale,
+      seed + i * 17,
+      false,
+    );
+    pos[o] = warped.x;
+    pos[o + 1] = warped.y;
+    pos[o + 2] = warped.z;
     nrm[o] = baked.branches.normals[o]!;
     nrm[o + 1] = baked.branches.normals[o + 1]!;
     nrm[o + 2] = baked.branches.normals[o + 2]!;
-    col[o] = barkColor.r;
-    col[o + 1] = barkColor.g;
-    col[o + 2] = barkColor.b;
+    const bark = varyColor(barkColor, seed + i * 23, realism.colorVariance * 0.55);
+    col[o] = bark.r;
+    col[o + 1] = bark.g;
+    col[o + 2] = bark.b;
     const w = Math.max(0, (ny - swayFrom) / Math.max(1e-4, 1 - swayFrom));
-    sway[i] = w * w * 0.55;
+    sway[i] = w * w * realism.windFlex * 0.62;
   }
 
   for (let i = 0; i < leafVerts; i++) {
@@ -3388,19 +3478,29 @@ export const buildWeberPennProcPlantTemplate = (
     const dst = (branchVerts + i) * 3;
     const di = branchVerts + i;
     const ny = (baked.leaves.positions[src + 1]! - baseY) * scale;
-    pos[dst] = (baked.leaves.positions[src]! - cx) * scale;
-    pos[dst + 1] = ny;
-    pos[dst + 2] = (baked.leaves.positions[src + 2]! - cz) * scale;
+    const warped = warpPosition(
+      (baked.leaves.positions[src]! - cx) * scale,
+      ny,
+      (baked.leaves.positions[src + 2]! - cz) * scale,
+      seed + i * 31,
+      true,
+    );
+    pos[dst] = warped.x;
+    pos[dst + 1] = warped.y;
+    pos[dst + 2] = warped.z;
     nrm[dst] = baked.leaves.normals[src]!;
     nrm[dst + 1] = baked.leaves.normals[src + 1]!;
     nrm[dst + 2] = baked.leaves.normals[src + 2]!;
-    const color = leafColor.clone().lerp(new THREE.Color(genome.leaf.colorB), THREE.MathUtils.clamp(ny, 0, 1) * 0.55);
+    const color = varyColor(
+      leafColor.clone().lerp(new THREE.Color(genome.leaf.colorB), THREE.MathUtils.clamp(ny, 0, 1) * 0.55),
+      seed + i * 37,
+    );
     col[dst] = color.r;
     col[dst + 1] = color.g;
     col[dst + 2] = color.b;
     tintable[di] = 1;
     const w = Math.max(0, (ny - swayFrom) / Math.max(1e-4, 1 - swayFrom));
-    sway[di] = Math.min(1, w * w + w);
+    sway[di] = Math.min(1, (w * w + w) * (0.72 + realism.windFlex * 0.62));
   }
 
   baked.branches.indices.forEach((v, i) => {
