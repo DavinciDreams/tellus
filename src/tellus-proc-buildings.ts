@@ -84,7 +84,7 @@ export interface ProceduralBuildingDimensions {
 }
 
 export const PROCEDURAL_BUILDING_PREFIX = "building-";
-const SHARED_STONE_ALBEDO_URL = "/terrain-textures/shared-fieldstone-rubble/albedo.png";
+const SHARED_STONE_ALBEDO_URL = "/terrain-textures/shared-light-stone-tiles/albedo.jpg";
 const SIMPLE_HOUSE_STONE_SKIRT_HEIGHT = 0.95;
 const MEDIEVAL_STUCCO_COLOR = 0xd3c19a;
 const MEDIEVAL_TIMBER_COLOR = 0x4f3324;
@@ -342,6 +342,19 @@ function fullAdobeStyle(style: BuildingMaterialStyle): boolean {
   return style === "desert-adobe";
 }
 
+function paletteStoneBodyColor(
+  style: Exclude<BuildingMaterialStyle, "auto">,
+  palette: ReturnType<typeof materialPalette>,
+): number {
+  const cottageStone = cottageStoneColor(style);
+  if (cottageStone !== null) return cottageStone;
+  if (style === "adobe" || style === "desert-adobe") return ADOBE_STONE_BASE_COLOR;
+  if (style === "log-siding" || style === "wood-plank") return LOG_STONE_BASE_COLOR;
+  if (shinglePalette(style)) return CEDAR_STONE_BASE_COLOR;
+  if (style === "white-tudor") return 0xb4afa2;
+  return palette.wall;
+}
+
 function materialPalette(style: Exclude<BuildingMaterialStyle, "auto">) {
   const palettes: Record<Exclude<BuildingMaterialStyle, "auto">, { wall: number; accent: number; roof: number; trim: number; foundation: number }> = {
     brick: { wall: 0x9b4f38, accent: 0x6e3329, roof: 0x5d2e2a, trim: 0xf0d2a2, foundation: 0x6d6558 },
@@ -414,28 +427,30 @@ function createMaterials(
   const plankStyle = materialStyle === "wood-plank" && !rockOnly;
   const cottageStone = !rockOnly ? cottageStoneColor(materialStyle) : null;
   const cottageStyle = cottageStone !== null;
+  const rockStoneColor = rockOnly ? paletteStoneBodyColor(materialStyle, palette) : null;
   const whiteTudorStyle = materialStyle === "white-tudor" && !rockOnly;
   const shingle = !rockOnly ? shinglePalette(materialStyle) : null;
   const shingleStyle = Boolean(shingle);
   const medievalStyle = Boolean(recipeId) && !rockOnly;
-  const wall = make(
+  const wallColor =
     cottageStone ??
-      (whiteTudorStyle
-        ? WHITE_TUDOR_WALL_COLOR
-        : shingle
-          ? shingle.base
-          : plankStyle
-            ? PLANK_WALL_COLOR
-          : logStyle
-            ? LOG_WALL_COLOR
-          : fullAdobe
-            ? DESERT_ADOBE_WALL_COLOR
-          : adobeStyle
-            ? ADOBE_WALL_COLOR
-          : medievalStyle
-            ? MEDIEVAL_STUCCO_COLOR
-          : palette.wall),
-  );
+    rockStoneColor ??
+    (whiteTudorStyle
+      ? WHITE_TUDOR_WALL_COLOR
+      : shingle
+        ? shingle.base
+      : plankStyle
+        ? PLANK_WALL_COLOR
+      : logStyle
+        ? LOG_WALL_COLOR
+      : fullAdobe
+        ? DESERT_ADOBE_WALL_COLOR
+      : adobeStyle
+        ? ADOBE_WALL_COLOR
+      : medievalStyle
+        ? MEDIEVAL_STUCCO_COLOR
+      : palette.wall);
+  const wall = make(wallColor);
   const timberDetail = medievalStyle || rockOnly;
   const accentColor = whiteTudorStyle
     ? WHITE_TUDOR_TIMBER_COLOR
@@ -470,7 +485,8 @@ function createMaterials(
   if (cottageStyle && usesSharedStoneWallTexture(materialStyle)) {
     applySharedAlbedo(wall, SHARED_STONE_ALBEDO_URL, simpleHouse ? [1.8, 1.25] : [2.3, 2.0]);
   }
-  if (stone && rockOnly) {
+  if (rockOnly) {
+    applySharedAlbedo(wall, SHARED_STONE_ALBEDO_URL, [2.5, 2.5]);
     applySharedAlbedo(foundation, SHARED_STONE_ALBEDO_URL, [2.2, 2.2]);
   }
   const roofTint = new THREE.Color(cottageStyle ? cottageRoofColor(materialStyle) : shingle ? shingle.base : logStyle || plankStyle ? LOG_ROOF_COLOR : adobeStyle ? ADOBE_ROOF_COLOR : SLATE_ROOF_COLOR);
