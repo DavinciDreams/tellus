@@ -30,7 +30,10 @@ export type BuildingMaterialStyle =
   | "stucco"
   | "adobe"
   | "log-siding"
-  | "cedar-shingle";
+  | "cedar-shingle"
+  | "weathered-shingle"
+  | "blue-shingle"
+  | "sage-shingle";
 
 export type BuildingLightingStyle = "none" | "warm" | "lantern" | "moonlit" | "bright";
 
@@ -95,6 +98,12 @@ const CEDAR_SHINGLE_COLOR = 0x8b6040;
 const CEDAR_SHINGLE_DARK_COLOR = 0x5a3827;
 const CEDAR_TRIM_COLOR = 0xf2efe4;
 const CEDAR_STONE_BASE_COLOR = 0xa7aaa4;
+const WEATHERED_SHINGLE_COLOR = 0x8e8a7d;
+const WEATHERED_SHINGLE_DARK_COLOR = 0x5d5b54;
+const BLUE_SHINGLE_COLOR = 0x6f8791;
+const BLUE_SHINGLE_DARK_COLOR = 0x465c65;
+const SAGE_SHINGLE_COLOR = 0x7f8a73;
+const SAGE_SHINGLE_DARK_COLOR = 0x4f5b48;
 const buildingTextureCache = new Map<string, THREE.Texture>();
 
 export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label: string }> = [
@@ -109,6 +118,9 @@ export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label
   { id: "adobe", label: "Adobe" },
   { id: "log-siding", label: "Log" },
   { id: "cedar-shingle", label: "Cedar" },
+  { id: "weathered-shingle", label: "Weathered" },
+  { id: "blue-shingle", label: "Blue Shingle" },
+  { id: "sage-shingle", label: "Sage Shingle" },
 ];
 
 export const BUILDING_LIGHTING_OPTIONS: Array<{ id: BuildingLightingStyle; label: string }> = [
@@ -258,6 +270,14 @@ function rockOnlyBuilding(recipeId: ProceduralBuildingType | undefined): boolean
   return recipeId === "keep" || recipeId === "castle" || recipeId === "fortress";
 }
 
+function shinglePalette(style: BuildingMaterialStyle): { base: number; dark: number } | null {
+  if (style === "cedar-shingle") return { base: CEDAR_SHINGLE_COLOR, dark: CEDAR_SHINGLE_DARK_COLOR };
+  if (style === "weathered-shingle") return { base: WEATHERED_SHINGLE_COLOR, dark: WEATHERED_SHINGLE_DARK_COLOR };
+  if (style === "blue-shingle") return { base: BLUE_SHINGLE_COLOR, dark: BLUE_SHINGLE_DARK_COLOR };
+  if (style === "sage-shingle") return { base: SAGE_SHINGLE_COLOR, dark: SAGE_SHINGLE_DARK_COLOR };
+  return null;
+}
+
 function materialPalette(style: Exclude<BuildingMaterialStyle, "auto">) {
   const palettes: Record<Exclude<BuildingMaterialStyle, "auto">, { wall: number; accent: number; roof: number; trim: number; foundation: number }> = {
     brick: { wall: 0x9b4f38, accent: 0x6e3329, roof: 0x5d2e2a, trim: 0xf0d2a2, foundation: 0x6d6558 },
@@ -270,6 +290,9 @@ function materialPalette(style: Exclude<BuildingMaterialStyle, "auto">) {
     adobe: { wall: ADOBE_WALL_COLOR, accent: MEDIEVAL_TIMBER_COLOR, roof: ADOBE_ROOF_COLOR, trim: MEDIEVAL_TIMBER_COLOR, foundation: ADOBE_STONE_BASE_COLOR },
     "log-siding": { wall: LOG_WALL_COLOR, accent: LOG_DETAIL_COLOR, roof: LOG_ROOF_COLOR, trim: LOG_DETAIL_COLOR, foundation: LOG_STONE_BASE_COLOR },
     "cedar-shingle": { wall: CEDAR_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: CEDAR_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: CEDAR_STONE_BASE_COLOR },
+    "weathered-shingle": { wall: WEATHERED_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: WEATHERED_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: CEDAR_STONE_BASE_COLOR },
+    "blue-shingle": { wall: BLUE_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: BLUE_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: CEDAR_STONE_BASE_COLOR },
+    "sage-shingle": { wall: SAGE_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: SAGE_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: CEDAR_STONE_BASE_COLOR },
   };
   return palettes[style];
 }
@@ -318,16 +341,17 @@ function createMaterials(
   const adobeStyle = materialStyle === "adobe" && !rockOnly;
   const logStyle = materialStyle === "log-siding" && !rockOnly;
   const plankStyle = materialStyle === "wood-plank" && !rockOnly;
-  const cedarStyle = materialStyle === "cedar-shingle" && !rockOnly;
+  const shingle = !rockOnly ? shinglePalette(materialStyle) : null;
+  const shingleStyle = Boolean(shingle);
   const medievalStyle = Boolean(recipeId) && !rockOnly;
-  const wall = make(cedarStyle ? CEDAR_SHINGLE_COLOR : plankStyle ? PLANK_WALL_COLOR : logStyle ? LOG_WALL_COLOR : adobeStyle ? ADOBE_WALL_COLOR : medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall);
+  const wall = make(shingle ? shingle.base : plankStyle ? PLANK_WALL_COLOR : logStyle ? LOG_WALL_COLOR : adobeStyle ? ADOBE_WALL_COLOR : medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall);
   const timberDetail = medievalStyle || rockOnly;
-  const accentColor = cedarStyle ? CEDAR_TRIM_COLOR : plankStyle ? PLANK_DETAIL_COLOR : logStyle ? LOG_DETAIL_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
+  const accentColor = shingleStyle ? CEDAR_TRIM_COLOR : plankStyle ? PLANK_DETAIL_COLOR : logStyle ? LOG_DETAIL_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
   const baseWallColor = simpleHouse
-    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : cedarStyle ? CEDAR_STONE_BASE_COLOR : logStyle || plankStyle ? LOG_STONE_BASE_COLOR : 0x8b8d86).lerp(new THREE.Color(0xffffff), adobeStyle || logStyle || plankStyle || cedarStyle ? 0.06 : 0.08)
+    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : shingleStyle ? CEDAR_STONE_BASE_COLOR : logStyle || plankStyle ? LOG_STONE_BASE_COLOR : 0x8b8d86).lerp(new THREE.Color(0xffffff), adobeStyle || logStyle || plankStyle || shingleStyle ? 0.06 : 0.08)
     : adobeStyle
       ? new THREE.Color(ADOBE_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.05)
-    : cedarStyle
+    : shingleStyle
       ? new THREE.Color(CEDAR_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.1)
     : logStyle || plankStyle
       ? new THREE.Color(LOG_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.06)
@@ -341,24 +365,24 @@ function createMaterials(
   if (stone && rockOnly) {
     applySharedAlbedo(foundation, SHARED_STONE_ALBEDO_URL, [2.2, 2.2]);
   }
-  const roofTint = new THREE.Color(cedarStyle ? CEDAR_SHINGLE_COLOR : logStyle || plankStyle ? LOG_ROOF_COLOR : adobeStyle ? ADOBE_ROOF_COLOR : SLATE_ROOF_COLOR);
+  const roofTint = new THREE.Color(shingle ? shingle.base : logStyle || plankStyle ? LOG_ROOF_COLOR : adobeStyle ? ADOBE_ROOF_COLOR : SLATE_ROOF_COLOR);
   const roof = make(roofTint.getHex(), 0.9);
-  const roofDetailColor = roofTint.clone().lerp(new THREE.Color(cedarStyle ? CEDAR_SHINGLE_DARK_COLOR : logStyle || plankStyle ? 0x322016 : adobeStyle ? 0x5f2418 : 0x252b31), 0.55);
+  const roofDetailColor = roofTint.clone().lerp(new THREE.Color(shingle ? shingle.dark : logStyle || plankStyle ? 0x322016 : adobeStyle ? 0x5f2418 : 0x252b31), 0.55);
   return {
     wall,
     baseWall,
     accent: make(accentColor),
     roof,
     roofDetail: make(roofDetailColor.getHex(), 0.92),
-    trim: make(cedarStyle ? CEDAR_TRIM_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.trim, 0.58),
+    trim: make(shingleStyle ? CEDAR_TRIM_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.trim, 0.58),
     foundation,
     logDetail: make(LOG_DETAIL_COLOR, 0.86),
     logHighlight: make(0x9b7250, 0.82),
     plankBoard: make(PLANK_DETAIL_COLOR, 0.84),
     plankHighlight: make(PLANK_HIGHLIGHT_COLOR, 0.8),
     plankChink: make(PLANK_CHINK_COLOR, 0.9),
-    cedarShingle: make(CEDAR_SHINGLE_COLOR, 0.84),
-    cedarShingleDark: make(CEDAR_SHINGLE_DARK_COLOR, 0.9),
+    cedarShingle: make(shingle?.base ?? CEDAR_SHINGLE_COLOR, 0.84),
+    cedarShingleDark: make(shingle?.dark ?? CEDAR_SHINGLE_DARK_COLOR, 0.9),
     glass: new THREE.MeshStandardMaterial({
       color: 0x9fc7d3,
       roughness: 0.18,
@@ -481,7 +505,7 @@ function addWallRelief(
     addLogSiding(group, width, depth, height, recipe, mats);
   } else if (materialStyle === "wood-plank" && !rockOnlyBuilding(recipe.id)) {
     addPlankSiding(group, width, depth, height, recipe, mats);
-  } else if (materialStyle === "cedar-shingle" && !rockOnlyBuilding(recipe.id)) {
+  } else if (shinglePalette(materialStyle) && !rockOnlyBuilding(recipe.id)) {
     addCedarShingleSiding(group, width, depth, height, recipe, mats);
   }
   if (recipe.id === "simple-house") {
@@ -493,7 +517,7 @@ function addWallRelief(
       addSimpleHouseLogTrim(group, width, depth, height, mats);
       return;
     }
-    if (materialStyle === "cedar-shingle") {
+    if (shinglePalette(materialStyle)) {
       addSimpleHouseShingleTrim(group, width, depth, height, mats);
       return;
     }
@@ -507,7 +531,7 @@ function addWallRelief(
     materialStyle === "plaster" ||
     materialStyle === "stucco" ||
     materialStyle === "log-siding" ||
-    materialStyle === "cedar-shingle" ||
+    Boolean(shinglePalette(materialStyle)) ||
     recipe.id === "inn" ||
     recipe.id === "store" ||
     recipe.id === "guild-hall";
