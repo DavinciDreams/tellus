@@ -4387,20 +4387,24 @@ function createTellusWorld(
   // neighbouring terrain ("under the land even after the surface button") - sampling a ring at the
   // footprint radius and taking the MAX rests the object ON the surface instead of inside it. Returns
   // null only when no sample resolves (async terrain not loaded yet).
-  const footprintGroundY = (thing: GeneratedThing): number | null => {
-    const referenceY = interiorObject ? visitorPosition.y : thing.position.y;
-    let bestRendered: number | null = renderedTerrainHeightAt(thing.position.x, thing.position.z, referenceY);
+  const footprintGroundYAt = (
+    thing: GeneratedThing,
+    x: number,
+    z: number,
+    referenceY = interiorObject ? visitorPosition.y : thing.position.y,
+  ): number | null => {
+    let bestRendered: number | null = renderedTerrainHeightAt(x, z, referenceY);
     let bestAnalytic = interiorObject
-      ? interiorPlacementFloorHeightAt(thing.position.x, thing.position.z, referenceY)
-      : groundHeightAt(thing.position.x, thing.position.z);
+      ? interiorPlacementFloorHeightAt(x, z, referenceY)
+      : groundHeightAt(x, z);
     const fp = thingFootprint(thing);
     const r = Math.min(fp?.radius ?? 0, 6);
     if (r >= 0.25) {
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * Math.PI * 2;
-        const x = thing.position.x + Math.cos(a) * r;
-        const z = thing.position.z + Math.sin(a) * r;
-        const rendered = renderedTerrainHeightAt(x, z, referenceY);
+        const sx = x + Math.cos(a) * r;
+        const sz = z + Math.sin(a) * r;
+        const rendered = renderedTerrainHeightAt(sx, sz, referenceY);
         if (
           rendered !== null &&
           Number.isFinite(rendered) &&
@@ -4409,8 +4413,8 @@ function createTellusWorld(
           bestRendered = rendered;
         }
         const analytic = interiorObject
-          ? interiorPlacementFloorHeightAt(x, z, referenceY)
-          : groundHeightAt(x, z);
+          ? interiorPlacementFloorHeightAt(sx, sz, referenceY)
+          : groundHeightAt(sx, sz);
         if (
           analytic !== null &&
           Number.isFinite(analytic) &&
@@ -4422,6 +4426,9 @@ function createTellusWorld(
     }
     return bestRendered ?? bestAnalytic;
   };
+
+  const footprintGroundY = (thing: GeneratedThing): number | null =>
+    footprintGroundYAt(thing, thing.position.x, thing.position.z);
 
   const liveGroundOffsetFrom = (thing: GeneratedThing): number | null => {
     const groundY = footprintGroundY(thing);
@@ -5182,11 +5189,16 @@ function createTellusWorld(
         }
       }
       const locallyRidden = existing.id === sailingThingId;
+      const nextPetOwnerId =
+        normalized.petOwnerId === undefined
+          ? existing.petOwnerId
+          : normalized.petOwnerId || undefined;
+      const locallyFollowedPet = nextPetOwnerId === petOwnerId;
       existing.kind = normalized.kind as GeneratedKind;
       existing.prompt = normalized.prompt;
       existing.creatorId = normalized.creatorId as AgentId | "visitor";
       existing.ownerUserId = normalized.ownerUserId;
-      if (!locallyRidden) {
+      if (!locallyRidden && !locallyFollowedPet) {
         existing.position = { ...normalized.position };
         existing.rotationX = normalized.rotationX ?? 0;
         existing.rotationY = normalized.rotationY;
@@ -5197,10 +5209,7 @@ function createTellusWorld(
       existing.assetStoreModelId = normalized.assetStoreModelId ?? existing.assetStoreModelId;
       // petOwnerId wire convention mirrors animation/avatar fields: "" clears, non-empty sets,
       // ABSENT means a mid-rollout backend stripped the field, so keep the local value.
-      existing.petOwnerId =
-        normalized.petOwnerId === undefined
-          ? existing.petOwnerId
-          : normalized.petOwnerId || undefined;
+      existing.petOwnerId = nextPetOwnerId;
       // animation wire convention (mirrors presence.avatarId): "" = explicit default, a non-empty
       // string = explicit clip, ABSENT = a mid-rollout server stripped the field — keep ours
       // (otherwise our own upsert's echo would wipe a just-picked clip).
@@ -5510,7 +5519,21 @@ function createTellusWorld(
     if (mode === "air" || mode === "water") {
       return movedVehiclePosition(thing, x, z, thing.position);
     }
-    return groundedPositionForCurrentSurface(x, z);
+    const liveGround = footprintGroundYAt(thing, x, z, visitorPosition.y);
+    return liveGround !== null && Number.isFinite(liveGround)
+      ? { x, y: liveGround, z }
+      : groundedPositionForCurrentSurface(x, z, thing.position);
+  };
+
+  const liftPetToRenderedTerrain = (pet: GeneratedThing): boolean => {
+    if (isFreeMovingVehicle(pet)) return false;
+    const liveGround = footprintGroundY(pet);
+    if (liveGround === null || !Number.isFinite(liveGround)) return false;
+    if (liveGround <= pet.position.y + 0.05) return false;
+    pet.position = { ...pet.position, y: liveGround };
+    updateThingMeshPosition(pet);
+    refreshInstancedThingMatrix(pet);
+    return true;
   };
 
   const syncPetsToOwner = (delta: number, forceTeleport = false) => {
@@ -5549,6 +5572,7 @@ function createTellusWorld(
             z: pet.position.z + dz * t,
           };
         }
+        liftPetToRenderedTerrain(pet);
         const mdx = pet.position.x - previous.x;
         const mdz = pet.position.z - previous.z;
         if (Math.hypot(mdx, mdz) > 0.001) {
