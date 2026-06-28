@@ -153,6 +153,7 @@ import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, gener
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial, terrainTextureDiagnostics } from "./tellus-terrain-material";
 import { largeWorldBaseHeight, largeWorldTerrainKind, usesContinentalChunkedTerrain } from "./tellus-large-world-terrain";
+import { buildingMaterialForEcology, resolveEcologySample } from "./tellus-ecology";
 import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
 import { generateInteriorRoom, normalizeInteriorBiomeMaterial, type InteriorBiomeMaterial } from "./tellus-building";
 import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
@@ -823,6 +824,18 @@ function createTellusWorld(
         return kind === "water" ? null : kind;
       }
     : centralTerrainPaintAt;
+  const sampleEcology = (x: number, z: number, height: number, paint: TerrainPaintKind | null, seed: number) =>
+    resolveEcologySample({
+      seed,
+      x,
+      z,
+      height,
+      slope: isChunked
+        ? Math.min(1, Math.abs((chunkRenderer?.sampleHeight(x + 2.5, z) ?? height) - height) / 2.5)
+        : undefined,
+      terrainPaint: paint,
+      biomeCell: worldBiomeCells.get(`${Math.floor(x / CHUNK_SPAN)}:${Math.floor(z / CHUNK_SPAN)}`),
+    });
   const vegetationEnabled = vegetationPreference !== "0" && (isChunked || vegetationPreference === "1");
   const groundGrassEnabled = !isChunked && vegetationPreference === "1";
   const vegetation = vegetationEnabled
@@ -870,6 +883,7 @@ function createTellusWorld(
         worldId: runtimeConfig.worldId,
         sampleHeight: sampleVegetationHeight,
         samplePaint: sampleVegetationPaint,
+        sampleEcology,
         bounds: chunkedVegetationBounds,
         densityMultiplier: procPlantDensityPreference,
         isExcluded: (x, z, h) =>
@@ -6476,24 +6490,25 @@ function createTellusWorld(
     const parsedProcedural = parseProceduralModelUrl(rawModelUrl);
     if (parsedProcedural?.building && !parsedProcedural.building.material) {
       const recipeId = parsedProcedural.building.recipeId;
-      const dryOpenKind = terrainKind(position.x, position.z, terrainHeight(position.x, position.z));
-      const shouldUseAdobe =
-        dryOpenKind === "grass" ||
-        dryOpenKind === "beach" ||
-        dryOpenKind === "dirt" ||
-        dryOpenKind === "rock";
-      const rockOnlyRecipe = recipeId === "keep" || recipeId === "castle" || recipeId === "fortress";
-      if (shouldUseAdobe && !rockOnlyRecipe) {
-        modelUrl = makeProceduralBuildingModelUrl(
-          makeProceduralBuildingArchetypeId(recipeId),
-          parsedProcedural.seed,
-          {
-            material: "adobe",
-            lighting: parsedProcedural.building.lighting,
-            roof: parsedProcedural.building.roof,
-          },
-        );
-      }
+      const height = sampleVegetationHeight(position.x, position.z) ?? terrainHeight(position.x, position.z);
+      const paint = sampleVegetationPaint(position.x, position.z);
+      const ecology = resolveEcologySample({
+        seed: parsedProcedural.seed,
+        x: position.x,
+        z: position.z,
+        height,
+        terrainPaint: paint,
+        biomeCell: worldBiomeCells.get(`${Math.floor(position.x / CHUNK_SPAN)}:${Math.floor(position.z / CHUNK_SPAN)}`),
+      });
+      modelUrl = makeProceduralBuildingModelUrl(
+        makeProceduralBuildingArchetypeId(recipeId),
+        parsedProcedural.seed,
+        {
+          material: buildingMaterialForEcology(ecology, recipeId),
+          lighting: parsedProcedural.building.lighting,
+          roof: parsedProcedural.building.roof,
+        },
+      );
     }
     const thing: GeneratedThing = {
       id: makeId(kind),

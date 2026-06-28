@@ -2,11 +2,13 @@ import * as THREE from "three";
 import { SEA_LEVEL, WORLD_RADIUS } from "./tellus-constants";
 import type { TerrainPaintKind } from "./tellus-types";
 import {
+  biomePatchForEcology,
   biomePatchForPaint,
   environmentForBiomePatch,
   genomeForBiomePatch,
   treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
+import { resolveEcologySample, type EcologySample } from "./tellus-ecology";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 import {
   buildProcPlantInstancedParts,
@@ -31,6 +33,7 @@ export interface ProcPlantVegetationOptions {
   worldId: string;
   sampleHeight: (x: number, z: number) => number | null;
   samplePaint: (x: number, z: number) => TerrainPaintKind | null;
+  sampleEcology?: (x: number, z: number, height: number, paint: TerrainPaintKind | null, seed: number) => EcologySample;
   bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
   chunkSize?: number;
   maxRing?: number;
@@ -366,6 +369,13 @@ export function createProcPlantVegetation(
     for (const key of active.keys()) enqueue(key);
   };
 
+  const estimateSlope = (x: number, z: number, height: number): number => {
+    const step = 2.5;
+    const hx = options.sampleHeight(x + step, z) ?? height;
+    const hz = options.sampleHeight(x, z + step) ?? height;
+    return THREE.MathUtils.clamp(Math.hypot(hx - height, hz - height) / step, 0, 1);
+  };
+
   const saveManualPlacements = () => {
     if (typeof window === "undefined") return;
     try {
@@ -418,7 +428,17 @@ export function createProcPlantVegetation(
       if (height === null || height < SEA_LEVEL - 12) continue;
       if (options.isExcluded?.(x, z, height)) continue;
       const paint = options.samplePaint(x, z);
-      const patch = biomePatchForPaint(paint, seed ^ Math.imul(i + 1, 0x9e3779b1));
+      const patchSeed = seed ^ Math.imul(i + 1, 0x9e3779b1);
+      const ecology = options.sampleEcology?.(x, z, height, paint, patchSeed) ??
+        resolveEcologySample({
+          seed: patchSeed,
+          x,
+          z,
+          height,
+          slope: estimateSlope(x, z, height),
+          terrainPaint: paint,
+        });
+      const patch = biomePatchForEcology(ecology, patchSeed) ?? biomePatchForPaint(paint, patchSeed);
       if (!patch || rand() > patch.density * densityMultiplier * (chunk.lod === 0 ? 1 : 0.58)) continue;
       const genome = genomeForBiomePatch(patch);
       const treeBackend = treeBackendForBiomePatch(patch);

@@ -10,11 +10,13 @@ import {
 } from "./tellus-procplants";
 import {
   PROCPLANT_PLACEABLE_CATALOG,
+  biomePatchForEcology,
   biomePatchForPaint,
   genomeForBiomePatch,
   procPlantPlaceableById,
   treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
+import { buildingMaterialForEcology, resolveEcologySample } from "./tellus-ecology";
 import { createProcPlantVegetation, procPlantChunkSeed } from "./tellus-procplant-vegetation";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 
@@ -162,6 +164,45 @@ describe("procplant vegetation", () => {
     expect(estuary.map((entry) => entry.presetId)).toContain("mangroveRoots");
     expect(taiga[0]?.score).toBeGreaterThan(0);
     expect(estuary[0]?.score).toBeGreaterThan(0);
+  });
+
+  it("resolves authored biome cells into shared plant and building ecology", () => {
+    const ecology = resolveEcologySample({
+      seed: 7,
+      x: 144,
+      z: 288,
+      height: 3,
+      terrainPaint: "dirt",
+      biomeCell: { cx: 1, cz: 3, biome: "estuary", intensity: 1 },
+    });
+    const patch = biomePatchForEcology(ecology, 7);
+
+    expect(ecology.biome).toBe("estuary");
+    expect(["reedSedge", "mangroveRoots", "phiFern", "furGrass"]).toContain(patch?.primary);
+    expect(buildingMaterialForEcology(ecology, "simple-house")).toBe("brick-cottage");
+  });
+
+  it("lets climate and substrate split one terrain paint into different biomes", () => {
+    const coastal = resolveEcologySample({
+      seed: 11,
+      x: 0,
+      z: 0,
+      height: 0.5,
+      terrainPaint: "beach",
+    });
+    const alpine = resolveEcologySample({
+      seed: 11,
+      x: 0,
+      z: 900,
+      height: 36,
+      slope: 0.8,
+      terrainPaint: "rock",
+    });
+
+    expect(coastal.biome).toBe("coastal");
+    expect(alpine.biome).toBe("arctic-alpine");
+    expect(buildingMaterialForEcology(coastal, "simple-house")).toBe("weathered-shingle");
+    expect(buildingMaterialForEcology(alpine, "simple-house")).toBe("log-siding");
   });
 
   it("builds SpeedTree-like runtime packages with wind and LOD contracts", () => {

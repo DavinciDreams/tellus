@@ -1,4 +1,10 @@
+import * as THREE from "three";
 import type { TerrainPaintKind } from "./tellus-types";
+import {
+  resolveEcologyCommunity,
+  resolveEcologySample,
+  type EcologySample,
+} from "./tellus-ecology";
 import {
   defaultPlantEnvironment,
   hybridizePlantGenomes,
@@ -172,6 +178,37 @@ const PAINT_BIOMES: Record<TerrainPaintKind, ProcPlantBiomeCandidate[]> = {
   ],
 };
 
+const TREE_BACKEND_BY_PRESET: Partial<Record<string, ProcPlantTreeBackend>> = {
+  oakCanopy: { kind: "lsystem", species: "cambridgeOak", leafScaleMultiplier: 1.8, maxLeaves: 190, maxStems: 48, maxBranchDepth: 2 },
+  birchGrove: { kind: "lsystem", species: "silverBirch", leafScaleMultiplier: 2.9, maxLeaves: 170, maxStems: 40, maxBranchDepth: 2 },
+  acaciaUmbrella: { kind: "lsystem", species: "sassafras", leafScaleMultiplier: 2.0, maxLeaves: 150, maxStems: 42, maxBranchDepth: 2, foliageMass: 0.58, foliageSpread: 0.28 },
+  alpineFir: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 2.8, maxLeaves: 180, maxStems: 44, maxBranchDepth: 2 },
+  redwoodSpire: { kind: "lsystem", species: "douglasFir", leafScaleMultiplier: 2.4, maxLeaves: 180, maxStems: 44, maxBranchDepth: 2, foliageMass: 0.9, foliageTipBias: 0.34 },
+};
+
+const patchFromEcologyPreset = (
+  presetId: string,
+  sample: EcologySample,
+  weight: number,
+): ProcPlantBiomeCandidate => {
+  const treeBackend = TREE_BACKEND_BY_PRESET[presetId];
+  const isTree = Boolean(treeBackend);
+  const dryStress = 1 - sample.moisture;
+  const windStress = sample.wind;
+  return candidate(presetId, {
+    weight,
+    density: THREE.MathUtils.clamp((isTree ? 0.18 : 0.58) * (0.62 + sample.moisture * 0.58) * (1 - sample.salinity * 0.22), 0.06, 0.88),
+    scale: THREE.MathUtils.clamp((isTree ? 5.8 : 1.05) * (1 - dryStress * 0.18) * (1 - windStress * 0.12), isTree ? 2.8 : 0.62, isTree ? 8.4 : 2.3),
+    treeBackend,
+    environment: {
+      light: sample.light,
+      moisture: sample.moisture,
+      crowding: THREE.MathUtils.clamp(sample.biomeWeights["tropical-rain-forest"] ?? sample.biomeWeights["temperate-rain-forest"] ?? 0.32, 0.16, 0.82),
+      biomeWarmth: sample.warmth,
+    },
+  });
+};
+
 const pickCandidate = (
   candidates: ProcPlantBiomeCandidate[],
   seed: number,
@@ -199,6 +236,34 @@ export const biomePatchForPaint = (
   if (!base) return null;
   return { version: 1, seed, ...base };
 };
+
+export const biomePatchForEcology = (
+  ecology: EcologySample,
+  seed: number,
+): ProcPlantBiomePatch | null => {
+  const community = resolveEcologyCommunity(ecology, 6);
+  const candidates = community.map((entry) => patchFromEcologyPreset(entry.presetId, ecology, entry.score));
+  const fallback = ecology.terrainPaint ? PAINT_BIOMES[ecology.terrainPaint] ?? [] : [];
+  const base = pickCandidate(candidates.length > 0 ? candidates : fallback, seed);
+  if (!base) return null;
+  return { version: 1, seed, ...base };
+};
+
+export const biomePatchForPaintEcology = (
+  paint: TerrainPaintKind | null,
+  seed: number,
+): ProcPlantBiomePatch | null =>
+  biomePatchForEcology(
+    resolveEcologySample({
+      seed,
+      x: 0,
+      z: 0,
+      height: paint === "snow" ? 30 : paint === "beach" ? 0.8 : 4,
+      slope: paint === "rock" ? 0.72 : 0.12,
+      terrainPaint: paint,
+    }),
+    seed,
+  ) ?? biomePatchForPaint(paint, seed);
 
 export const genomeForBiomePatch = (patch: ProcPlantBiomePatch): ProcPlantGenome => {
   const primary = procPlantPresets[patch.primary] ?? procPlantPresets.furGrass;
