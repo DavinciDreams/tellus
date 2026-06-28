@@ -627,12 +627,12 @@ function addCathedralWindows(
   for (let row = 0; row < rows; row++) {
     const y = yStart + row * yStep;
     for (const x of frontXs) {
-      addNineLiteWindow(group, x, y + 0.5, depth / 2 + 0.07, 0, mats, mats.trim, 3, 5, 1.0, 2.45);
-      addNineLiteWindow(group, x, y + 0.5, -depth / 2 - 0.07, Math.PI, mats, mats.trim, 3, 5, 1.0, 2.45);
+      addNineLiteWindow(group, x, y + 0.34, depth / 2 + 0.07, 0, mats, mats.trim, 3, 4, 1.0, 2.1);
+      addNineLiteWindow(group, x, y + 0.34, -depth / 2 - 0.07, Math.PI, mats, mats.trim, 3, 4, 1.0, 2.1);
     }
     for (const z of sideZs) {
-      addNineLiteWindow(group, width / 2 + 0.07, y + 0.5, z, Math.PI / 2, mats, mats.trim, 3, 5, 1.0, 2.45);
-      addNineLiteWindow(group, -width / 2 - 0.07, y + 0.5, z, -Math.PI / 2, mats, mats.trim, 3, 5, 1.0, 2.45);
+      addNineLiteWindow(group, width / 2 + 0.07, y + 0.34, z, Math.PI / 2, mats, mats.trim, 3, 4, 1.0, 2.1);
+      addNineLiteWindow(group, -width / 2 - 0.07, y + 0.34, z, -Math.PI / 2, mats, mats.trim, 3, 4, 1.0, 2.1);
     }
   }
 }
@@ -707,7 +707,7 @@ function addBuildingGridWindow(
   mats: ReturnType<typeof createMaterials>,
 ) {
   if (recipe.id === "cathedral") {
-    addNineLiteWindow(group, x, y + 0.58, z, rotationY, mats, mats.trim, 3, 5, 1.05, 2.55);
+    addNineLiteWindow(group, x, y + 0.34, z, rotationY, mats, mats.trim, 3, 4, 1.0, 2.1);
     return;
   }
   if (recipe.id === "church") {
