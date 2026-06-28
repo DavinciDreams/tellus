@@ -263,7 +263,8 @@ function createMaterials(
   const rockOnly = rockOnlyBuilding(recipeId);
   const medievalStyle = Boolean(recipeId) && !rockOnly;
   const wall = make(medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall);
-  const accentColor = medievalStyle ? MEDIEVAL_TIMBER_COLOR : palette.accent;
+  const timberDetail = medievalStyle || rockOnly;
+  const accentColor = timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
   const baseWallColor = simpleHouse
     ? new THREE.Color(0x8b8d86).lerp(new THREE.Color(0xffffff), 0.08)
     : new THREE.Color(palette.foundation).lerp(new THREE.Color(0xffffff), 0.32);
@@ -285,7 +286,7 @@ function createMaterials(
     accent: make(accentColor),
     roof,
     roofDetail: make(roofDetailColor.getHex(), 0.92),
-    trim: make(medievalStyle ? MEDIEVAL_TIMBER_COLOR : rockOnly ? palette.accent : palette.trim, 0.58),
+    trim: make(timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.trim, 0.58),
     foundation,
     glass: new THREE.MeshStandardMaterial({
       color: 0x9fc7d3,
