@@ -182,6 +182,20 @@ describe("procplant vegetation", () => {
     expect(buildingMaterialForEcology(ecology, "simple-house")).toBe("brick-cottage");
   });
 
+  it("normalizes legacy server biome names into ecology biomes", () => {
+    const ecology = resolveEcologySample({
+      seed: 9,
+      x: 0,
+      z: 0,
+      height: 8,
+      terrainPaint: "meadow",
+      biomeCell: { cx: 0, cz: 0, biome: "forest", intensity: 1 },
+    });
+
+    expect(ecology.biome).toBe("temperate-rain-forest");
+    expect(buildingMaterialForEcology(ecology, "simple-house")).toMatch(/shingle|timber-frame/);
+  });
+
   it("lets climate and substrate split one terrain paint into different biomes", () => {
     const coastal = resolveEcologySample({
       seed: 11,

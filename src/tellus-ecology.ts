@@ -56,8 +56,12 @@ export const normalizeEcologyBiomeId = (value: string | null | undefined): Ecolo
   if ((ECOLOGY_BIOMES as string[]).includes(normalized)) return normalized as EcologyBiomeId;
   if (normalized === "wetland" || normalized === "mangrove" || normalized === "marsh") return "estuary";
   if (normalized === "alpine" || normalized === "arctic" || normalized === "mountain") return "arctic-alpine";
-  if (normalized === "temperate-forest" || normalized === "rain-forest") return "temperate-rain-forest";
+  if (normalized === "forest" || normalized === "temperate-forest" || normalized === "rain-forest") return "temperate-rain-forest";
   if (normalized === "tropical-forest" || normalized === "jungle") return "tropical-rain-forest";
+  if (normalized === "meadow" || normalized === "prairie" || normalized === "steppe") return "grassland";
+  if (normalized === "beach" || normalized === "shore" || normalized === "cove") return "coastal";
+  if (normalized === "snow" || normalized === "ice" || normalized === "glacier") return "arctic-alpine";
+  if (normalized === "alien" || normalized === "lichen") return "tundra";
   return null;
 };
 
@@ -113,7 +117,7 @@ export const resolveEcologySample = (input: EcologySampleInput): EcologySample =
   const weights: Partial<Record<EcologyBiomeId, number>> = {};
   const authoredBiome = normalizeEcologyBiomeId(input.biomeCell?.becoming ?? input.biomeCell?.biome);
 
-  if (authoredBiome) addWeight(weights, authoredBiome, input.biomeCell?.intensity ?? 1.25);
+  if (authoredBiome) addWeight(weights, authoredBiome, Math.max(2.5, (input.biomeCell?.intensity ?? 1) * 2.5));
   if (salinity > 0.35) addWeight(weights, coastal ? "coastal" : "estuary", salinity);
   if (moisture > 0.76 && elevation < 0.32) addWeight(weights, warmth > 0.62 ? "tropical-rain-forest" : "temperate-rain-forest", moisture);
   if (moisture > 0.82 && salinity > 0.2) addWeight(weights, "estuary", moisture * salinity);
