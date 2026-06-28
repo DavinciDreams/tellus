@@ -28,7 +28,8 @@ export type BuildingMaterialStyle =
   | "timber-frame"
   | "plaster"
   | "stucco"
-  | "adobe";
+  | "adobe"
+  | "log-siding";
 
 export type BuildingLightingStyle = "none" | "warm" | "lantern" | "moonlit" | "bright";
 
@@ -81,6 +82,10 @@ const SLATE_ROOF_COLOR = 0x66717a;
 const ADOBE_WALL_COLOR = 0xb88755;
 const ADOBE_ROOF_COLOR = 0xa34c2f;
 const ADOBE_STONE_BASE_COLOR = 0xc2a772;
+const LOG_WALL_COLOR = 0x7b5637;
+const LOG_DETAIL_COLOR = 0x4f3324;
+const LOG_ROOF_COLOR = 0x6b4a2f;
+const LOG_STONE_BASE_COLOR = 0x81817a;
 const buildingTextureCache = new Map<string, THREE.Texture>();
 
 export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label: string }> = [
@@ -93,6 +98,7 @@ export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label
   { id: "plaster", label: "Plaster" },
   { id: "stucco", label: "Stucco" },
   { id: "adobe", label: "Adobe" },
+  { id: "log-siding", label: "Log" },
 ];
 
 export const BUILDING_LIGHTING_OPTIONS: Array<{ id: BuildingLightingStyle; label: string }> = [
@@ -252,6 +258,7 @@ function materialPalette(style: Exclude<BuildingMaterialStyle, "auto">) {
     plaster: { wall: 0xd9caa5, accent: 0x8d7758, roof: 0x6b3b36, trim: 0x4d3828, foundation: 0x777165 },
     stucco: { wall: 0xcfc2a0, accent: 0x8a806d, roof: 0x6b4a3a, trim: 0xf0e0bd, foundation: 0x747064 },
     adobe: { wall: ADOBE_WALL_COLOR, accent: MEDIEVAL_TIMBER_COLOR, roof: ADOBE_ROOF_COLOR, trim: MEDIEVAL_TIMBER_COLOR, foundation: ADOBE_STONE_BASE_COLOR },
+    "log-siding": { wall: LOG_WALL_COLOR, accent: LOG_DETAIL_COLOR, roof: LOG_ROOF_COLOR, trim: LOG_DETAIL_COLOR, foundation: LOG_STONE_BASE_COLOR },
   };
   return palettes[style];
 }
@@ -298,14 +305,17 @@ function createMaterials(
   const simpleHouse = recipeId === "simple-house";
   const rockOnly = rockOnlyBuilding(recipeId);
   const adobeStyle = materialStyle === "adobe" && !rockOnly;
+  const logStyle = materialStyle === "log-siding" && !rockOnly;
   const medievalStyle = Boolean(recipeId) && !rockOnly;
-  const wall = make(adobeStyle ? ADOBE_WALL_COLOR : medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall);
+  const wall = make(logStyle ? LOG_WALL_COLOR : adobeStyle ? ADOBE_WALL_COLOR : medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall);
   const timberDetail = medievalStyle || rockOnly;
-  const accentColor = timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
+  const accentColor = logStyle ? LOG_DETAIL_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
   const baseWallColor = simpleHouse
-    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : 0x8b8d86).lerp(new THREE.Color(0xffffff), adobeStyle ? 0.06 : 0.08)
+    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : logStyle ? LOG_STONE_BASE_COLOR : 0x8b8d86).lerp(new THREE.Color(0xffffff), adobeStyle || logStyle ? 0.06 : 0.08)
     : adobeStyle
       ? new THREE.Color(ADOBE_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.05)
+    : logStyle
+      ? new THREE.Color(LOG_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.06)
     : new THREE.Color(palette.foundation).lerp(new THREE.Color(0xffffff), 0.32);
   const baseWall = make(baseWallColor.getHex(), 0.84);
   const foundation = make(medievalStyle ? MEDIEVAL_TIMBER_COLOR : palette.foundation, 0.82);
@@ -316,9 +326,9 @@ function createMaterials(
   if (stone && rockOnly) {
     applySharedAlbedo(foundation, SHARED_STONE_ALBEDO_URL, [2.2, 2.2]);
   }
-  const roofTint = new THREE.Color(adobeStyle ? ADOBE_ROOF_COLOR : SLATE_ROOF_COLOR);
+  const roofTint = new THREE.Color(logStyle ? LOG_ROOF_COLOR : adobeStyle ? ADOBE_ROOF_COLOR : SLATE_ROOF_COLOR);
   const roof = make(roofTint.getHex(), 0.9);
-  const roofDetailColor = roofTint.clone().lerp(new THREE.Color(adobeStyle ? 0x5f2418 : 0x252b31), 0.55);
+  const roofDetailColor = roofTint.clone().lerp(new THREE.Color(logStyle ? 0x322016 : adobeStyle ? 0x5f2418 : 0x252b31), 0.55);
   return {
     wall,
     baseWall,
@@ -327,6 +337,8 @@ function createMaterials(
     roofDetail: make(roofDetailColor.getHex(), 0.92),
     trim: make(timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.trim, 0.58),
     foundation,
+    logDetail: make(LOG_DETAIL_COLOR, 0.86),
+    logHighlight: make(0x9b7250, 0.82),
     glass: new THREE.MeshStandardMaterial({
       color: 0x9fc7d3,
       roughness: 0.18,
@@ -445,7 +457,14 @@ function addWallRelief(
     addBox(group, [0.13, 0.13, depth + 0.1], [leftX, yBand, 0], mats.accent, false);
     addBox(group, [0.13, 0.13, depth + 0.1], [rightX, yBand, 0], mats.accent, false);
   }
+  if (materialStyle === "log-siding" && !rockOnlyBuilding(recipe.id)) {
+    addLogSiding(group, width, depth, height, recipe, mats);
+  }
   if (recipe.id === "simple-house") {
+    if (materialStyle === "log-siding") {
+      addSimpleHouseLogTrim(group, width, depth, height, mats);
+      return;
+    }
     addSimpleHouseTimbers(group, width, depth, height, mats);
     return;
   }
@@ -455,6 +474,7 @@ function addWallRelief(
     materialStyle === "wood-plank" ||
     materialStyle === "plaster" ||
     materialStyle === "stucco" ||
+    materialStyle === "log-siding" ||
     recipe.id === "inn" ||
     recipe.id === "store" ||
     recipe.id === "guild-hall";
@@ -485,6 +505,77 @@ function addWallRelief(
       addDiagonalBrace(group, x + 0.24, 0.92, backZ - 0.035, Math.PI, mats.accent, 0.58);
     }
   }
+}
+
+function addLogSiding(
+  group: THREE.Group,
+  width: number,
+  depth: number,
+  height: number,
+  recipe: TellusBuildingRecipe,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const lowerBodyHeight = recipe.id === "simple-house"
+    ? Math.min(SIMPLE_HOUSE_STONE_SKIRT_HEIGHT, height * 0.36)
+    : height >= 7.2
+      ? 2.65
+      : Math.min(0.95, height * 0.28);
+  const yStart = 0.28 + lowerBodyHeight + 0.18;
+  const yEnd = 0.28 + height - 0.42;
+  const frontZ = depth / 2 + 0.122;
+  const backZ = -depth / 2 - 0.122;
+  const leftX = -width / 2 - 0.122;
+  const rightX = width / 2 + 0.122;
+  const spacing = 0.28;
+  const courseCount = Math.max(3, Math.floor((yEnd - yStart) / spacing));
+  for (let i = 0; i <= courseCount; i++) {
+    const y = yStart + i * spacing;
+    const mat = i % 2 === 0 ? mats.logDetail : mats.logHighlight;
+    addBox(group, [width * 0.96, 0.11, 0.13], [0, y, frontZ], mat, false);
+    addBox(group, [width * 0.96, 0.11, 0.13], [0, y, backZ], mat, false);
+    addBox(group, [0.13, 0.11, depth * 0.96], [leftX, y, 0], mat, false);
+    addBox(group, [0.13, 0.11, depth * 0.96], [rightX, y, 0], mat, false);
+  }
+  const cornerHeight = Math.max(0.8, yEnd - yStart + 0.42);
+  const cornerY = yStart + cornerHeight / 2 - 0.1;
+  for (const x of [-width / 2 + 0.18, width / 2 - 0.18]) {
+    addBox(group, [0.2, cornerHeight, 0.18], [x, cornerY, frontZ + 0.02], mats.accent, false);
+    addBox(group, [0.2, cornerHeight, 0.18], [x, cornerY, backZ - 0.02], mats.accent, false);
+  }
+  for (const z of [-depth / 2 + 0.18, depth / 2 - 0.18]) {
+    addBox(group, [0.18, cornerHeight, 0.2], [leftX - 0.02, cornerY, z], mats.accent, false);
+    addBox(group, [0.18, cornerHeight, 0.2], [rightX + 0.02, cornerY, z], mats.accent, false);
+  }
+}
+
+function addSimpleHouseLogTrim(
+  group: THREE.Group,
+  width: number,
+  depth: number,
+  height: number,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const yTop = 0.28 + height;
+  const ySkirtTop = 0.28 + Math.min(SIMPLE_HOUSE_STONE_SKIRT_HEIGHT, height * 0.36);
+  const yUpperBeam = yTop - 0.56;
+  const frontZ = depth / 2 + 0.12;
+  const backZ = -depth / 2 - 0.12;
+  const leftX = -width / 2 - 0.12;
+  const rightX = width / 2 + 0.12;
+  const doorBeamGap = 1.65;
+  const frontBeamSpan = (width + 0.2 - doorBeamGap) / 2;
+  const frontBeamOffset = doorBeamGap / 2 + frontBeamSpan / 2;
+  addBox(group, [frontBeamSpan, 0.16, 0.16], [-frontBeamOffset, ySkirtTop, frontZ], mats.accent, false);
+  addBox(group, [frontBeamSpan, 0.16, 0.16], [frontBeamOffset, ySkirtTop, frontZ], mats.accent, false);
+  addBox(group, [width + 0.2, 0.16, 0.16], [0, ySkirtTop, backZ], mats.accent, false);
+  addBox(group, [0.16, 0.16, depth + 0.2], [leftX, ySkirtTop, 0], mats.accent, false);
+  addBox(group, [0.16, 0.16, depth + 0.2], [rightX, ySkirtTop, 0], mats.accent, false);
+  addBox(group, [width + 0.2, 0.16, 0.16], [0, yUpperBeam, frontZ], mats.accent, false);
+  addBox(group, [width + 0.2, 0.16, 0.16], [0, yUpperBeam, backZ], mats.accent, false);
+  addBox(group, [0.16, 0.16, depth + 0.2], [leftX, yUpperBeam, 0], mats.accent, false);
+  addBox(group, [0.16, 0.16, depth + 0.2], [rightX, yUpperBeam, 0], mats.accent, false);
+  addGableSunburst(group, width, yUpperBeam, yTop, frontZ, mats, "up");
+  addGableSunburst(group, width, yUpperBeam, yTop, backZ, mats, "down");
 }
 
 function addSimpleHouseTimbers(
