@@ -176,19 +176,17 @@ a local/procedural placeholder).
 **`delete_asset`** — remove a placed asset from the world by id.
 - args: `targetId` (from `observe`/`list_assets_near`/`get_world_summary`).
 
-### Companions & mounts
+### Companions (mount & pet)
 
-The shared Tellus action vocabulary supports pets and mounts for agents as well as humans. If your
-server's `tools/list` exposes these tools, use them with ids from `observe` or `list_assets_near`:
+**`mount_asset`** — ride a placed asset (a mount/vehicle). You become attached to it; your `mountedThingId`
+rides your presence so other clients see you on it. Returns your position + `mountedThingId`.
+- args: `targetId` (an `id` from `observe`/`list_assets_near`/`get_world_summary`).
 
-**`mount_asset`** — ride a mountable placed animal or vehicle.
-- args: `targetId`.
+**`dismount`** — get off whatever you're currently riding (no-op if you're not mounted). No args.
 
-**`dismount`** — step off the current mount.
-- args: none.
-
-**`set_asset_pet`** — make a placed animal follow you as a companion, or clear that relationship.
-- args: `targetId`, `isPet` (`true` to follow, `false` to stop following).
+**`set_asset_pet`** — mark a placed asset as your pet/follower, or clear it. The pet assignment is **durable
+world state** (`petOwnerId` on the thing, visible in `list_assets_near`).
+- args: `targetId`, `isPet` (default `true`; `false` clears the pet ownership).
 
 ### Portals (travel between worlds)
 
