@@ -804,8 +804,9 @@ function addGabledRoof(
   addRoofShingles(group, -(width / 4 + overhang * 0.24), yBase + roofHeight / 2, angle, slope, depth + overhang * 2, -1, mats);
   addRoofShingles(group, width / 4 + overhang * 0.24, yBase + roofHeight / 2, -angle, slope, depth + overhang * 2, 1, mats);
   addBox(group, [0.22, 0.18, depth + overhang * 2.12], [0, yBase + roofHeight + 0.02, 0], mats.trim, false);
-  addBox(group, [width + overhang * 2, 0.16, 0.18], [0, yBase + 0.06, depth / 2 + overhang], mats.trim, false);
-  addBox(group, [width + overhang * 2, 0.16, 0.18], [0, yBase + 0.06, -depth / 2 - overhang], mats.trim, false);
+  const gableEndBeamY = yBase + (recipe.id === "cathedral" ? 0.55 : 0.06);
+  addBox(group, [width + overhang * 2, 0.16, 0.18], [0, gableEndBeamY, depth / 2 + overhang], mats.trim, false);
+  addBox(group, [width + overhang * 2, 0.16, 0.18], [0, gableEndBeamY, -depth / 2 - overhang], mats.trim, false);
 
   for (const z of [-depth / 2 - 0.04, depth / 2 + 0.04]) {
     const gable = new THREE.Mesh(new THREE.BufferGeometry(), mats.wall);
