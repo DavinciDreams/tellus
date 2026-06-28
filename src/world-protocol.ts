@@ -125,6 +125,8 @@ export interface WorldPortal {
   createdBy?: string;
   createdAt?: string;
   anchorThingId?: string;
+  /** Local-space offset from the anchor asset origin. Older anchored portals omit this and use position. */
+  anchorOffset?: Vec3;
 }
 
 export interface WorldProcPlantPlacement {

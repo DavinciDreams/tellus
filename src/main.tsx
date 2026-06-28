@@ -10,6 +10,7 @@ import {
   Building2,
   CircleHelp,
   Globe2,
+  ImagePlus,
   Map as MapIcon,
   MessageCircle,
   Mic,
@@ -48,11 +49,12 @@ import {
   BUILDING_MATERIAL_OPTIONS,
   PROCEDURAL_BUILDING_CATALOG,
   makeProceduralBuildingArchetypeId,
+  proceduralBuildingDimensions,
   type BuildingLightingStyle,
   type BuildingMaterialStyle,
   type ProceduralBuildingType,
 } from "./tellus-proc-buildings";
-import { createAmbientPhysics, resolveObstacles, type ObstacleCircle } from "./tellus-physics";
+import { createAmbientPhysics, resolveObstacles, resolveRectObstacles, type ObstacleCircle, type ObstacleRect } from "./tellus-physics";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
@@ -381,6 +383,7 @@ function createTellusWorld(
   // TELLUS INFINITY portals: the current world's portals + a one-shot world.portal.entered signal the React
   // layer consumes to switch worlds (with spawn). Both ride the snapshot bridge.
   let worldPortals: WorldPortal[] = [];
+  const portalAnchorOffsets = new Map<string, Vec3>();
   let pendingPortalSwitch: PortalEntered | null = null;
   // TELLUS INFINITY biomes: the world's biome cells keyed "cx:cz" (diff-merged from world.biome.patch).
   const worldBiomeCells = new Map<string, WorldBiomeCell>();
@@ -1579,6 +1582,7 @@ function createTellusWorld(
   const pendingPortalWarnedIds = new Set<string>();
   const pendingDeletedPortals = new Map<string, WorldPortal>();
   let lastPortalEnterAt = 0;
+  let lastPortalSelectAt = 0;
   let insidePortalId: string | null = null;
   // Set on spawn/warp/interior-entry; blocks portal auto-enter until the player is clear of ALL
   // portals once (prevents the "spawn on the door → bounce back" loop, robust to async portal load).
@@ -1667,6 +1671,17 @@ function createTellusWorld(
   const makeWallDoorMarker = (pending = false): THREE.Object3D => {
     const g = new THREE.Group();
     g.userData.portalMarkerKey = `wall-door:${pending ? "pending" : "ready"}`;
+    const pickVolume = new THREE.Mesh(
+      new THREE.BoxGeometry(2.7, 3.3, 0.72),
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.001,
+        depthWrite: false,
+      }),
+    );
+    pickVolume.position.set(0, 1.65, 0.08);
+    pickVolume.userData.portalDoorPickVolume = true;
     const frameMat = new THREE.MeshStandardMaterial({
       color: pending ? 0x8fd5ff : 0x5e3b1f,
       roughness: 0.72,
@@ -1704,7 +1719,7 @@ function createTellusWorld(
     threshold.position.set(0, 0.04, 0.16);
     const glow = new THREE.Mesh(new THREE.PlaneGeometry(width * 1.12, height * 1.04), glowMat);
     glow.position.set(0, height / 2, 0.02);
-    g.add(glow, visual, left, right, top, threshold);
+    g.add(pickVolume, glow, visual, left, right, top, threshold);
     return g;
   };
   const interiorDoorSpawnForSceneUrl = (sceneUrl: string): Vec3 => {
@@ -1716,19 +1731,67 @@ function createTellusWorld(
     Boolean(interiorObject && p.target.kind === "world");
   const isDoorSurfacePortal = (p: WorldPortal): boolean =>
     Boolean(isWallDoorPortal(p) || p.target.kind === "interior" || typeof p.rotation?.y === "number");
+  const portalAnchorThing = (p: WorldPortal): GeneratedThing | undefined =>
+    p.anchorThingId ? generated.find((thing) => thing.id === p.anchorThingId) : undefined;
+  const rotateXZ = (point: Vec3, radians: number): Vec3 => {
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    return {
+      x: point.x * cos - point.z * sin,
+      y: point.y,
+      z: point.x * sin + point.z * cos,
+    };
+  };
+  const portalAnchorOffset = (p: WorldPortal, anchor: GeneratedThing): Vec3 => {
+    const cached = portalAnchorOffsets.get(p.id);
+    if (
+      cached &&
+      Number.isFinite(cached.x) &&
+      Number.isFinite(cached.y) &&
+      Number.isFinite(cached.z)
+    ) {
+      return cached;
+    }
+    if (
+      p.anchorOffset &&
+      Number.isFinite(p.anchorOffset.x) &&
+      Number.isFinite(p.anchorOffset.y) &&
+      Number.isFinite(p.anchorOffset.z)
+    ) {
+      portalAnchorOffsets.set(p.id, { ...p.anchorOffset });
+      return p.anchorOffset;
+    }
+    const derived = {
+      x: p.position.x - anchor.position.x,
+      y: p.position.y - anchor.position.y,
+      z: p.position.z - anchor.position.z,
+    };
+    portalAnchorOffsets.set(p.id, derived);
+    return derived;
+  };
   const portalAnchorPosition = (p: WorldPortal): Vec3 => {
-    const anchor = p.anchorThingId
-      ? generated.find((thing) => thing.id === p.anchorThingId)
-      : undefined;
-    return anchor?.position ?? p.position;
+    const anchor = portalAnchorThing(p);
+    if (!anchor) return p.position;
+    const offset = portalAnchorOffset(p, anchor);
+    const worldOffset = rotateXZ(offset, anchor.rotationY ?? 0);
+    return {
+      x: anchor.position.x + worldOffset.x,
+      y: anchor.position.y + worldOffset.y,
+      z: anchor.position.z + worldOffset.z,
+    };
+  };
+  const portalRotationY = (p: WorldPortal): number => {
+    const base = typeof p.rotation?.y === "number" ? p.rotation.y : 0;
+    const anchor = portalAnchorThing(p);
+    return anchor ? (anchor.rotationY ?? 0) + base : base;
   };
   const portalDoorSurfacePose = (p: WorldPortal): { position: Vec3; rotationY: number } => {
     const position = portalAnchorPosition(p);
     if (!interiorObject || !isWallDoorPortal(p)) {
-      return { position, rotationY: typeof p.rotation?.y === "number" ? p.rotation.y : 0 };
+      return { position, rotationY: portalRotationY(p) };
     }
     if (typeof p.rotation?.y === "number") {
-      return { position, rotationY: p.rotation.y };
+      return { position, rotationY: portalRotationY(p) };
     }
     const bounds = interiorPlacementBounds(1.4);
     if (!bounds) return { position: interiorPlacementPosition(position.x, position.z), rotationY: 0 };
@@ -1740,6 +1803,20 @@ function createTellusWorld(
     };
   };
   const markPortalReady = (p: WorldPortal) => {
+    if (p.anchorThingId && p.anchorOffset) {
+      portalAnchorOffsets.set(p.id, { ...p.anchorOffset });
+    } else if (!p.anchorThingId) {
+      portalAnchorOffsets.delete(p.id);
+    } else if (!portalAnchorOffsets.has(p.id)) {
+      const anchor = portalAnchorThing(p);
+      if (anchor) {
+        portalAnchorOffsets.set(p.id, {
+          x: p.position.x - anchor.position.x,
+          y: p.position.y - anchor.position.y,
+          z: p.position.z - anchor.position.z,
+        });
+      }
+    }
     const wasPending = pendingPortalIds.delete(p.id);
     pendingPortalStartedAt.delete(p.id);
     pendingPortalWarnedIds.delete(p.id);
@@ -1754,12 +1831,17 @@ function createTellusWorld(
   };
   const mergePortalSnapshot = (snapshotPortals: WorldPortal[]) => {
     const byId = new Map<string, WorldPortal>();
+    const snapshotIds = new Set<string>();
     for (const p of snapshotPortals) {
+      snapshotIds.add(p.id);
       markPortalReady(p);
       byId.set(p.id, p);
     }
     for (const p of worldPortals) {
       if (pendingPortalIds.has(p.id) && !byId.has(p.id)) byId.set(p.id, p);
+    }
+    for (const id of portalAnchorOffsets.keys()) {
+      if (!snapshotIds.has(id) && !pendingPortalIds.has(id)) portalAnchorOffsets.delete(id);
     }
     worldPortals = Array.from(byId.values());
   };
@@ -1778,6 +1860,8 @@ function createTellusWorld(
     return best ?? (Number.isFinite(position.y) ? position.y : SEA_LEVEL);
   };
   const announcePortalSelection = (portalId: string) => {
+    lastPortalSelectAt = performance.now();
+    insidePortalId = portalId;
     window.dispatchEvent(new CustomEvent("tellus:portal-selected", { detail: portalId }));
   };
   const syncPortalMarkers = () => {
@@ -1811,10 +1895,11 @@ function createTellusWorld(
       const y = pose ? position.y : portalGroundY(p) + 0.05;
       marker.position.set(position.x, y, position.z);
       marker.rotation.y = pose?.rotationY ?? 0;
+      marker.scale.setScalar(doorSurface ? clamp(p.radius / 1.7, 0.55, 2.4) : 1);
       const triggerRing = marker.children.find((child) => child.userData.portalTriggerRing);
       if (triggerRing) {
         const r = Math.max(1.2, p.radius);
-        triggerRing.scale.set(r, 1, r);
+        triggerRing.scale.set(r / marker.scale.x, 1, r / marker.scale.z);
       }
     }
     for (const [id, marker] of portalMarkers) {
@@ -1838,13 +1923,14 @@ function createTellusWorld(
     const rightZ = -Math.sin(pose.rotationY);
     const forward = dx * normalX + dz * normalZ;
     const lateral = dx * rightX + dz * rightZ;
+    const heightScale = clamp(p.radius / 1.7, 0.55, 2.4);
     const halfWidth = Math.max(0.85, Math.min(1.35, p.radius * 0.62));
     return (
       Math.abs(lateral) <= halfWidth &&
       forward >= -0.42 &&
       forward <= 0.72 &&
       point.y >= pose.position.y - 0.35 &&
-      point.y <= pose.position.y + 3.35
+      point.y <= pose.position.y + 3.35 * heightScale
     );
   };
   const doorSurfacePortalContainsVisitor = (p: WorldPortal): boolean =>
@@ -1890,6 +1976,10 @@ function createTellusWorld(
     // player is clear of every portal — then normal proximity entry resumes.
     if (portalSpawnGuard) {
       if (!nearId) portalSpawnGuard = false;
+      insidePortalId = nearId;
+      return;
+    }
+    if (now - lastPortalSelectAt < 1400) {
       insidePortalId = nearId;
       return;
     }
@@ -2307,7 +2397,12 @@ function createTellusWorld(
     })),
     selectedThingId,
     sailingThingId,
-    portals: worldPortals.map((p) => ({ ...p, position: { ...p.position }, target: { ...p.target } })),
+    portals: worldPortals.map((p) => ({
+      ...p,
+      position: { ...p.position },
+      anchorOffset: p.anchorOffset ?? (p.anchorThingId ? portalAnchorOffsets.get(p.id) : undefined),
+      target: { ...p.target },
+    })),
     portalSwitch: pendingPortalSwitch ?? undefined,
     biomeCells: worldBiomeCells.size > 0 ? Array.from(worldBiomeCells.values()).map((c) => ({ ...c })) : undefined,
   });
@@ -3127,6 +3222,7 @@ function createTellusWorld(
         pendingPortalStartedAt.delete(portalDeleted);
         pendingPortalWarnedIds.delete(portalDeleted);
         pendingDeletedPortals.delete(portalDeleted);
+        portalAnchorOffsets.delete(portalDeleted);
         worldPortals = worldPortals.filter((p) => p.id !== portalDeleted);
         syncPortalMarkers();
         publish();
@@ -3142,11 +3238,15 @@ function createTellusWorld(
           pendingPortalIds.clear();
           pendingPortalStartedAt.clear();
           pendingPortalWarnedIds.clear();
+          for (const id of rejectedPendingIds) portalAnchorOffsets.delete(id);
           worldPortals = worldPortals.filter((p) => !rejectedPendingIds.has(p.id));
           syncPortalMarkers();
         }
         if (parsed.actionType === "world.portal.delete" || parsed.actionType === "portal.delete") {
           for (const portal of pendingDeletedPortals.values()) {
+            if (portal.anchorThingId && portal.anchorOffset) {
+              portalAnchorOffsets.set(portal.id, { ...portal.anchorOffset });
+            }
             const byId = new Map(worldPortals.map((p) => [p.id, p]));
             byId.set(portal.id, portal);
             worldPortals = Array.from(byId.values());
@@ -4070,7 +4170,16 @@ function createTellusWorld(
   const terrainRayOrigin = new THREE.Vector3();
   const terrainRayDirection = new THREE.Vector3(0, -1, 0);
   const terrainRayTargets: THREE.Object3D[] = [];
-  const footprintCache = new Map<string, { radius: number; height: number }>();
+  type ThingFootprint = {
+    radius: number;
+    height: number;
+    width: number;
+    depth: number;
+    centerX: number;
+    centerZ: number;
+    source: "procedural-building" | "rendered";
+  };
+  const footprintCache = new Map<string, ThingFootprint>();
 
   const interiorPlacementBounds = (margin = 0): { minX: number; maxX: number; minZ: number; maxZ: number } | null => {
     const raw = interiorObject?.children[0]?.userData.placementBounds ?? interiorObject?.userData.placementBounds;
@@ -4191,16 +4300,54 @@ function createTellusWorld(
       ? interiorPlacementPosition(x, z, fallback?.y ?? visitorPosition.y)
       : groundedPosition(x, z, fallback);
 
-  const thingFootprint = (thing: GeneratedThing): { radius: number; height: number } | null => {
-    const mesh = generatedMeshes.get(thing.id);
-    if (!mesh) return null;
-    const key = `${thing.id}:${thing.scale.toFixed(2)}`;
+  const thingFootprint = (thing: GeneratedThing): ThingFootprint | null => {
+    const proceduralModel = parseProceduralModelUrl(thing.modelUrl ?? "");
+    const proceduralBuilding = proceduralModel?.building;
+    const key = [
+      thing.id,
+      thing.modelUrl ?? "",
+      thing.scale.toFixed(3),
+      (thing.rotationY ?? 0).toFixed(3),
+    ].join(":");
     const cached = footprintCache.get(key);
     if (cached) return cached;
+    const mesh = generatedMeshes.get(thing.id);
+    if (proceduralBuilding) {
+      const dims = proceduralBuildingDimensions(proceduralBuilding.recipeId, proceduralModel.seed);
+      if (dims) {
+        const visualScale = mesh
+          ? Math.max(mesh.scale.x, mesh.scale.z)
+          : assetTargetHeight(thing) / Math.max(0.01, dims.bodyHeight);
+        const width = dims.width * visualScale;
+        const depth = dims.depth * visualScale;
+        const fp: ThingFootprint = {
+          radius: Math.max(width, depth) / 2,
+          height: dims.bodyHeight * visualScale,
+          width,
+          depth,
+          centerX: thing.position.x,
+          centerZ: thing.position.z,
+          source: "procedural-building",
+        };
+        footprintCache.set(key, fp);
+        if (footprintCache.size > 600) footprintCache.clear();
+        return fp;
+      }
+    }
+    if (!mesh) return null;
     const box = measureModelBounds(mesh); // skinning-aware: bind-pose boxes of animated models are bogus
     if (box.isEmpty()) return null;
     const size = box.getSize(new THREE.Vector3());
-    const fp = { radius: Math.max(size.x, size.z) / 2, height: size.y };
+    const center = box.getCenter(new THREE.Vector3());
+    const fp: ThingFootprint = {
+      radius: Math.max(size.x, size.z) / 2,
+      height: size.y,
+      width: size.x,
+      depth: size.z,
+      centerX: center.x,
+      centerZ: center.z,
+      source: "rendered",
+    };
     footprintCache.set(key, fp);
     if (footprintCache.size > 600) footprintCache.clear();
     return fp;
@@ -5438,11 +5585,129 @@ function createTellusWorld(
       sendPortalUpsert(
         {
           ...portal,
-          position: { ...thing.position },
+          position: portalAnchorPosition(portal),
         },
         { pending: false },
       );
     }
+  };
+
+  const setPortalWorldPosition = (portal: WorldPortal, position: Vec3): WorldPortal => {
+    const anchor = portalAnchorThing(portal);
+    if (!anchor) return { ...portal, position };
+    const worldOffset = {
+      x: position.x - anchor.position.x,
+      y: position.y - anchor.position.y,
+      z: position.z - anchor.position.z,
+    };
+    return {
+      ...portal,
+      position,
+      anchorOffset: rotateXZ(worldOffset, -(anchor.rotationY ?? 0)),
+    };
+  };
+
+  const upsertEditedPortal = (portal: WorldPortal, logText?: string) => {
+    sendPortalUpsert(portal, {
+      pending: false,
+      logText,
+    });
+  };
+
+  const movePortal = (portalId: string, dx: number, dz: number) => {
+    const portal = worldPortals.find((p) => p.id === portalId);
+    if (!portal) return;
+    const current = portalAnchorPosition(portal);
+    const next = setPortalWorldPosition(portal, { ...current, x: current.x + dx, z: current.z + dz });
+    upsertEditedPortal(next);
+  };
+
+  const liftPortal = (portalId: string, amount: number) => {
+    const portal = worldPortals.find((p) => p.id === portalId);
+    if (!portal) return;
+    const current = portalAnchorPosition(portal);
+    const next = setPortalWorldPosition(portal, { ...current, y: current.y + amount });
+    upsertEditedPortal(next);
+  };
+
+  const rotatePortal = (portalId: string, radians: number) => {
+    const portal = worldPortals.find((p) => p.id === portalId);
+    if (!portal) return;
+    const rotation = portal.rotation ?? { x: 0, y: 0, z: 0 };
+    upsertEditedPortal({
+      ...portal,
+      rotation: { ...rotation, y: (rotation.y ?? 0) + radians },
+    });
+  };
+
+  const scalePortal = (portalId: string, multiplier: number) => {
+    const portal = worldPortals.find((p) => p.id === portalId);
+    if (!portal) return;
+    upsertEditedPortal({
+      ...portal,
+      radius: clamp(portal.radius * multiplier, 0.55, 5.5),
+    });
+  };
+
+  const nearestGeneratedThingToPortal = (portal: WorldPortal): GeneratedThing | undefined => {
+    const position = portalAnchorPosition(portal);
+    let best: GeneratedThing | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const thing of generated) {
+      const distance = distance2D(position, thing.position);
+      if (distance < bestDistance) {
+        best = thing;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  };
+
+  const attachPortalToThing = (portalId: string, thingId: string) => {
+    const portal = worldPortals.find((p) => p.id === portalId);
+    const anchor = thingById(thingId);
+    if (!portal || !anchor) return;
+    const position = portalAnchorPosition(portal);
+    const worldOffset = {
+      x: position.x - anchor.position.x,
+      y: position.y - anchor.position.y,
+      z: position.z - anchor.position.z,
+    };
+    const rotationY = portalRotationY(portal) - (anchor.rotationY ?? 0);
+    upsertEditedPortal(
+      {
+        ...portal,
+        position,
+        rotation: { ...(portal.rotation ?? { x: 0, y: 0, z: 0 }), y: rotationY },
+        anchorThingId: anchor.id,
+        anchorOffset: rotateXZ(worldOffset, -(anchor.rotationY ?? 0)),
+      },
+      `Attached ${portal.label || portal.target.worldId} to ${anchor.prompt || anchor.kind}`,
+    );
+  };
+
+  const attachPortalToSelected = (portalId: string) => {
+    const portal = worldPortals.find((p) => p.id === portalId);
+    if (!portal) return;
+    const anchor = selectedThingId ? thingById(selectedThingId) : undefined;
+    const fallback = anchor ?? nearestGeneratedThingToPortal(portal);
+    if (!fallback) return;
+    attachPortalToThing(portalId, fallback.id);
+  };
+
+  const detachPortal = (portalId: string) => {
+    const portal = worldPortals.find((p) => p.id === portalId);
+    if (!portal) return;
+    const position = portalAnchorPosition(portal);
+    const rotationY = portalRotationY(portal);
+    const next: WorldPortal = {
+      ...portal,
+      position,
+      rotation: { ...(portal.rotation ?? { x: 0, y: 0, z: 0 }), y: rotationY },
+      anchorThingId: undefined,
+      anchorOffset: undefined,
+    };
+    upsertEditedPortal(next, `Detached ${portal.label || portal.target.worldId}`);
   };
 
   const moveGenerated = (id: string, dx: number, dz: number, targetY?: number) => {
@@ -5560,6 +5825,7 @@ function createTellusWorld(
     const mesh = generatedMeshes.get(id);
     if (mesh) applyThingRotation(mesh, thing);
     publishGeneratedThing(thing);
+    syncAnchoredPortalsForThing(thing);
     publish();
   };
 
@@ -5573,6 +5839,7 @@ function createTellusWorld(
       updateThingMeshPosition(thing);
     }
     publishGeneratedThing(thing);
+    syncAnchoredPortalsForThing(thing);
     publish();
   };
 
@@ -6074,6 +6341,7 @@ function createTellusWorld(
         thing,
         generationProvider,
         generationController.signal,
+        request.sourceImageUrl,
       )
         .then(async (initialResult) => {
           if (destroyed || generationPausedForThing(thing) || !thingById(thing.id)) return;
@@ -6434,9 +6702,10 @@ function createTellusWorld(
     });
   };
 
-  const submitVisitorPrompt = (prompt: string) => {
+  const submitVisitorPrompt = (prompt: string, sourceImageUrl?: string) => {
     const trimmed = prompt.trim();
-    if (!trimmed) return;
+    const trimmedImageUrl = sourceImageUrl?.trim();
+    if (!trimmed && !trimmedImageUrl) return;
     if (trimmed.toLowerCase().startsWith("ask ") && generated.length > 0) {
       interact({
         targetId: generated[generated.length - 1].id,
@@ -6446,7 +6715,7 @@ function createTellusWorld(
       return;
     }
     generate({
-      prompt: trimmed,
+      prompt: trimmed || "make a 3D model from this reference image",
       location: {
         x: visitorPosition.x + Math.sin(yaw) * 4,
         y: 0,
@@ -6454,6 +6723,7 @@ function createTellusWorld(
       },
       creatorId: "visitor",
       ownerUserId: userId,
+      sourceImageUrl: trimmedImageUrl || undefined,
     });
   };
 
@@ -6556,6 +6826,7 @@ function createTellusWorld(
     return Math.min(RUN_MAX_MULT, Math.pow(RUN_EXP_BASE, heldS));
   };
   let obstacleCache: ObstacleCircle[] = [];
+  let buildingWallObstacleCache: ObstacleRect[] = [];
   let obstacleCacheAt = 0;
   let rapierSolidsCacheAt = 0;
   const riderOffsetCache = new Map<string, Vec3>();
@@ -6591,6 +6862,7 @@ function createTellusWorld(
     if (thing.id === sailingThingId || ambientPhysics.has(thing.id)) return null;
     if (thing.petOwnerId) return null;
     if (thing.id === draggingThingId) return null;
+    if (isBuildingThing(thing)) return null;
     const profile = runtimeProfileForThing(thing);
     if (
       !profile.dimensions ||
@@ -6602,9 +6874,9 @@ function createTellusWorld(
     if (thing.position.y > visitorPosition.y + 2.2) return null;
     return {
       id: thing.id,
-      x: thing.position.x,
+      x: profile.dimensions ? (thingFootprint(thing)?.centerX ?? thing.position.x) : thing.position.x,
       y: thing.position.y,
-      z: thing.position.z,
+      z: profile.dimensions ? (thingFootprint(thing)?.centerZ ?? thing.position.z) : thing.position.z,
       radius: profile.collisionRadius,
       height: profile.collisionHeight,
     };
@@ -6630,11 +6902,136 @@ function createTellusWorld(
     }
     rapierPhysics.syncSolids(solids);
   };
+
+  const isBuildingThing = (thing: GeneratedThing): boolean => {
+    if (parseProceduralModelUrl(thing.modelUrl ?? "")?.building) return true;
+    const lower = thing.prompt.toLowerCase();
+    return (
+      thing.kind === "shrine" ||
+      lower.includes("house") ||
+      lower.includes("hut") ||
+      lower.includes("cabin") ||
+      lower.includes("building") ||
+      lower.includes("shop") ||
+      lower.includes("temple") ||
+      lower.includes("tower")
+    );
+  };
+
+  const buildingDoorPortalForThing = (thing: GeneratedThing): WorldPortal | undefined =>
+    worldPortals.find(
+      (portal) =>
+        portal.anchorThingId === thing.id &&
+        portal.target.kind === "interior" &&
+        !pendingPortalIds.has(portal.id),
+    );
+
+  const pushBuildingWall = (
+    list: ObstacleRect[],
+    thing: GeneratedThing,
+    centerX: number,
+    centerZ: number,
+    localX: number,
+    localZ: number,
+    hx: number,
+    hz: number,
+    yaw: number,
+  ) => {
+    if (hx <= 0.12 || hz <= 0.12) return;
+    const cos = Math.cos(thing.rotationY);
+    const sin = Math.sin(thing.rotationY);
+    list.push({
+      ownerId: thing.id,
+      x: centerX + localX * cos - localZ * sin,
+      z: centerZ + localX * sin + localZ * cos,
+      hx,
+      hz,
+      yaw: thing.rotationY + yaw,
+    });
+  };
+
+  const buildingWallObstaclesForThing = (thing: GeneratedThing): ObstacleRect[] => {
+    const fp = thingFootprint(thing);
+    if (!fp || fp.height < 1.4 || fp.radius < 1.0) return [];
+    if (thing.position.y > visitorPosition.y + 2.2) return [];
+    const halfWidth = clamp(fp.width / 2, 1.4, 26);
+    const halfDepth = clamp(fp.depth / 2, 1.4, 26);
+    const wallThickness = clamp(Math.min(halfWidth, halfDepth) * 0.08, 0.22, 0.6);
+    const walls: ObstacleRect[] = [];
+    const doorPortal = buildingDoorPortalForThing(thing);
+    const addWholeWall = (side: "front" | "back" | "left" | "right") => {
+      if (side === "front") pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, 0, halfDepth, halfWidth, wallThickness, 0);
+      else if (side === "back") pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, 0, -halfDepth, halfWidth, wallThickness, 0);
+      else if (side === "left") pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, -halfWidth, 0, halfDepth, wallThickness, Math.PI / 2);
+      else pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, halfWidth, 0, halfDepth, wallThickness, Math.PI / 2);
+    };
+    if (!doorPortal) {
+      addWholeWall("front");
+      addWholeWall("back");
+      addWholeWall("left");
+      addWholeWall("right");
+      return walls;
+    }
+    const doorPosition = portalAnchorPosition(doorPortal);
+    const cos = Math.cos(-(thing.rotationY ?? 0));
+    const sin = Math.sin(-(thing.rotationY ?? 0));
+    const dx = doorPosition.x - fp.centerX;
+    const dz = doorPosition.z - fp.centerZ;
+    const doorLocal = {
+      x: dx * cos - dz * sin,
+      z: dx * sin + dz * cos,
+    };
+    const side =
+      Math.abs(doorLocal.z) >= Math.abs(doorLocal.x)
+        ? doorLocal.z >= 0
+          ? "front"
+          : "back"
+        : doorLocal.x >= 0
+          ? "right"
+          : "left";
+    const splitWall = (doorAlong: number, wallCenterX: number, wallCenterZ: number, vertical: boolean) => {
+      const sideHalf = vertical ? halfDepth : halfWidth;
+      const gapHalf = clamp(Math.max(1.2, doorPortal.radius * 0.85), 1.2, Math.max(1.25, sideHalf - 0.35));
+      const clampedDoor = clamp(doorAlong, -sideHalf + gapHalf, sideHalf - gapHalf);
+      const leftLength = clampedDoor - gapHalf + sideHalf;
+      const rightLength = sideHalf - (clampedDoor + gapHalf);
+      if (!vertical) {
+        pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, -sideHalf + leftLength / 2, wallCenterZ, leftLength / 2, wallThickness, 0);
+        pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, clampedDoor + gapHalf + rightLength / 2, wallCenterZ, rightLength / 2, wallThickness, 0);
+      } else {
+        pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, wallCenterX, -sideHalf + leftLength / 2, leftLength / 2, wallThickness, Math.PI / 2);
+        pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, wallCenterX, clampedDoor + gapHalf + rightLength / 2, rightLength / 2, wallThickness, Math.PI / 2);
+      }
+    };
+    if (side === "front") splitWall(doorLocal.x, 0, halfDepth, false);
+    else addWholeWall("front");
+    if (side === "back") splitWall(doorLocal.x, 0, -halfDepth, false);
+    else addWholeWall("back");
+    if (side === "left") splitWall(doorLocal.z, -halfWidth, 0, true);
+    else addWholeWall("left");
+    if (side === "right") splitWall(doorLocal.z, halfWidth, 0, true);
+    else addWholeWall("right");
+    return walls;
+  };
+  const pointInsideBuildingFootprint = (thing: GeneratedThing, point: { x: number; z: number }): boolean => {
+    const fp = thingFootprint(thing);
+    if (!fp || fp.height < 1.4 || fp.radius < 1.0) return false;
+    const halfWidth = clamp(fp.width / 2, 1.4, 26);
+    const halfDepth = clamp(fp.depth / 2, 1.4, 26);
+    const cos = Math.cos(-(thing.rotationY ?? 0));
+    const sin = Math.sin(-(thing.rotationY ?? 0));
+    const dx = point.x - fp.centerX;
+    const dz = point.z - fp.centerZ;
+    const localX = dx * cos - dz * sin;
+    const localZ = dx * sin + dz * cos;
+    return Math.abs(localX) < halfWidth && Math.abs(localZ) < halfDepth;
+  };
   const currentObstacles = (): ObstacleCircle[] => {
     const nowMs = performance.now();
     if (nowMs - obstacleCacheAt > 500) {
       obstacleCacheAt = nowMs;
       const list: ObstacleCircle[] = [...vegetation.getTreeColliders()];
+      const wallList: ObstacleRect[] = [];
       for (const thing of generated) {
         // Pass through: the vehicle you're riding, ambient-physics props (their own collision),
         // and the thing you're actively dragging (else it shoves you around as you place it).
@@ -6646,21 +7043,31 @@ function createTellusWorld(
         if (!fp || fp.height < 1.4 || fp.radius < 0.55) continue;
         // only solid when the player can actually run into it (not lifted into the sky)
         if (thing.position.y > visitorPosition.y + 2.2) continue;
-        const isProceduralBuilding =
-          Boolean(parseProceduralModelUrl(thing.modelUrl ?? "")?.building);
+        if (isBuildingThing(thing)) {
+          wallList.push(...buildingWallObstaclesForThing(thing));
+          continue;
+        }
         list.push({
-          x: thing.position.x,
-          z: thing.position.z,
+          x: fp.centerX,
+          z: fp.centerZ,
           // Solid radius scales with the model's footprint (capped so huge props stay passable
           // around the edges); the 0.7 factor lets you brush past rather than bumping a fat box.
-          r: isProceduralBuilding
-            ? clamp(fp.radius * 0.82, 1.2, 14)
-            : clamp(fp.radius * 0.7, 0.55, 2.6),
+          r: clamp(fp.radius * 0.7, 0.55, 2.6),
         });
       }
       obstacleCache = list;
+      buildingWallObstacleCache = wallList;
     }
     return obstacleCache;
+  };
+
+  const currentBuildingWallObstacles = (): ObstacleRect[] => {
+    currentObstacles();
+    return buildingWallObstacleCache.filter((wall) => {
+      if (!wall.ownerId) return true;
+      const thing = thingById(wall.ownerId);
+      return !thing || !pointInsideBuildingFootprint(thing, visitorPosition);
+    });
   };
 
   // Bounded auto-retry for models whose textures failed during a load burst (KTX2 contention):
@@ -6850,8 +7257,20 @@ function createTellusWorld(
         0.5,
         vegetation.getTreeColliders(),
       );
+      pushed = resolveRectObstacles(
+        pushed.x,
+        pushed.z,
+        0.5,
+        currentBuildingWallObstacles(),
+      );
     } else {
       pushed = resolveObstacles(desiredX, desiredZ, 0.5, currentObstacles());
+      pushed = resolveRectObstacles(
+        pushed.x,
+        pushed.z,
+        0.5,
+        currentBuildingWallObstacles(),
+      );
     }
     const grounded = groundedPosition(pushed.x, pushed.z, visitorPosition);
     if (playerAirborne) {
@@ -8846,6 +9265,11 @@ function createTellusWorld(
     options: { pending?: boolean; logText?: string } = {},
   ) => {
     const pending = options.pending ?? true;
+    if (portal.anchorThingId && portal.anchorOffset) {
+      portalAnchorOffsets.set(portal.id, { ...portal.anchorOffset });
+    } else if (!portal.anchorThingId) {
+      portalAnchorOffsets.delete(portal.id);
+    }
     // Bare name — server grain case is "portal.upsert" (see portal.enter note above).
     const frame = { type: "portal.upsert", visitorId, portal };
     if (pending) {
@@ -8879,6 +9303,7 @@ function createTellusWorld(
             pendingPortalIds.delete(portal.id);
             pendingPortalStartedAt.delete(portal.id);
             pendingPortalWarnedIds.delete(portal.id);
+            portalAnchorOffsets.delete(portal.id);
             worldPortals = worldPortals.filter((p) => p.id !== portal.id);
           }
           syncPortalMarkers();
@@ -8900,6 +9325,7 @@ function createTellusWorld(
     pendingPortalStartedAt.delete(id);
     pendingPortalWarnedIds.delete(id);
     pendingDeletedPortals.set(id, existing);
+    portalAnchorOffsets.delete(id);
     worldPortals = worldPortals.filter((p) => p.id !== id);
     syncPortalMarkers();
     addLog({
@@ -8913,6 +9339,9 @@ function createTellusWorld(
     const frame = { type: "portal.delete", visitorId, portalId: id };
     const restore = (error: unknown) => {
       pendingDeletedPortals.delete(id);
+      if (existing.anchorThingId && existing.anchorOffset) {
+        portalAnchorOffsets.set(existing.id, { ...existing.anchorOffset });
+      }
       worldPortals = [...worldPortals, existing];
       syncPortalMarkers();
       addLog({
@@ -8950,19 +9379,40 @@ function createTellusWorld(
     const target = targetWorldId.trim();
     if (!target) return;
     const anchor = selectedThingId ? thingById(selectedThingId) : undefined;
-    const x = Math.round(anchor?.position.x ?? visitorPosition.x);
-    const z = Math.round(anchor?.position.z ?? visitorPosition.z);
-    const y = anchor?.position.y ?? groundHeightAt(x, z) ?? visitorPosition.y ?? SEA_LEVEL;
+    const position = anchor
+      ? {
+          x: Math.round(anchor.position.x + Math.sin(yaw) * Math.max(1.2, anchor.scale * 0.8)),
+          y: anchor.position.y,
+          z: Math.round(anchor.position.z + Math.cos(yaw) * Math.max(1.2, anchor.scale * 0.8)),
+        }
+      : {
+          x: Math.round(visitorPosition.x),
+          y: visitorPosition.y ?? SEA_LEVEL,
+          z: Math.round(visitorPosition.z),
+        };
+    if (!anchor) position.y = groundHeightAt(position.x, position.z) ?? position.y;
+    const anchorOffset = anchor
+      ? rotateXZ(
+          {
+            x: position.x - anchor.position.x,
+            y: position.y - anchor.position.y,
+            z: position.z - anchor.position.z,
+          },
+          -(anchor.rotationY ?? 0),
+        )
+      : undefined;
+    const portalId = makeId("portal");
     sendPortalUpsert({
-      id: makeId("portal"),
+      id: portalId,
       worldId: runtimeConfig.worldId,
       label: (label || target).slice(0, 48),
-      position: { x, y, z },
+      position,
       radius: 1.7,
-      rotation: { x: 0, y: yaw, z: 0 },
+      rotation: { x: 0, y: anchor ? yaw - (anchor.rotationY ?? 0) : yaw, z: 0 },
       target: { kind: "world", worldId: target },
-      ...(anchor ? { anchorThingId: anchor.id } : {}),
+      ...(anchor ? { anchorThingId: anchor.id, anchorOffset } : {}),
     });
+    announcePortalSelection(portalId);
   };
   const createInteriorWallDoorAt = (
     placement: { position: Vec3; rotationY: number },
@@ -8986,6 +9436,7 @@ function createTellusWorld(
   const createDoorHere = (label?: string, sceneUrl?: string) => {
     const interiorId = `interior-${runtimeConfig.worldId}-${makeId("room").slice(0, 12)}`;
     const roomSceneUrl = sceneUrl?.trim() || GENERATED_INTERIOR_SCENE_URL;
+    const anchor = selectedThingId ? thingById(selectedThingId) : undefined;
     const target = {
       kind: "interior" as const,
       worldId: interiorId,
@@ -8997,8 +9448,9 @@ function createTellusWorld(
       const x = bounds ? clamp(visitorPosition.x, bounds.minX, bounds.maxX) : visitorPosition.x;
       const z = bounds?.minZ ?? visitorPosition.z;
       const y = interiorPlacementFloorHeightAt(x, z, visitorPosition.y) ?? Math.max(0, visitorPosition.y);
+      const portalId = makeId("door");
       sendPortalUpsert({
-        id: makeId("door"),
+        id: portalId,
         worldId: runtimeConfig.worldId,
         label: (label || "Door").slice(0, 48),
         position: { x, y, z },
@@ -9006,20 +9458,42 @@ function createTellusWorld(
         rotation: { x: 0, y: 0, z: 0 },
         target,
       });
+      announcePortalSelection(portalId);
       return;
     }
-    const x = Math.round(visitorPosition.x + Math.sin(yaw) * 1.4);
-    const z = Math.round(visitorPosition.z + Math.cos(yaw) * 1.4);
-    const y = groundedPositionForCurrentSurface(x, z, visitorPosition).y;
+    const position = anchor
+      ? {
+          x: anchor.position.x + Math.sin(yaw) * Math.max(1.25, anchor.scale * 0.8),
+          y: anchor.position.y,
+          z: anchor.position.z + Math.cos(yaw) * Math.max(1.25, anchor.scale * 0.8),
+        }
+      : groundedPositionForCurrentSurface(
+          Math.round(visitorPosition.x + Math.sin(yaw) * 1.4),
+          Math.round(visitorPosition.z + Math.cos(yaw) * 1.4),
+          visitorPosition,
+        );
+    const anchorOffset = anchor
+      ? rotateXZ(
+          {
+            x: position.x - anchor.position.x,
+            y: position.y - anchor.position.y,
+            z: position.z - anchor.position.z,
+          },
+          -(anchor.rotationY ?? 0),
+        )
+      : undefined;
+    const portalId = makeId("door");
     sendPortalUpsert({
-      id: makeId("door"),
+      id: portalId,
       worldId: runtimeConfig.worldId,
       label: (label || "Door").slice(0, 48),
-      position: { x, y, z },
+      position,
       radius: 1.7,
-      rotation: { x: 0, y: yaw, z: 0 },
+      rotation: { x: 0, y: anchor ? yaw - (anchor.rotationY ?? 0) : yaw, z: 0 },
       target,
+      ...(anchor ? { anchorThingId: anchor.id, anchorOffset } : {}),
     });
+    announcePortalSelection(portalId);
   };
 
   return {
@@ -9028,6 +9502,13 @@ function createTellusWorld(
     previewPortalTarget,
     startInteriorWallDoorPlacement: setInteriorWallDoorPlacement,
     updatePortalTarget,
+    movePortal,
+    liftPortal,
+    rotatePortal,
+    scalePortal,
+    attachPortalToSelected,
+    attachPortalToThing,
+    detachPortal,
     deletePortal: sendPortalDelete,
     createDoorHere,
     generate,
@@ -11776,6 +12257,10 @@ function App(): React.ReactElement {
   const [procBuildingMaterial, setProcBuildingMaterial] = useState<BuildingMaterialStyle>("auto");
   const [procBuildingLighting, setProcBuildingLighting] = useState<BuildingLightingStyle>("warm");
   const [procBuildingRoof, setProcBuildingRoof] = useState(true);
+  const assetWorldId = activeWorldId ?? runtimeConfig.worldId;
+  const assetPrimaryTab: Extract<AssetPanelTab, "building" | "furniture"> =
+    assetWorldId.startsWith("interior-") ? "furniture" : "building";
+  const assetPrimaryLabel = assetPrimaryTab === "furniture" ? "Furniture" : "Buildings";
   // Map each browse tab to the store's REAL asset_category (flora / fauna / building). The store
   // categorizes animals under "fauna" (not "animal"), so use the precise category filter rather than
   // a fuzzy free-text search. A user-typed search overrides the category seed.
@@ -11787,6 +12272,12 @@ function App(): React.ReactElement {
         : assetPanelTab === "building"
           ? "building"
           : "";
+  useEffect(() => {
+    if (!assetPanelOpen) return;
+    if ((assetPanelTab === "building" || assetPanelTab === "furniture") && assetPanelTab !== assetPrimaryTab) {
+      setAssetPanelTab(assetPrimaryTab);
+    }
+  }, [assetPanelOpen, assetPanelTab, assetPrimaryTab]);
   const selectedProcBuilding =
     PROCEDURAL_BUILDING_CATALOG.find((item) => item.id === procBuildingType) ??
     PROCEDURAL_BUILDING_CATALOG[0];
@@ -11808,11 +12299,15 @@ function App(): React.ReactElement {
       { scale: 1 },
     );
   }, [procBuildingLighting, procBuildingMaterial, procBuildingRoof, selectedProcBuilding]);
-  const assetBrowseQuery = assetSearch.trim();
+  const assetBrowseQuery =
+    assetSearch.trim() ||
+    (assetPanelTab === "furniture" ? "furniture chair table sofa lamp bed decor" : "");
   const assetBrowseSeq = useRef(0);
   const [assetReuseSuggestions, setAssetReuseSuggestions] = useState<AssetReuseCandidate[]>([]);
   const [assetReuseLoading, setAssetReuseLoading] = useState(false);
   const [createPromptOpen, setCreatePromptOpen] = useState(false);
+  const [createImageUrl, setCreateImageUrl] = useState("");
+  const [createImageName, setCreateImageName] = useState("");
 
   const runAssetBrowse = useCallback(
     async (query: string, page: number, append: boolean, sort: AssetBrowseSort, category = "") => {
@@ -11977,6 +12472,7 @@ function App(): React.ReactElement {
   const [mapActorList, setMapActorList] = useState<"items" | "players" | "agents" | null>(null);
   const worldMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const createImageInputRef = useRef<HTMLInputElement | null>(null);
   const { listening, supported, start } = useSpeechInput((text) =>
     setPrompt(text),
   );
@@ -12384,6 +12880,9 @@ function App(): React.ReactElement {
     [snapshot.generated, snapshot.selectedThingId],
   );
   const activeSelectedThing = snapshot.selectedThingId ? selectedThing : null;
+  const activeSelectedPortal = selectedPortalId
+    ? (snapshot.portals ?? []).find((portal) => portal.id === selectedPortalId) ?? null
+    : null;
   const selectedRuntimeProfile = activeSelectedThing
     ? buildWorldThingRuntimeProfile(activeSelectedThing, {
         groundY: groundHeightAt(activeSelectedThing.position.x, activeSelectedThing.position.z),
@@ -12834,9 +13333,35 @@ function App(): React.ReactElement {
     (thing) => thing.ownerUserId === snapshot.userId,
   );
 
+  const acceptCreateImageFile = (file?: File | null) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (!result) return;
+      setCreateImageUrl(result);
+      setCreateImageName(file.name);
+      if (!prompt.trim()) {
+        setPrompt(
+          assetPrimaryTab === "furniture"
+            ? "make a 3D model of this product photo for an interior"
+            : "make a 3D model from this reference image",
+        );
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const clearCreateImage = () => {
+    setCreateImageUrl("");
+    setCreateImageName("");
+    if (createImageInputRef.current) createImageInputRef.current.value = "";
+  };
+
   const submitPrompt = () => {
-    worldRef.current?.submitVisitorPrompt(prompt);
+    worldRef.current?.submitVisitorPrompt(prompt, createImageUrl || undefined);
     setPrompt("");
+    clearCreateImage();
     setCreatePromptOpen(false);
   };
 
@@ -12849,7 +13374,7 @@ function App(): React.ReactElement {
 
   const toggleAssetDrawer = () => {
     setAssetPanelOpen((open) => {
-      if (!open) setAssetPanelTab((current) => current === "avatar" ? "building" : current);
+      if (!open) setAssetPanelTab(assetPrimaryTab);
       return !open;
     });
   };
@@ -13851,12 +14376,12 @@ function App(): React.ReactElement {
           </button>
           <button
             type="button"
-            className={assetPanelOpen && assetPanelTab !== "avatar" ? "toolbelt-button active" : "toolbelt-button"}
-            title="Assets"
+            className={assetPanelOpen && assetPanelTab === assetPrimaryTab ? "toolbelt-button active" : "toolbelt-button"}
+            title={assetPrimaryLabel}
             onClick={toggleAssetDrawer}
           >
-            <Box size={18} />
-            <span>Assets</span>
+            {assetPrimaryTab === "building" ? <Building2 size={18} /> : <Box size={18} />}
+            <span>{assetPrimaryLabel}</span>
           </button>
           <button
             type="button"
@@ -14277,7 +14802,23 @@ function App(): React.ReactElement {
                 const anchoredThing = portal.anchorThingId
                   ? snapshot.generated.find((thing) => thing.id === portal.anchorThingId)
                   : undefined;
-                const position = anchoredThing?.position ?? portal.position;
+                const position = anchoredThing
+                  ? (() => {
+                      const offset = portal.anchorOffset ?? {
+                        x: portal.position.x - anchoredThing.position.x,
+                        y: portal.position.y - anchoredThing.position.y,
+                        z: portal.position.z - anchoredThing.position.z,
+                      };
+                      const anchorYaw = portal.anchorOffset ? anchoredThing.rotationY ?? 0 : 0;
+                      const cos = Math.cos(anchorYaw);
+                      const sin = Math.sin(anchorYaw);
+                      return {
+                        x: anchoredThing.position.x + offset.x * cos - offset.z * sin,
+                        y: anchoredThing.position.y + offset.y,
+                        z: anchoredThing.position.z + offset.x * sin + offset.z * cos,
+                      };
+                    })()
+                  : portal.position;
                 return (
                   <button
                     type="button"
@@ -14539,7 +15080,7 @@ function App(): React.ReactElement {
                   >
                     <button type="button" title={`Enter ${p.label || worldDisplayName(p.target.worldId)} (${p.target.kind})`} onClick={() => worldRef.current?.enterPortal(p.id)} style={portalBtn}>
                       {"->"} {p.label || worldDisplayName(p.target.worldId)} <small style={{ opacity: 0.6 }}>{p.target.kind}</small>
-                      {selected && <small style={{ float: "right", opacity: 0.78 }}>editing</small>}
+                      {selected && <small style={{ float: "right", opacity: 0.78 }}>selected</small>}
                     </button>
                     <div className="portal-panel-row-actions">
                       <select
@@ -14710,8 +15251,229 @@ function App(): React.ReactElement {
             <span>Dismount</span>
           </button>
         )}
-        {activeSelectedThing && !snapshot.sailingThingId && (
+        {activeSelectedPortal && !snapshot.sailingThingId && (
+          <div className="selected-transform-hud" aria-label="Selected portal controls">
+            <button
+              type="button"
+              className="selected-transform-close"
+              title="Close portal controls"
+              aria-label="Close portal controls"
+              onClick={() => setSelectedPortalId("")}
+            >
+              ×
+            </button>
+            <div className="selected-transform-label">
+              <Globe2 size={15} />
+              <select
+                value={activeSelectedPortal.id}
+                aria-label="Selected portal"
+                onChange={(event) => setSelectedPortalId(event.target.value)}
+              >
+                {(snapshot.portals ?? []).map((portal) => (
+                  <option key={portal.id} value={portal.id}>
+                    {portal.label || worldDisplayName(portal.target.worldId)}
+                  </option>
+                ))}
+              </select>
+              <div className="selected-name-actions">
+                <button
+                  type="button"
+                  className="selected-name-action"
+                  title={`Enter ${activeSelectedPortal.label || worldDisplayName(activeSelectedPortal.target.worldId)}`}
+                  onClick={() => worldRef.current?.enterPortal(activeSelectedPortal.id)}
+                >
+                  Enter
+                </button>
+                <button
+                  type="button"
+                  className="selected-name-action"
+                  title={activeSelectedThing ? `Attach portal to ${activeSelectedThing.prompt}` : "Attach portal to nearest asset"}
+                  disabled={snapshot.generated.length === 0}
+                  onClick={() => worldRef.current?.attachPortalToSelected(activeSelectedPortal.id)}
+                >
+                  {activeSelectedThing ? "Attach" : "Attach nearest"}
+                </button>
+                <button
+                  type="button"
+                  className="selected-name-action"
+                  title="Detach portal from asset"
+                  disabled={!activeSelectedPortal.anchorThingId}
+                  onClick={() => worldRef.current?.detachPortal(activeSelectedPortal.id)}
+                >
+                  Detach
+                </button>
+                <button
+                  type="button"
+                  className="selected-name-action selected-name-delete"
+                  title="Delete portal"
+                  onClick={() => {
+                    const ok = window.confirm(
+                      `Delete portal ${activeSelectedPortal.label || worldDisplayName(activeSelectedPortal.target.worldId)}?`,
+                    );
+                    if (ok) worldRef.current?.deletePortal(activeSelectedPortal.id);
+                  }}
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  className="selected-name-action"
+                  title="Close portal controls"
+                  aria-label="Close portal controls"
+                  onClick={() => setSelectedPortalId("")}
+                >
+                  Close
+                </button>
+              </div>
+              <select
+                value={activeSelectedPortal.anchorThingId ?? ""}
+                aria-label="Portal anchor asset"
+                title="Attach portal to asset"
+                style={{ gridColumn: 2, gridRow: 3 }}
+                onChange={(event) => {
+                  const thingId = event.target.value;
+                  if (thingId) worldRef.current?.attachPortalToThing(activeSelectedPortal.id, thingId);
+                  else worldRef.current?.detachPortal(activeSelectedPortal.id);
+                }}
+              >
+                <option value="">Anchor: none</option>
+                {snapshot.generated.map((thing) => (
+                  <option key={thing.id} value={thing.id}>
+                    Anchor: {thing.prompt || thing.kind}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="selected-step-control" aria-label="Nudge step">
+              {[0.25, 1, 2].map((step) => (
+                <button
+                  key={step}
+                  type="button"
+                  className={step === selectedNudgeStep ? "active" : undefined}
+                  title={`Move and height step: ${step}`}
+                  aria-label={`Use ${step} step`}
+                  aria-pressed={step === selectedNudgeStep}
+                  onClick={() => setSelectedNudgeStep(step)}
+                >
+                  {step}
+                </button>
+              ))}
+            </div>
+            <div className="selected-nudge-pad" aria-label="Position controls">
+              <button
+                type="button"
+                className="icon-button nudge-up"
+                title="Move forward"
+                aria-label="Move portal forward"
+                onClick={() => worldRef.current?.movePortal(activeSelectedPortal.id, 0, -selectedNudgeStep)}
+              >
+                <ArrowUp size={16} />
+              </button>
+              <button
+                type="button"
+                className="icon-button nudge-left"
+                title="Move left"
+                aria-label="Move portal left"
+                onClick={() => worldRef.current?.movePortal(activeSelectedPortal.id, -selectedNudgeStep, 0)}
+              >
+                <ArrowLeft size={16} />
+              </button>
+              <button
+                type="button"
+                className="icon-button nudge-right"
+                title="Move right"
+                aria-label="Move portal right"
+                onClick={() => worldRef.current?.movePortal(activeSelectedPortal.id, selectedNudgeStep, 0)}
+              >
+                <ArrowRight size={16} />
+              </button>
+              <button
+                type="button"
+                className="icon-button nudge-down"
+                title="Move backward"
+                aria-label="Move portal backward"
+                onClick={() => worldRef.current?.movePortal(activeSelectedPortal.id, 0, selectedNudgeStep)}
+              >
+                <ArrowDown size={16} />
+              </button>
+            </div>
+            <div className="selected-place-actions" aria-label="Portal rotation controls">
+              <button
+                type="button"
+                className="icon-button"
+                title="Rotate left"
+                aria-label="Rotate portal left"
+                onClick={() => worldRef.current?.rotatePortal(activeSelectedPortal.id, -THREE.MathUtils.degToRad(15))}
+              >
+                <RotateCcw size={17} />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                title="Rotate right"
+                aria-label="Rotate portal right"
+                onClick={() => worldRef.current?.rotatePortal(activeSelectedPortal.id, THREE.MathUtils.degToRad(15))}
+              >
+                <RotateCw size={17} />
+              </button>
+            </div>
+            <div className="selected-transform-stack" aria-label="Height controls">
+              <button
+                type="button"
+                className="icon-button"
+                title="Raise portal"
+                aria-label="Raise portal"
+                onClick={() => worldRef.current?.liftPortal(activeSelectedPortal.id, selectedNudgeStep)}
+              >
+                <ArrowUp size={17} />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                title="Lower portal"
+                aria-label="Lower portal"
+                onClick={() => worldRef.current?.liftPortal(activeSelectedPortal.id, -selectedNudgeStep)}
+              >
+                <ArrowDown size={17} />
+              </button>
+            </div>
+            <div className="selected-transform-stack" aria-label="Scale controls">
+              <button
+                type="button"
+                className="icon-button"
+                title="Scale up"
+                aria-label="Scale portal up"
+                onClick={() => worldRef.current?.scalePortal(activeSelectedPortal.id, 1.16)}
+              >
+                <Plus size={17} />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                title="Scale down"
+                aria-label="Scale portal down"
+                onClick={() => worldRef.current?.scalePortal(activeSelectedPortal.id, 0.86)}
+              >
+                <Minus size={17} />
+              </button>
+            </div>
+          </div>
+        )}
+        {!activeSelectedPortal && activeSelectedThing && !snapshot.sailingThingId && (
           <div className="selected-transform-hud" aria-label="Selected asset controls">
+            <button
+              type="button"
+              className="selected-transform-close"
+              title="Close asset controls"
+              aria-label="Close asset controls"
+              onClick={() => {
+                setMoveModeActive(false);
+                worldRef.current?.setMoveMode(null);
+                worldRef.current?.selectGenerated(undefined);
+              }}
+            >
+              ×
+            </button>
             <div className="selected-transform-label">
               <Box size={15} />
               <select
@@ -14810,6 +15572,19 @@ function App(): React.ReactElement {
                   }
                 >
                   Delete
+                </button>
+                <button
+                  type="button"
+                  className="selected-name-action"
+                  title="Close asset controls"
+                  aria-label="Close asset controls"
+                  onClick={() => {
+                    setMoveModeActive(false);
+                    worldRef.current?.setMoveMode(null);
+                    worldRef.current?.selectGenerated(undefined);
+                  }}
+                >
+                  Close
                 </button>
               </div>
               {selectedClipNames.length > 0 && (
@@ -15004,6 +15779,48 @@ function App(): React.ReactElement {
             onBlur={() => setCreatePromptFocused(false)}
             onChange={(event) => setPrompt(event.target.value)}
           />
+          <div
+            className={createImageUrl ? "prompt-image-drop has-image" : "prompt-image-drop"}
+            onDragOver={(event) => {
+              event.preventDefault();
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              acceptCreateImageFile(event.dataTransfer.files?.[0]);
+            }}
+          >
+            <input
+              ref={createImageInputRef}
+              type="file"
+              accept="image/*"
+              onChange={(event) => acceptCreateImageFile(event.target.files?.[0])}
+            />
+            {createImageUrl ? (
+              <>
+                <img src={createImageUrl} alt="" />
+                <span>{createImageName || "Reference image"}</span>
+                <button
+                  type="button"
+                  className="prompt-image-clear"
+                  title="Remove image"
+                  aria-label="Remove image"
+                  onClick={clearCreateImage}
+                >
+                  <X size={13} />
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="prompt-image-button"
+                title="Add reference image"
+                onClick={() => createImageInputRef.current?.click()}
+              >
+                <ImagePlus size={15} />
+                <span>Image</span>
+              </button>
+            )}
+          </div>
           {(assetReuseSuggestions.length > 0 || assetReuseLoading) && (
             <div className="prompt-reuse-strip" aria-label="Reusable asset suggestions">
               <span>{assetReuseLoading ? "Checking existing assets..." : "Already made"}</span>
@@ -15064,7 +15881,7 @@ function App(): React.ReactElement {
         {assetPanelOpen && (
           <section className="tool-card inventory-card asset-drawer">
             <div className="panel-strip">
-              <span>Assets</span>
+              <span>{assetPanelTab === "avatar" ? "Avatar" : assetPrimaryLabel}</span>
               <button
                 type="button"
                 className="icon-button"
@@ -15105,12 +15922,12 @@ function App(): React.ReactElement {
               </button>
               <button
                 type="button"
-                className={assetPanelTab === "building" ? "active" : ""}
-                title="Buildings"
-                aria-label="Building assets"
-                onClick={() => setAssetPanelTab("building")}
+                className={assetPanelTab === assetPrimaryTab ? "active" : ""}
+                title={assetPrimaryLabel}
+                aria-label={`${assetPrimaryLabel} assets`}
+                onClick={() => setAssetPanelTab(assetPrimaryTab)}
               >
-                <Building2 size={17} />
+                {assetPrimaryTab === "building" ? <Building2 size={17} /> : <Box size={17} />}
               </button>
             </nav>
             {assetPanelTab === "avatar" && (
@@ -15161,7 +15978,7 @@ function App(): React.ReactElement {
                 </div>
               </div>
             )}
-            {(assetPanelTab === "animal" || assetPanelTab === "building" || assetPanelTab === "flora") && (
+            {(assetPanelTab === "animal" || assetPanelTab === "building" || assetPanelTab === "flora" || assetPanelTab === "furniture") && (
               <div className="inventory-list asset-list">
                 {assetPanelTab === "building" && (
                   <section className="asset-proc-panel" aria-label="Procedural buildings">
@@ -15238,7 +16055,7 @@ function App(): React.ReactElement {
                     type="text"
                     value={assetSearch}
                     onChange={(e) => setAssetSearch(e.target.value)}
-                    placeholder={`Search ${assetPanelTab} assets...`}
+                    placeholder={`Search ${assetPanelTab === "furniture" ? "furniture" : assetPanelTab} assets...`}
                     aria-label="Search assets"
                   />
                 </label>
@@ -15279,7 +16096,7 @@ function App(): React.ReactElement {
                 )}
                 {assetBrowse.length === 0 && !assetBrowseLoading && (
                   <span className="inventory-empty">
-                    No {assetPanelTab} assets loaded yet.
+                    No {assetPanelTab === "furniture" ? "furniture" : assetPanelTab} assets loaded yet.
                   </span>
                 )}
                 {assetBrowseLoading && (

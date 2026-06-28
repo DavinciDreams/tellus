@@ -454,6 +454,7 @@ export async function startDirectInstantMeshGeneration(
   thing: GeneratedThing,
   provider: DirectGenerationProvider,
   signal?: AbortSignal,
+  imageUrl?: string,
 ): Promise<DirectGenerationResponse> {
   const response = await fetch(tellusApiUrl("/api/generate-3d"), {
     method: "POST",
@@ -464,6 +465,7 @@ export async function startDirectInstantMeshGeneration(
       prompt: thing.prompt,
       kind: thing.kind,
       provider,
+      imageUrl: imageUrl?.trim() || undefined,
       instantMeshBaseUrl:
         provider === "instantmesh-gradio"
           ? runtimeConfig.instantMeshTargets[runtimeConfig.instantMeshTarget]

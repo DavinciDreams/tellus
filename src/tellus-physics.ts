@@ -236,6 +236,15 @@ export interface ObstacleCircle {
   r: number;
 }
 
+export interface ObstacleRect {
+  x: number;
+  z: number;
+  hx: number;
+  hz: number;
+  yaw: number;
+  ownerId?: string;
+}
+
 export function resolveObstacles(
   x: number,
   z: number,
@@ -255,6 +264,51 @@ export function resolveObstacles(
       const push = (minDist - d) / d;
       px += dx * push;
       pz += dz * push;
+    }
+  }
+  return { x: px, z: pz };
+}
+
+export function resolveRectObstacles(
+  x: number,
+  z: number,
+  radius: number,
+  obstacles: readonly ObstacleRect[],
+): { x: number; z: number } {
+  let px = x;
+  let pz = z;
+  for (let pass = 0; pass < 2; pass++) {
+    for (const o of obstacles) {
+      const cos = Math.cos(o.yaw);
+      const sin = Math.sin(o.yaw);
+      const dx = px - o.x;
+      const dz = pz - o.z;
+      const lx = dx * cos + dz * sin;
+      const lz = -dx * sin + dz * cos;
+      const cx = Math.max(-o.hx, Math.min(o.hx, lx));
+      const cz = Math.max(-o.hz, Math.min(o.hz, lz));
+      const ddx = lx - cx;
+      const ddz = lz - cz;
+      const d2 = ddx * ddx + ddz * ddz;
+      if (d2 >= radius * radius) continue;
+      let pushX = 0;
+      let pushZ = 0;
+      if (d2 > 1e-8) {
+        const d = Math.sqrt(d2);
+        const push = (radius - d) / d;
+        pushX = ddx * push;
+        pushZ = ddz * push;
+      } else {
+        const toXEdge = o.hx - Math.abs(lx);
+        const toZEdge = o.hz - Math.abs(lz);
+        if (toXEdge < toZEdge) {
+          pushX = (lx >= 0 ? 1 : -1) * (toXEdge + radius);
+        } else {
+          pushZ = (lz >= 0 ? 1 : -1) * (toZEdge + radius);
+        }
+      }
+      px += pushX * cos - pushZ * sin;
+      pz += pushX * sin + pushZ * cos;
     }
   }
   return { x: px, z: pz };
