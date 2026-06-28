@@ -9808,6 +9808,78 @@ const landShapeFromTerrainTuning = (
   },
 });
 
+const BUILDING_MATERIAL_SWATCHES: Record<BuildingMaterialStyle, { wall: string; roof: string; trim: string; base: string; detail: string }> = {
+  auto: { wall: "#d3c19a", roof: "#66717a", trim: "#4f3324", base: "#817866", detail: "#6f5846" },
+  brick: { wall: "#9c4f35", roof: "#66717a", trim: "#4f3324", base: "#5b4038", detail: "#d6aa82" },
+  "stone-ashlar": { wall: "#6f7068", roof: "#66717a", trim: "#4f3324", base: "#555750", detail: "#a5a69c" },
+  "stone-rubble": { wall: "#5e5f56", roof: "#66717a", trim: "#4f3324", base: "#46483f", detail: "#97998e" },
+  "wood-plank": { wall: "#8c6844", roof: "#6b4a2f", trim: "#5a3925", base: "#81817a", detail: "#c7ad79" },
+  "timber-frame": { wall: "#d3c19a", roof: "#66717a", trim: "#4f3324", base: "#817866", detail: "#4f3324" },
+  plaster: { wall: "#d7d0bd", roof: "#66717a", trim: "#5a4330", base: "#7a746b", detail: "#eee6d3" },
+  stucco: { wall: "#cfc2a5", roof: "#66717a", trim: "#5a4330", base: "#83715a", detail: "#eee3c7" },
+  adobe: { wall: "#b88755", roof: "#a34c2f", trim: "#4f3324", base: "#c2a772", detail: "#d0a079" },
+  "desert-adobe": { wall: "#bc8559", roof: "#a34c2f", trim: "#4f3324", base: "#bc8559", detail: "#d7ad7e" },
+  "log-siding": { wall: "#7b5637", roof: "#6b4a2f", trim: "#4f3324", base: "#81817a", detail: "#4f3324" },
+  "cotswold-cottage": { wall: "#c9b47b", roof: "#4a3024", trim: "#4d3323", base: "#ad9868", detail: "#e0cf9b" },
+  "fieldstone-cottage": { wall: "#a9aca5", roof: "#4a3024", trim: "#4d3323", base: "#8d9089", detail: "#d0d2cc" },
+  "green-fieldstone-cottage": { wall: "#a9aca5", roof: "#586a45", trim: "#405137", base: "#8d9089", detail: "#d0d2cc" },
+  "brick-cottage": { wall: "#a75a3c", roof: "#4a3024", trim: "#4d3323", base: "#7a3d2b", detail: "#d5a184" },
+  "white-tudor": { wall: "#e8dfc7", roof: "#66717a", trim: "#35231a", base: "#83715a", detail: "#35231a" },
+  "cedar-shingle": { wall: "#8b6040", roof: "#8b6040", trim: "#f2efe4", base: "#a7aaa4", detail: "#5a3827" },
+  "weathered-shingle": { wall: "#8e8a7d", roof: "#8e8a7d", trim: "#f2efe4", base: "#a7aaa4", detail: "#5d5b54" },
+  "blue-shingle": { wall: "#6f8791", roof: "#6f8791", trim: "#f2efe4", base: "#a7aaa4", detail: "#465c65" },
+  "sage-shingle": { wall: "#7f8a73", roof: "#7f8a73", trim: "#f2efe4", base: "#a7aaa4", detail: "#4f5b48" },
+};
+
+function BuildingMaterialTile({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: { id: BuildingMaterialStyle; label: string };
+  selected: boolean;
+  onSelect: (id: BuildingMaterialStyle) => void;
+}): React.ReactElement {
+  const swatch = BUILDING_MATERIAL_SWATCHES[option.id];
+  const style = {
+    "--building-wall": swatch.wall,
+    "--building-roof": swatch.roof,
+    "--building-trim": swatch.trim,
+    "--building-base": swatch.base,
+    "--building-detail": swatch.detail,
+  } as React.CSSProperties;
+  return (
+    <button
+      type="button"
+      className="building-material-tile"
+      aria-pressed={selected}
+      title={option.label}
+      data-style={option.id}
+      onClick={() => onSelect(option.id)}
+    >
+      <span className="building-material-thumb" style={style} aria-hidden="true">
+        <span className="building-mini-roof">
+          <span />
+          <span />
+          <span />
+        </span>
+        <span className="building-mini-body">
+          <span className="building-mini-base" />
+          <span className="building-mini-trim horizontal top" />
+          <span className="building-mini-trim horizontal middle" />
+          <span className="building-mini-trim vertical left" />
+          <span className="building-mini-trim vertical center" />
+          <span className="building-mini-trim vertical right" />
+          <span className="building-mini-window one" />
+          <span className="building-mini-window two" />
+          <span className="building-mini-window three" />
+        </span>
+      </span>
+      <span>{option.label}</span>
+    </button>
+  );
+}
+
 // One avatar-picker grid tile: store thumbnail when it loads, else a colored-initial fallback
 // ("classic" has no store thumbnail and always renders the initial tile). Click = select.
 function App(): React.ReactElement {
@@ -13367,10 +13439,12 @@ function App(): React.ReactElement {
   };
 
   const closeToolPanel = (menu: ToolMenu) => {
+    if (menu === "terrain") clearTerrainBrush();
     setOpenToolMenus((current) => current.filter((item) => item !== menu));
   };
 
   const toggleToolPanel = (menu: ToolMenu) => {
+    if (menu === "terrain" && isToolOpen("terrain")) clearTerrainBrush();
     setOpenToolMenus((current) =>
       current.includes(menu)
         ? current.filter((item) => item !== menu)
@@ -15979,37 +16053,33 @@ function App(): React.ReactElement {
                         ))}
                       </select>
                     </label>
-                    <div className="asset-proc-row">
-                      <label className="asset-proc-field">
-                        <span>Material</span>
-                        <select
-                          value={procBuildingMaterial}
-                          onChange={(event) =>
-                            setProcBuildingMaterial(event.target.value as BuildingMaterialStyle)
-                          }
-                        >
-                          {BUILDING_MATERIAL_OPTIONS.map((option) => (
-                            <option key={option.id} value={option.id}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="asset-proc-field">
-                        <span>Light</span>
-                        <select
-                          value={procBuildingLighting}
-                          onChange={(event) =>
-                            setProcBuildingLighting(event.target.value as BuildingLightingStyle)
-                          }
-                        >
-                          {BUILDING_LIGHTING_OPTIONS.map((option) => (
-                            <option key={option.id} value={option.id}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                    <label className="asset-proc-field">
+                      <span>Light</span>
+                      <select
+                        value={procBuildingLighting}
+                        onChange={(event) =>
+                          setProcBuildingLighting(event.target.value as BuildingLightingStyle)
+                        }
+                      >
+                        {BUILDING_LIGHTING_OPTIONS.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="asset-proc-field">
+                      <span>Style</span>
+                      <div className="building-material-grid" aria-label="Building style">
+                        {BUILDING_MATERIAL_OPTIONS.map((option) => (
+                          <BuildingMaterialTile
+                            key={option.id}
+                            option={option}
+                            selected={procBuildingMaterial === option.id}
+                            onSelect={setProcBuildingMaterial}
+                          />
+                        ))}
+                      </div>
                     </div>
                     <div className="asset-proc-actions">
                       <label>
