@@ -90,7 +90,7 @@ const LOG_STONE_BASE_COLOR = 0x81817a;
 const PLANK_WALL_COLOR = 0x8c6844;
 const PLANK_DETAIL_COLOR = 0x5a3925;
 const PLANK_HIGHLIGHT_COLOR = 0xa67b55;
-const PLANK_CHINK_COLOR = 0x332116;
+const PLANK_CHINK_COLOR = 0xc7ad79;
 const CEDAR_SHINGLE_COLOR = 0x8b6040;
 const CEDAR_SHINGLE_LIGHT_COLOR = 0xa57950;
 const CEDAR_SHINGLE_DARK_COLOR = 0x5a3827;
@@ -658,7 +658,7 @@ function addPlankSiding(
   const courseCount = Math.max(3, Math.floor((yEnd - yStart) / spacing));
   for (let i = 0; i <= courseCount; i++) {
     const y = yStart + i * spacing;
-    const boardMat = i % 2 === 0 ? mats.plankBoard : mats.plankHighlight;
+    const boardMat = mats.plankBoard;
     addBox(group, [width * 0.97, boardHeight, boardDepth], [0, y, frontZ], boardMat, false);
     addBox(group, [width * 0.97, boardHeight, boardDepth], [0, y, backZ], boardMat, false);
     addBox(group, [boardDepth, boardHeight, depth * 0.97], [leftX, y, 0], boardMat, false);
