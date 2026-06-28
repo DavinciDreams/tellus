@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import { ktx2Loader } from "./tellus-generation-client";
+import type { TerrainKind } from "./tellus-types";
 import {
   abs,
   attribute,
@@ -47,6 +48,42 @@ const PAINT_FLOWERS = 6;
 const PAINT_STONE = 7;
 const PAINT_BRICK = 8;
 const PAINT_GRASS = 9;
+const PAINT_GRAVEL = 10;
+const PAINT_FOREST_FLOOR = 11;
+const PAINT_JUNGLE_MOSS = 12;
+const PAINT_DESERT_SAND = 13;
+const KIND_MEADOW = 1;
+const KIND_GRASS = 2;
+const KIND_ROCK = 3;
+const KIND_SNOW = 4;
+const KIND_BEACH = 5;
+const KIND_DIRT = 6;
+const KIND_FOREST_FLOOR = 7;
+const KIND_FLOWERS = 8;
+const KIND_GRAVEL = 9;
+const KIND_JUNGLE_MOSS = 10;
+const KIND_STONE = 11;
+const KIND_BRICK = 12;
+const KIND_DESERT_SAND = 13;
+
+export function terrainKindCode(kind: TerrainKind): number {
+  switch (kind) {
+    case "meadow": return KIND_MEADOW;
+    case "grass": return KIND_GRASS;
+    case "rock": return KIND_ROCK;
+    case "snow": return KIND_SNOW;
+    case "beach": return KIND_BEACH;
+    case "dirt": return KIND_DIRT;
+    case "forest-floor": return KIND_FOREST_FLOOR;
+    case "flowers": return KIND_FLOWERS;
+    case "gravel": return KIND_GRAVEL;
+    case "jungle-moss": return KIND_JUNGLE_MOSS;
+    case "stone": return KIND_STONE;
+    case "brick": return KIND_BRICK;
+    case "desert-sand": return KIND_DESERT_SAND;
+    default: return 0;
+  }
+}
 
 // World-space pattern sizes (metres). Brick courses are wider than tall; stone cells are chunky.
 const BRICK_W = 1.6;
@@ -168,26 +205,51 @@ function buildDetailColorNode() {
   // FLAT interpolation: a triangle straddling two paint codes must not interpolate the code (that
   // would sweep through other bands at the seam → a dark brick/stone ring around painted patches).
   const paintCode = float(varying(attribute("tellusPaintCode", "float")).setInterpolation("flat"));
+  const kindCode = float(varying(attribute("tellusTerrainKindCode", "float")).setInterpolation("flat"));
   const band = (code: number) =>
     step(code - 0.5, paintCode).sub(step(code + 0.5, paintCode));
+  const kindBand = (code: number) =>
+    step(code - 0.5, kindCode).sub(step(code + 0.5, kindCode));
   const isMeadow = band(PAINT_MEADOW);
   const isStone = band(PAINT_STONE);
   const isBrick = band(PAINT_BRICK);
   const isGrass = band(PAINT_GRASS);
+  const isGravel = band(PAINT_GRAVEL);
+  const isForestFloor = band(PAINT_FOREST_FLOOR);
+  const isJungleMoss = band(PAINT_JUNGLE_MOSS);
+  const isDesertSand = band(PAINT_DESERT_SAND);
+  const unpainted = step(0.5, paintCode).oneMinus();
+  const isAutoBeach = kindBand(KIND_BEACH).mul(unpainted);
+  const isAutoDirt = kindBand(KIND_DIRT).mul(unpainted);
+  const isAutoRock = kindBand(KIND_ROCK).mul(unpainted);
+  const isAutoSnow = kindBand(KIND_SNOW).mul(unpainted);
 
   const structPattern = float(1)
     .mul(isBrick.oneMinus().mul(isStone.oneMinus())) // 1 where neither structural pattern applies
     .add(brickPattern(wp.x, wp.z).mul(isBrick))
     .add(stonePattern(wp.x, wp.z).mul(isStone));
+  const structuralMask = isGravel.add(isStone).clamp(0, 1);
+  const terrainPattern = mix(
+    structPattern,
+    mx_noise_float(wp.mul(1.8)).mul(0.14).add(0.98),
+    isAutoBeach
+      .add(isAutoDirt)
+      .add(isAutoRock)
+      .add(isAutoSnow)
+      .add(isForestFloor)
+      .add(isDesertSand)
+      .add(structuralMask)
+      .clamp(0, 1),
+  );
 
   // Apply: base vertex color, grain, slope, structural pattern, then cool-tinted up high.
   const base = vertexColor();
-  const litColor = base.mul(grain.add(1).sub(slopeDark)).mul(structPattern);
+  const litColor = base.mul(grain.add(1).sub(slopeDark)).mul(terrainPattern);
   let detailed = mix(litColor, litColor.add(coolTint), heightT);
 
   // Green/khaki variation for meadow + grass (RGB multiplier). dry = 1 for grass, 0 for meadow.
-  const greenMask = isMeadow.max(isGrass);
-  const greenMul = greenVariation(wp.x, wp.z, isGrass);
+  const greenMask = isMeadow.max(isGrass).max(isJungleMoss);
+  const greenMul = greenVariation(wp.x, wp.z, isGrass).mul(mix(float(1), float(0.62), isJungleMoss));
   detailed = mix(detailed, detailed.mul(greenMul), greenMask);
 
   return detailed;
@@ -198,15 +260,16 @@ function buildDetailColorNode() {
 // meadow(1) yields fragments whose interpolated code sweeps through 7/8, lighting the stone/brick
 // bands → a dark brick/stone ring around painted patches. flat = one integer code per triangle.
 const WEBGL_VARYING =
-  "varying vec3 vTellusWorldPos;\nvarying vec3 vTellusWorldNormal;\nflat varying float vTellusPaintCode;";
+  "varying vec3 vTellusWorldPos;\nvarying vec3 vTellusWorldNormal;\nflat varying float vTellusPaintCode;\nflat varying float vTellusTerrainKindCode;";
 
 // Declares the per-vertex paint code attribute (geometries without it default the varying to 0).
-const WEBGL_VERTEX_HEAD = "attribute float tellusPaintCode;";
+const WEBGL_VERTEX_HEAD = "attribute float tellusPaintCode;\nattribute float tellusTerrainKindCode;";
 
 const WEBGL_VERTEX_TAIL = `
   vTellusWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
   vTellusWorldNormal = normalize(mat3(modelMatrix) * objectNormal);
   vTellusPaintCode = tellusPaintCode;
+  vTellusTerrainKindCode = tellusTerrainKindCode;
 `;
 
 // Hash-based value noise + 3-octave fractal — cheap, no textures. Matches the macro/micro feel of the
@@ -313,11 +376,12 @@ export interface TerrainMaterialOptions {
 
 const terrainTextureLoader = new THREE.TextureLoader();
 const generatedTerrainTextures = new Map<string, THREE.Texture>();
-const BIOME_LITE_TEXTURE_UNITS = 2; // moss + shared stone albedo samplers; sand/dirt stay procedural
+const BIOME_LITE_TEXTURE_UNITS = 3; // moss + shared stone + neutral grit samplers; still below old nine-sampler path
 const ESTIMATED_NINE_SAMPLER_UNITS = 11; // base albedo + normal + 9 paint albedo maps
 const BIOME_LITE_TEXTURE_URLS = {
   moss: "/terrain-textures/moss002/albedo.png",
   rock: "/terrain-textures/shared-fieldstone-rubble/albedo.png",
+  grit: "/terrain-textures/shared-asphalt-grain/albedo.jpg",
 } as const;
 
 function terrainImageTexturesRequested(): boolean {
@@ -367,7 +431,7 @@ export function terrainTextureDiagnostics(
   const reason = !requestedImageTextures
     ? "Procedural terrain detail is active."
     : supportsBiomeLitePaint
-      ? "Biome-lite terrain textures are active: moss and shared stone albedos stay below the WebGL sampler cap; sand, dirt, brick, and cobblestone are procedural."
+      ? "Biome-lite terrain textures are active: moss, shared stone, and neutral grit albedos stay below the WebGL sampler cap; brick and cobblestone are procedural."
       : "This WebGL renderer does not report enough fragment texture units for the biome-lite texture path.";
 
   return {
@@ -507,6 +571,7 @@ function applyBiomeLiteTerrainOverlay(
   const paintTextures: Record<keyof typeof BIOME_LITE_TEXTURE_URLS, THREE.Texture> = {
     moss: fallback,
     rock: fallback,
+    grit: fallback,
   };
   const shaders = new Set<Parameters<NonNullable<THREE.MeshStandardMaterial["onBeforeCompile"]>>[0]>();
 
@@ -514,6 +579,7 @@ function applyBiomeLiteTerrainOverlay(
     for (const shader of shaders) {
       shader.uniforms.tellusMossAlbedoMap.value = paintTextures.moss;
       shader.uniforms.tellusRockAlbedoMap.value = paintTextures.rock;
+      shader.uniforms.tellusGritAlbedoMap.value = paintTextures.grit;
     }
   };
 
@@ -531,6 +597,7 @@ function applyBiomeLiteTerrainOverlay(
     shader.uniforms.tellusBiomeTextureScale = { value: textureScale };
     shader.uniforms.tellusMossAlbedoMap = { value: paintTextures.moss };
     shader.uniforms.tellusRockAlbedoMap = { value: paintTextures.rock };
+    shader.uniforms.tellusGritAlbedoMap = { value: paintTextures.grit };
     shader.vertexShader = shader.vertexShader
       .replace(
         "#include <common>",
@@ -548,8 +615,12 @@ ${WEBGL_VARYING}
 uniform float tellusBiomeTextureScale;
 uniform sampler2D tellusMossAlbedoMap;
 uniform sampler2D tellusRockAlbedoMap;
+uniform sampler2D tellusGritAlbedoMap;
 float tellusPaintBand(float code){
   return step(code - 0.5, vTellusPaintCode) - step(code + 0.5, vTellusPaintCode);
+}
+float tellusKindBand(float code){
+  return step(code - 0.5, vTellusTerrainKindCode) - step(code + 0.5, vTellusTerrainKindCode);
 }
 float tellusBrickMortar(vec2 f){
   vec2 edge = min(f, 1.0 - f);
@@ -594,7 +665,7 @@ vec3 tellusRockSurface(vec2 worldPos, vec3 base){
   float grain = tellusHash2(fineCell);
   float seam = step(0.86, abs(sin(worldPos.x * 1.7 + slab * 4.0))) *
     step(0.76, abs(sin(worldPos.y * 1.3 + slab * 5.0)));
-  vec3 rock = base * mix(0.72, 1.18, slab) * mix(0.92, 1.08, grain);
+  vec3 rock = base * mix(0.86, 1.12, slab) * mix(0.94, 1.07, grain);
   return mix(rock, rock * 0.48, seam * 0.42);
 }
 vec3 tellusSandSurface(vec2 worldPos){
@@ -615,11 +686,27 @@ vec3 tellusDirtSurface(vec2 worldPos){
   base *= mix(0.93, 1.08, grit);
   return mix(base, base * vec3(1.08, 1.02, 0.88), dry * 0.22);
 }
+vec3 tellusForestFloorSurface(vec2 worldPos){
+  float duff = tellusSoftTerrainNoise(worldPos * 0.34 + vec2(8.1, -2.6)) * 0.5 + 0.5;
+  float leaf = tellusSoftTerrainNoise(worldPos * 2.8 + vec2(-1.7, 12.3)) * 0.5 + 0.5;
+  vec3 base = mix(vec3(0.12, 0.095, 0.065), vec3(0.28, 0.21, 0.13), duff);
+  return base * mix(0.88, 1.14, leaf);
+}
+vec3 tellusDesertSandSurface(vec2 worldPos){
+  float broad = tellusSoftTerrainNoise(worldPos * 0.2 + vec2(-4.0, 6.0)) * 0.5 + 0.5;
+  float ripple = sin((worldPos.x * 4.6 + worldPos.y * 0.42) + sin(worldPos.y * 0.8) * 1.1) * 0.5 + 0.5;
+  vec3 base = mix(vec3(0.67, 0.36, 0.15), vec3(0.92, 0.57, 0.24), broad);
+  return base * mix(0.95, 1.08, ripple);
+}
 vec3 tellusSnowSurface(vec2 worldPos){
   float drift = tellusSoftTerrainNoise(worldPos * 0.22 + vec2(5.0, -3.0)) * 0.5 + 0.5;
   float sparkle = tellusSoftTerrainNoise(worldPos * 2.8 + vec2(17.0, 13.0)) * 0.5 + 0.5;
   vec3 base = mix(vec3(0.72, 0.79, 0.91), vec3(0.92, 0.96, 1.0), drift);
   return base * mix(0.96, 1.06, sparkle);
+}
+float tellusGritDetail(vec3 sampleColor, float strength){
+  float luma = dot(sampleColor, vec3(0.299, 0.587, 0.114));
+  return mix(1.0, mix(0.78, 1.24, luma), strength);
 }`,
       )
       .replace(
@@ -630,34 +717,61 @@ vec3 tellusSnowSurface(vec2 worldPos){
     float meadowMask = tellusPaintBand(${PAINT_MEADOW.toFixed(1)});
     float flowersMask = tellusPaintBand(${PAINT_FLOWERS.toFixed(1)});
     float grassMask = tellusPaintBand(${PAINT_GRASS.toFixed(1)});
+    float jungleMossMask = tellusPaintBand(${PAINT_JUNGLE_MOSS.toFixed(1)});
     float mossMask = meadowMask + flowersMask + grassMask;
     float sandMask = tellusPaintBand(${PAINT_BEACH.toFixed(1)});
     float dirtMask = tellusPaintBand(${PAINT_DIRT.toFixed(1)});
+    float forestFloorMask = tellusPaintBand(${PAINT_FOREST_FLOOR.toFixed(1)});
+    float desertSandMask = tellusPaintBand(${PAINT_DESERT_SAND.toFixed(1)});
     float rockMask = tellusPaintBand(${PAINT_ROCK.toFixed(1)});
+    float gravelMask = tellusPaintBand(${PAINT_GRAVEL.toFixed(1)});
     float snowMask = tellusPaintBand(${PAINT_SNOW.toFixed(1)});
     float stoneMask = tellusPaintBand(${PAINT_STONE.toFixed(1)});
     float brickMask = tellusPaintBand(${PAINT_BRICK.toFixed(1)});
-    float paintMask = clamp(mossMask + sandMask + dirtMask + rockMask + snowMask + stoneMask + brickMask, 0.0, 1.0);
+    float unpainted = 1.0 - step(0.5, vTellusPaintCode);
+    sandMask += unpainted * tellusKindBand(${KIND_BEACH.toFixed(1)});
+    dirtMask += unpainted * tellusKindBand(${KIND_DIRT.toFixed(1)});
+    rockMask += unpainted * tellusKindBand(${KIND_ROCK.toFixed(1)});
+    snowMask += unpainted * tellusKindBand(${KIND_SNOW.toFixed(1)});
+    forestFloorMask += unpainted * tellusKindBand(${KIND_FOREST_FLOOR.toFixed(1)});
+    desertSandMask += unpainted * tellusKindBand(${KIND_DESERT_SAND.toFixed(1)});
+    gravelMask += unpainted * tellusKindBand(${KIND_GRAVEL.toFixed(1)});
+    jungleMossMask += unpainted * tellusKindBand(${KIND_JUNGLE_MOSS.toFixed(1)});
+    stoneMask += unpainted * tellusKindBand(${KIND_STONE.toFixed(1)});
+    brickMask += unpainted * tellusKindBand(${KIND_BRICK.toFixed(1)});
+    mossMask += jungleMossMask;
+    float paintMask = clamp(mossMask + sandMask + dirtMask + forestFloorMask + desertSandMask + rockMask + gravelMask + snowMask + stoneMask + brickMask, 0.0, 1.0);
     vec3 mossSample = texture2D(tellusMossAlbedoMap, tellusPaintUv).rgb;
     vec3 rockSample = texture2D(tellusRockAlbedoMap, tellusPaintUv).rgb;
+    vec3 gritSample = texture2D(tellusGritAlbedoMap, tellusPaintUv * 1.65).rgb;
     vec3 meadowAlbedo = mossSample * vec3(0.96, 1.03, 0.96);
     vec3 flowersAlbedo = mossSample * vec3(1.04, 1.08, 1.08);
     vec3 grassAlbedo = mossSample * vec3(1.08, 1.12, 0.82);
-    vec3 sandAlbedo = tellusSandSurface(vTellusWorldPos.xz);
-    vec3 dirtAlbedo = tellusDirtSurface(vTellusWorldPos.xz);
-    vec3 pebbleAlbedo = rockSample * vec3(0.82, 0.86, 0.82);
+    vec3 jungleMossAlbedo = mossSample * vec3(0.38, 0.68, 0.34);
+    vec3 sandAlbedo = mix(tellusSandSurface(vTellusWorldPos.xz) * vec3(0.9, 0.84, 0.68), gritSample * vec3(1.18, 1.08, 0.88), 0.62);
+    vec3 dirtBase = tellusDirtSurface(vTellusWorldPos.xz) * vec3(0.68, 0.5, 0.32);
+    vec3 dirtGrain = mix(gritSample * vec3(0.5, 0.34, 0.2), gritSample * gritSample * vec3(0.42, 0.25, 0.13), 0.48);
+    vec3 dirtAlbedo = mix(dirtBase, dirtGrain, 0.72);
+    vec3 forestFloorAlbedo = mix(tellusForestFloorSurface(vTellusWorldPos.xz) * vec3(1.12, 0.72, 0.42), gritSample * vec3(0.34, 0.22, 0.13), 0.58);
+    vec3 desertSandAlbedo = mix(tellusDesertSandSurface(vTellusWorldPos.xz), gritSample * vec3(1.36, 0.76, 0.34), 0.4);
+    vec3 pebbleAlbedo = rockSample * vec3(0.82, 0.86, 0.82) * tellusGritDetail(gritSample, 0.32);
+    vec3 gravelAlbedo = gritSample * vec3(0.62, 0.59, 0.51);
     float mountainRock = smoothstep(0.22, 0.58, 1.0 - clamp(vTellusWorldNormal.y, 0.0, 1.0));
     vec3 rockAlbedo = mix(pebbleAlbedo, tellusRockSurface(vTellusWorldPos.xz, pebbleAlbedo), mountainRock);
-    vec3 snowAlbedo = tellusSnowSurface(vTellusWorldPos.xz);
-    vec3 cobblestoneAlbedo = tellusStoneSlabs(vTellusWorldPos.xz);
+    vec3 snowAlbedo = mix(tellusSnowSurface(vTellusWorldPos.xz), gritSample * vec3(1.2, 1.24, 1.26), 0.34);
+    vec3 cobblestoneAlbedo = mix(gritSample * vec3(0.92, 0.88, 0.76), tellusStoneSlabs(vTellusWorldPos.xz) * vec3(1.12, 1.04, 0.9), 0.62);
     vec3 brickAlbedo = tellusRunningBondBrick(vTellusWorldPos.xz);
     vec3 biomeAlbedo =
       meadowAlbedo * meadowMask +
       flowersAlbedo * flowersMask +
       grassAlbedo * grassMask +
+      jungleMossAlbedo * jungleMossMask +
       sandAlbedo * sandMask +
       dirtAlbedo * dirtMask +
+      forestFloorAlbedo * forestFloorMask +
+      desertSandAlbedo * desertSandMask +
       rockAlbedo * rockMask +
+      gravelAlbedo * gravelMask +
       snowAlbedo * snowMask +
       cobblestoneAlbedo * stoneMask +
       brickAlbedo * brickMask +

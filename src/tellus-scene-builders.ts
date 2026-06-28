@@ -55,7 +55,7 @@ import {
 import { createGltfLoader, gltfObjectCache } from "./tellus-generation-client";
 import { proxiedGeneratedModelUrl } from "./tellus-urls-identity";
 import { tryLoadVrmObject, VrmObjectRig } from "./tellus-vrm-avatar";
-import { createTerrainMaterial } from "./tellus-terrain-material";
+import { createTerrainMaterial, terrainKindCode } from "./tellus-terrain-material";
 import { worldThingTargetHeight } from "./tellus-world-object-profile";
 
 const SKYBOX_MODEL_VERTICAL_OFFSETS: Record<string, number> = {
@@ -114,6 +114,7 @@ export function createTerrainGeometry(renderSegments = TERRAIN_SEGMENTS): THREE.
   const colors: number[] = [];
   const uvs: number[] = [];
   const paintCodes: number[] = [];
+  const terrainKindCodes: number[] = [];
   const indices: number[] = [];
 
   for (let z = 0; z <= renderSegments; z++) {
@@ -133,6 +134,7 @@ export function createTerrainGeometry(renderSegments = TERRAIN_SEGMENTS): THREE.
       colors.push(color.r, color.g, color.b);
       uvs.push(px / (WORLD_RADIUS * 2) + 0.5, pz / (WORLD_RADIUS * 2) + 0.5);
       paintCodes.push(painted ? terrainPaintCode(painted) : 0);
+      terrainKindCodes.push(terrainKindCode(kind));
     }
   }
 
@@ -155,6 +157,7 @@ export function createTerrainGeometry(renderSegments = TERRAIN_SEGMENTS): THREE.
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setAttribute("tellusPaintCode", new THREE.Float32BufferAttribute(paintCodes, 1));
+  geometry.setAttribute("tellusTerrainKindCode", new THREE.Float32BufferAttribute(terrainKindCodes, 1));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
@@ -319,6 +322,7 @@ export function createDistantIslandTerrainGeometry(
   const colors: number[] = [];
   const uvs: number[] = [];
   const paintCodes: number[] = [];
+  const terrainKindCodes: number[] = [];
   const indices: number[] = [];
 
   for (let zIndex = 0; zIndex <= DISTANT_TERRAIN_SEGMENTS; zIndex++) {
@@ -329,6 +333,7 @@ export function createDistantIslandTerrainGeometry(
       uvs.push(point.x / (WORLD_RADIUS * 2) + 0.5, point.z / (WORLD_RADIUS * 2) + 0.5);
       const painted = distantTerrainPaintAt(spec, point.x, point.z);
       paintCodes.push(painted ? terrainPaintCode(painted) : 0);
+      terrainKindCodes.push(terrainKindCode(painted ?? "meadow"));
       const color = painted
         ? terrainVertexColor(
             painted,
@@ -381,6 +386,7 @@ export function createDistantIslandTerrainGeometry(
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setAttribute("tellusPaintCode", new THREE.Float32BufferAttribute(paintCodes, 1));
+  geometry.setAttribute("tellusTerrainKindCode", new THREE.Float32BufferAttribute(terrainKindCodes, 1));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;

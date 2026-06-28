@@ -3798,17 +3798,34 @@ button.terrain-scatter-tile {
 
 .terrain-swatch.dirt .terrain-swatch-preview {
   background:
-    linear-gradient(18deg, transparent 0 42%, rgb(87 60 29 / 32%) 43% 47%, transparent 48%),
-    radial-gradient(circle at 66% 38%, rgb(80 50 26 / 56%) 0 8%, transparent 9%),
-    linear-gradient(135deg, #6f5730, #9a7b46);
+    linear-gradient(18deg, transparent 0 42%, rgb(56 33 16 / 46%) 43% 47%, transparent 48%),
+    radial-gradient(circle at 66% 38%, rgb(48 27 13 / 68%) 0 8%, transparent 9%),
+    radial-gradient(circle at 28% 70%, rgb(124 76 36 / 48%) 0 7%, transparent 8%),
+    linear-gradient(135deg, #4b2d17, #7a4d25);
 }
 
-.terrain-swatch.pebbles .terrain-swatch-preview {
+.terrain-swatch.forest-floor .terrain-swatch-preview {
+  background:
+    radial-gradient(ellipse at 24% 34%, rgb(35 20 11 / 82%) 0 9%, transparent 10%),
+    radial-gradient(ellipse at 68% 66%, rgb(93 45 20 / 64%) 0 12%, transparent 13%),
+    linear-gradient(36deg, transparent 0 45%, rgb(119 65 32 / 46%) 46% 49%, transparent 50%),
+    linear-gradient(135deg, #211209, #5a3018);
+}
+
+.terrain-swatch.cobble .terrain-swatch-preview {
   background:
     radial-gradient(circle at 18% 24%, #a8956a 0 9%, transparent 10%),
     radial-gradient(circle at 48% 58%, #46505a 0 10%, transparent 11%),
     radial-gradient(circle at 78% 32%, #c2b17c 0 8%, transparent 9%),
     linear-gradient(135deg, #5d665f, #7a7764);
+}
+
+.terrain-swatch.gravel .terrain-swatch-preview {
+  background:
+    radial-gradient(circle at 18% 24%, rgb(210 210 196 / 48%) 0 4%, transparent 5%),
+    radial-gradient(circle at 42% 58%, rgb(60 60 56 / 48%) 0 5%, transparent 6%),
+    radial-gradient(circle at 78% 34%, rgb(155 150 132 / 52%) 0 6%, transparent 7%),
+    repeating-radial-gradient(circle at 55% 45%, #5e5d55 0 2px, #88877d 3px 5px);
 }
 
 .terrain-swatch.snow .terrain-swatch-preview {
@@ -3818,6 +3835,13 @@ button.terrain-scatter-tile {
     linear-gradient(135deg, #c8e0dc, #f2f8ef);
 }
 
+.terrain-swatch.desert-sand .terrain-swatch-preview {
+  background:
+    linear-gradient(18deg, transparent 0 44%, rgb(255 211 132 / 35%) 45% 47%, transparent 48%) 0 0 / 16px 100%,
+    radial-gradient(circle at 70% 32%, rgb(156 73 28 / 34%) 0 9%, transparent 10%),
+    linear-gradient(135deg, #b85c25, #e89a43);
+}
+
 .terrain-swatch.flowers .terrain-swatch-preview {
   background:
     radial-gradient(circle at 23% 34%, #ffd36a 0 4%, transparent 5%),
@@ -3825,6 +3849,13 @@ button.terrain-scatter-tile {
     radial-gradient(circle at 70% 52%, #c8dfff 0 4%, transparent 5%),
     radial-gradient(circle at 78% 40%, #fff7d6 0 4%, transparent 5%),
     linear-gradient(135deg, #5f9f32, #8fbd4d);
+}
+
+.terrain-swatch.jungle-moss .terrain-swatch-preview {
+  background:
+    radial-gradient(circle at 22% 38%, rgb(35 101 37 / 82%) 0 10%, transparent 11%),
+    radial-gradient(circle at 70% 58%, rgb(12 59 22 / 78%) 0 12%, transparent 13%),
+    linear-gradient(135deg, #173b1c, #3f7d32);
 }
 
 .terrain-swatch.stone .terrain-swatch-preview {
