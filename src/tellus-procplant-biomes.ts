@@ -158,6 +158,16 @@ const PAINT_BIOMES: Record<TerrainPaintKind, ProcPlantBiomeCandidate[]> = {
     candidate("understoryShrub", { density: 0.3, scale: 2.1, weight: 2, environment: { light: 0.68, moisture: 0.42, crowding: 0.34, biomeWarmth: 0.64 } }),
     candidate("acaciaUmbrella", { density: 0.14, scale: 5.8, weight: 1, treeBackend: { kind: "lsystem", species: "sassafras", leafScaleMultiplier: 2.0, maxLeaves: 150, maxStems: 42, maxBranchDepth: 2 }, environment: { light: 0.82, moisture: 0.34, crowding: 0.2, biomeWarmth: 0.76 } }),
   ],
+  "forest-floor": [
+    candidate("understoryShrub", { secondary: "phiFern", hybrid: 0.22, density: 0.48, scale: 2.2, weight: 3, environment: { light: 0.42, moisture: 0.66, crowding: 0.62, biomeWarmth: 0.48 } }),
+    candidate("phiFern", { density: 0.52, scale: 1.0, weight: 2, environment: { light: 0.38, moisture: 0.74, crowding: 0.58, biomeWarmth: 0.46 } }),
+    candidate("oakCanopy", { density: 0.18, scale: 6.5, weight: 1, treeBackend: { kind: "lsystem", species: "cambridgeOak", leafScaleMultiplier: 1.7, maxLeaves: 180, maxStems: 46, maxBranchDepth: 2 }, environment: { light: 0.46, moisture: 0.58, crowding: 0.56, biomeWarmth: 0.5 } }),
+  ],
+  "desert-sand": [
+    candidate("desertRosette", { secondary: "agaveSucculent", hybrid: 0.16, density: 0.24, scale: 1.25, weight: 3, environment: { light: 0.96, moisture: 0.14, crowding: 0.1, biomeWarmth: 0.92 } }),
+    candidate("agaveSucculent", { density: 0.18, scale: 1.4, weight: 2, environment: { light: 0.96, moisture: 0.12, crowding: 0.1, biomeWarmth: 0.9 } }),
+    candidate("acaciaUmbrella", { density: 0.1, scale: 5.8, weight: 1, treeBackend: { kind: "lsystem", species: "sassafras", leafScaleMultiplier: 1.8, maxLeaves: 120, maxStems: 34, maxBranchDepth: 2 }, environment: { light: 0.92, moisture: 0.18, crowding: 0.12, biomeWarmth: 0.88 } }),
+  ],
   rock: [
     candidate("agaveSucculent", { secondary: "desertRosette", hybrid: 0.08, density: 0.22, scale: 1.3, weight: 3, environment: { light: 0.86, moisture: 0.24, crowding: 0.12, biomeWarmth: 0.62 } }),
     candidate("phiFern", { density: 0.1, scale: 0.85, weight: 1, environment: { light: 0.54, moisture: 0.34, crowding: 0.18, biomeWarmth: 0.5 } }),
@@ -171,6 +181,15 @@ const PAINT_BIOMES: Record<TerrainPaintKind, ProcPlantBiomeCandidate[]> = {
   stone: [
     candidate("phiFern", { secondary: "furGrass", hybrid: 0.04, density: 0.12, scale: 0.8, weight: 2, environment: { light: 0.58, moisture: 0.36, crowding: 0.2, biomeWarmth: 0.52 } }),
     candidate("vincaVine", { density: 0.08, scale: 0.9, weight: 1, environment: { light: 0.48, moisture: 0.42, crowding: 0.24, biomeWarmth: 0.56 } }),
+  ],
+  gravel: [
+    candidate("furGrass", { density: 0.1, scale: 0.75, weight: 2, environment: { light: 0.7, moisture: 0.28, crowding: 0.1, biomeWarmth: 0.52 } }),
+    candidate("vincaVine", { density: 0.06, scale: 0.75, weight: 1, environment: { light: 0.56, moisture: 0.34, crowding: 0.1, biomeWarmth: 0.52 } }),
+  ],
+  "jungle-moss": [
+    candidate("phiFern", { secondary: "vincaVine", hybrid: 0.3, density: 0.74, scale: 1.2, weight: 3, environment: { light: 0.35, moisture: 0.92, crowding: 0.76, biomeWarmth: 0.84 } }),
+    candidate("understoryShrub", { density: 0.42, scale: 2.4, weight: 2, environment: { light: 0.38, moisture: 0.86, crowding: 0.72, biomeWarmth: 0.82 } }),
+    candidate("foldedPalm", { density: 0.2, scale: 3.8, weight: 1, environment: { light: 0.5, moisture: 0.84, crowding: 0.58, biomeWarmth: 0.9 } }),
   ],
   brick: [
     candidate("vincaVine", { density: 0.08, scale: 0.85, weight: 2, environment: { light: 0.52, moisture: 0.32, crowding: 0.14, biomeWarmth: 0.55 } }),

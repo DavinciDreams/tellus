@@ -151,7 +151,7 @@ import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tel
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
-import { createTerrainMaterial, terrainTextureDiagnostics } from "./tellus-terrain-material";
+import { createTerrainMaterial, terrainKindCode, terrainTextureDiagnostics } from "./tellus-terrain-material";
 import { largeWorldBaseHeight, largeWorldTerrainKind, usesContinentalChunkedTerrain } from "./tellus-large-world-terrain";
 import { buildingMaterialForEcology, resolveEcologySample } from "./tellus-ecology";
 import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
@@ -2717,6 +2717,8 @@ function createTellusWorld(
       "position",
     ) as THREE.BufferAttribute;
     const colors = terrain.geometry.getAttribute("color") as THREE.BufferAttribute;
+    const paintCodes = terrain.geometry.getAttribute("tellusPaintCode") as THREE.BufferAttribute | undefined;
+    const terrainKindCodes = terrain.geometry.getAttribute("tellusTerrainKindCode") as THREE.BufferAttribute | undefined;
     const renderRow = terrainRenderSegments + 1;
     for (let zIndex = 0; zIndex <= terrainRenderSegments; zIndex++) {
       const vz = (zIndex / terrainRenderSegments - 0.5) * WORLD_RADIUS * 2;
@@ -2730,17 +2732,23 @@ function createTellusWorld(
         const py = inside ? terrainHeight(px, pz) : -4.5;
         const index = zIndex * renderRow + xIndex;
         positions.setXYZ(index, px, py, pz);
+        const kind = inside ? terrainKind(px, pz, py) : "rock";
         const color = terrainVertexColor(
-          inside ? terrainKind(px, pz, py) : "rock",
+          kind,
           px,
           pz,
           xIndex * 1009 + zIndex * 9176,
         );
         colors.setXYZ(index, color.r, color.g, color.b);
+        const painted = inside ? centralTerrainPaintAt(px, pz) : null;
+        paintCodes?.setX(index, painted ? terrainPaintCode(painted) : 0);
+        terrainKindCodes?.setX(index, terrainKindCode(kind));
       }
     }
     positions.needsUpdate = true;
     colors.needsUpdate = true;
+    if (paintCodes) paintCodes.needsUpdate = true;
+    if (terrainKindCodes) terrainKindCodes.needsUpdate = true;
     terrain.geometry.computeVertexNormals();
     refreshFlowerPatches();
   };
@@ -2755,6 +2763,8 @@ function createTellusWorld(
     maxZ: number,
   ) => {
     const colors = terrain.geometry.getAttribute("color") as THREE.BufferAttribute;
+    const paintCodes = terrain.geometry.getAttribute("tellusPaintCode") as THREE.BufferAttribute | undefined;
+    const terrainKindCodes = terrain.geometry.getAttribute("tellusTerrainKindCode") as THREE.BufferAttribute | undefined;
     const renderRow = terrainRenderSegments + 1;
     const span = WORLD_RADIUS * 2;
     // Map the world-space brush AABB to render-grid index ranges (one cell of padding for falloff seams).
@@ -2774,16 +2784,23 @@ function createTellusWorld(
         const px = vx * edgeScale;
         const pz = vz * edgeScale;
         const py = inside ? terrainHeight(px, pz) : -4.5;
+        const kind = inside ? terrainKind(px, pz, py) : "rock";
         const color = terrainVertexColor(
-          inside ? terrainKind(px, pz, py) : "rock",
+          kind,
           px,
           pz,
           xIndex * 1009 + zIndex * 9176,
         );
-        colors.setXYZ(zIndex * renderRow + xIndex, color.r, color.g, color.b);
+        const index = zIndex * renderRow + xIndex;
+        colors.setXYZ(index, color.r, color.g, color.b);
+        const painted = inside ? centralTerrainPaintAt(px, pz) : null;
+        paintCodes?.setX(index, painted ? terrainPaintCode(painted) : 0);
+        terrainKindCodes?.setX(index, terrainKindCode(kind));
       }
     }
     colors.needsUpdate = true;
+    if (paintCodes) paintCodes.needsUpdate = true;
+    if (terrainKindCodes) terrainKindCodes.needsUpdate = true;
   };
 
   // Coalesce the full 9409-vertex rebuild (positions + colors + computeVertexNormals + flower patches) to one
@@ -16375,11 +16392,27 @@ function App(): React.ReactElement {
             </button>
             <button
               type="button"
-              className={`terrain-swatch pebbles ${terrainBrushMode === "rock" ? "active" : ""}`}
+              className={`terrain-swatch forest-floor ${terrainBrushMode === "forest-floor" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("forest-floor")}
+            >
+              <span className="terrain-swatch-preview" />
+              <span>Forest</span>
+            </button>
+            <button
+              type="button"
+              className={`terrain-swatch cobble ${terrainBrushMode === "rock" ? "active" : ""}`}
               onClick={() => selectTerrainBrush("rock")}
             >
               <span className="terrain-swatch-preview" />
-              <span>Pebbles</span>
+              <span>Cobble</span>
+            </button>
+            <button
+              type="button"
+              className={`terrain-swatch gravel ${terrainBrushMode === "gravel" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("gravel")}
+            >
+              <span className="terrain-swatch-preview" />
+              <span>Gravel</span>
             </button>
             <button
               type="button"
@@ -16391,11 +16424,27 @@ function App(): React.ReactElement {
             </button>
             <button
               type="button"
+              className={`terrain-swatch desert-sand ${terrainBrushMode === "desert-sand" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("desert-sand")}
+            >
+              <span className="terrain-swatch-preview" />
+              <span>Desert</span>
+            </button>
+            <button
+              type="button"
               className={`terrain-swatch flowers ${terrainBrushMode === "flowers" ? "active" : ""}`}
               onClick={() => selectTerrainBrush("flowers")}
             >
               <span className="terrain-swatch-preview" />
               <span>Flowers</span>
+            </button>
+            <button
+              type="button"
+              className={`terrain-swatch jungle-moss ${terrainBrushMode === "jungle-moss" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("jungle-moss")}
+            >
+              <span className="terrain-swatch-preview" />
+              <span>Jungle</span>
             </button>
             <button
               type="button"

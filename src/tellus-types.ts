@@ -13,9 +13,13 @@ export type TerrainKind =
   | "snow"
   | "beach"
   | "dirt"
+  | "forest-floor"
   | "flowers"
+  | "gravel"
+  | "jungle-moss"
   | "stone"
   | "brick"
+  | "desert-sand"
   | "water";
 export type TerrainPaintKind = Exclude<TerrainKind, "water">;
 export type TerrainEditMode = "raise" | "lower" | "flatten" | TerrainPaintKind;

@@ -576,9 +576,11 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
 
   const pickTree = (paint: TerrainPaintKind | null, h: number, r1: number, r2: number): { tpl: Template; scale: number } | null => {
     const meadowish = paint === "meadow" || paint === "grass" || paint === null || paint === "flowers";
-    if (paint === "beach") {
+    if (paint === "beach" || paint === "desert-sand") {
       if (r1 > 0.16) return null;
-      return { tpl: treeTpls.palm, scale: 5.5 + r2 * 3 };
+      return paint === "desert-sand" && r2 < 0.55
+        ? { tpl: treeTpls.deadtree, scale: 3.8 + r2 * 3.2 }
+        : { tpl: treeTpls.palm, scale: 5.5 + r2 * 3 };
     }
     if (paint === "snow" || paint === "rock" || h > 10.5) {
       if (r1 > 0.16) return null;
@@ -586,12 +588,22 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
         ? { tpl: treeTpls.pine, scale: 7 + r2 * 4 }
         : { tpl: treeTpls.conifer, scale: 5.5 + r2 * 3.2 };
     }
+    if (paint === "forest-floor" || paint === "jungle-moss") {
+      if (r1 > (paint === "jungle-moss" ? 0.42 : 0.34)) return null;
+      if (r2 < 0.25) return { tpl: treeTpls.broadleaf, scale: 5.4 + r2 * 3.2 };
+      if (r2 < 0.58) return { tpl: treeTpls.birch, scale: 5.2 + r2 * 3.4 };
+      return { tpl: treeTpls.conifer, scale: 5.4 + r2 * 3 };
+    }
     if (paint === "dirt") {
       if (r1 > 0.26) return null;
       if (r2 < 0.16) return { tpl: treeTpls.deadtree, scale: 4.2 + r2 * 4.5 };
       return r2 < 0.55
         ? { tpl: treeTpls.conifer, scale: 5.5 + r2 * 3.2 }
         : { tpl: treeTpls.broadleaf, scale: 4.6 + r2 * 2.6 };
+    }
+    if (paint === "gravel" || paint === "stone" || paint === "brick") {
+      if (r1 > 0.08) return null;
+      return { tpl: treeTpls.deadtree, scale: 3.4 + r2 * 2.2 };
     }
     if (meadowish) {
       const accept = paint === "flowers" ? 0.14 : 0.34;
