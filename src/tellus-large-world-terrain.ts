@@ -1,5 +1,6 @@
 import type { TerrainKind } from "./tellus-types";
 import type { LandShapeConfig, WorldTemplateId } from "./tellus-types";
+import type { WorldBiomeCell } from "./world-protocol";
 import {
   CHUNK_SPAN,
   CLASSIC_WORLD_RADIUS,
@@ -15,6 +16,7 @@ import {
 } from "./tellus-world-templates";
 import { evoflowTerrainSourceFor } from "./tellus-evoflow-terrains";
 import {
+  activeEvoflowBiomeCell,
   activeEvoflowBaseTerrainHeight,
   activeEvoflowTerrainKind,
 } from "./tellus-terrain";
@@ -676,4 +678,16 @@ export function largeWorldTerrainKind(
   if (y > 7 && slope < 0.42 && meadowNoise > 0.28) return "flowers";
   if (slope > 0.68) return "dirt";
   return "meadow";
+}
+
+export function largeWorldBiomeCellAt(
+  x: number,
+  z: number,
+  y = largeWorldBaseHeight(x, z),
+): WorldBiomeCell | null {
+  const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
+  if (!isEvoflowTemplate(template)) return null;
+  const point = chunkedIslandPoint(x, z);
+  if (!point) return null;
+  return activeEvoflowBiomeCell(point.cx, point.cz, y);
 }

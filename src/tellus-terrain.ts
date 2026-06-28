@@ -42,6 +42,7 @@ import {
   type WorldGeneratedThing,
   type WorldPresence,
   type WorldPatch,
+  type WorldBiomeCell,
   isTellusTerrainState,
   isWorldGeneratedThing,
 } from "./world-protocol";
@@ -319,6 +320,59 @@ function evoflowTerrainKind(cx: number, cz: number, y: number): TerrainKind | nu
 
 export function activeEvoflowTerrainKind(cx: number, cz: number, y: number): TerrainKind | null {
   return evoflowTerrainKind(cx, cz, y);
+}
+
+export function evoflowBiomeForSemanticLabel(
+  template: WorldTemplateId,
+  label: number,
+  y: number,
+): string {
+  if (template === "evoflow-copper-terraces") return "desert";
+  if (template === "evoflow-lichen-basin") return y > 10 ? "arctic-alpine" : "tundra";
+  if (template === "evoflow-glass-ridge" || template === "evoflow-basalt-teeth" || template === "evoflow-spires") {
+    return y > 12 ? "arctic-alpine" : "desert";
+  }
+  if (label <= 0 && y < -1.5) return "coastal";
+  if (label === 1) return "desert";
+  if (label === 3) return y > 12 ? "arctic-alpine" : "desert";
+  if (label === 4) return "grassland";
+  if (label === 5) return "savanna";
+  return y > 12 ? "arctic-alpine" : "desert";
+}
+
+export function activeEvoflowBiomeCell(
+  cx: number,
+  cz: number,
+  y: number,
+): WorldBiomeCell | null {
+  if (!activeEvoflowRaster?.semanticData) return null;
+  const { u, v } = evoflowUv(cx, cz);
+  const label = Math.round(
+    sampleRasterChannel(
+      activeEvoflowRaster.semanticData,
+      activeEvoflowRaster.width,
+      activeEvoflowRaster.height,
+      u,
+      v,
+    ),
+  );
+  const biome = evoflowBiomeForSemanticLabel(activeTemplate, label, y);
+  return {
+    cx: Math.floor(cx / 8),
+    cz: Math.floor(cz / 8),
+    biome,
+    intensity: 1,
+  };
+}
+
+export function activeEvoflowWorldBiomeCellAt(
+  x: number,
+  z: number,
+  y: number,
+): WorldBiomeCell | null {
+  const cx = x / WORLD_SCALE;
+  const cz = z / WORLD_SCALE;
+  return activeEvoflowBiomeCell(cx, cz, y);
 }
 
 void beginEvoflowTerrainLoad(activeTemplate);

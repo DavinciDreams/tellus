@@ -148,11 +148,11 @@ import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayer
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { parseWaterSettings, runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig, worldApiUrl } from "./tellus-runtime-config";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, assetStoreOptimizedAssetUrls, toAssetId } from "./tellus-urls-identity";
-import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded } from "./tellus-terrain";
+import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded, activeEvoflowWorldBiomeCellAt } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial, terrainKindCode, terrainTextureDiagnostics } from "./tellus-terrain-material";
-import { largeWorldBaseHeight, largeWorldTerrainKind, usesContinentalChunkedTerrain } from "./tellus-large-world-terrain";
+import { largeWorldBaseHeight, largeWorldBiomeCellAt, largeWorldTerrainKind, usesContinentalChunkedTerrain } from "./tellus-large-world-terrain";
 import { buildingMaterialForEcology, resolveEcologySample } from "./tellus-ecology";
 import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
 import { generateInteriorRoom, normalizeInteriorBiomeMaterial, type InteriorBiomeMaterial } from "./tellus-building";
@@ -824,6 +824,12 @@ function createTellusWorld(
         return kind === "water" ? null : kind;
       }
     : centralTerrainPaintAt;
+  const biomeCellAt = (x: number, z: number, height: number): WorldBiomeCell | null => {
+    const key = `${Math.floor(x / CHUNK_SPAN)}:${Math.floor(z / CHUNK_SPAN)}`;
+    return worldBiomeCells.get(key) ?? (isChunked
+      ? largeWorldBiomeCellAt(x, z, height)
+      : activeEvoflowWorldBiomeCellAt(x, z, height));
+  };
   const sampleEcology = (x: number, z: number, height: number, paint: TerrainPaintKind | null, seed: number) =>
     resolveEcologySample({
       seed,
@@ -834,7 +840,7 @@ function createTellusWorld(
         ? Math.min(1, Math.abs((chunkRenderer?.sampleHeight(x + 2.5, z) ?? height) - height) / 2.5)
         : undefined,
       terrainPaint: paint,
-      biomeCell: worldBiomeCells.get(`${Math.floor(x / CHUNK_SPAN)}:${Math.floor(z / CHUNK_SPAN)}`),
+      biomeCell: biomeCellAt(x, z, height),
     });
   const vegetationEnabled = vegetationPreference !== "0" && (isChunked || vegetationPreference === "1");
   const groundGrassEnabled = !isChunked && vegetationPreference === "1";
@@ -6515,7 +6521,7 @@ function createTellusWorld(
         z: position.z,
         height,
         terrainPaint: paint,
-        biomeCell: worldBiomeCells.get(`${Math.floor(position.x / CHUNK_SPAN)}:${Math.floor(position.z / CHUNK_SPAN)}`),
+        biomeCell: biomeCellAt(position.x, position.z, height),
       });
       modelUrl = makeProceduralBuildingModelUrl(
         makeProceduralBuildingArchetypeId(recipeId),

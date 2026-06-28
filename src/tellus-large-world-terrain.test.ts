@@ -12,6 +12,7 @@ import {
   usesContinentalChunkedTerrain,
 } from "./tellus-large-world-terrain";
 import { runtimeConfig } from "./tellus-runtime-config";
+import { evoflowBiomeForSemanticLabel } from "./tellus-terrain";
 import type { WorldTemplateId } from "./tellus-types";
 
 function sampleGrid(step = 96, count = 12): Array<{ x: number; z: number; h: number; slope: number }> {
@@ -83,6 +84,13 @@ function showcaseGridSamples(chunkSize = 24): Array<{ x: number; z: number }> {
 }
 
 describe("large-world terrain", () => {
+  it("maps local Evoflow semantic labels into ecology biome families", () => {
+    expect(evoflowBiomeForSemanticLabel("evoflow-copper-terraces", 1, 3)).toBe("desert");
+    expect(evoflowBiomeForSemanticLabel("evoflow-lichen-basin", 4, 4)).toBe("tundra");
+    expect(evoflowBiomeForSemanticLabel("evoflow-glass-ridge", 3, 18)).toBe("arctic-alpine");
+    expect(evoflowBiomeForSemanticLabel("evoflow-coral-canyon", 4, 2)).toBe("grassland");
+  });
+
   afterEach(() => {
     setChunkedWorldChunks(null);
     runtimeConfig.worldId = "chunked-64-genesis";
