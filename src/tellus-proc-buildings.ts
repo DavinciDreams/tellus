@@ -230,6 +230,9 @@ export const buildProceduralBuildingModel = (
   addWindows(group, width, depth, floors, recipe, mats, rng);
   addFootprintDetails(group, width, depth, height, recipe, mats, rng);
   if (options.roof !== false) addRoof(group, width, depth, height, recipe, mats, rng);
+  if (shinglePalette(materialStyle) && !rockOnlyBuilding(recipe.id)) {
+    addShinglePorch(group, width, depth, recipe, mats);
+  }
   addLighting(group, width, depth, height, options.lighting ?? "warm");
   return group;
 };
@@ -612,6 +615,94 @@ function addCedarShingleSiding(
     addBox(group, [tileDepth, 0.03, depth * 0.94], [leftX - 0.002, shadowY, 0], mats.cedarShingleDark, false);
     addBox(group, [tileDepth, 0.03, depth * 0.94], [rightX + 0.002, shadowY, 0], mats.cedarShingleDark, false);
   }
+}
+
+function addShinglePorch(
+  group: THREE.Group,
+  width: number,
+  depth: number,
+  recipe: TellusBuildingRecipe,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const smallBuilding = recipe.id === "simple-house" || width < 8.2;
+  const porchWidth = Math.min(width + 0.35, Math.max(3.5, width * (smallBuilding ? 0.62 : 0.72)));
+  const porchDepth = Math.min(2.25, Math.max(1.45, depth * 0.25));
+  const frontWallZ = depth / 2;
+  const porchCenterZ = frontWallZ + porchDepth / 2 + 0.16;
+  const floorHeight = 0.22;
+  const floorY = 0.18;
+  addBox(group, [porchWidth, floorHeight, porchDepth], [0, floorY, porchCenterZ], mats.baseWall, false);
+  addBox(group, [Math.min(2.5, porchWidth * 0.44), 0.14, 0.55], [0, 0.07, frontWallZ + porchDepth + 0.45], mats.baseWall, false);
+
+  const columnCount = smallBuilding
+    ? 2
+    : Math.min(6, Math.max(3, Math.round(porchWidth / 2.45) + 1));
+  const columnXs = evenPositions(columnCount, porchWidth - 0.52);
+  const columnHeight = smallBuilding ? 2.0 : 2.18;
+  const columnY = floorHeight + columnHeight / 2;
+  const columnZ = frontWallZ + porchDepth - 0.12;
+  for (const x of columnXs) {
+    addBox(group, [0.18, columnHeight, 0.18], [x, columnY, columnZ], mats.trim, false);
+    addBox(group, [0.36, 0.12, 0.36], [x, floorHeight + 0.06, columnZ], mats.trim, false);
+    addBox(group, [0.34, 0.12, 0.34], [x, floorHeight + columnHeight + 0.02, columnZ], mats.trim, false);
+  }
+
+  const roofWidth = porchWidth + 0.75;
+  const roofDepth = porchDepth + 0.68;
+  const roofCenter: [number, number, number] = [0, floorHeight + columnHeight + 0.28, frontWallZ + roofDepth / 2 + 0.02];
+  const roofRotationX = Math.atan2(0.48, roofDepth);
+  const porchRoof = new THREE.Mesh(new THREE.BoxGeometry(roofWidth, 0.16, roofDepth), mats.roof);
+  porchRoof.position.set(...roofCenter);
+  porchRoof.rotation.x = roofRotationX;
+  addMesh(group, porchRoof, false);
+  addShedRoofShingles(group, roofCenter, roofWidth, roofDepth, roofRotationX, mats);
+  addBox(group, [roofWidth + 0.08, 0.16, 0.14], [0, roofCenter[1] - 0.28, frontWallZ + roofDepth + 0.04], mats.trim, false);
+  addBox(group, [roofWidth + 0.1, 0.12, 0.12], [0, roofCenter[1] + 0.22, frontWallZ - 0.12], mats.trim, false);
+}
+
+function addShedRoofShingles(
+  group: THREE.Group,
+  center: [number, number, number],
+  roofWidth: number,
+  roofDepth: number,
+  rotationX: number,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const rowCount = Math.max(4, Math.floor(roofDepth / 0.34));
+  const rowSpacing = roofDepth / (rowCount + 0.5);
+  const startZ = -roofDepth / 2 + rowSpacing;
+  for (let row = 0; row < rowCount; row++) {
+    const localZ = startZ + row * rowSpacing;
+    addShedRoofDetailBox(group, [roofWidth + 0.04, 0.045, 0.035], center, 0, 0.105, localZ, rotationX, mats.roofDetail);
+  }
+
+  const columns = Math.max(4, Math.floor(roofWidth / 0.9));
+  for (let row = 0; row < rowCount - 1; row++) {
+    const localZ = startZ + (row + 0.5) * rowSpacing;
+    for (let col = 0; col < columns; col++) {
+      if ((row + col) % 2 !== 0) continue;
+      const x = ((col + 0.5) / columns - 0.5) * (roofWidth - 0.45);
+      addShedRoofDetailBox(group, [0.035, 0.04, rowSpacing * 0.52], center, x, 0.115, localZ, rotationX, mats.roofDetail);
+    }
+  }
+}
+
+function addShedRoofDetailBox(
+  group: THREE.Group,
+  size: [number, number, number],
+  center: [number, number, number],
+  localX: number,
+  localY: number,
+  localZ: number,
+  rotationX: number,
+  material: THREE.Material,
+) {
+  const offset = new THREE.Vector3(localX, localY, localZ);
+  offset.applyEuler(new THREE.Euler(rotationX, 0, 0));
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+  mesh.position.set(center[0] + offset.x, center[1] + offset.y, center[2] + offset.z);
+  mesh.rotation.x = rotationX;
+  addMesh(group, mesh, false);
 }
 
 function lowerBodyHeightForSiding(recipe: TellusBuildingRecipe, height: number): number {
