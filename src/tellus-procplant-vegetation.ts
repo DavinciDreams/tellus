@@ -85,20 +85,45 @@ interface OrganBucket {
   instances: ProcPlantInstance[];
 }
 
+interface BiomeTreeTemplateOptions {
+  leafScaleMultiplier?: number;
+  maxLeaves?: number;
+  maxStems?: number;
+  maxBranchDepth?: number;
+  foliageMass?: number;
+  foliageClusterDensity?: number;
+  foliageTipBias?: number;
+  foliageSpread?: number;
+}
+
 const DEFAULT_CHUNK_SIZE = 12;
 const DEFAULT_MAX_RING = 2;
 const MAX_LOD0_PLANTS = 16;
 const MAX_LOD1_PLANTS = 6;
 
+const foliageDefaultsForTreeSpecies = (
+  species: string,
+): Required<Pick<BiomeTreeTemplateOptions, "foliageMass" | "foliageClusterDensity" | "foliageTipBias" | "foliageSpread">> => {
+  const id = species.toLowerCase();
+  if (id.includes("fir") || id.includes("pine") || id.includes("douglas") || id.includes("larch")) {
+    return { foliageMass: 0.92, foliageClusterDensity: 1.24, foliageTipBias: 0.34, foliageSpread: 0.16 };
+  }
+  if (id.includes("cherry") || id.includes("apple") || id.includes("magnolia")) {
+    return { foliageMass: 0.72, foliageClusterDensity: 1.22, foliageTipBias: 0.62, foliageSpread: 0.22 };
+  }
+  if (id.includes("birch") || id.includes("aspen") || id.includes("poplar")) {
+    return { foliageMass: 0.58, foliageClusterDensity: 1.04, foliageTipBias: 0.72, foliageSpread: 0.2 };
+  }
+  if (id.includes("oak") || id.includes("sassafras") || id.includes("tupelo")) {
+    return { foliageMass: 0.74, foliageClusterDensity: 1.22, foliageTipBias: 0.58, foliageSpread: 0.21 };
+  }
+  return { foliageMass: 0.62, foliageClusterDensity: 1.1, foliageTipBias: 0.55, foliageSpread: 0.2 };
+};
+
 const buildBiomeTreeTemplate = (
   species: string,
   seed: number,
-  options: {
-    leafScaleMultiplier?: number;
-    maxLeaves?: number;
-    maxStems?: number;
-    maxBranchDepth?: number;
-  } = {},
+  options: BiomeTreeTemplateOptions = {},
 ): ProcPlantTemplate =>
   treeTemplateFromSpecies(species, seed, {
     radialSegments: 3,
@@ -108,6 +133,10 @@ const buildBiomeTreeTemplate = (
     maxStems: options.maxStems ?? 42,
     maxLeaves: options.maxLeaves ?? 170,
     leafScaleMultiplier: options.leafScaleMultiplier ?? 2,
+    foliageMass: options.foliageMass,
+    foliageClusterDensity: options.foliageClusterDensity,
+    foliageTipBias: options.foliageTipBias,
+    foliageSpread: options.foliageSpread,
     swayFrom: 0.3,
   });
 
@@ -391,9 +420,19 @@ export function createProcPlantVegetation(
       const paint = options.samplePaint(x, z);
       const patch = biomePatchForPaint(paint, seed ^ Math.imul(i + 1, 0x9e3779b1));
       if (!patch || rand() > patch.density * densityMultiplier * (chunk.lod === 0 ? 1 : 0.58)) continue;
+      const genome = genomeForBiomePatch(patch);
       const treeBackend = treeBackendForBiomePatch(patch);
       if (treeBackend?.kind === "lsystem") {
-        const template = buildBiomeTreeTemplate(treeBackend.species, patch.seed ^ i, treeBackend);
+        const speciesFoliage = foliageDefaultsForTreeSpecies(treeBackend.species);
+        const template = buildBiomeTreeTemplate(treeBackend.species, patch.seed ^ i, {
+          ...treeBackend,
+          maxLeaves: treeBackend.maxLeaves ?? (chunk.lod === 0 ? 180 : 120),
+          foliageMass: treeBackend.foliageMass ?? genome.foliage?.mass ?? speciesFoliage.foliageMass,
+          foliageClusterDensity:
+            treeBackend.foliageClusterDensity ?? genome.foliage?.clusterDensity ?? speciesFoliage.foliageClusterDensity,
+          foliageTipBias: treeBackend.foliageTipBias ?? genome.foliage?.tipBias ?? speciesFoliage.foliageTipBias,
+          foliageSpread: treeBackend.foliageSpread ?? speciesFoliage.foliageSpread,
+        });
         const scale = patch.scale * THREE.MathUtils.lerp(0.86, 1.16, rand());
         const matrix = new THREE.Matrix4()
           .makeRotationY(rand() * Math.PI * 2)
@@ -404,7 +443,6 @@ export function createProcPlantVegetation(
         chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
-      const genome = genomeForBiomePatch(patch);
       const env = environmentForBiomePatch(patch);
       const built = buildProcPlantInstancedParts(genome, patch.seed ^ i, env);
       const scale = patch.scale * THREE.MathUtils.lerp(0.82, 1.22, rand());

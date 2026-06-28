@@ -50,6 +50,10 @@ export function treeTemplateFromSpecies(
     maxLeaves: opts.maxLeaves,
     leafScaleMultiplier: opts.leafScaleMultiplier,
     blossomScaleMultiplier: opts.blossomScaleMultiplier,
+    foliageMass: opts.foliageMass,
+    foliageClusterDensity: opts.foliageClusterDensity,
+    foliageTipBias: opts.foliageTipBias,
+    foliageSpread: opts.foliageSpread,
   };
   const generateLeaves = (opts.maxLeaves ?? 1) !== 0;
   const baked = generateBakedTree(species, seed >>> 0, bakeOpts, generateLeaves);

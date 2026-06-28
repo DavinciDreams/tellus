@@ -27,6 +27,10 @@ export interface ProcPlantTreeBackend {
   maxLeaves?: number;
   maxStems?: number;
   maxBranchDepth?: number;
+  foliageMass?: number;
+  foliageClusterDensity?: number;
+  foliageTipBias?: number;
+  foliageSpread?: number;
 }
 
 export interface ProcPlantPlaceableCatalogEntry {

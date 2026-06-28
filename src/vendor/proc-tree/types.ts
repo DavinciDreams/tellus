@@ -193,4 +193,12 @@ export type BakeOptions = {
   leafScaleMultiplier?: number;
   /** Multiplier applied to blossom cards before baking. Defaults to leafScaleMultiplier. */
   blossomScaleMultiplier?: number;
+  /** Adds deterministic crown-fill leaf cards around existing leaf anchors. */
+  foliageMass?: number;
+  /** Controls how many crown-fill cards are emitted per leaf anchor. */
+  foliageClusterDensity?: number;
+  /** Biases crown-fill toward higher/tip leaves. */
+  foliageTipBias?: number;
+  /** Local scatter radius for crown-fill cards, in generator units. */
+  foliageSpread?: number;
 };

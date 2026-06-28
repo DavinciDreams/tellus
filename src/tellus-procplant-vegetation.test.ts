@@ -9,6 +9,7 @@ import {
   treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
 import { createProcPlantVegetation, procPlantChunkSeed } from "./tellus-procplant-vegetation";
+import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 
 describe("procplant vegetation", () => {
   it("derives stable chunk seeds from world, chunk, and terrain revision", () => {
@@ -51,6 +52,31 @@ describe("procplant vegetation", () => {
     expect(snowTree).toBeTruthy();
     expect(treeBackendForBiomePatch(grassTree!)?.species).toMatch(/cambridgeOak|silverBirch/);
     expect(treeBackendForBiomePatch(snowTree!)?.species).toMatch(/balsamFir|douglasFir/);
+  });
+
+  it("can apply procplant foliage mass to wrapped L-system tree templates", () => {
+    const sparse = treeTemplateFromSpecies("balsamFir", 123, {
+      radialSegments: 3,
+      branchSamples: 1,
+      maxBranchDepth: 2,
+      maxStems: 44,
+      maxLeaves: 120,
+      leafScaleMultiplier: 2.4,
+    });
+    const full = treeTemplateFromSpecies("balsamFir", 123, {
+      radialSegments: 3,
+      branchSamples: 1,
+      maxBranchDepth: 2,
+      maxStems: 44,
+      maxLeaves: 120,
+      leafScaleMultiplier: 2.4,
+      foliageMass: 1,
+      foliageClusterDensity: 1.25,
+      foliageTipBias: 0.35,
+    });
+
+    expect(full.idx.length).toBeGreaterThan(sparse.idx.length);
+    expect(full.idx.length).toBeLessThanOrEqual(sparse.idx.length + 120 * 4 * 6);
   });
 
   it("exposes procplant presets as placeable procedural model urls", () => {

@@ -54,6 +54,10 @@ const DEFAULTS: Required<BakeOptions> = {
   maxLeaves: 50000,
   leafScaleMultiplier: 1,
   blossomScaleMultiplier: 1,
+  foliageMass: 0,
+  foliageClusterDensity: 1,
+  foliageTipBias: 0.5,
+  foliageSpread: 0.18,
 };
 
 function transformVec3(v: THREE.Vector3): THREE.Vector3 {
@@ -288,6 +292,81 @@ function toSoup(acc: Accum): Soup {
   };
 }
 
+const mulberry32 = (seed: number) => {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+function addFoliageMassCards(
+  leaves: LeafData[],
+  tree: TreeData,
+  opts: Required<BakeOptions>,
+): LeafData[] {
+  const mass = Math.max(0, opts.foliageMass);
+  if (mass <= 0 || leaves.length === 0 || opts.maxLeaves <= 0) return leaves;
+
+  const sourceLeaves = leaves.filter((leaf) => !leaf.isBlossom);
+  if (sourceLeaves.length === 0) return leaves;
+
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const leaf of sourceLeaves) {
+    minZ = Math.min(minZ, leaf.position.z);
+    maxZ = Math.max(maxZ, leaf.position.z);
+  }
+  const zRange = Math.max(1e-4, maxZ - minZ);
+  const targetCount = Math.max(
+    leaves.length,
+    Math.round(opts.maxLeaves * (1 + mass * opts.foliageClusterDensity)),
+  );
+  const cap = Math.min(targetCount, Math.max(leaves.length, opts.maxLeaves * 4));
+  const out = [...leaves];
+  const rand = mulberry32(tree.seed ^ 0x6a09e667);
+  const gScale = tree.treeScale / tree.params.gScale;
+  const spread = opts.foliageSpread * gScale;
+
+  for (let i = 0; i < sourceLeaves.length && out.length < cap; i++) {
+    const leaf = sourceLeaves[i]!;
+    const heightT = THREE.MathUtils.clamp((leaf.position.z - minZ) / zRange, 0, 1);
+    const tipWeight = THREE.MathUtils.lerp(1, heightT, opts.foliageTipBias);
+    const expected = THREE.MathUtils.clamp(mass * opts.foliageClusterDensity * tipWeight, 0, 4.25);
+    let extra = Math.floor(expected);
+    if (rand() < expected - extra) extra++;
+
+    for (let j = 0; j < extra && out.length < cap; j++) {
+      const angle = (i * 2.399963229728653 + j * 1.61803398875 + rand() * 0.35) % (Math.PI * 2);
+      const radius = spread * (0.3 + rand() * 0.85) * (0.75 + heightT * 0.45);
+      const right = leaf.right.clone().normalize();
+      const up = new THREE.Vector3().crossVectors(leaf.direction, right).normalize();
+      const offset = right
+        .clone()
+        .multiplyScalar(Math.cos(angle) * radius)
+        .add(up.clone().multiplyScalar(Math.sin(angle) * radius * 0.65))
+        .add(leaf.direction.clone().normalize().multiplyScalar((rand() - 0.5) * radius * 0.45));
+      const direction = leaf.direction
+        .clone()
+        .normalize()
+        .add(right.clone().multiplyScalar((rand() - 0.5) * 0.28))
+        .add(up.clone().multiplyScalar((rand() - 0.5) * 0.2))
+        .normalize();
+      const rotatedRight = right.applyAxisAngle(direction, (rand() - 0.5) * 1.1).normalize();
+      out.push({
+        position: leaf.position.clone().add(offset),
+        direction,
+        right: rotatedRight,
+        isBlossom: false,
+      });
+    }
+  }
+
+  return out;
+}
+
 // ── Public bake ─────────────────────────────────────────────────────────────
 
 /**
@@ -326,6 +405,7 @@ export function bakeTree(tree: TreeData, options: BakeOptions = {}): BakedTree {
     }
     leaves = sampled;
   }
+  leaves = addFoliageMassCards(leaves, tree, opts);
   if (leaves.length > 0) {
     const gScale = tree.treeScale / params.gScale;
     const leafShape = getLeafShape(params.leafShape);
