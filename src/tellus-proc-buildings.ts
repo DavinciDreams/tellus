@@ -619,7 +619,7 @@ function addCathedralWindows(
   mats: ReturnType<typeof createMaterials>,
 ) {
   const rows = Math.max(1, floors - 1);
-  const yStart = 3.85;
+  const yStart = 4.38;
   const yStep = 2.18;
   const frontXs = evenPositions(3, Math.max(1.2, width - 4.4));
   const sideCols = Math.max(4, Math.floor((depth - 5.0) / 3.0));
