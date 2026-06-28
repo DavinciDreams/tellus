@@ -63,6 +63,14 @@ export interface ProceduralBuildingOptions {
   roof?: boolean;
 }
 
+export interface ProceduralBuildingDimensions {
+  width: number;
+  depth: number;
+  floors: number;
+  floorHeight: number;
+  bodyHeight: number;
+}
+
 export const PROCEDURAL_BUILDING_PREFIX = "building-";
 const SHARED_STONE_ALBEDO_URL = "/terrain-textures/shared-fieldstone-rubble/albedo.png";
 const SIMPLE_HOUSE_STONE_SKIRT_HEIGHT = 0.95;
@@ -134,11 +142,10 @@ export const normalizeBuildingLighting = (
     ? (value as BuildingLightingStyle)
     : undefined;
 
-export const buildProceduralBuildingModel = (
+export const proceduralBuildingDimensions = (
   recipeId: ProceduralBuildingType,
   seed: number,
-  options: ProceduralBuildingOptions = {},
-): THREE.Group | null => {
+): ProceduralBuildingDimensions | null => {
   const recipe = proceduralBuildingRecipe(recipeId);
   if (!recipe) return null;
   const rng = mulberry32(seed);
@@ -146,7 +153,30 @@ export const buildProceduralBuildingModel = (
   const depth = pickRange(recipe.depthRange, rng);
   const floors = Math.max(1, Math.round(pickRange(recipe.floorsRange, rng)));
   const floorHeight = 2.65;
-  const height = floors * floorHeight;
+  return {
+    width,
+    depth,
+    floors,
+    floorHeight,
+    bodyHeight: floors * floorHeight,
+  };
+};
+
+export const buildProceduralBuildingModel = (
+  recipeId: ProceduralBuildingType,
+  seed: number,
+  options: ProceduralBuildingOptions = {},
+): THREE.Group | null => {
+  const recipe = proceduralBuildingRecipe(recipeId);
+  if (!recipe) return null;
+  const dims = proceduralBuildingDimensions(recipeId, seed);
+  if (!dims) return null;
+  const rng = mulberry32(seed);
+  rng();
+  rng();
+  rng();
+  const { width, depth, floors, floorHeight } = dims;
+  const height = dims.bodyHeight;
   const materialStyle = options.material && options.material !== "auto" ? options.material : recipe.defaultMaterial;
   const palette = materialPalette(materialStyle);
   const mats = createMaterials(palette, materialStyle, recipe.id);
