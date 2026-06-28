@@ -54,7 +54,7 @@ import {
   type BuildingMaterialStyle,
   type ProceduralBuildingType,
 } from "./tellus-proc-buildings";
-import { createAmbientPhysics, resolveObstacles, resolveRectObstacles, type ObstacleCircle, type ObstacleRect } from "./tellus-physics";
+import { createAmbientPhysics, resolveObstacles, resolveRectObstacles, resolveSweptRectObstacles, type ObstacleCircle, type ObstacleRect } from "./tellus-physics";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
@@ -4312,28 +4312,6 @@ function createTellusWorld(
     const cached = footprintCache.get(key);
     if (cached) return cached;
     const mesh = generatedMeshes.get(thing.id);
-    if (proceduralBuilding) {
-      const dims = proceduralBuildingDimensions(proceduralBuilding.recipeId, proceduralModel.seed);
-      if (dims) {
-        const visualScale = mesh
-          ? Math.max(mesh.scale.x, mesh.scale.z)
-          : assetTargetHeight(thing) / Math.max(0.01, dims.bodyHeight);
-        const width = dims.width * visualScale;
-        const depth = dims.depth * visualScale;
-        const fp: ThingFootprint = {
-          radius: Math.max(width, depth) / 2,
-          height: dims.bodyHeight * visualScale,
-          width,
-          depth,
-          centerX: thing.position.x,
-          centerZ: thing.position.z,
-          source: "procedural-building",
-        };
-        footprintCache.set(key, fp);
-        if (footprintCache.size > 600) footprintCache.clear();
-        return fp;
-      }
-    }
     if (!mesh) return null;
     const box = measureModelBounds(mesh); // skinning-aware: bind-pose boxes of animated models are bogus
     if (box.isEmpty()) return null;
@@ -4346,7 +4324,7 @@ function createTellusWorld(
       depth: size.z,
       centerX: center.x,
       centerZ: center.z,
-      source: "rendered",
+      source: proceduralBuilding ? "procedural-building" : "rendered",
     };
     footprintCache.set(key, fp);
     if (footprintCache.size > 600) footprintCache.clear();
@@ -6479,7 +6457,7 @@ function createTellusWorld(
         : model.modelUrl
           ? assetStoreIdFromModelUrl(model.modelUrl) ?? undefined
           : undefined);
-    const modelUrl =
+    const rawModelUrl =
       assetStoreModelId
         ? assetStoreGameOptimizedModelUrl(assetStoreModelId)
         : model.modelUrl ??
@@ -6494,6 +6472,29 @@ function createTellusWorld(
           z: visitorPosition.z + Math.cos(yaw) * 4,
         },
     });
+    let modelUrl = rawModelUrl;
+    const parsedProcedural = parseProceduralModelUrl(rawModelUrl);
+    if (parsedProcedural?.building && !parsedProcedural.building.material) {
+      const recipeId = parsedProcedural.building.recipeId;
+      const dryOpenKind = terrainKind(position.x, position.z, terrainHeight(position.x, position.z));
+      const shouldUseAdobe =
+        dryOpenKind === "grass" ||
+        dryOpenKind === "beach" ||
+        dryOpenKind === "dirt" ||
+        dryOpenKind === "rock";
+      const rockOnlyRecipe = recipeId === "keep" || recipeId === "castle" || recipeId === "fortress";
+      if (shouldUseAdobe && !rockOnlyRecipe) {
+        modelUrl = makeProceduralBuildingModelUrl(
+          makeProceduralBuildingArchetypeId(recipeId),
+          parsedProcedural.seed,
+          {
+            material: "adobe",
+            lighting: parsedProcedural.building.lighting,
+            roof: parsedProcedural.building.roof,
+          },
+        );
+      }
+    }
     const thing: GeneratedThing = {
       id: makeId(kind),
       kind,
@@ -6862,6 +6863,7 @@ function createTellusWorld(
     if (thing.id === sailingThingId || ambientPhysics.has(thing.id)) return null;
     if (thing.petOwnerId) return null;
     if (thing.id === draggingThingId) return null;
+    if (isFlatGroundThing(thing)) return null;
     if (isBuildingThing(thing)) return null;
     const profile = runtimeProfileForThing(thing);
     if (
@@ -6917,14 +6919,23 @@ function createTellusWorld(
       lower.includes("tower")
     );
   };
-
-  const buildingDoorPortalForThing = (thing: GeneratedThing): WorldPortal | undefined =>
-    worldPortals.find(
-      (portal) =>
-        portal.anchorThingId === thing.id &&
-        portal.target.kind === "interior" &&
-        !pendingPortalIds.has(portal.id),
+  const isFlatGroundThing = (thing: GeneratedThing): boolean => {
+    const lower = thing.prompt.toLowerCase();
+    return (
+      thing.kind === "path" ||
+      lower.includes("path") ||
+      lower.includes("road") ||
+      lower.includes("bridge") ||
+      lower.includes("dock") ||
+      lower.includes("pier") ||
+      lower.includes("cobblestone") ||
+      lower.includes("cobble") ||
+      lower.includes("paver") ||
+      lower.includes("paving") ||
+      lower.includes("plaza") ||
+      lower.includes("courtyard")
     );
+  };
 
   const pushBuildingWall = (
     list: ObstacleRect[],
@@ -6954,63 +6965,22 @@ function createTellusWorld(
     const fp = thingFootprint(thing);
     if (!fp || fp.height < 1.4 || fp.radius < 1.0) return [];
     if (thing.position.y > visitorPosition.y + 2.2) return [];
-    const halfWidth = clamp(fp.width / 2, 1.4, 26);
-    const halfDepth = clamp(fp.depth / 2, 1.4, 26);
-    const wallThickness = clamp(Math.min(halfWidth, halfDepth) * 0.08, 0.22, 0.6);
+    const proceduralBuilding = Boolean(parseProceduralModelUrl(thing.modelUrl ?? "")?.building);
+    const inset = proceduralBuilding ? 0.85 : 0;
+    const halfWidth = Math.max(0.8, clamp(fp.width / 2, 1.4, 26) - inset);
+    const halfDepth = Math.max(0.8, clamp(fp.depth / 2, 1.4, 26) - inset);
+    const wallThickness = proceduralBuilding ? 0.28 : clamp(Math.min(halfWidth, halfDepth) * 0.08, 0.22, 0.6);
     const walls: ObstacleRect[] = [];
-    const doorPortal = buildingDoorPortalForThing(thing);
     const addWholeWall = (side: "front" | "back" | "left" | "right") => {
       if (side === "front") pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, 0, halfDepth, halfWidth, wallThickness, 0);
       else if (side === "back") pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, 0, -halfDepth, halfWidth, wallThickness, 0);
       else if (side === "left") pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, -halfWidth, 0, halfDepth, wallThickness, Math.PI / 2);
       else pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, halfWidth, 0, halfDepth, wallThickness, Math.PI / 2);
     };
-    if (!doorPortal) {
-      addWholeWall("front");
-      addWholeWall("back");
-      addWholeWall("left");
-      addWholeWall("right");
-      return walls;
-    }
-    const doorPosition = portalAnchorPosition(doorPortal);
-    const cos = Math.cos(-(thing.rotationY ?? 0));
-    const sin = Math.sin(-(thing.rotationY ?? 0));
-    const dx = doorPosition.x - fp.centerX;
-    const dz = doorPosition.z - fp.centerZ;
-    const doorLocal = {
-      x: dx * cos - dz * sin,
-      z: dx * sin + dz * cos,
-    };
-    const side =
-      Math.abs(doorLocal.z) >= Math.abs(doorLocal.x)
-        ? doorLocal.z >= 0
-          ? "front"
-          : "back"
-        : doorLocal.x >= 0
-          ? "right"
-          : "left";
-    const splitWall = (doorAlong: number, wallCenterX: number, wallCenterZ: number, vertical: boolean) => {
-      const sideHalf = vertical ? halfDepth : halfWidth;
-      const gapHalf = clamp(Math.max(1.2, doorPortal.radius * 0.85), 1.2, Math.max(1.25, sideHalf - 0.35));
-      const clampedDoor = clamp(doorAlong, -sideHalf + gapHalf, sideHalf - gapHalf);
-      const leftLength = clampedDoor - gapHalf + sideHalf;
-      const rightLength = sideHalf - (clampedDoor + gapHalf);
-      if (!vertical) {
-        pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, -sideHalf + leftLength / 2, wallCenterZ, leftLength / 2, wallThickness, 0);
-        pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, clampedDoor + gapHalf + rightLength / 2, wallCenterZ, rightLength / 2, wallThickness, 0);
-      } else {
-        pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, wallCenterX, -sideHalf + leftLength / 2, leftLength / 2, wallThickness, Math.PI / 2);
-        pushBuildingWall(walls, thing, fp.centerX, fp.centerZ, wallCenterX, clampedDoor + gapHalf + rightLength / 2, rightLength / 2, wallThickness, Math.PI / 2);
-      }
-    };
-    if (side === "front") splitWall(doorLocal.x, 0, halfDepth, false);
-    else addWholeWall("front");
-    if (side === "back") splitWall(doorLocal.x, 0, -halfDepth, false);
-    else addWholeWall("back");
-    if (side === "left") splitWall(doorLocal.z, -halfWidth, 0, true);
-    else addWholeWall("left");
-    if (side === "right") splitWall(doorLocal.z, halfWidth, 0, true);
-    else addWholeWall("right");
+    addWholeWall("front");
+    addWholeWall("back");
+    addWholeWall("left");
+    addWholeWall("right");
     return walls;
   };
   const pointInsideBuildingFootprint = (thing: GeneratedThing, point: { x: number; z: number }): boolean => {
@@ -7030,7 +7000,7 @@ function createTellusWorld(
     const nowMs = performance.now();
     if (nowMs - obstacleCacheAt > 500) {
       obstacleCacheAt = nowMs;
-      const list: ObstacleCircle[] = [...vegetation.getTreeColliders()];
+      const list: ObstacleCircle[] = [];
       const wallList: ObstacleRect[] = [];
       for (const thing of generated) {
         // Pass through: the vehicle you're riding, ambient-physics props (their own collision),
@@ -7038,6 +7008,7 @@ function createTellusWorld(
         if (thing.id === sailingThingId || ambientPhysics.has(thing.id)) continue;
         if (thing.petOwnerId) continue;
         if (thing.id === draggingThingId) continue;
+        if (isFlatGroundThing(thing)) continue;
         const fp = thingFootprint(thing);
         // Skip tiny/flat items you should be able to walk over (rugs, coins, low debris).
         if (!fp || fp.height < 1.4 || fp.radius < 0.55) continue;
@@ -7063,11 +7034,7 @@ function createTellusWorld(
 
   const currentBuildingWallObstacles = (): ObstacleRect[] => {
     currentObstacles();
-    return buildingWallObstacleCache.filter((wall) => {
-      if (!wall.ownerId) return true;
-      const thing = thingById(wall.ownerId);
-      return !thing || !pointInsideBuildingFootprint(thing, visitorPosition);
-    });
+    return buildingWallObstacleCache;
   };
 
   // Bounded auto-retry for models whose textures failed during a load burst (KTX2 contention):
@@ -7251,24 +7218,35 @@ function createTellusWorld(
         y: visitorPosition.y,
         z: desiredZ,
       });
-      pushed = resolveObstacles(
-        moved.position.x,
-        moved.position.z,
-        0.5,
-        vegetation.getTreeColliders(),
+      pushed = { x: moved.position.x, z: moved.position.z };
+      pushed = resolveSweptRectObstacles(
+        visitorPosition.x,
+        visitorPosition.z,
+        pushed.x,
+        pushed.z,
+        0.08,
+        currentBuildingWallObstacles(),
       );
       pushed = resolveRectObstacles(
         pushed.x,
         pushed.z,
-        0.5,
+        0.08,
         currentBuildingWallObstacles(),
       );
     } else {
       pushed = resolveObstacles(desiredX, desiredZ, 0.5, currentObstacles());
+      pushed = resolveSweptRectObstacles(
+        visitorPosition.x,
+        visitorPosition.z,
+        pushed.x,
+        pushed.z,
+        0.08,
+        currentBuildingWallObstacles(),
+      );
       pushed = resolveRectObstacles(
         pushed.x,
         pushed.z,
-        0.5,
+        0.08,
         currentBuildingWallObstacles(),
       );
     }
