@@ -86,6 +86,10 @@ const LOG_WALL_COLOR = 0x7b5637;
 const LOG_DETAIL_COLOR = 0x4f3324;
 const LOG_ROOF_COLOR = 0x6b4a2f;
 const LOG_STONE_BASE_COLOR = 0x81817a;
+const PLANK_WALL_COLOR = 0x8c6844;
+const PLANK_DETAIL_COLOR = 0x5a3925;
+const PLANK_HIGHLIGHT_COLOR = 0xa67b55;
+const PLANK_CHINK_COLOR = 0x332116;
 const buildingTextureCache = new Map<string, THREE.Texture>();
 
 export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label: string }> = [
@@ -306,15 +310,16 @@ function createMaterials(
   const rockOnly = rockOnlyBuilding(recipeId);
   const adobeStyle = materialStyle === "adobe" && !rockOnly;
   const logStyle = materialStyle === "log-siding" && !rockOnly;
+  const plankStyle = materialStyle === "wood-plank" && !rockOnly;
   const medievalStyle = Boolean(recipeId) && !rockOnly;
-  const wall = make(logStyle ? LOG_WALL_COLOR : adobeStyle ? ADOBE_WALL_COLOR : medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall);
+  const wall = make(plankStyle ? PLANK_WALL_COLOR : logStyle ? LOG_WALL_COLOR : adobeStyle ? ADOBE_WALL_COLOR : medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall);
   const timberDetail = medievalStyle || rockOnly;
-  const accentColor = logStyle ? LOG_DETAIL_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
+  const accentColor = plankStyle ? PLANK_DETAIL_COLOR : logStyle ? LOG_DETAIL_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
   const baseWallColor = simpleHouse
-    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : logStyle ? LOG_STONE_BASE_COLOR : 0x8b8d86).lerp(new THREE.Color(0xffffff), adobeStyle || logStyle ? 0.06 : 0.08)
+    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : logStyle || plankStyle ? LOG_STONE_BASE_COLOR : 0x8b8d86).lerp(new THREE.Color(0xffffff), adobeStyle || logStyle || plankStyle ? 0.06 : 0.08)
     : adobeStyle
       ? new THREE.Color(ADOBE_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.05)
-    : logStyle
+    : logStyle || plankStyle
       ? new THREE.Color(LOG_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.06)
     : new THREE.Color(palette.foundation).lerp(new THREE.Color(0xffffff), 0.32);
   const baseWall = make(baseWallColor.getHex(), 0.84);
@@ -326,9 +331,9 @@ function createMaterials(
   if (stone && rockOnly) {
     applySharedAlbedo(foundation, SHARED_STONE_ALBEDO_URL, [2.2, 2.2]);
   }
-  const roofTint = new THREE.Color(logStyle ? LOG_ROOF_COLOR : adobeStyle ? ADOBE_ROOF_COLOR : SLATE_ROOF_COLOR);
+  const roofTint = new THREE.Color(logStyle || plankStyle ? LOG_ROOF_COLOR : adobeStyle ? ADOBE_ROOF_COLOR : SLATE_ROOF_COLOR);
   const roof = make(roofTint.getHex(), 0.9);
-  const roofDetailColor = roofTint.clone().lerp(new THREE.Color(logStyle ? 0x322016 : adobeStyle ? 0x5f2418 : 0x252b31), 0.55);
+  const roofDetailColor = roofTint.clone().lerp(new THREE.Color(logStyle || plankStyle ? 0x322016 : adobeStyle ? 0x5f2418 : 0x252b31), 0.55);
   return {
     wall,
     baseWall,
@@ -339,6 +344,9 @@ function createMaterials(
     foundation,
     logDetail: make(LOG_DETAIL_COLOR, 0.86),
     logHighlight: make(0x9b7250, 0.82),
+    plankBoard: make(PLANK_DETAIL_COLOR, 0.84),
+    plankHighlight: make(PLANK_HIGHLIGHT_COLOR, 0.8),
+    plankChink: make(PLANK_CHINK_COLOR, 0.9),
     glass: new THREE.MeshStandardMaterial({
       color: 0x9fc7d3,
       roughness: 0.18,
@@ -459,9 +467,15 @@ function addWallRelief(
   }
   if (materialStyle === "log-siding" && !rockOnlyBuilding(recipe.id)) {
     addLogSiding(group, width, depth, height, recipe, mats);
+  } else if (materialStyle === "wood-plank" && !rockOnlyBuilding(recipe.id)) {
+    addPlankSiding(group, width, depth, height, recipe, mats);
   }
   if (recipe.id === "simple-house") {
     if (materialStyle === "log-siding") {
+      addSimpleHouseLogTrim(group, width, depth, height, mats);
+      return;
+    }
+    if (materialStyle === "wood-plank") {
       addSimpleHouseLogTrim(group, width, depth, height, mats);
       return;
     }
@@ -507,6 +521,14 @@ function addWallRelief(
   }
 }
 
+function lowerBodyHeightForSiding(recipe: TellusBuildingRecipe, height: number): number {
+  return recipe.id === "simple-house"
+    ? Math.min(SIMPLE_HOUSE_STONE_SKIRT_HEIGHT, height * 0.36)
+    : height >= 7.2
+      ? 2.65
+      : Math.min(0.95, height * 0.28);
+}
+
 function addLogSiding(
   group: THREE.Group,
   width: number,
@@ -515,11 +537,7 @@ function addLogSiding(
   recipe: TellusBuildingRecipe,
   mats: ReturnType<typeof createMaterials>,
 ) {
-  const lowerBodyHeight = recipe.id === "simple-house"
-    ? Math.min(SIMPLE_HOUSE_STONE_SKIRT_HEIGHT, height * 0.36)
-    : height >= 7.2
-      ? 2.65
-      : Math.min(0.95, height * 0.28);
+  const lowerBodyHeight = lowerBodyHeightForSiding(recipe, height);
   const yStart = 0.28 + lowerBodyHeight + 0.18;
   const yEnd = 0.28 + height - 0.42;
   const courseLift = 0.034;
@@ -547,6 +565,54 @@ function addLogSiding(
   for (const z of [-depth / 2 + 0.18, depth / 2 - 0.18]) {
     addBox(group, [0.18, cornerHeight, 0.2], [leftX - 0.02, cornerY, z], mats.accent, false);
     addBox(group, [0.18, cornerHeight, 0.2], [rightX + 0.02, cornerY, z], mats.accent, false);
+  }
+}
+
+function addPlankSiding(
+  group: THREE.Group,
+  width: number,
+  depth: number,
+  height: number,
+  recipe: TellusBuildingRecipe,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const lowerBodyHeight = lowerBodyHeightForSiding(recipe, height);
+  const yStart = 0.28 + lowerBodyHeight + 0.2;
+  const yEnd = 0.28 + height - 0.38;
+  const courseLift = 0.03;
+  const boardDepth = 0.032;
+  const chinkDepth = 0.036;
+  const frontZ = depth / 2 + courseLift;
+  const backZ = -depth / 2 - courseLift;
+  const leftX = -width / 2 - courseLift;
+  const rightX = width / 2 + courseLift;
+  const spacing = 0.36;
+  const boardHeight = 0.25;
+  const courseCount = Math.max(3, Math.floor((yEnd - yStart) / spacing));
+  for (let i = 0; i <= courseCount; i++) {
+    const y = yStart + i * spacing;
+    const boardMat = i % 2 === 0 ? mats.plankBoard : mats.plankHighlight;
+    addBox(group, [width * 0.97, boardHeight, boardDepth], [0, y, frontZ], boardMat, false);
+    addBox(group, [width * 0.97, boardHeight, boardDepth], [0, y, backZ], boardMat, false);
+    addBox(group, [boardDepth, boardHeight, depth * 0.97], [leftX, y, 0], boardMat, false);
+    addBox(group, [boardDepth, boardHeight, depth * 0.97], [rightX, y, 0], boardMat, false);
+    if (i < courseCount) {
+      const gapY = y + spacing * 0.5;
+      addBox(group, [width * 0.97, 0.035, chinkDepth], [0, gapY, frontZ + 0.003], mats.plankChink, false);
+      addBox(group, [width * 0.97, 0.035, chinkDepth], [0, gapY, backZ - 0.003], mats.plankChink, false);
+      addBox(group, [chinkDepth, 0.035, depth * 0.97], [leftX - 0.003, gapY, 0], mats.plankChink, false);
+      addBox(group, [chinkDepth, 0.035, depth * 0.97], [rightX + 0.003, gapY, 0], mats.plankChink, false);
+    }
+  }
+  const cornerHeight = Math.max(0.8, yEnd - yStart + 0.42);
+  const cornerY = yStart + cornerHeight / 2 - 0.1;
+  for (const x of [-width / 2 + 0.18, width / 2 - 0.18]) {
+    addBox(group, [0.16, cornerHeight, 0.15], [x, cornerY, frontZ + 0.018], mats.accent, false);
+    addBox(group, [0.16, cornerHeight, 0.15], [x, cornerY, backZ - 0.018], mats.accent, false);
+  }
+  for (const z of [-depth / 2 + 0.18, depth / 2 - 0.18]) {
+    addBox(group, [0.15, cornerHeight, 0.16], [leftX - 0.018, cornerY, z], mats.accent, false);
+    addBox(group, [0.15, cornerHeight, 0.16], [rightX + 0.018, cornerY, z], mats.accent, false);
   }
 }
 
