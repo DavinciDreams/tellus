@@ -644,20 +644,21 @@ function addWindows(
     return;
   }
   const rows = Math.max(1, floors);
-  const colsFront = Math.max(1, Math.floor(width / 2.4));
-  const colsSide = Math.max(1, Math.floor(depth / 2.6));
+  const sparse = recipe.id === "keep" || recipe.id === "fortress" || recipe.id === "castle" || recipe.id === "smithy";
+  const frontCols = Math.max(1, Math.floor(width / (sparse ? 3.1 : 2.6)));
+  const sideCols = Math.max(1, Math.floor(depth / (sparse ? 3.2 : 2.7)));
+  const frontXs = evenPositions(frontCols, Math.max(1, width - 2.0));
+  const sideZs = evenPositions(sideCols, Math.max(1, depth - 2.0));
   for (let floor = 0; floor < rows; floor++) {
     const y = 1.55 + floor * 2.65;
-    for (let i = 0; i < colsFront; i++) {
-      const x = ((i + 0.5) / colsFront - 0.5) * (width - 1.4);
+    for (const x of frontXs) {
       if (Math.abs(x) < 0.95 && floor === 0) continue;
-      if (rng() <= recipe.windowChance) addBuildingGridWindow(group, x, y, depth / 2 + 0.07, 0, recipe, mats);
-      if (rng() <= recipe.windowChance * 0.8) addBuildingGridWindow(group, x, y, -depth / 2 - 0.07, Math.PI, recipe, mats);
+      addBuildingGridWindow(group, x, y, depth / 2 + 0.07, 0, recipe, mats);
+      addBuildingGridWindow(group, x, y, -depth / 2 - 0.07, Math.PI, recipe, mats);
     }
-    for (let i = 0; i < colsSide; i++) {
-      const z = ((i + 0.5) / colsSide - 0.5) * (depth - 1.5);
-      if (rng() <= recipe.windowChance * 0.75) addBuildingGridWindow(group, width / 2 + 0.07, y, z, Math.PI / 2, recipe, mats);
-      if (rng() <= recipe.windowChance * 0.75) addBuildingGridWindow(group, -width / 2 - 0.07, y, z, -Math.PI / 2, recipe, mats);
+    for (const z of sideZs) {
+      addBuildingGridWindow(group, width / 2 + 0.07, y, z, Math.PI / 2, recipe, mats);
+      addBuildingGridWindow(group, -width / 2 - 0.07, y, z, -Math.PI / 2, recipe, mats);
     }
   }
 }
@@ -678,8 +679,9 @@ function addCathedralWindows(
   for (let row = 0; row < rows; row++) {
     const y = yStart + row * yStep;
     for (const x of frontXs) {
-      if (row === 0 && Math.abs(x) < 0.2) continue;
-      addNineLiteWindow(group, x, y, depth / 2 + 0.07, 0, mats, mats.trim, 3, 4, 1.0, 2.1);
+      if (!(row === 0 && Math.abs(x) < 0.2)) {
+        addNineLiteWindow(group, x, y, depth / 2 + 0.07, 0, mats, mats.trim, 3, 4, 1.0, 2.1);
+      }
       addNineLiteWindow(group, x, y, -depth / 2 - 0.07, Math.PI, mats, mats.trim, 3, 4, 1.0, 2.1);
     }
     for (const z of sideZs) {
