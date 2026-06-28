@@ -950,14 +950,14 @@ function addPyramidRoofCourses(
   mats: ReturnType<typeof createMaterials>,
 ) {
   const yBase = 0.28 + height;
-  const levels = Math.max(6, Math.floor(roofHeight / 0.26));
-  const detailY = 0.08;
-  const detailW = 0.09;
+  const levels = Math.max(8, Math.floor(roofHeight / 0.22));
+  const detailY = 0.1;
+  const detailW = 0.12;
   for (let i = 0; i <= levels; i++) {
-    const t = (i + 0.18) / (levels + 1.18);
-    const y = yBase + t * roofHeight + 0.1;
-    const sx = Math.max(0.55, width * 0.94 * (1 - t));
-    const sz = Math.max(0.55, depth * 0.94 * (1 - t));
+    const t = (i + 0.04) / (levels + 1.08);
+    const y = yBase + t * roofHeight + 0.13;
+    const sx = Math.max(0.55, width * 1.02 * (1 - t));
+    const sz = Math.max(0.55, depth * 1.02 * (1 - t));
     addBox(group, [sx, detailY, detailW], [0, y, sz / 2], mats.roofDetail, false);
     addBox(group, [sx, detailY, detailW], [0, y, -sz / 2], mats.roofDetail, false);
     addBox(group, [detailW, detailY, sz], [sx / 2, y, 0], mats.roofDetail, false);
@@ -991,16 +991,19 @@ function addTowerCapCourses(
   yBase: number,
   mats: ReturnType<typeof createMaterials>,
 ) {
-  const levels = 3;
-  for (let i = 1; i <= levels; i++) {
-    const t = i / (levels + 1);
-    const y = yBase + t * 0.9;
-    const size = Math.max(0.18, towerSize * 0.72 * (1 - t));
-    addBox(group, [size, 0.04, 0.045], [x, y, z + size / 2], mats.roofDetail, false);
-    addBox(group, [size, 0.04, 0.045], [x, y, z - size / 2], mats.roofDetail, false);
-    addBox(group, [0.045, 0.04, size], [x + size / 2, y, z], mats.roofDetail, false);
-    addBox(group, [0.045, 0.04, size], [x - size / 2, y, z], mats.roofDetail, false);
+  const levels = 5;
+  for (let i = 0; i <= levels; i++) {
+    const t = (i + 0.08) / (levels + 1.08);
+    const y = yBase + t * 0.9 + 0.06;
+    const size = Math.max(0.2, towerSize * 0.86 * (1 - t));
+    addBox(group, [size, 0.06, 0.07], [x, y, z + size / 2], mats.roofDetail, false);
+    addBox(group, [size, 0.06, 0.07], [x, y, z - size / 2], mats.roofDetail, false);
+    addBox(group, [0.07, 0.06, size], [x + size / 2, y, z], mats.roofDetail, false);
+    addBox(group, [0.07, 0.06, size], [x - size / 2, y, z], mats.roofDetail, false);
   }
+  const seamLength = Math.max(0.3, towerSize * 0.48);
+  addBox(group, [0.06, 0.07, seamLength], [x, yBase + 0.48, z], mats.roofDetail, false);
+  addBox(group, [seamLength, 0.07, 0.06], [x, yBase + 0.48, z], mats.roofDetail, false);
 }
 
 function addDormer(
