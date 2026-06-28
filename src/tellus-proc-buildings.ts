@@ -989,12 +989,13 @@ function addTowerCapCourses(
   z: number,
   towerSize: number,
   yBase: number,
+  capHeight: number,
   mats: ReturnType<typeof createMaterials>,
 ) {
   const levels = 5;
   for (let i = 0; i <= levels; i++) {
     const t = (i + 0.08) / (levels + 1.08);
-    const y = yBase + t * 0.9 + 0.06;
+    const y = yBase + t * capHeight + 0.06;
     const size = Math.max(0.2, towerSize * 0.86 * (1 - t));
     addBox(group, [size, 0.06, 0.07], [x, y, z + size / 2], mats.roofDetail, false);
     addBox(group, [size, 0.06, 0.07], [x, y, z - size / 2], mats.roofDetail, false);
@@ -1002,8 +1003,8 @@ function addTowerCapCourses(
     addBox(group, [0.07, 0.06, size], [x - size / 2, y, z], mats.roofDetail, false);
   }
   const seamLength = Math.max(0.3, towerSize * 0.48);
-  addBox(group, [0.06, 0.07, seamLength], [x, yBase + 0.48, z], mats.roofDetail, false);
-  addBox(group, [seamLength, 0.07, 0.06], [x, yBase + 0.48, z], mats.roofDetail, false);
+  addBox(group, [0.06, 0.07, seamLength], [x, yBase + capHeight * 0.52, z], mats.roofDetail, false);
+  addBox(group, [seamLength, 0.07, 0.06], [x, yBase + capHeight * 0.52, z], mats.roofDetail, false);
 }
 
 function addDormer(
@@ -1038,10 +1039,11 @@ function addFootprintDetails(
     for (const x of [-width / 2 + towerSize / 2, width / 2 - towerSize / 2]) {
       for (const z of [-depth / 2 + towerSize / 2, depth / 2 - towerSize / 2]) {
         addBox(group, [towerSize, height * 1.22, towerSize], [x, 0.28 + (height * 1.22) / 2, z], mats.wall);
-        const cap = new THREE.Mesh(new THREE.ConeGeometry(towerSize * 0.72, 0.9, 6), mats.roof);
-        cap.position.set(x, 0.28 + height * 1.22 + 0.45, z);
+        const capHeight = 1.45;
+        const cap = new THREE.Mesh(new THREE.ConeGeometry(towerSize * 0.78, capHeight, 6), mats.roof);
+        cap.position.set(x, 0.28 + height * 1.22 + capHeight / 2, z);
         addMesh(group, cap);
-        addTowerCapCourses(group, x, z, towerSize, 0.28 + height * 1.22, mats);
+        addTowerCapCourses(group, x, z, towerSize, 0.28 + height * 1.22, capHeight, mats);
       }
     }
   } else if (recipe.footprintStyle === "winged" || recipe.footprintStyle === "cruciform") {
