@@ -27,7 +27,8 @@ export type BuildingMaterialStyle =
   | "wood-plank"
   | "timber-frame"
   | "plaster"
-  | "stucco";
+  | "stucco"
+  | "adobe";
 
 export type BuildingLightingStyle = "none" | "warm" | "lantern" | "moonlit" | "bright";
 
@@ -77,6 +78,9 @@ const SIMPLE_HOUSE_STONE_SKIRT_HEIGHT = 0.95;
 const MEDIEVAL_STUCCO_COLOR = 0xd3c19a;
 const MEDIEVAL_TIMBER_COLOR = 0x4f3324;
 const SLATE_ROOF_COLOR = 0x66717a;
+const ADOBE_WALL_COLOR = 0xb88755;
+const ADOBE_ROOF_COLOR = 0xa34c2f;
+const ADOBE_STONE_BASE_COLOR = 0xc2a772;
 const buildingTextureCache = new Map<string, THREE.Texture>();
 
 export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label: string }> = [
@@ -88,6 +92,7 @@ export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label
   { id: "timber-frame", label: "Timber" },
   { id: "plaster", label: "Plaster" },
   { id: "stucco", label: "Stucco" },
+  { id: "adobe", label: "Adobe" },
 ];
 
 export const BUILDING_LIGHTING_OPTIONS: Array<{ id: BuildingLightingStyle; label: string }> = [
@@ -246,6 +251,7 @@ function materialPalette(style: Exclude<BuildingMaterialStyle, "auto">) {
     "timber-frame": { wall: 0xd0b78b, accent: 0x4f3324, roof: 0x56312d, trim: 0xf2e1b3, foundation: 0x665e51 },
     plaster: { wall: 0xd9caa5, accent: 0x8d7758, roof: 0x6b3b36, trim: 0x4d3828, foundation: 0x777165 },
     stucco: { wall: 0xcfc2a0, accent: 0x8a806d, roof: 0x6b4a3a, trim: 0xf0e0bd, foundation: 0x747064 },
+    adobe: { wall: ADOBE_WALL_COLOR, accent: MEDIEVAL_TIMBER_COLOR, roof: ADOBE_ROOF_COLOR, trim: MEDIEVAL_TIMBER_COLOR, foundation: ADOBE_STONE_BASE_COLOR },
   };
   return palettes[style];
 }
@@ -291,12 +297,15 @@ function createMaterials(
   const stone = materialStyle === "stone-ashlar" || materialStyle === "stone-rubble";
   const simpleHouse = recipeId === "simple-house";
   const rockOnly = rockOnlyBuilding(recipeId);
+  const adobeStyle = materialStyle === "adobe" && !rockOnly;
   const medievalStyle = Boolean(recipeId) && !rockOnly;
-  const wall = make(medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall);
+  const wall = make(adobeStyle ? ADOBE_WALL_COLOR : medievalStyle ? MEDIEVAL_STUCCO_COLOR : palette.wall);
   const timberDetail = medievalStyle || rockOnly;
   const accentColor = timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
   const baseWallColor = simpleHouse
-    ? new THREE.Color(0x8b8d86).lerp(new THREE.Color(0xffffff), 0.08)
+    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : 0x8b8d86).lerp(new THREE.Color(0xffffff), adobeStyle ? 0.06 : 0.08)
+    : adobeStyle
+      ? new THREE.Color(ADOBE_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.05)
     : new THREE.Color(palette.foundation).lerp(new THREE.Color(0xffffff), 0.32);
   const baseWall = make(baseWallColor.getHex(), 0.84);
   const foundation = make(medievalStyle ? MEDIEVAL_TIMBER_COLOR : palette.foundation, 0.82);
@@ -307,9 +316,9 @@ function createMaterials(
   if (stone && rockOnly) {
     applySharedAlbedo(foundation, SHARED_STONE_ALBEDO_URL, [2.2, 2.2]);
   }
-  const roofTint = new THREE.Color(SLATE_ROOF_COLOR);
+  const roofTint = new THREE.Color(adobeStyle ? ADOBE_ROOF_COLOR : SLATE_ROOF_COLOR);
   const roof = make(roofTint.getHex(), 0.9);
-  const roofDetailColor = roofTint.clone().lerp(new THREE.Color(0x252b31), 0.55);
+  const roofDetailColor = roofTint.clone().lerp(new THREE.Color(adobeStyle ? 0x5f2418 : 0x252b31), 0.55);
   return {
     wall,
     baseWall,

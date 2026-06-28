@@ -6479,7 +6479,7 @@ function createTellusWorld(
         : model.modelUrl
           ? assetStoreIdFromModelUrl(model.modelUrl) ?? undefined
           : undefined);
-    const modelUrl =
+    const rawModelUrl =
       assetStoreModelId
         ? assetStoreGameOptimizedModelUrl(assetStoreModelId)
         : model.modelUrl ??
@@ -6494,6 +6494,29 @@ function createTellusWorld(
           z: visitorPosition.z + Math.cos(yaw) * 4,
         },
     });
+    let modelUrl = rawModelUrl;
+    const parsedProcedural = parseProceduralModelUrl(rawModelUrl);
+    if (parsedProcedural?.building && !parsedProcedural.building.material) {
+      const recipeId = parsedProcedural.building.recipeId;
+      const dryOpenKind = terrainKind(position.x, position.z, terrainHeight(position.x, position.z));
+      const shouldUseAdobe =
+        dryOpenKind === "grass" ||
+        dryOpenKind === "beach" ||
+        dryOpenKind === "dirt" ||
+        dryOpenKind === "rock";
+      const rockOnlyRecipe = recipeId === "keep" || recipeId === "castle" || recipeId === "fortress";
+      if (shouldUseAdobe && !rockOnlyRecipe) {
+        modelUrl = makeProceduralBuildingModelUrl(
+          makeProceduralBuildingArchetypeId(recipeId),
+          parsedProcedural.seed,
+          {
+            material: "adobe",
+            lighting: parsedProcedural.building.lighting,
+            roof: parsedProcedural.building.roof,
+          },
+        );
+      }
+    }
     const thing: GeneratedThing = {
       id: makeId(kind),
       kind,
