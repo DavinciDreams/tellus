@@ -522,19 +522,21 @@ function addLogSiding(
       : Math.min(0.95, height * 0.28);
   const yStart = 0.28 + lowerBodyHeight + 0.18;
   const yEnd = 0.28 + height - 0.42;
-  const frontZ = depth / 2 + 0.122;
-  const backZ = -depth / 2 - 0.122;
-  const leftX = -width / 2 - 0.122;
-  const rightX = width / 2 + 0.122;
+  const courseLift = 0.034;
+  const courseDepth = 0.045;
+  const frontZ = depth / 2 + courseLift;
+  const backZ = -depth / 2 - courseLift;
+  const leftX = -width / 2 - courseLift;
+  const rightX = width / 2 + courseLift;
   const spacing = 0.28;
   const courseCount = Math.max(3, Math.floor((yEnd - yStart) / spacing));
   for (let i = 0; i <= courseCount; i++) {
     const y = yStart + i * spacing;
     const mat = i % 2 === 0 ? mats.logDetail : mats.logHighlight;
-    addBox(group, [width * 0.96, 0.11, 0.13], [0, y, frontZ], mat, false);
-    addBox(group, [width * 0.96, 0.11, 0.13], [0, y, backZ], mat, false);
-    addBox(group, [0.13, 0.11, depth * 0.96], [leftX, y, 0], mat, false);
-    addBox(group, [0.13, 0.11, depth * 0.96], [rightX, y, 0], mat, false);
+    addBox(group, [width * 0.96, 0.11, courseDepth], [0, y, frontZ], mat, false);
+    addBox(group, [width * 0.96, 0.11, courseDepth], [0, y, backZ], mat, false);
+    addBox(group, [courseDepth, 0.11, depth * 0.96], [leftX, y, 0], mat, false);
+    addBox(group, [courseDepth, 0.11, depth * 0.96], [rightX, y, 0], mat, false);
   }
   const cornerHeight = Math.max(0.8, yEnd - yStart + 0.42);
   const cornerY = yStart + cornerHeight / 2 - 0.1;
