@@ -663,6 +663,14 @@ function addPlankSiding(
     addBox(group, [width * 0.97, boardHeight, boardDepth], [0, y, backZ], boardMat, false);
     addBox(group, [boardDepth, boardHeight, depth * 0.97], [leftX, y, 0], boardMat, false);
     addBox(group, [boardDepth, boardHeight, depth * 0.97], [rightX, y, 0], boardMat, false);
+    addBox(group, [width * 0.97, 0.035, boardDepth + 0.004], [0, y + boardHeight * 0.32, frontZ + 0.002], mats.plankHighlight, false);
+    addBox(group, [width * 0.97, 0.035, boardDepth + 0.004], [0, y + boardHeight * 0.32, backZ - 0.002], mats.plankHighlight, false);
+    addBox(group, [boardDepth + 0.004, 0.035, depth * 0.97], [leftX - 0.002, y + boardHeight * 0.32, 0], mats.plankHighlight, false);
+    addBox(group, [boardDepth + 0.004, 0.035, depth * 0.97], [rightX + 0.002, y + boardHeight * 0.32, 0], mats.plankHighlight, false);
+    addBox(group, [width * 0.97, 0.04, boardDepth + 0.006], [0, y - boardHeight * 0.38, frontZ + 0.003], mats.plankChink, false);
+    addBox(group, [width * 0.97, 0.04, boardDepth + 0.006], [0, y - boardHeight * 0.38, backZ - 0.003], mats.plankChink, false);
+    addBox(group, [boardDepth + 0.006, 0.04, depth * 0.97], [leftX - 0.003, y - boardHeight * 0.38, 0], mats.plankChink, false);
+    addBox(group, [boardDepth + 0.006, 0.04, depth * 0.97], [rightX + 0.003, y - boardHeight * 0.38, 0], mats.plankChink, false);
     if (i < courseCount) {
       const gapY = y + spacing * 0.5;
       addBox(group, [width * 0.97, 0.035, chinkDepth], [0, gapY, frontZ + 0.003], mats.plankChink, false);
