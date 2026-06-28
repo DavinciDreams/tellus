@@ -94,6 +94,7 @@ const PLANK_CHINK_COLOR = 0xc7ad79;
 const CEDAR_SHINGLE_COLOR = 0x8b6040;
 const CEDAR_SHINGLE_DARK_COLOR = 0x5a3827;
 const CEDAR_TRIM_COLOR = 0xf2efe4;
+const CEDAR_STONE_BASE_COLOR = 0xa7aaa4;
 const buildingTextureCache = new Map<string, THREE.Texture>();
 
 export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label: string }> = [
@@ -268,7 +269,7 @@ function materialPalette(style: Exclude<BuildingMaterialStyle, "auto">) {
     stucco: { wall: 0xcfc2a0, accent: 0x8a806d, roof: 0x6b4a3a, trim: 0xf0e0bd, foundation: 0x747064 },
     adobe: { wall: ADOBE_WALL_COLOR, accent: MEDIEVAL_TIMBER_COLOR, roof: ADOBE_ROOF_COLOR, trim: MEDIEVAL_TIMBER_COLOR, foundation: ADOBE_STONE_BASE_COLOR },
     "log-siding": { wall: LOG_WALL_COLOR, accent: LOG_DETAIL_COLOR, roof: LOG_ROOF_COLOR, trim: LOG_DETAIL_COLOR, foundation: LOG_STONE_BASE_COLOR },
-    "cedar-shingle": { wall: CEDAR_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: CEDAR_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: LOG_STONE_BASE_COLOR },
+    "cedar-shingle": { wall: CEDAR_SHINGLE_COLOR, accent: CEDAR_TRIM_COLOR, roof: CEDAR_SHINGLE_COLOR, trim: CEDAR_TRIM_COLOR, foundation: CEDAR_STONE_BASE_COLOR },
   };
   return palettes[style];
 }
@@ -323,10 +324,12 @@ function createMaterials(
   const timberDetail = medievalStyle || rockOnly;
   const accentColor = cedarStyle ? CEDAR_TRIM_COLOR : plankStyle ? PLANK_DETAIL_COLOR : logStyle ? LOG_DETAIL_COLOR : timberDetail ? MEDIEVAL_TIMBER_COLOR : palette.accent;
   const baseWallColor = simpleHouse
-    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : logStyle || plankStyle || cedarStyle ? LOG_STONE_BASE_COLOR : 0x8b8d86).lerp(new THREE.Color(0xffffff), adobeStyle || logStyle || plankStyle || cedarStyle ? 0.06 : 0.08)
+    ? new THREE.Color(adobeStyle ? ADOBE_STONE_BASE_COLOR : cedarStyle ? CEDAR_STONE_BASE_COLOR : logStyle || plankStyle ? LOG_STONE_BASE_COLOR : 0x8b8d86).lerp(new THREE.Color(0xffffff), adobeStyle || logStyle || plankStyle || cedarStyle ? 0.06 : 0.08)
     : adobeStyle
       ? new THREE.Color(ADOBE_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.05)
-    : logStyle || plankStyle || cedarStyle
+    : cedarStyle
+      ? new THREE.Color(CEDAR_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.1)
+    : logStyle || plankStyle
       ? new THREE.Color(LOG_STONE_BASE_COLOR).lerp(new THREE.Color(0xffffff), 0.06)
     : new THREE.Color(palette.foundation).lerp(new THREE.Color(0xffffff), 0.32);
   const baseWall = make(baseWallColor.getHex(), 0.84);
