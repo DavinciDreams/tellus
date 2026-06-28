@@ -588,6 +588,10 @@ function addWindows(
     addSymmetricHouseWindows(group, width, depth, floors, mats);
     return;
   }
+  if (recipe.id === "cathedral") {
+    addCathedralWindows(group, width, depth, floors, mats);
+    return;
+  }
   const rows = Math.max(1, floors);
   const colsFront = Math.max(1, Math.floor(width / 2.4));
   const colsSide = Math.max(1, Math.floor(depth / 2.6));
@@ -605,6 +609,38 @@ function addWindows(
       if (rng() <= recipe.windowChance * 0.75) addBuildingGridWindow(group, -width / 2 - 0.07, y, z, -Math.PI / 2, recipe, mats);
     }
   }
+}
+
+function addCathedralWindows(
+  group: THREE.Group,
+  width: number,
+  depth: number,
+  floors: number,
+  mats: ReturnType<typeof createMaterials>,
+) {
+  const rows = Math.max(1, floors - 1);
+  const yStart = 4.2;
+  const yStep = 2.65;
+  const frontCols = Math.max(3, Math.floor(width / 2.8));
+  const sideCols = Math.max(5, Math.floor(depth / 3.0));
+  const frontXs = evenPositions(frontCols, width - 2.0);
+  const sideZs = evenPositions(sideCols, depth - 2.2);
+  for (let row = 0; row < rows; row++) {
+    const y = yStart + row * yStep;
+    for (const x of frontXs) {
+      addNineLiteWindow(group, x, y + 0.5, depth / 2 + 0.07, 0, mats, mats.trim, 3, 5, 1.0, 2.45);
+      addNineLiteWindow(group, x, y + 0.5, -depth / 2 - 0.07, Math.PI, mats, mats.trim, 3, 5, 1.0, 2.45);
+    }
+    for (const z of sideZs) {
+      addNineLiteWindow(group, width / 2 + 0.07, y + 0.5, z, Math.PI / 2, mats, mats.trim, 3, 5, 1.0, 2.45);
+      addNineLiteWindow(group, -width / 2 - 0.07, y + 0.5, z, -Math.PI / 2, mats, mats.trim, 3, 5, 1.0, 2.45);
+    }
+  }
+}
+
+function evenPositions(count: number, span: number): number[] {
+  if (count <= 1) return [0];
+  return Array.from({ length: count }, (_, i) => (i / (count - 1) - 0.5) * span);
 }
 
 function addWindow(
