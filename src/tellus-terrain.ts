@@ -465,6 +465,14 @@ export function isTerrainPaintMode(mode: TerrainEditMode): mode is TerrainPaintK
   return terrainPaintKinds.includes(mode as TerrainPaintKind);
 }
 
+function smoothTerrainTone(x: number, z: number): number {
+  const broad =
+    Math.sin(x * 0.071 + z * 0.043) * 0.5 +
+    Math.sin(x * -0.031 + z * 0.086 + 1.7) * 0.32 +
+    Math.sin(x * 0.17 + z * -0.11 + 3.1) * 0.18;
+  return broad;
+}
+
 export function terrainVertexColor(
   kind: TerrainKind,
   x: number,
@@ -484,12 +492,12 @@ export function terrainVertexColor(
     // De-crayola the flat green: scatter each vertex's tone between a warmer yellow-green and a
     // cooler olive so the field reads natural rather than uniform candy green. Grass leans drier
     // (toward straw/khaki) than meadow.
-    const t = rand(seed * 7 + Math.floor(x * 23) + Math.floor(z * 29));
+    const t = smoothTerrainTone(x, z) * 0.5 + 0.5;
     const warm = kind === "grass" ? new THREE.Color(0xc4b878) : new THREE.Color(0x86a352);
     const cool = kind === "grass" ? new THREE.Color(0x8f9a52) : new THREE.Color(0x5f7c44);
-    color.lerp(t > 0.5 ? warm : cool, 0.18 + Math.abs(t - 0.5) * 0.34);
+    color.lerp(t > 0.5 ? warm : cool, 0.14 + Math.abs(t - 0.5) * 0.22);
   }
-  const noise = 0.9 + rand(seed + Math.floor(x * 13) + Math.floor(z * 17)) * 0.18;
+  const noise = 0.96 + smoothTerrainTone(x * 1.4 + seed * 0.001, z * 1.4 - seed * 0.001) * 0.055;
   return color.multiplyScalar(noise);
 }
 

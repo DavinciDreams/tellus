@@ -144,7 +144,7 @@ export type GeneratedKind =
   | "object";
 
 export type ToolName = "generate" | "interact";
-export type AssetPanelTab = "avatar" | "flora" | "animal" | "building";
+export type AssetPanelTab = "avatar" | "flora" | "animal" | "building" | "furniture";
 export type ToolMenu = "terrain";
 
 export interface Vec3 {
@@ -236,6 +236,7 @@ export interface GenerateRequest {
   scale?: number;
   creatorId: AgentId | "visitor";
   ownerUserId?: string;
+  sourceImageUrl?: string;
 }
 
 export interface InteractRequest {
@@ -273,6 +274,13 @@ export interface TellusWorldApi {
   previewPortalTarget(targetWorldId?: string | null): void;
   startInteriorWallDoorPlacement(targetWorldId?: string | null, label?: string): void;
   updatePortalTarget(portalId: string, targetWorldId: string): void;
+  movePortal(portalId: string, dx: number, dz: number): void;
+  liftPortal(portalId: string, amount: number): void;
+  rotatePortal(portalId: string, radians: number): void;
+  scalePortal(portalId: string, multiplier: number): void;
+  attachPortalToSelected(portalId: string): void;
+  attachPortalToThing(portalId: string, thingId: string): void;
+  detachPortal(portalId: string): void;
   deletePortal(portalId: string): void;
   createDoorHere(label?: string, sceneUrl?: string): void;
   generate(request: GenerateRequest): GeneratedThing;
@@ -311,7 +319,7 @@ export interface TellusWorldApi {
   setPlayerGenerationProvider(provider: RoleGenerationProvider): void;
   setAgentGenerationProvider(provider: RoleGenerationProvider): void;
   setInstantMeshTarget(target: InstantMeshTarget): void;
-  submitVisitorPrompt(prompt: string): void;
+  submitVisitorPrompt(prompt: string, sourceImageUrl?: string): void;
   sendWorldChat(
     text: string,
     channel?: WorldChatChannel,
