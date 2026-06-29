@@ -381,20 +381,20 @@ export interface TerrainMaterialOptions {
 
 const terrainTextureLoader = new THREE.TextureLoader();
 const generatedTerrainTextures = new Map<string, THREE.Texture>();
-const BIOME_LITE_TEXTURE_UNITS = 3; // moss + shared stone + neutral grit samplers; still below old nine-sampler path
+const BIOME_LITE_TEXTURE_UNITS = 3; // moss + neutral grit + cobble samplers; still below old nine-sampler path
 const ESTIMATED_NINE_SAMPLER_UNITS = 11; // base albedo + normal + 9 paint albedo maps
 const BIOME_LITE_TEXTURE_URLS = {
   moss: [
     "/terrain-textures/moss002/albedo-512.webp",
     "/terrain-textures/moss002/albedo.png",
   ],
-  rock: [
-    "/terrain-textures/shared-fieldstone-rubble/albedo-512.webp",
-    "/terrain-textures/shared-fieldstone-rubble/albedo.png",
-  ],
   grit: [
     "/terrain-textures/shared-asphalt-grain/albedo-512.webp",
     "/terrain-textures/shared-asphalt-grain/albedo.jpg",
+  ],
+  cobble: [
+    "/terrain-textures/shared-fieldstone-rubble/albedo-512.webp",
+    "/terrain-textures/shared-fieldstone-rubble/albedo.png",
   ],
 } as const;
 
@@ -445,7 +445,7 @@ export function terrainTextureDiagnostics(
   const reason = !requestedImageTextures
     ? "Procedural terrain detail is active."
     : supportsBiomeLitePaint
-      ? "Biome-lite terrain textures are active: moss, shared stone, and neutral grit albedos stay below the WebGL sampler cap; brick and cobblestone are procedural."
+      ? "Biome-lite terrain textures are active: moss, neutral grit, and cobble albedos stay below the WebGL sampler cap; brick remains procedural."
       : "This WebGL renderer does not report enough fragment texture units for the biome-lite texture path.";
 
   return {
@@ -600,16 +600,16 @@ function applyBiomeLiteTerrainOverlay(
   const fallback = whiteTerrainTexture();
   const paintTextures: Record<keyof typeof BIOME_LITE_TEXTURE_URLS, THREE.Texture> = {
     moss: fallback,
-    rock: fallback,
     grit: fallback,
+    cobble: fallback,
   };
   const shaders = new Set<Parameters<NonNullable<THREE.MeshStandardMaterial["onBeforeCompile"]>>[0]>();
 
   const updateShaderUniforms = () => {
     for (const shader of shaders) {
       shader.uniforms.tellusMossAlbedoMap.value = paintTextures.moss;
-      shader.uniforms.tellusRockAlbedoMap.value = paintTextures.rock;
       shader.uniforms.tellusGritAlbedoMap.value = paintTextures.grit;
+      shader.uniforms.tellusCobbleAlbedoMap.value = paintTextures.cobble;
     }
   };
 
@@ -626,8 +626,8 @@ function applyBiomeLiteTerrainOverlay(
     shaders.add(shader);
     shader.uniforms.tellusBiomeTextureScale = { value: textureScale };
     shader.uniforms.tellusMossAlbedoMap = { value: paintTextures.moss };
-    shader.uniforms.tellusRockAlbedoMap = { value: paintTextures.rock };
     shader.uniforms.tellusGritAlbedoMap = { value: paintTextures.grit };
+    shader.uniforms.tellusCobbleAlbedoMap = { value: paintTextures.cobble };
     shader.vertexShader = shader.vertexShader
       .replace(
         "#include <common>",
@@ -644,8 +644,8 @@ function applyBiomeLiteTerrainOverlay(
 ${WEBGL_VARYING}
 uniform float tellusBiomeTextureScale;
 uniform sampler2D tellusMossAlbedoMap;
-uniform sampler2D tellusRockAlbedoMap;
 uniform sampler2D tellusGritAlbedoMap;
+uniform sampler2D tellusCobbleAlbedoMap;
 float tellusPaintBand(float code){
   return step(code - 0.5, vTellusPaintCode) - step(code + 0.5, vTellusPaintCode);
 }
@@ -782,8 +782,8 @@ float tellusGritDetail(vec3 sampleColor, float strength){
     mossMask += jungleMossMask;
     float paintMask = clamp(mossMask + sandMask + dirtMask + forestFloorMask + desertSandMask + rockMask + gravelMask + snowMask + stoneMask + brickMask, 0.0, 1.0);
     vec3 mossSample = texture2D(tellusMossAlbedoMap, tellusPaintUv).rgb;
-    vec3 rockSample = texture2D(tellusRockAlbedoMap, tellusPaintUv).rgb;
     vec3 gritSample = texture2D(tellusGritAlbedoMap, tellusPaintUv * 1.65).rgb;
+    vec3 cobbleSample = texture2D(tellusCobbleAlbedoMap, tellusPaintUv * 0.92).rgb;
     vec3 meadowAlbedo = mossSample * vec3(0.96, 1.03, 0.96);
     vec3 flowersAlbedo = mossSample * vec3(1.04, 1.08, 1.08);
     vec3 grassAlbedo = mossSample * vec3(1.08, 1.12, 0.82);
@@ -794,12 +794,12 @@ float tellusGritDetail(vec3 sampleColor, float strength){
     vec3 dirtAlbedo = mix(dirtBase, dirtGrain, 0.72);
     vec3 forestFloorAlbedo = mix(tellusForestFloorSurface(vTellusWorldPos.xz) * vec3(1.12, 0.72, 0.42), gritSample * vec3(0.34, 0.22, 0.13), 0.58);
     vec3 desertSandAlbedo = mix(tellusDesertSandSurface(vTellusWorldPos.xz), gritSample * vec3(1.36, 0.76, 0.34), 0.4);
-    vec3 pebbleAlbedo = rockSample * vec3(0.82, 0.86, 0.82) * tellusGritDetail(gritSample, 0.32);
+    vec3 pebbleAlbedo = gritSample * vec3(0.68, 0.7, 0.66);
     vec3 gravelAlbedo = gritSample * vec3(0.62, 0.59, 0.51);
     float mountainRock = smoothstep(0.22, 0.58, 1.0 - clamp(vTellusWorldNormal.y, 0.0, 1.0));
     vec3 rockAlbedo = mix(pebbleAlbedo, tellusRockSurface(vTellusWorldPos.xz, pebbleAlbedo), mountainRock);
     vec3 snowAlbedo = mix(tellusSnowSurface(vTellusWorldPos.xz), gritSample * vec3(1.2, 1.24, 1.26), 0.34);
-    vec3 cobblestoneAlbedo = mix(gritSample * vec3(0.92, 0.88, 0.76), tellusStoneSlabs(vTellusWorldPos.xz) * vec3(1.12, 1.04, 0.9), 0.62);
+    vec3 cobblestoneAlbedo = mix(cobbleSample * vec3(1.04, 1.0, 0.92), tellusStoneSlabs(vTellusWorldPos.xz) * cobbleSample, 0.34);
     vec3 brickAlbedo = tellusRunningBondBrick(vTellusWorldPos.xz);
     vec3 biomeAlbedo =
       meadowAlbedo * meadowMask +
