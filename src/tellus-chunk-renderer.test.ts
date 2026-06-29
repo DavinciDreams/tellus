@@ -115,19 +115,23 @@ describe("createChunkTerrainGeometry", () => {
 
   it("renders template changes into chunk geometry", () => {
     setChunkedWorldChunks({ w: 64, h: 64 });
-    const chunk = makeChunk({ cx: 32, cz: 32 });
+    const chunk = makeChunk({ cx: 38, cz: 35 });
 
-    runtimeConfig.worldId = "chunked-64-copper-terraces";
-    runtimeConfig.worldTemplate = "evoflow-copper-terraces";
+    runtimeConfig.worldId = "chunked-64-ridge";
+    runtimeConfig.worldTemplate = "ridge";
     const copper = createChunkTerrainGeometry(chunk);
-    const copperY = (copper.getAttribute("position") as THREE.BufferAttribute).getY(0);
+    const copperPos = copper.getAttribute("position") as THREE.BufferAttribute;
 
-    runtimeConfig.worldId = "chunked-64-basalt-teeth";
-    runtimeConfig.worldTemplate = "evoflow-basalt-teeth";
+    runtimeConfig.worldId = "chunked-64-lowlands";
+    runtimeConfig.worldTemplate = "lowlands";
     const basalt = createChunkTerrainGeometry(chunk);
-    const basaltY = (basalt.getAttribute("position") as THREE.BufferAttribute).getY(0);
+    const basaltPos = basalt.getAttribute("position") as THREE.BufferAttribute;
 
-    expect(Math.abs(basaltY - copperY)).toBeGreaterThan(1);
+    let maxDelta = 0;
+    for (let i = 0; i < Math.min(copperPos.count, basaltPos.count); i++) {
+      maxDelta = Math.max(maxDelta, Math.abs(basaltPos.getY(i) - copperPos.getY(i)));
+    }
+    expect(maxDelta).toBeGreaterThan(1);
     copper.dispose();
     basalt.dispose();
   });

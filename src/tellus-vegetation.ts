@@ -66,6 +66,7 @@ export interface VegetationOptions {
   samplePaint: (x: number, z: number) => TerrainPaintKind | null;
   bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
   sectorsEnabled?: boolean;
+  sectorStreamRadius?: number;
   grassOnly?: boolean;
   suppressGrass?: boolean;
   suppressSmallFlora?: boolean;
@@ -235,6 +236,10 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   const sectorsPerSideX = Math.ceil(spanX / SECTOR);
   const sectorsPerSideZ = Math.ceil(spanZ / SECTOR);
   const sectorsEnabled = options.sectorsEnabled ?? true;
+  const sectorStreamRadius = options.sectorStreamRadius !== undefined
+    ? Math.max(0, Math.floor(options.sectorStreamRadius))
+    : null;
+  const streamSectors = sectorsEnabled && sectorStreamRadius !== null;
   const inWorld = (x: number, z: number, margin = 0) => {
     if (!classicDiscBounds) {
       return (
@@ -644,21 +649,33 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   const TREES_PER_SECTOR = 56;
   const ROCKS_PER_SECTOR = 0;
   interface Sector {
+    key: string;
     sx: number;
     sz: number;
+    lastNeededMs: number;
+    treeCount: number;
     trees: PooledMesh | null;
     rocks: PooledMesh | null;
     texturedTrees: THREE.Group | null;
   }
   const sectors: Sector[] = [];
-  if (sectorsEnabled) {
+  const sectorByKey = new Map<string, Sector>();
+  const sectorKey = (sx: number, sz: number) => `${sx}:${sz}`;
+  const createSector = (sx: number, sz: number, nowMs = 0): Sector => {
+    const key = sectorKey(sx, sz);
+    const sector = { key, sx, sz, lastNeededMs: nowMs, treeCount: 0, trees: null, rocks: null, texturedTrees: null };
+    sectorByKey.set(key, sector);
+    sectors.push(sector);
+    return sector;
+  };
+  if (sectorsEnabled && !streamSectors) {
     for (let sx = 0; sx < sectorsPerSideX; sx++) {
       for (let sz = 0; sz < sectorsPerSideZ; sz++) {
         const centerX = minWorldX + sx * SECTOR + SECTOR / 2;
         const centerZ = minWorldZ + sz * SECTOR + SECTOR / 2;
         // skip sectors entirely outside the island disc
         if (classicDiscBounds && Math.hypot(centerX, centerZ) - SECTOR * 0.71 > halfWorld) continue;
-        sectors.push({ sx, sz, trees: null, rocks: null, texturedTrees: null });
+        createSector(sx, sz);
       }
     }
   }
@@ -676,6 +693,54 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     });
     sector.texturedTrees.clear();
     sector.texturedTrees = null;
+  };
+
+  const disposeSector = (sector: Sector) => {
+    disposeTexturedSector(sector);
+    if (sector.trees) {
+      group.remove(sector.trees.mesh);
+      sector.trees.geometry.dispose();
+      sector.trees = null;
+    }
+    if (sector.rocks) {
+      group.remove(sector.rocks.mesh);
+      sector.rocks.geometry.dispose();
+      sector.rocks = null;
+    }
+    treeCount -= sector.treeCount;
+    sector.treeCount = 0;
+  };
+
+  const syncStreamedSectors = (px: number, pz: number, nowMs: number) => {
+    if (!streamSectors) return;
+    const centerSx = Math.floor((px - minWorldX) / SECTOR);
+    const centerSz = Math.floor((pz - minWorldZ) / SECTOR);
+    const wanted = new Set<string>();
+    for (let dz = -sectorStreamRadius!; dz <= sectorStreamRadius!; dz++) {
+      for (let dx = -sectorStreamRadius!; dx <= sectorStreamRadius!; dx++) {
+        const sx = centerSx + dx;
+        const sz = centerSz + dz;
+        if (sx < 0 || sz < 0 || sx >= sectorsPerSideX || sz >= sectorsPerSideZ) continue;
+        const centerX = minWorldX + sx * SECTOR + SECTOR / 2;
+        const centerZ = minWorldZ + sz * SECTOR + SECTOR / 2;
+        if (classicDiscBounds && Math.hypot(centerX, centerZ) - SECTOR * 0.71 > halfWorld) continue;
+        const key = sectorKey(sx, sz);
+        wanted.add(key);
+        let sector = sectorByKey.get(key);
+        if (!sector) {
+          sector = createSector(sx, sz, nowMs);
+          buildSector(sector);
+        }
+        sector.lastNeededMs = nowMs;
+      }
+    }
+    for (let i = sectors.length - 1; i >= 0; i--) {
+      const sector = sectors[i]!;
+      if (wanted.has(sector.key) || nowMs - sector.lastNeededMs < 3500) continue;
+      disposeSector(sector);
+      sectorByKey.delete(sector.key);
+      sectors.splice(i, 1);
+    }
   };
 
   const buildTexturedSector = (sector: Sector, placements: TexturedTreePlacement[]) => {
@@ -806,7 +871,8 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     markPooledUpdated(sector.trees, cur.i);
     if (cur.i > 0) setBounds(sector.trees, ox + SECTOR / 2, oz + SECTOR / 2, SECTOR, minY, maxY);
     buildTexturedSector(sector, texturedPlacements);
-    treeCount += stamped;
+    treeCount += stamped - sector.treeCount;
+    sector.treeCount = stamped;
 
     if (ROCKS_PER_SECTOR > 0) {
       // rocks + boulders
@@ -898,6 +964,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     uPlayer.value.set(px, playerY, pz);
     uCamXZ.value.set(px, pz);
     uFade.value.set(TIERS[tier].radius * 0.7, TIERS[tier].radius);
+    syncStreamedSectors(px, pz, nowMs);
 
     if (fps > 0) {
       // Hitch-proof shedding: a single GLB-decode stall used to crash several tiers in under a
@@ -929,6 +996,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       sectorBuildIndex = 0;
       sectorColliders = [];
       treeCount = 0;
+      for (const sector of sectors) sector.treeCount = 0;
     }
     if (sectorBuildIndex < sectors.length) {
       buildSector(sectors[sectorBuildIndex]);

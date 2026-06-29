@@ -956,10 +956,10 @@ function createTellusWorld(
   }
   const chunkedVegetationBounds = chunkedDims
     ? {
-        minX: 0,
-        maxX: chunkedDims.w * CHUNK_SPAN,
-        minZ: 0,
-        maxZ: chunkedDims.h * CHUNK_SPAN,
+        minX: -(chunkedDims.w * CHUNK_SPAN) / 2 - CHUNK_SPAN,
+        maxX: (chunkedDims.w * CHUNK_SPAN) / 2 + CHUNK_SPAN,
+        minZ: -(chunkedDims.h * CHUNK_SPAN) / 2 - CHUNK_SPAN,
+        maxZ: (chunkedDims.h * CHUNK_SPAN) / 2 + CHUNK_SPAN,
       }
     : undefined;
   const waterFeatureCenter = (() => {
@@ -1056,7 +1056,7 @@ function createTellusWorld(
     renderer.shadowMap.enabled = !lowGpuDebug();
   };
   const sampleVegetationHeight = isChunked
-    ? (x: number, z: number) => chunkRenderer?.sampleHeight(x, z) ?? SEA_LEVEL - 100
+    ? (x: number, z: number) => chunkRenderer?.sampleHeight(x, z) ?? largeWorldBaseHeight(x, z)
     : terrainHeight;
   const sampleVegetationPaint = isChunked
     ? (x: number, z: number) => {
@@ -1067,6 +1067,7 @@ function createTellusWorld(
       }
     : centralTerrainPaintAt;
   const isWaterTerrainForVegetation = (x: number, z: number, h: number): boolean => {
+    if (isChunked && h > SEA_LEVEL + 0.35) return false;
     const kind = isChunked
       ? largeWorldTerrainKind(x, z, h)
       : terrainKind(x, z, h);
@@ -1193,7 +1194,8 @@ function createTellusWorld(
         sampleHeight: sampleVegetationHeight,
         samplePaint: sampleVegetationPaint,
         bounds: chunkedVegetationBounds,
-        sectorsEnabled: !isChunked,
+        sectorsEnabled: true,
+        sectorStreamRadius: isChunked ? 2 : undefined,
         grassOnly: false,
         suppressGrass: isChunked && !groundGrassEnabled,
         suppressSmallFlora: isChunked,
@@ -1230,7 +1232,14 @@ function createTellusWorld(
         fullDetailLod: activeWorldTemplate === "tellus",
         shouldPauseBuild: hasMovementKeyHeld,
         shouldDeferBuild: () => {
-          const terrainReady = !isChunked || (chunkRenderer?.stats().active ?? 0) >= 9;
+          const terrainStats = chunkRenderer?.stats();
+          const terrainReady = !isChunked || Boolean(
+            terrainStats &&
+            (
+              terrainStats.active >= 9 ||
+              (terrainStats.active > 0 && terrainStats.pending === 0 && terrainStats.queued === 0 && terrainStats.inflight === 0)
+            ),
+          );
           const skyboxReady =
             Boolean(activeSkyboxUrl) ||
             !runtimeConfig.skyboxUrl ||
