@@ -339,6 +339,31 @@ describe("procplant vegetation", () => {
     vegetation.dispose();
   });
 
+  it("defers procplant chunks until the world visuals are ready", () => {
+    let ready = false;
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-deferred-procplants-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -80, maxX: 80, minZ: -80, maxZ: 80 },
+      densityMultiplier: 0,
+      shouldDeferBuild: () => !ready,
+    });
+
+    vegetation.update(0, 0, 1, 60, 0);
+    expect(vegetation.stats().chunks).toBe(0);
+    expect(vegetation.stats().buildDeferred).toBe(true);
+
+    ready = true;
+    vegetation.update(0, 0, 1, 60, 16);
+    expect(vegetation.stats().chunks).toBeGreaterThan(0);
+    expect(vegetation.stats().buildDeferred).toBe(false);
+
+    vegetation.dispose();
+  });
+
   it("does not reseed procplants when terrain rebuild notifications repeat", () => {
     const scene = new THREE.Scene();
     const vegetation = createProcPlantVegetation({

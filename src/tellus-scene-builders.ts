@@ -668,15 +668,13 @@ export function disposeObject(object: THREE.Object3D): void {
     vrmRig.dispose();
     return;
   }
-  // A mirror frees its live-Reflector cap slot + render target on removal.
+  // Legacy generated objects may still carry disposal hooks; honor them before walking buffers.
   const disposeMirror = object.userData?.disposeMirror as (() => void) | undefined;
   if (disposeMirror) disposeMirror();
-  // Models cloned from the cached GLB share geometry/materials with the cache; never free those buffers
-  // here (it would break every other instance + the cache). The node wrappers are GC'd; buffers live in
-  // generatedGltfCache for the session.
-  if (object.userData?.sharedGltf) return;
+  const hasSharedBuffers = Boolean(object.userData?.sharedGltf || object.userData?.sharedProcedural);
   object.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
+    if (hasSharedBuffers && (child.userData?.sharedGltf || child.userData?.sharedProcedural)) return;
     child.geometry.dispose();
     disposeMaterial(child.material);
   });

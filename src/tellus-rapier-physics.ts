@@ -80,8 +80,26 @@ const playerFeet = (center: Vec3): Vec3 => ({
 const isFiniteVec = (v: Vec3): boolean =>
   Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
 
+const initRapier = async () => {
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    if (
+      typeof args[0] === "string" &&
+      args[0].includes("using deprecated parameters for the initialization function")
+    ) {
+      return;
+    }
+    originalWarn(...args);
+  };
+  try {
+    await RAPIER.init();
+  } finally {
+    console.warn = originalWarn;
+  }
+};
+
 export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> {
-  await (RAPIER.init as (options?: object) => Promise<void>)({});
+  await initRapier();
   const world = new World({ x: 0, y: -22, z: 0 });
   const controller = world.createCharacterController(0.04);
   controller.setSlideEnabled(true);
@@ -183,10 +201,17 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
     collisionWorldDirty = true;
   };
 
-  const failRapier = (error: unknown): void => {
+  const failRapier = (error: unknown, context: string): void => {
     failed = true;
     collisionWorldDirty = false;
-    console.warn("Tellus Rapier physics disabled after movement failure", error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("Tellus Rapier physics disabled after movement failure", {
+      context,
+      error: error instanceof Error ? error.name : typeof error,
+      message,
+      solids: colliders.size,
+      statics: staticColliders.size,
+    });
   };
 
   const api: TellusRapierPhysics = {
@@ -269,8 +294,8 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
           collisions: controller.numComputedCollisions(),
         };
       } catch (error) {
-        failRapier(error);
-        return { position: desiredFeet, grounded: false, collisions: 0 };
+        failRapier(error, "movePlayer");
+        return { position: fromFeet, grounded: false, collisions: 0 };
       }
     },
     movePlayer3D(fromFeet, desiredFeet) {
@@ -314,8 +339,8 @@ export async function createTellusRapierPhysics(): Promise<TellusRapierPhysics> 
           collisions: controller.numComputedCollisions(),
         };
       } catch (error) {
-        failRapier(error);
-        return { position: desiredFeet, grounded: false, collisions: 0 };
+        failRapier(error, "movePlayer3D");
+        return { position: fromFeet, grounded: false, collisions: 0 };
       }
     },
     addStaticTrimesh(id, object) {

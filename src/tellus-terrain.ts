@@ -534,7 +534,11 @@ export function terrainVertexColor(
   seed: number,
 ): THREE.Color {
   const color = terrainColors[kind].clone();
-  if (kind === "flowers") {
+  if (kind === "water") {
+    // The water surface is transparent; the terrain below it should read like a shallow sandy shelf,
+    // not a second dark-blue layer tinting the ocean/river from underneath.
+    color.copy(new THREE.Color(0xd8c39a).lerp(new THREE.Color(0x9bb8a4), 0.22));
+  } else if (kind === "flowers") {
     color.lerp(new THREE.Color(0x5f9438), 0.58);
   } else if (kind === "rock") {
     const pebble = rand(seed * 5 + 7919);

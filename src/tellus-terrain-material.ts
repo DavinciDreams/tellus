@@ -65,6 +65,7 @@ const KIND_JUNGLE_MOSS = 10;
 const KIND_STONE = 11;
 const KIND_BRICK = 12;
 const KIND_DESERT_SAND = 13;
+const KIND_WATER = 14;
 
 export function terrainKindCode(kind: TerrainKind): number {
   switch (kind) {
@@ -81,6 +82,7 @@ export function terrainKindCode(kind: TerrainKind): number {
     case "stone": return KIND_STONE;
     case "brick": return KIND_BRICK;
     case "desert-sand": return KIND_DESERT_SAND;
+    case "water": return KIND_WATER;
     default: return 0;
   }
 }
@@ -108,11 +110,12 @@ const brickPattern = Fn(([px, pz]: [ReturnType<typeof float>, ReturnType<typeof 
   // Mortar grooves: dark band near each cell edge. e* = normalised distance from cell centre.
   const eu = abs(u.sub(0.5)).mul(2); // 0 centre -> 1 edge
   const ev = abs(v.sub(0.5)).mul(2);
-  const mortar = step(0.86, eu).max(step(0.72, ev)); // 1 in the groove band, else 0
+  const mortar = smoothstep(0.78, 0.92, eu).max(smoothstep(0.62, 0.8, ev)); // 1 in the groove band, else 0
   // Per-brick value variation so the field isn't uniform.
   const brickId = px.add(offset).div(BRICK_W).floor().add(row.mul(7.0));
-  const vary = mx_noise_float(vec3(brickId.mul(0.13), row.mul(0.31), float(0))).mul(0.12);
-  return mix(float(1).add(vary), float(0.55), mortar);
+  const vary = mx_noise_float(vec3(brickId.mul(0.13), row.mul(0.31), float(0))).mul(0.16);
+  const faceGrain = mx_noise_float(vec3(px.mul(2.8), pz.mul(2.8), float(0))).mul(0.08);
+  return mix(float(1).add(vary).add(faceGrain), float(0.5), mortar);
 });
 
 /** Stone pattern: irregular cracked cells via cell noise + faint dark hairline cracks. */
@@ -220,6 +223,7 @@ function buildDetailColorNode() {
   const isDesertSand = band(PAINT_DESERT_SAND);
   const unpainted = step(0.5, paintCode).oneMinus();
   const isAutoBeach = kindBand(KIND_BEACH).mul(unpainted);
+  const isAutoWater = kindBand(KIND_WATER).mul(unpainted);
   const isAutoDirt = kindBand(KIND_DIRT).mul(unpainted);
   const isAutoRock = kindBand(KIND_ROCK).mul(unpainted);
   const isAutoSnow = kindBand(KIND_SNOW).mul(unpainted);
@@ -233,6 +237,7 @@ function buildDetailColorNode() {
     structPattern,
     mx_noise_float(wp.mul(1.8)).mul(0.14).add(0.98),
     isAutoBeach
+      .add(isAutoWater)
       .add(isAutoDirt)
       .add(isAutoRock)
       .add(isAutoSnow)
@@ -379,9 +384,18 @@ const generatedTerrainTextures = new Map<string, THREE.Texture>();
 const BIOME_LITE_TEXTURE_UNITS = 3; // moss + shared stone + neutral grit samplers; still below old nine-sampler path
 const ESTIMATED_NINE_SAMPLER_UNITS = 11; // base albedo + normal + 9 paint albedo maps
 const BIOME_LITE_TEXTURE_URLS = {
-  moss: "/terrain-textures/moss002/albedo.png",
-  rock: "/terrain-textures/shared-fieldstone-rubble/albedo.png",
-  grit: "/terrain-textures/shared-asphalt-grain/albedo.jpg",
+  moss: [
+    "/terrain-textures/moss002/albedo-512.webp",
+    "/terrain-textures/moss002/albedo.png",
+  ],
+  rock: [
+    "/terrain-textures/shared-fieldstone-rubble/albedo-512.webp",
+    "/terrain-textures/shared-fieldstone-rubble/albedo.png",
+  ],
+  grit: [
+    "/terrain-textures/shared-asphalt-grain/albedo-512.webp",
+    "/terrain-textures/shared-asphalt-grain/albedo.jpg",
+  ],
 } as const;
 
 function terrainImageTexturesRequested(): boolean {
@@ -551,6 +565,22 @@ async function loadTerrainTexture(url: string, repeat: number, colorSpace?: THRE
   return prepareRepeatTexture(texture, repeat, colorSpace);
 }
 
+async function loadTerrainTextureCandidate(
+  urls: readonly string[],
+  repeat: number,
+  colorSpace?: THREE.ColorSpace,
+): Promise<THREE.Texture> {
+  let lastError: unknown;
+  for (const url of urls) {
+    try {
+      return await loadTerrainTexture(url, repeat, colorSpace);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error("No terrain texture candidates were provided");
+}
+
 function whiteTerrainTexture(): THREE.Texture {
   const cached = generatedTerrainTextures.get("white");
   if (cached) return cached;
@@ -584,7 +614,7 @@ function applyBiomeLiteTerrainOverlay(
   };
 
   for (const key of Object.keys(BIOME_LITE_TEXTURE_URLS) as Array<keyof typeof BIOME_LITE_TEXTURE_URLS>) {
-    void loadTerrainTexture(BIOME_LITE_TEXTURE_URLS[key], repeat, THREE.SRGBColorSpace)
+    void loadTerrainTextureCandidate(BIOME_LITE_TEXTURE_URLS[key], repeat, THREE.SRGBColorSpace)
       .then((texture) => {
         paintTextures[key] = texture;
         updateShaderUniforms();
@@ -624,7 +654,7 @@ float tellusKindBand(float code){
 }
 float tellusBrickMortar(vec2 f){
   vec2 edge = min(f, 1.0 - f);
-  return 1.0 - step(0.075, min(edge.x, edge.y));
+  return 1.0 - smoothstep(0.035, 0.105, min(edge.x, edge.y));
 }
 float tellusHash2(vec2 p){
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -638,9 +668,14 @@ vec3 tellusRunningBondBrick(vec2 worldPos){
   vec2 brickUv = vec2(worldPos.x / 1.08, worldPos.y / 0.42);
   brickUv.x += floor(brickUv.y) * 0.5;
   vec2 f = fract(brickUv);
+  vec2 cell = floor(brickUv);
   float mortar = tellusBrickMortar(f);
-  float worn = fract(sin(dot(floor(brickUv), vec2(17.13, 41.77))) * 43758.5453);
+  float worn = fract(sin(dot(cell, vec2(17.13, 41.77))) * 43758.5453);
+  float soot = tellusSoftTerrainNoise(worldPos * 2.7 + cell * 0.17) * 0.5 + 0.5;
+  float chipped = smoothstep(0.74, 1.0, tellusHash2(cell + floor(f * 5.0)));
   vec3 brick = mix(vec3(0.38, 0.08, 0.055), vec3(0.68, 0.18, 0.10), worn);
+  brick *= mix(0.9, 1.12, soot);
+  brick = mix(brick, brick * vec3(1.16, 1.07, 0.94), chipped * 0.22);
   return mix(brick, vec3(0.54, 0.48, 0.42), mortar);
 }
 vec3 tellusStoneSlabs(vec2 worldPos){
@@ -653,9 +688,13 @@ vec3 tellusStoneSlabs(vec2 worldPos){
   vec2 cell = floor(slabUv);
   vec2 f = fract(slabUv);
   vec2 edge = min(f, 1.0 - f);
-  float mortar = 1.0 - step(0.07, min(edge.x, edge.y));
+  float mortar = 1.0 - smoothstep(0.035, 0.1, min(edge.x, edge.y));
   float chip = fract(sin(dot(cell, vec2(23.17, 31.91))) * 43758.5453);
+  float grain = tellusSoftTerrainNoise(worldPos * 2.1 + cell * 0.23) * 0.5 + 0.5;
+  float hairline = smoothstep(0.78, 0.98, abs(tellusSoftTerrainNoise(worldPos * 4.4 + cell)));
   vec3 slab = mix(vec3(0.42, 0.43, 0.42), vec3(0.72, 0.74, 0.70), chip);
+  slab *= mix(0.88, 1.1, grain);
+  slab = mix(slab, slab * 0.62, hairline * 0.16);
   return mix(slab, vec3(0.30, 0.31, 0.30), mortar);
 }
 vec3 tellusRockSurface(vec2 worldPos, vec3 base){
@@ -730,6 +769,7 @@ float tellusGritDetail(vec3 sampleColor, float strength){
     float brickMask = tellusPaintBand(${PAINT_BRICK.toFixed(1)});
     float unpainted = 1.0 - step(0.5, vTellusPaintCode);
     sandMask += unpainted * tellusKindBand(${KIND_BEACH.toFixed(1)});
+    sandMask += unpainted * tellusKindBand(${KIND_WATER.toFixed(1)});
     dirtMask += unpainted * tellusKindBand(${KIND_DIRT.toFixed(1)});
     rockMask += unpainted * tellusKindBand(${KIND_ROCK.toFixed(1)});
     snowMask += unpainted * tellusKindBand(${KIND_SNOW.toFixed(1)});

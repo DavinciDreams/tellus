@@ -624,7 +624,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     const oz = minWorldZ + sector.sz * SECTOR;
     // trees
     sector.trees ??= makePooled(TREES_PER_SECTOR * maxTreeVerts, TREES_PER_SECTOR * maxTreeIdx, treeMaterial);
-    sector.trees.mesh.castShadow = true;
+    sector.trees.mesh.castShadow = false;
     const cur: StampCursor = { v: 0, i: 0 };
     let minY = Infinity;
     let maxY = -Infinity;
@@ -664,7 +664,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
         ROCKS_PER_SECTOR * boulderTpl.idx.length,
         rockMaterial,
       );
-      sector.rocks.mesh.castShadow = true;
+      sector.rocks.mesh.castShadow = false;
       const rcur: StampCursor = { v: 0, i: 0 };
       let rMinY = Infinity;
       let rMaxY = -Infinity;

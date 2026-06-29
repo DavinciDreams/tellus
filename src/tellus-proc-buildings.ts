@@ -125,6 +125,7 @@ const RIVER_BRICK_DETAIL_COLOR = 0x643628;
 const WHITE_TUDOR_WALL_COLOR = 0xe8dfc7;
 const WHITE_TUDOR_TIMBER_COLOR = 0x35231a;
 const buildingTextureCache = new Map<string, THREE.Texture>();
+const buildingMaterialSetCache = new Map<string, ReturnType<typeof createMaterialSet>>();
 
 export const BUILDING_MATERIAL_OPTIONS: Array<{ id: BuildingMaterialStyle; label: string }> = [
   { id: "auto", label: "Auto" },
@@ -413,7 +414,31 @@ function applySharedAlbedo(
   return material;
 }
 
+function createMaterialSetCacheKey(
+  materialStyle: Exclude<BuildingMaterialStyle, "auto">,
+  recipeId?: ProceduralBuildingType,
+): string {
+  return `${recipeId ?? "generic"}:${materialStyle}`;
+}
+
 function createMaterials(
+  palette: ReturnType<typeof materialPalette>,
+  materialStyle: Exclude<BuildingMaterialStyle, "auto">,
+  recipeId?: ProceduralBuildingType,
+) {
+  const key = createMaterialSetCacheKey(materialStyle, recipeId);
+  const cached = buildingMaterialSetCache.get(key);
+  if (cached) return cached;
+  const materials = createMaterialSet(palette, materialStyle, recipeId);
+  buildingMaterialSetCache.set(key, materials);
+  if (buildingMaterialSetCache.size > 96) {
+    const first = buildingMaterialSetCache.keys().next().value;
+    if (first) buildingMaterialSetCache.delete(first);
+  }
+  return materials;
+}
+
+function createMaterialSet(
   palette: ReturnType<typeof materialPalette>,
   materialStyle: Exclude<BuildingMaterialStyle, "auto">,
   recipeId?: ProceduralBuildingType,
@@ -532,12 +557,22 @@ function addMesh(group: THREE.Group, mesh: THREE.Mesh, collide = true) {
 function mergeBuildingMeshesByMaterial(group: THREE.Group) {
   group.updateMatrixWorld(true);
   const buckets = new Map<string, { material: THREE.Material; collide: boolean; geometries: THREE.BufferGeometry[]; meshes: THREE.Mesh[] }>();
+  const geometryMergeSignature = (geometry: THREE.BufferGeometry) => {
+    const attributes = Object.entries(geometry.attributes)
+      .map(([name, attribute]) => {
+        const bufferAttribute = attribute as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+        return `${name}:${bufferAttribute.itemSize}:${bufferAttribute.normalized ? 1 : 0}`;
+      })
+      .sort()
+      .join("|");
+    return `${geometry.index ? "indexed" : "flat"}:${attributes}`;
+  };
   group.traverse((object) => {
     if (!(object instanceof THREE.Mesh) || object instanceof THREE.InstancedMesh) return;
     if (Array.isArray(object.material)) return;
     const geometry = object.geometry;
-    if (!geometry || geometry.morphAttributes && Object.keys(geometry.morphAttributes).length > 0) return;
-    const key = `${object.material.uuid}:${object.userData.collide === false ? "ghost" : "solid"}`;
+    if (!geometry || (geometry.morphAttributes && Object.keys(geometry.morphAttributes).length > 0)) return;
+    const key = `${object.material.uuid}:${object.userData.collide === false ? "ghost" : "solid"}:${geometryMergeSignature(geometry)}`;
     let bucket = buckets.get(key);
     if (!bucket) {
       bucket = {

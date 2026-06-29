@@ -75,6 +75,11 @@ export function configureKtx2Support(renderer: unknown): void {
 
 export function createGltfLoader(): GLTFLoader {
   return new GLTFLoader(gltfManager)
+    .register(() => ({
+      // Legacy glTF 1/early-2 material model. Three no longer implements it, but some skybox/store
+      // assets still mark it required even though the PBR fallback renders acceptably.
+      name: "KHR_materials_pbrSpecularGlossiness",
+    }))
     .setDRACOLoader(dracoLoader)
     .setKTX2Loader(ktx2Loader)
     .setMeshoptDecoder(MeshoptDecoder);

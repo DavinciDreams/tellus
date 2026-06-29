@@ -25,9 +25,12 @@ import {
 } from "./tellus-urls-identity";
 import type { ChunkData } from "./world-protocol";
 import type { TerrainPaintKind, WorldTemplateId } from "./tellus-types";
+import { terrainKindCode } from "./tellus-terrain-material";
 
 const key = (cx: number, cz: number) => `${cx},${cz}`;
 const CHUNK_SKIRT_DEPTH = 8;
+const CHUNK_PROVISIONAL_SEGMENTS = 8;
+const TERRAIN_KIND_CODE_WATER = terrainKindCode("water");
 
 // Sample the 65x65 sculpt grid (row-major z*65+x). Empty array => flat (revision 0).
 function sculptAt(offsets: number[], xi: number, zi: number): number {
@@ -59,6 +62,7 @@ export function createChunkTerrainGeometry(
   const colors: number[] = [];
   const uvs: number[] = [];
   const paintCodes: number[] = [];
+  const terrainKindCodes: number[] = [];
   const indices: number[] = [];
 
   for (let j = 0; j <= seg; j++) {
@@ -83,6 +87,7 @@ export function createChunkTerrainGeometry(
       // Carry the code of the APPLIED paint (0 when the biome owns the vertex), so the material's
       // per-kind pattern matches the vertex color and biome terrain stays pattern-free.
       paintCodes.push(kind ? terrainPaintCode(kind) : 0);
+      terrainKindCodes.push(terrainKindCode(resolvedKind));
     }
   }
 
@@ -113,6 +118,7 @@ export function createChunkTerrainGeometry(
     );
     uvs.push(uvs[uvOffset] ?? 0, uvs[uvOffset + 1] ?? 0);
     paintCodes.push(paintCodes[surfaceIndex] ?? 0);
+    terrainKindCodes.push(terrainKindCodes[surfaceIndex] ?? 0);
     return skirtIndex;
   };
 
@@ -122,13 +128,26 @@ export function createChunkTerrainGeometry(
   for (let x = seg; x > 0; x--) ring.push(seg * row + x);
   for (let z = seg; z > 0; z--) ring.push(z * row);
 
-  const skirtRing = ring.map(addSkirtVertex);
+  const skirtRing = new Map<number, number>();
+  const skirtVertexFor = (surfaceIndex: number) => {
+    const existing = skirtRing.get(surfaceIndex);
+    if (existing !== undefined) return existing;
+    const next = addSkirtVertex(surfaceIndex);
+    skirtRing.set(surfaceIndex, next);
+    return next;
+  };
   for (let i = 0; i < ring.length; i++) {
     const next = (i + 1) % ring.length;
     const a = ring[i];
     const b = ring[next];
-    const a2 = skirtRing[i];
-    const b2 = skirtRing[next];
+    if (
+      (terrainKindCodes[a] ?? 0) === TERRAIN_KIND_CODE_WATER &&
+      (terrainKindCodes[b] ?? 0) === TERRAIN_KIND_CODE_WATER
+    ) {
+      continue;
+    }
+    const a2 = skirtVertexFor(a);
+    const b2 = skirtVertexFor(b);
     // Include both windings so the skirt masks seams from above and below with front-face materials.
     indices.push(a, a2, b, b, a2, b2, a, b, a2, b, b2, a2);
   }
@@ -138,6 +157,7 @@ export function createChunkTerrainGeometry(
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setAttribute("tellusPaintCode", new THREE.Float32BufferAttribute(paintCodes, 1));
+  geometry.setAttribute("tellusTerrainKindCode", new THREE.Float32BufferAttribute(terrainKindCodes, 1));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
@@ -160,6 +180,10 @@ interface ActiveChunk {
 export interface ChunkRenderer {
   /** Per-frame from animate(); re-evaluates the load/evict ring only when the center chunk changes. */
   update(worldX: number, worldZ: number): void;
+  /** Fetch a small ring ahead of movement without changing the eviction/active center. */
+  prefetch(worldX: number, worldZ: number, radius?: number): void;
+  /** Render a temporary procedural-base chunk immediately so movement never waits on chunk fetch. */
+  ensureBaseChunk(worldX: number, worldZ: number): boolean;
   /** Set how many chunk-rings load around the player (radius in chunks; (2r+1)² chunks). Forces a re-eval. */
   setLoadRadius(radius: number): void;
   /** /live chunk.updated -> mark dirty + refetch that chunk (rebuilt in the next flush). */
@@ -168,8 +192,10 @@ export interface ChunkRenderer {
   rebuildTerrain(): void;
   /** Optimistic local paint for immediate feedback while the authoritative chunk patch round-trips. */
   applyLocalPaint(kind: TerrainPaintKind, worldX: number, worldZ: number, radius: number): void;
-  /** Rebuild any chunks whose data arrived since last frame — call once/frame next to flushTerrain(). */
-  flush(): void;
+  /** Rebuild chunks whose data arrived since last frame — call once/frame next to flushTerrain(). */
+  flush(maxBuilds?: number, maxMs?: number, maxFetchStarts?: number): void;
+  /** Limit how many queued chunk fetches update()/prefetch() may start synchronously. */
+  setFetchStartBudget(maxStarts: number): void;
   /**
    * Bilinearly sample the sculpted chunk height at world (x,z). Returns null when the chunk that
    * owns (x,z) is not currently active (so grounding falls back to the flat base). A loaded chunk
@@ -177,7 +203,21 @@ export interface ChunkRenderer {
    */
   sampleHeight(worldX: number, worldZ: number): number | null;
   samplePaint(worldX: number, worldZ: number): TerrainPaintKind | null;
-  stats(): { active: number; pending: number; failed: number };
+  stats(): {
+    active: number;
+    pending: number;
+    queued: number;
+    inflight: number;
+    ready: number;
+    failed: number;
+    loadRadius: number;
+    center: { cx: number; cz: number } | null;
+    lastFlushBuilt: number;
+    lastFlushMs: number;
+    maxFlushMs: number;
+    provisional: number;
+    currentProvisional: boolean;
+  };
   dispose(): void;
 }
 
@@ -203,13 +243,19 @@ export function createChunkRenderer(
 
   const active = new Map<string, ActiveChunk>();
   const inflight = new Map<string, AbortController>();
+  const queuedFetches = new Map<string, { cx: number; cz: number; lodSegments: number; priority: number; force: boolean }>();
   const ready = new Map<string, ChunkData>(); // fetched data awaiting build/rebuild in flush()
   const lodOf = new Map<string, number>(); // intended lod for a pending fetch
   const retryAt = new Map<string, number>(); // failed fetches; retried while the chunk remains wanted
+  const localPaintOverrides = new Map<string, Map<number, number>>();
   let centerCx = NaN;
   let centerCz = NaN;
   let disposed = false;
   let failedFetches = 0;
+  let lastFlushBuilt = 0;
+  let lastFlushMs = 0;
+  let maxFlushMs = 0;
+  let fetchStartBudget = Number.POSITIVE_INFINITY;
   // Runtime-tunable load ring (the chunk slider). loadRadius = chunks fetched around the centre ((2r+1)²);
   // keepRadius = loadRadius + 1 for the same evict hysteresis the CHUNK_LOAD/KEEP constants had (2 → 3).
   let loadRadius = CHUNK_LOAD_RADIUS;
@@ -225,8 +271,9 @@ export function createChunkRenderer(
     retryAt.set(k, Date.now() + 2_000);
   };
 
-  const fetchChunk = (cx: number, cz: number, lodSegments: number) => {
+  const startFetchChunk = (cx: number, cz: number, lodSegments: number) => {
     const k = key(cx, cz);
+    queuedFetches.delete(k);
     retryAt.delete(k);
     inflight.get(k)?.abort();
     const ctrl = new AbortController();
@@ -255,9 +302,47 @@ export function createChunkRenderer(
       });
   };
 
+  const queueChunkFetch = (cx: number, cz: number, lodSegments: number, priority: number, force = false) => {
+    const k = key(cx, cz);
+    const existing = queuedFetches.get(k);
+    if (
+      existing &&
+      existing.lodSegments === lodSegments &&
+      existing.priority <= priority &&
+      (existing.force || !force)
+    ) {
+      return;
+    }
+    queuedFetches.set(k, { cx, cz, lodSegments, priority, force });
+    lodOf.set(k, lodSegments);
+  };
+
+  const pumpQueuedFetches = (maxStarts = Number.POSITIVE_INFINITY) => {
+    if (disposed || queuedFetches.size === 0 || maxStarts <= 0) return 0;
+    let started = 0;
+    const sorted = [...queuedFetches]
+      .sort(([, a], [, b]) => a.priority - b.priority);
+    for (const [k, request] of sorted) {
+      if (started >= maxStarts) break;
+      if (inflight.has(k) || ready.has(k)) {
+        queuedFetches.delete(k);
+        continue;
+      }
+      const activeChunk = active.get(k);
+      if (!request.force && activeChunk && activeChunk.lodSegments === request.lodSegments) {
+        queuedFetches.delete(k);
+        continue;
+      }
+      startFetchChunk(request.cx, request.cz, request.lodSegments);
+      started++;
+    }
+    return started;
+  };
+
   const evict = (k: string) => {
     inflight.get(k)?.abort();
     inflight.delete(k);
+    queuedFetches.delete(k);
     ready.delete(k);
     lodOf.delete(k);
     retryAt.delete(k);
@@ -266,6 +351,29 @@ export function createChunkRenderer(
       group.remove(a.mesh);
       a.mesh.geometry.dispose(); // shared material left intact
       active.delete(k);
+    }
+  };
+
+  const scheduleAround = (cx: number, cz: number, radius: number, now: number) => {
+    const bounds = getChunkedWorldChunks(); // {w,h} in chunks, or null until the manifest loads
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const tcx = cx + dx;
+        const tcz = cz + dz;
+        if (tcx < 0 || tcz < 0) continue; // world coords are [0, N*SPAN)
+        if (bounds && (tcx >= bounds.w || tcz >= bounds.h)) continue; // past the world's far edge
+        const ring = Math.max(Math.abs(dx), Math.abs(dz));
+        const lod = lodForRing(ring);
+        const k = key(tcx, tcz);
+        const a = active.get(k);
+        if (a && a.lodSegments === lod) continue; // already at right detail
+        if (inflight.has(k) && lodOf.get(k) === lod) continue;
+        if (ready.has(k) && lodOf.get(k) === lod) continue;
+        if (queuedFetches.has(k) && lodOf.get(k) === lod) continue;
+        const retry = retryAt.get(k);
+        if (retry !== undefined && retry > now) continue;
+        queueChunkFetch(tcx, tcz, lod, ring);
+      }
     }
   };
 
@@ -286,24 +394,8 @@ export function createChunkRenderer(
     centerCz = cz;
 
     // Ensure chunks within the load radius are fetched (skip already-active at the right LOD).
-    const bounds = getChunkedWorldChunks(); // {w,h} in chunks, or null until the manifest loads
-    for (let dz = -loadRadius; dz <= loadRadius; dz++) {
-      for (let dx = -loadRadius; dx <= loadRadius; dx++) {
-        const tcx = cx + dx;
-        const tcz = cz + dz;
-        if (tcx < 0 || tcz < 0) continue; // world coords are [0, N*SPAN)
-        if (bounds && (tcx >= bounds.w || tcz >= bounds.h)) continue; // past the world's far edge
-        const ring = Math.max(Math.abs(dx), Math.abs(dz));
-        const lod = lodForRing(ring);
-        const k = key(tcx, tcz);
-        const a = active.get(k);
-        if (a && a.lodSegments === lod) continue; // already at right detail
-        if (inflight.has(k) && lodOf.get(k) === lod) continue;
-        const retry = retryAt.get(k);
-        if (retry !== undefined && retry > now) continue;
-        fetchChunk(tcx, tcz, lod);
-      }
-    }
+    scheduleAround(cx, cz, loadRadius, now);
+    pumpQueuedFetches(fetchStartBudget);
 
     // Evict anything beyond the keep radius (Chebyshev distance). Scan ready.keys() too: a chunk whose
     // fetch already resolved sits in `ready` (not active, not inflight) and would otherwise leak — the next
@@ -316,34 +408,92 @@ export function createChunkRenderer(
     }
   };
 
+  const prefetch = (worldX: number, worldZ: number, radius = 1) => {
+    if (disposed) return;
+    const cx = Math.floor(worldX / CHUNK_SPAN);
+    const cz = Math.floor(worldZ / CHUNK_SPAN);
+    scheduleAround(cx, cz, Math.max(0, Math.min(2, Math.round(radius))), Date.now());
+    pumpQueuedFetches(fetchStartBudget);
+  };
+
+  const ensureBaseChunk = (worldX: number, worldZ: number): boolean => {
+    if (disposed) return false;
+    const cx = Math.floor(worldX / CHUNK_SPAN);
+    const cz = Math.floor(worldZ / CHUNK_SPAN);
+    const bounds = getChunkedWorldChunks();
+    if (cx < 0 || cz < 0) return false;
+    if (bounds && (cx >= bounds.w || cz >= bounds.h)) return false;
+    const k = key(cx, cz);
+    if (active.has(k)) return false;
+    buildOrUpdate(
+      k,
+      {
+        cx,
+        cz,
+        revision: -1,
+        segments: CHUNK_SEGMENTS,
+        sculptOffsets: [],
+        paint: [],
+      },
+      CHUNK_PROVISIONAL_SEGMENTS,
+    );
+    return true;
+  };
+
+  const chunkDataWithLocalPaint = (k: string, data: ChunkData): ChunkData => {
+    const overrides = localPaintOverrides.get(k);
+    const existing = active.get(k);
+    if (!overrides?.size && !existing?.paint.length) return data;
+    const paint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
+    if (existing?.paint.length) {
+      for (let index = 0; index < Math.min(existing.paint.length, paint.length); index++) {
+        const code = existing.paint[index] ?? 0;
+        if (code) paint[index] = code;
+      }
+    }
+    if (data.paint.length) {
+      for (let index = 0; index < Math.min(data.paint.length, paint.length); index++) {
+        const code = data.paint[index] ?? 0;
+        if (code) paint[index] = code;
+      }
+    }
+    if (overrides?.size) {
+      for (const [index, code] of overrides) {
+        if (index >= 0 && index < paint.length) paint[index] = code;
+      }
+    }
+    return { ...data, paint };
+  };
+
   const buildOrUpdate = (k: string, data: ChunkData, lodSegments: number) => {
+    const mergedData = chunkDataWithLocalPaint(k, data);
     const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
-    const geometry = createChunkTerrainGeometry(data, lodSegments);
+    const geometry = createChunkTerrainGeometry(mergedData, lodSegments);
     const existing = active.get(k);
     if (existing) {
       existing.mesh.geometry.dispose();
       existing.mesh.geometry = geometry;
-      existing.revision = data.revision;
+      existing.revision = mergedData.revision;
       existing.lodSegments = lodSegments;
       existing.template = template;
-      existing.sculptOffsets = data.sculptOffsets;
-      existing.paint = data.paint;
+      existing.sculptOffsets = mergedData.sculptOffsets;
+      existing.paint = mergedData.paint;
       return;
     }
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(data.cx * CHUNK_SPAN, 0, data.cz * CHUNK_SPAN);
+    mesh.position.set(mergedData.cx * CHUNK_SPAN, 0, mergedData.cz * CHUNK_SPAN);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     group.add(mesh);
     active.set(k, {
       mesh,
-      revision: data.revision,
+      revision: mergedData.revision,
       lodSegments,
       template,
-      cx: data.cx,
-      cz: data.cz,
-      sculptOffsets: data.sculptOffsets,
-      paint: data.paint,
+      cx: mergedData.cx,
+      cz: mergedData.cz,
+      sculptOffsets: mergedData.sculptOffsets,
+      paint: mergedData.paint,
     });
   };
 
@@ -365,9 +515,32 @@ export function createChunkRenderer(
     }
   };
 
-  const flush = () => {
-    if (disposed || ready.size === 0) return;
-    for (const [k, data] of ready) {
+  const flush = (
+    maxBuilds = Number.POSITIVE_INFINITY,
+    maxMs = Number.POSITIVE_INFINITY,
+    maxFetchStarts = Number.POSITIVE_INFINITY,
+  ) => {
+    lastFlushBuilt = 0;
+    lastFlushMs = 0;
+    const startedAt = performance.now();
+    pumpQueuedFetches(maxFetchStarts);
+    if (disposed || ready.size === 0) {
+      lastFlushMs = performance.now() - startedAt;
+      maxFlushMs = Math.max(maxFlushMs, lastFlushMs);
+      return;
+    }
+    const sorted = [...ready].sort(([, a], [, b]) => {
+      const aRing = Number.isFinite(centerCx)
+        ? Math.max(Math.abs(a.cx - centerCx), Math.abs(a.cz - centerCz))
+        : 0;
+      const bRing = Number.isFinite(centerCx)
+        ? Math.max(Math.abs(b.cx - centerCx), Math.abs(b.cz - centerCz))
+        : 0;
+      return aRing - bRing;
+    });
+    for (const [k, data] of sorted) {
+      if (lastFlushBuilt >= maxBuilds) break;
+      if (lastFlushBuilt > 0 && performance.now() - startedAt >= maxMs) break;
       // Belt-and-suspenders against the evict race: a fetch that resolved after the owning chunk drifted
       // out of keep-radius must not be built. (evict() also scans ready, but a fetch can resolve between
       // an evict pass and this flush.)
@@ -375,6 +548,7 @@ export function createChunkRenderer(
         Number.isFinite(centerCx) &&
         Math.max(Math.abs(data.cx - centerCx), Math.abs(data.cz - centerCz)) > keepRadius()
       ) {
+        ready.delete(k);
         continue;
       }
       const lod = lodOf.get(k) ?? CHUNK_SEGMENTS;
@@ -387,11 +561,15 @@ export function createChunkRenderer(
         existing.lodSegments === lod &&
         existing.template === template
       ) {
+        ready.delete(k);
         continue;
       }
       buildOrUpdate(k, data, lod);
+      ready.delete(k);
+      lastFlushBuilt++;
     }
-    ready.clear();
+    lastFlushMs = performance.now() - startedAt;
+    maxFlushMs = Math.max(maxFlushMs, lastFlushMs);
   };
 
   const reloadChunk = (chunkX: number, chunkZ: number) => {
@@ -400,7 +578,7 @@ export function createChunkRenderer(
     // Only reload chunks we have on screen, in flight, or already fetched-and-waiting (ready); a patch
     // that lands in the ready window must still refetch so the newer revision wins.
     if (!a && !inflight.has(k) && !ready.has(k)) return;
-    fetchChunk(chunkX, chunkZ, a?.lodSegments ?? CHUNK_SEGMENTS);
+    queueChunkFetch(chunkX, chunkZ, a?.lodSegments ?? CHUNK_SEGMENTS, -1, true);
   };
 
   const applyLocalPaint = (kind: TerrainPaintKind, worldX: number, worldZ: number, radius: number) => {
@@ -418,6 +596,15 @@ export function createChunkRenderer(
           ? [...a.paint]
           : new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
       let changed = false;
+      let overrides = localPaintOverrides.get(k);
+      if (!overrides) {
+        overrides = new Map();
+        localPaintOverrides.set(k, overrides);
+      }
+      for (let index = 0; index < paint.length; index++) {
+        const existingCode = paint[index] ?? 0;
+        if (existingCode) overrides.set(index, existingCode);
+      }
       for (let zi = 0; zi < CHUNK_VERTEX_COUNT; zi++) {
         const z = chunkZ0 + (zi / CHUNK_SEGMENTS) * CHUNK_SPAN;
         for (let xi = 0; xi < CHUNK_VERTEX_COUNT; xi++) {
@@ -430,6 +617,7 @@ export function createChunkRenderer(
           const index = zi * CHUNK_VERTEX_COUNT + xi;
           if (paint[index] === paintCode) continue;
           paint[index] = paintCode;
+          overrides.set(index, paintCode);
           changed = true;
         }
       }
@@ -499,6 +687,7 @@ export function createChunkRenderer(
     disposed = true;
     for (const ctrl of inflight.values()) ctrl.abort();
     inflight.clear();
+    queuedFetches.clear();
     ready.clear();
     lodOf.clear();
     for (const a of active.values()) {
@@ -520,16 +709,39 @@ export function createChunkRenderer(
     centerCz = NaN;
   };
 
+  const setFetchStartBudget = (maxStarts: number) => {
+    fetchStartBudget = Math.max(0, Math.floor(maxStarts));
+  };
+
   return {
     update,
+    prefetch,
+    ensureBaseChunk,
     setLoadRadius,
+    setFetchStartBudget,
     reloadChunk,
     rebuildTerrain,
     applyLocalPaint,
     flush,
     sampleHeight,
     samplePaint,
-    stats: () => ({ active: active.size, pending: inflight.size + ready.size, failed: failedFetches }),
+    stats: () => ({
+      active: active.size,
+      pending: queuedFetches.size + inflight.size + ready.size,
+      queued: queuedFetches.size,
+      inflight: inflight.size,
+      ready: ready.size,
+      failed: failedFetches,
+      loadRadius,
+      center: Number.isFinite(centerCx) ? { cx: centerCx, cz: centerCz } : null,
+      lastFlushBuilt,
+      lastFlushMs: Math.round(lastFlushMs * 10) / 10,
+      maxFlushMs: Math.round(maxFlushMs * 10) / 10,
+      provisional: [...active.values()].filter((chunk) => chunk.revision < 0).length,
+      currentProvisional:
+        Number.isFinite(centerCx) &&
+        (active.get(key(centerCx, centerCz))?.revision ?? 0) < 0,
+    }),
     dispose,
   };
 }

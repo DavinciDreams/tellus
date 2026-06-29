@@ -202,9 +202,16 @@ describe("large-world terrain", () => {
     runtimeConfig.worldId = "chunked-64-main";
     runtimeConfig.worldTemplate = "tellus";
 
+    const center = { x: (64 * CHUNK_SPAN) / 2, z: (64 * CHUNK_SPAN) / 2 };
+    const innerBeach = { x: center.x + 140, z: center.z };
+    const justOffshore = { x: center.x + 150, z: center.z };
     const oceanEdge = { x: CHUNK_SPAN, z: CHUNK_SPAN };
 
     expect(usesContinentalChunkedTerrain()).toBe(false);
+    expect(largeWorldBaseHeight(innerBeach.x, innerBeach.z)).toBeGreaterThan(
+      largeWorldBaseHeight(justOffshore.x, justOffshore.z),
+    );
+    expect(largeWorldBaseHeight(justOffshore.x, justOffshore.z)).toBeLessThan(SEA_LEVEL);
     expect(largeWorldTerrainKind(oceanEdge.x, oceanEdge.z)).toBe("water");
   });
 

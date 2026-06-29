@@ -532,6 +532,17 @@ declare global {
       generatedAssets?: unknown;
       terrainTextures?: unknown;
     };
+    __tellusPerfReport?: () => unknown;
+    __tellusPerfReset?: () => boolean;
+    __tellusSetTerrainOnly?: (enabled?: boolean) => boolean;
+    __tellusSetLowGpu?: (enabled?: boolean) => boolean;
+    __tellusSetRenderEvery?: (frames?: number) => number;
+    __tellusSetFrameDriver?: (driver?: "raf" | "timeout") => "raf" | "timeout";
+    __tellusSetRenderer?: (preference?: "webgl" | "webgpu" | "default") => {
+      requested: "webgl" | "webgpu" | "default";
+      active: "webgl" | "webgpu";
+      reloadRequired: boolean;
+    };
     __tellusAssetLodUrls?: (assetIdOrUrl: string) => {
       assetId: string;
       gameOptimized: string;
@@ -593,8 +604,7 @@ declare global {
       /** True while an embedded-clip mixer OR a VRM rig is advancing this thing. */
       playing: boolean;
     }>;
-    // Diagnostics for placed mirrors (smoke tests / console): how many render live (Reflector) vs as
-    // static tinted glass, and the live-mirror cap.
+    // Diagnostics for placed mirrors (smoke tests / console): mirrors are static tinted glass.
     __tellusMirrorDebug?: () => {
       live: number;
       glass: number;
