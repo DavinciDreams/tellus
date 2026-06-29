@@ -10,6 +10,7 @@ import {
 } from "./tellus-procplant-biomes";
 import { resolveEcologySample, type EcologySample } from "./tellus-ecology";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
+import { buildStylizedEvergreenTemplate } from "./tellus-veg-archetypes";
 import {
   buildProcPlantInstancedParts,
   createProcPlantConiferSprayGeometry,
@@ -40,6 +41,7 @@ export interface ProcPlantVegetationOptions {
   densityMultiplier?: number;
   isExcluded?: (x: number, z: number, height: number) => boolean;
   viewMode?: () => "first" | "third";
+  fullDetailLod?: boolean;
 }
 
 export interface ProcPlantVegetationStats {
@@ -133,6 +135,7 @@ const LOW_FPS_BUILD_BUDGET = 1;
 const NORMAL_BUILD_BUDGET = 2;
 const LOW_FPS_BUILD_MS_BUDGET = 2.5;
 const NORMAL_BUILD_MS_BUDGET = 5;
+const MIN_PROCPLANT_GROUND_HEIGHT = SEA_LEVEL + 0.35;
 
 const foliageDefaultsForTreeSpecies = (
   species: string,
@@ -209,14 +212,23 @@ const buildCheapTreeTemplate = (species: string): ProcPlantTemplate => {
   const cached = cheapTreeTemplateCache.get(species);
   if (cached) return cached;
   const conifer = /fir|pine|douglas|larch|spruce/i.test(species);
-  const trunk = new THREE.BoxGeometry(conifer ? 0.14 : 0.18, conifer ? 0.9 : 0.75, conifer ? 0.14 : 0.18);
-  trunk.translate(0, conifer ? 0.45 : 0.375, 0);
-  const crown = conifer
-    ? new THREE.ConeGeometry(0.55, 1.55, 5)
-    : new THREE.ConeGeometry(0.72, 1.0, 6);
-  crown.translate(0, conifer ? 1.25 : 1.05, 0);
+  if (conifer) {
+    const template = buildStylizedEvergreenTemplate(hashString(species), undefined, {
+      height: /small/i.test(species) ? 0.92 : /douglas|redwood/i.test(species) ? 1.32 : 1.14,
+      width: /small/i.test(species) ? 0.36 : /douglas|redwood/i.test(species) ? 0.46 : 0.42,
+      tiers: /small/i.test(species) ? 4 : /douglas|redwood/i.test(species) ? 7 : 6,
+      trunkRadius: /small/i.test(species) ? 0.052 : 0.058,
+    });
+    cheapTreeTemplateCache.set(species, template);
+    return template;
+  }
+  const trunk = new THREE.CylinderGeometry(0.055, 0.085, 0.78, 6);
+  trunk.translate(0, 0.39, 0);
+  const crown = new THREE.IcosahedronGeometry(0.58, 1);
+  crown.scale(1.08, /birch|poplar|aspen/i.test(species) ? 1.34 : 0.96, 1.08);
+  crown.translate(0, /birch|poplar|aspen/i.test(species) ? 1.12 : 1.02, 0);
   const trunkTemplate = templateFromGeometry(trunk, new THREE.Color(0x5c3f24));
-  const crownTemplate = templateFromGeometry(crown, new THREE.Color(conifer ? 0x2f5b37 : 0x536f38));
+  const crownTemplate = templateFromGeometry(crown, new THREE.Color(/cherry|apple|magnolia/i.test(species) ? 0x6f8f4a : 0x536f38));
   trunk.dispose();
   crown.dispose();
   const vertexOffset = trunkTemplate.pos.length / 3;
@@ -434,7 +446,7 @@ const normalizeManualPlacement = (value: unknown): ProcPlantManualPlacement | nu
     seed: record.seed >>> 0,
     x: record.x,
     z: record.z,
-    scale: THREE.MathUtils.clamp(record.scale, 0.08, 12),
+    scale: THREE.MathUtils.clamp(record.scale, 0.08, 24),
   };
 };
 
@@ -489,6 +501,7 @@ export function createProcPlantVegetation(
     `${Math.floor(x / chunkSize)},${Math.floor(z / chunkSize)}`;
 
   const viewMode = () => options.viewMode?.() ?? "first";
+  const fullDetailLod = options.fullDetailLod ?? false;
 
   const activeMaxRing = () => {
     if (options.maxRing !== undefined) return maxRing;
@@ -496,6 +509,7 @@ export function createProcPlantVegetation(
   };
 
   const lodForRing = (ring: number): 0 | 1 | 2 => {
+    if (fullDetailLod) return 0;
     if (viewMode() === "third") {
       if (ring === 0) return 0;
       if (ring <= 2) return 1;
@@ -601,7 +615,7 @@ export function createProcPlantVegetation(
       const z = z0 + rand() * chunkSize;
       if (!inBounds(x, z)) continue;
       const height = options.sampleHeight(x, z);
-      if (height === null || height < SEA_LEVEL - 12) continue;
+      if (height === null || height < MIN_PROCPLANT_GROUND_HEIGHT) continue;
       if (options.isExcluded?.(x, z, height)) continue;
       const paint = options.samplePaint(x, z);
       if (paint === "stone" || paint === "brick") continue;
@@ -621,7 +635,10 @@ export function createProcPlantVegetation(
       const genome = genomeForBiomePatch(patch);
       const treeBackend = treeBackendForBiomePatch(patch);
       if (treeBackend?.kind === "lsystem") {
-        const template = buildCheapTreeTemplate(treeBackend.species);
+        const template = buildBiomeTreeTemplate(treeBackend.species, patch.seed ^ i, {
+          ...foliageDefaultsForTreeSpecies(treeBackend.species),
+          ...treeBackend,
+        });
         const scale = patch.scale * THREE.MathUtils.lerp(0.86, 1.16, rand());
         const matrix = new THREE.Matrix4()
           .makeRotationY(rand() * Math.PI * 2)
@@ -662,7 +679,7 @@ export function createProcPlantVegetation(
       if (manualPlacementChunks.get(placement.id) !== chunk.key) continue;
       if (!inBounds(placement.x, placement.z)) continue;
       const height = options.sampleHeight(placement.x, placement.z);
-      if (height === null || height < SEA_LEVEL - 12) continue;
+      if (height === null || height < MIN_PROCPLANT_GROUND_HEIGHT) continue;
       if (options.isExcluded?.(placement.x, placement.z, height)) continue;
       const genome = procPlantPresets[placement.presetId];
       if (!genome) continue;

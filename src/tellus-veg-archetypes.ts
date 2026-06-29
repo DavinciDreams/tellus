@@ -444,12 +444,179 @@ const SASSAFRAS_COLORS = { barkColor: 0x6b4f34, leafColor: 0xd18a37 };
 const TOPIARY_COLORS = { barkColor: 0x62452c, leafColor: 0x4b8c3f };
 const WILLOW_COLORS = { barkColor: 0x73543a, leafColor: 0x8bbd58 };
 
+export const buildStylizedEvergreenTemplate = (
+  seed = 0,
+  colors: Pick<TreeTemplateOptions, "barkColor" | "leafColor"> = PINE_COLORS,
+  options: {
+    tiers?: number;
+    height?: number;
+    width?: number;
+    trunkHeight?: number;
+    trunkRadius?: number;
+    snowCap?: boolean;
+  } = {},
+): Template => {
+  const rng = mulberry32(seed ^ 0x9e3779b9);
+  const height = options.height ?? 1.12;
+  const width = options.width ?? 0.48;
+  const tiers = Math.max(3, Math.round(options.tiers ?? 5));
+  const trunkHeight = options.trunkHeight ?? height * 0.72;
+  const trunkRadius = options.trunkRadius ?? 0.065;
+  const leaf = new THREE.Color(colors.leafColor ?? PINE_COLORS.leafColor);
+  const leafDark = leaf.clone().multiplyScalar(0.72);
+  const leafLight = leaf.clone().lerp(new THREE.Color(0xffffff), 0.16);
+  const bark = new THREE.Color(colors.barkColor ?? PINE_COLORS.barkColor);
+  const parts: TemplatePart[] = [
+    {
+      geom: new THREE.CylinderGeometry(trunkRadius * 0.72, trunkRadius * 1.25, trunkHeight, 6),
+      matrix: at(0, trunkHeight / 2, 0),
+      color: bark,
+      tintable: false,
+      swayFrom: height * 0.45,
+    },
+  ];
+
+  for (let i = 0; i < tiers; i++) {
+    const t = tiers === 1 ? 0 : i / (tiers - 1);
+    const y = THREE.MathUtils.lerp(height * 0.34, height * 0.86, t);
+    const tierHeight = THREE.MathUtils.lerp(height * 0.38, height * 0.26, t);
+    const radius = THREE.MathUtils.lerp(width, width * 0.18, t) * THREE.MathUtils.lerp(0.92, 1.08, rng());
+    const radialSegments = i === tiers - 1 ? 6 : 7;
+    const color = (i % 2 === 0 ? leaf : leafDark).clone().lerp(leafLight, rng() * 0.16);
+    parts.push({
+      geom: new THREE.ConeGeometry(radius, tierHeight, radialSegments, 1, false),
+      matrix: xform(
+        (rng() - 0.5) * width * 0.035,
+        y,
+        (rng() - 0.5) * width * 0.035,
+        1,
+        1,
+        1,
+        (rng() - 0.5) * 0.04,
+        (rng() - 0.5) * 0.04,
+        rng() * Math.PI * 2,
+      ),
+      color,
+      tintable: true,
+      swayFrom: height * 0.18,
+    });
+    if (options.snowCap && i >= tiers - 2) {
+      parts.push({
+        geom: new THREE.ConeGeometry(radius * 0.72, tierHeight * 0.18, radialSegments, 1, false),
+        matrix: xform(0, y + tierHeight * 0.16, 0, 1, 1, 1, 0, 0, rng() * Math.PI * 2),
+        color: new THREE.Color(0xf2f5ee),
+        tintable: false,
+        swayFrom: height * 0.28,
+      });
+    }
+  }
+
+  return buildTemplateFromParts(parts);
+};
+
+const makeCanopyShape = (points: Array<readonly [number, number]>): THREE.Shape => {
+  const shape = new THREE.Shape();
+  points.forEach(([x, y], index) => {
+    if (index === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  });
+  shape.closePath();
+  return shape;
+};
+
+export const buildRetroCutoutTreeTemplate = (
+  seed = 0,
+  colors: Pick<TreeTemplateOptions, "barkColor" | "leafColor"> = CONIFER_COLORS,
+  options: {
+    height?: number;
+    width?: number;
+    planes?: number;
+    trunkHeight?: number;
+    trunkRadius?: number;
+    redwoodish?: boolean;
+  } = {},
+): Template => {
+  const rng = mulberry32(seed ^ 0xc0ffee);
+  const height = options.height ?? 1.08;
+  const width = options.width ?? 0.42;
+  const planes = Math.max(2, Math.round(options.planes ?? 3));
+  const trunkHeight = options.trunkHeight ?? height * 0.58;
+  const trunkRadius = options.trunkRadius ?? 0.06;
+  const leaf = new THREE.Color(colors.leafColor ?? CONIFER_COLORS.leafColor);
+  const bark = new THREE.Color(colors.barkColor ?? CONIFER_COLORS.barkColor);
+  const top = height;
+  const lower = height * 0.26;
+  const shoulder = options.redwoodish ? height * 0.72 : height * 0.64;
+  const canopy = options.redwoodish
+    ? makeCanopyShape([
+        [0, top],
+        [-width * 0.34, height * 0.86],
+        [-width * 0.28, height * 0.72],
+        [-width * 0.5, height * 0.58],
+        [-width * 0.36, height * 0.43],
+        [-width * 0.44, lower],
+        [0, height * 0.34],
+        [width * 0.44, lower],
+        [width * 0.36, height * 0.43],
+        [width * 0.5, height * 0.58],
+        [width * 0.28, height * 0.72],
+        [width * 0.34, height * 0.86],
+      ])
+    : makeCanopyShape([
+        [0, top],
+        [-width * 0.24, height * 0.88],
+        [-width * 0.54, shoulder],
+        [-width * 0.4, height * 0.54],
+        [-width * 0.64, height * 0.36],
+        [-width * 0.34, lower],
+        [0, height * 0.3],
+        [width * 0.34, lower],
+        [width * 0.64, height * 0.36],
+        [width * 0.4, height * 0.54],
+        [width * 0.54, shoulder],
+        [width * 0.24, height * 0.88],
+      ]);
+  const parts: TemplatePart[] = [
+    {
+      geom: new THREE.CylinderGeometry(trunkRadius * 0.76, trunkRadius * 1.2, trunkHeight, 5),
+      matrix: at(0, trunkHeight / 2, 0),
+      color: bark,
+      tintable: false,
+      swayFrom: height * 0.6,
+    },
+  ];
+  for (let i = 0; i < planes; i++) {
+    const yaw = (i / planes) * Math.PI + (rng() - 0.5) * 0.08;
+    const color = leaf
+      .clone()
+      .multiplyScalar(THREE.MathUtils.lerp(0.72, 1.06, rng()))
+      .lerp(new THREE.Color(0xffffff), options.redwoodish ? 0.04 : 0.1);
+    parts.push({
+      geom: new THREE.ShapeGeometry(canopy),
+      matrix: xform(
+        (rng() - 0.5) * width * 0.035,
+        0,
+        (rng() - 0.5) * width * 0.035,
+        1,
+        1,
+        1,
+        0,
+        0,
+        yaw,
+      ),
+      color,
+      tintable: true,
+      swayFrom: height * 0.18,
+    });
+  }
+  return buildTemplateFromParts(parts);
+};
+
 export const buildConiferTemplate = (): Template =>
-  treeTemplateFromSpecies("douglasFir", AMBIENT_SEED.conifer, {
-    ...AMBIENT_BUDGET,
-    ...CONIFER_COLORS,
-    leafScaleMultiplier: 2.35,
-    swayFrom: 0.2,
+  buildRetroCutoutTreeTemplate(AMBIENT_SEED.conifer, CONIFER_COLORS, {
+    height: 1.08,
+    width: 0.46,
+    planes: 3,
   });
 
 export const buildBroadleafTemplate = (): Template =>
@@ -461,11 +628,11 @@ export const buildBroadleafTemplate = (): Template =>
   });
 
 export const buildPineTemplate = (): Template =>
-  treeTemplateFromSpecies("balsamFir", AMBIENT_SEED.pine, {
-    ...AMBIENT_BUDGET,
-    ...PINE_COLORS,
-    leafScaleMultiplier: 2.75,
-    swayFrom: 0.4,
+  buildRetroCutoutTreeTemplate(AMBIENT_SEED.pine, PINE_COLORS, {
+    height: 1.18,
+    width: 0.48,
+    planes: 3,
+    trunkRadius: 0.055,
   });
 
 export const buildBirchTemplate = (): Template =>
@@ -640,10 +807,25 @@ const proceduralTree = (
   palette,
 });
 
+const proceduralEvergreen = (
+  id: string,
+  label: string,
+  colors: Pick<TreeTemplateOptions, "barkColor" | "leafColor">,
+  palette: number[],
+  options?: Parameters<typeof buildStylizedEvergreenTemplate>[2],
+): ProceduralArchetype => ({
+  id,
+  label,
+  emoji: "🌲",
+  kind: "tree",
+  build: (seed) => buildStylizedEvergreenTemplate(seed, colors, options),
+  palette,
+});
+
 export const PROCEDURAL_CATALOG: ProceduralArchetype[] = [
-  { id: "conifer", label: "Conifer tree", emoji: "🌲", kind: "tree", build: (seed) => treeTemplateFromSpecies("douglasFir", seed, scatterBudget({ ...CONIFER_COLORS, leafScaleMultiplier: 2.45, swayFrom: 0.2 })), palette: [0xffffff, 0xeaffe0, 0xd8f0c8, 0xfff2cf] },
+  proceduralEvergreen("conifer", "Conifer tree", CONIFER_COLORS, [0xffffff, 0xeaffe0, 0xd8f0c8, 0xfff2cf], { tiers: 5, height: 1.1, width: 0.5 }),
   { id: "broadleaf", label: "Broadleaf tree", emoji: "🌳", kind: "tree", build: (seed) => treeTemplateFromSpecies("blackOak", seed, scatterBudget({ ...BROADLEAF_COLORS, leafScaleMultiplier: 1.45, swayFrom: 0.3 })), palette: [0xffffff, 0xf2ffd9, 0xdfffcb, 0xffe9b8] },
-  { id: "pine", label: "Tall pine", emoji: "🌲", kind: "tree", build: (seed) => treeTemplateFromSpecies("balsamFir", seed, scatterBudget({ ...PINE_COLORS, leafScaleMultiplier: 2.9, swayFrom: 0.4 })), palette: [0xffffff, 0xe2f2dc, 0xcfe8d2] },
+  proceduralEvergreen("pine", "Tall pine", PINE_COLORS, [0xffffff, 0xe2f2dc, 0xcfe8d2], { tiers: 7, height: 1.28, width: 0.46, trunkRadius: 0.055 }),
   { id: "birch", label: "Birch", emoji: "🌳", kind: "tree", build: (seed) => treeTemplateFromSpecies("silverBirch", seed, scatterBudget({ ...BIRCH_COLORS, leafScaleMultiplier: 3.2, swayFrom: 0.42 })), palette: [0xffffff, 0xf4ffd8, 0xffeec2] },
   { id: "palm", label: "Palm", emoji: "🌴", kind: "tree", build: (seed) => treeTemplateFromSpecies("palm", seed, scatterBudget({ maxBranchDepth: 1, maxLeaves: 280, ...PALM_COLORS, swayFrom: 0.55 })), palette: [0xffffff, 0xeaffd4, 0xd9f7c0] },
   { id: "deadtree", label: "Dead tree", emoji: "🪾", kind: "tree", build: (seed) => treeTemplateFromSpecies("blackOak", seed, scatterBudget({ maxLeaves: 0, ...DEAD_COLORS, leafTintable: false, swayFrom: 0.4 })), palette: [0xffffff, 0xe8e0d4, 0xd9cfc4] },
@@ -652,14 +834,14 @@ export const PROCEDURAL_CATALOG: ProceduralArchetype[] = [
   proceduralTree("bamboo", "Bamboo grove", "bamboo", BAMBOO_COLORS, [0xffffff, 0xe7ffd2, 0xd7f6ae], { maxBranchDepth: 2, maxLeaves: 1200, maxStems: 220, swayFrom: 0.18 }),
   proceduralTree("blacktupelo", "Black tupelo", "blackTupelo", TUPELO_COLORS, [0xffffff, 0xffd3b4, 0xffb09a, 0xf2e8ac], { maxBranchDepth: 4, maxLeaves: 4200, leafScaleMultiplier: 2.2, swayFrom: 0.36 }),
   proceduralTree("cambridgeoak", "English oak", "cambridgeOak", OAK_COLORS, [0xffffff, 0xe8ffd1, 0xd9ebb8, 0xffe7b5], { maxBranchDepth: 4, maxLeaves: 4200, leafScaleMultiplier: 1.9, swayFrom: 0.34 }),
-  proceduralTree("douglasfir", "Douglas fir", "douglasFir", CONIFER_COLORS, [0xffffff, 0xeaffe0, 0xd8f0c8], { maxLeaves: 4200, leafScaleMultiplier: 2.45, swayFrom: 0.22 }),
-  proceduralTree("europeanlarch", "European larch", "europeanLarch", LARCH_COLORS, [0xffffff, 0xfff5bc, 0xeee8a4, 0xe3ffd0], { maxLeaves: 4200, leafScaleMultiplier: 2.6, swayFrom: 0.26 }),
+  proceduralEvergreen("douglasfir", "Douglas fir", CONIFER_COLORS, [0xffffff, 0xeaffe0, 0xd8f0c8], { tiers: 6, height: 1.24, width: 0.48 }),
+  proceduralEvergreen("europeanlarch", "European larch", LARCH_COLORS, [0xffffff, 0xfff5bc, 0xeee8a4, 0xe3ffd0], { tiers: 6, height: 1.2, width: 0.44 }),
   proceduralTree("fanpalm", "Fan palm", "fanPalm", PALM_COLORS, [0xffffff, 0xeaffd4, 0xd9f7c0], { maxBranchDepth: 2, maxLeaves: 320, leafScaleMultiplier: 1.2, swayFrom: 0.55 }),
   proceduralTree("hillcherry", "Hill cherry", "hillCherry", CHERRY_COLORS, [0xffffff, 0xffc9db, 0xffdde8, 0xffefc4], { maxLeaves: 4200, leafScaleMultiplier: 2.0, blossomScaleMultiplier: 2.2, swayFrom: 0.28 }),
   proceduralTree("lombardypoplar", "Lombardy poplar", "lombardyPoplar", POPLAR_COLORS, [0xffffff, 0xf3ffd3, 0xdaf0b4], { maxLeaves: 3200, swayFrom: 0.32 }),
   proceduralTree("quakingaspen", "Quaking aspen", "quakingAspen", ASPEN_COLORS, [0xffffff, 0xfff1ad, 0xf3ffd0], { maxLeaves: 4200, leafScaleMultiplier: 2.9, swayFrom: 0.32 }),
   proceduralTree("sassafras", "Sassafras", "sassafras", SASSAFRAS_COLORS, [0xffffff, 0xffd0a1, 0xffefb4, 0xe6ffd0], { maxBranchDepth: 4, maxLeaves: 4200, leafScaleMultiplier: 2.2, swayFrom: 0.34 }),
-  proceduralTree("smallpine", "Small pine", "smallPine", PINE_COLORS, [0xffffff, 0xe2f2dc, 0xcfe8d2], { maxBranchDepth: 2, maxLeaves: 2400, leafScaleMultiplier: 3.05, swayFrom: 0.38 }),
+  proceduralEvergreen("smallpine", "Small pine", PINE_COLORS, [0xffffff, 0xe2f2dc, 0xcfe8d2], { tiers: 4, height: 0.92, width: 0.44, trunkRadius: 0.052 }),
   proceduralTree("spheretree", "Sphere topiary", "sphereTree", TOPIARY_COLORS, [0xffffff, 0xe4ffd0, 0xd0f0b8], { maxLeaves: 4200, leafScaleMultiplier: 1.6, swayFrom: 0.3 }),
   proceduralTree("weepingwillow", "Weeping willow", "weepingWillow", WILLOW_COLORS, [0xffffff, 0xf0ffd0, 0xdcefae], { maxBranchDepth: 4, maxLeaves: 4200, leafScaleMultiplier: 2.4, swayFrom: 0.28 }),
   { id: "bush", label: "Bush", emoji: "🌿", kind: "object", build: () => buildBushTemplate(), palette: [0xffffff, 0xe9ffd9, 0xd2f2bc, 0xffe3b3] },

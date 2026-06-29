@@ -50,6 +50,27 @@ export interface ProcPlantPlaceableCatalogEntry {
   scale: number;
 }
 
+const ADULT_TREE_SCALE_BY_PRESET: Partial<Record<string, number>> = {
+  oakCanopy: 13.5,
+  birchGrove: 11.5,
+  acaciaUmbrella: 9.5,
+  mangroveRoots: 8.8,
+  blueSpruce: 10.5,
+  alpineFir: 14.5,
+  redwoodSpire: 17.5,
+  foldedPalm: 8.4,
+};
+
+const ADULT_TREE_SCALE_BY_SPECIES: Partial<Record<string, number>> = {
+  balsamfir: 14.5,
+  cambridgeoak: 13.5,
+  douglasfir: 17.5,
+  hillcherry: 8.4,
+  silverbirch: 11.5,
+  sassafras: 9.5,
+  blacktupelo: 11,
+};
+
 const labelForPreset = (id: string): string =>
   id
     .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -82,6 +103,30 @@ const emojiForGenome = (genome: ProcPlantGenome): string => {
   }
 };
 
+export const adultScaleForProcPlantPreset = (presetId: string): number => {
+  const genome = procPlantPresets[presetId];
+  if (!genome) return 1;
+  const authored = ADULT_TREE_SCALE_BY_PRESET[presetId];
+  if (authored !== undefined) return authored;
+  const kind = placeableKindForGenome(genome);
+  if (kind !== "tree") return genome.habit === "flower" ? 1.0 : 0.95;
+  if (genome.habit === "conifer") return 12;
+  if (genome.habit === "palm" || genome.habit === "tropical") return 8.4;
+  return 10.5;
+};
+
+const adultScaleForTreeBackend = (
+  primary: string,
+  backend?: ProcPlantTreeBackend,
+  requested?: number,
+): number => {
+  const preset = ADULT_TREE_SCALE_BY_PRESET[primary];
+  const species = backend?.species ? ADULT_TREE_SCALE_BY_SPECIES[backend.species.toLowerCase()] : undefined;
+  const adult = preset ?? species;
+  if (adult === undefined) return requested ?? 1;
+  return Math.max(requested ?? adult, adult);
+};
+
 export const PROCPLANT_PLACEABLE_CATALOG: ProcPlantPlaceableCatalogEntry[] = procPlantPresetIds.map((presetId) => {
   const genome = procPlantPresets[presetId];
   const kind = placeableKindForGenome(genome);
@@ -92,8 +137,8 @@ export const PROCPLANT_PLACEABLE_CATALOG: ProcPlantPlaceableCatalogEntry[] = pro
     emoji: emojiForGenome(genome),
     kind,
     scatterCount: kind === "tree" ? 4 : kind === "flower" ? 12 : 10,
-    scatterRadius: kind === "tree" ? 20 : 11,
-    scale: kind === "tree" ? 1.35 : kind === "flower" ? 1.0 : 0.95,
+    scatterRadius: kind === "tree" ? 30 : 11,
+    scale: adultScaleForProcPlantPreset(presetId),
   };
 });
 
@@ -111,21 +156,25 @@ type ProcPlantBiomeCandidate = Omit<ProcPlantBiomePatch, "version" | "seed"> & {
 const candidate = (
   primary: string,
   options: Partial<ProcPlantBiomeCandidate> = {},
-): ProcPlantBiomeCandidate => ({
-  primary,
-  secondary: options.secondary,
-  hybrid: options.hybrid ?? 0,
-  density: options.density ?? 0.45,
-  scale: options.scale ?? 1,
-  weight: options.weight ?? 1,
-  treeBackend: options.treeBackend,
-  environment: {
-    light: options.environment?.light ?? 0.78,
-    moisture: options.environment?.moisture ?? 0.55,
-    crowding: options.environment?.crowding ?? 0.32,
-    biomeWarmth: options.environment?.biomeWarmth ?? 0.65,
-  },
-});
+): ProcPlantBiomeCandidate => {
+  const genome = procPlantPresets[primary];
+  const isTree = Boolean(genome && placeableKindForGenome(genome) === "tree");
+  return {
+    primary,
+    secondary: options.secondary,
+    hybrid: options.hybrid ?? 0,
+    density: isTree ? (options.density ?? 0.45) * 0.38 : options.density ?? 0.45,
+    scale: isTree ? adultScaleForTreeBackend(primary, options.treeBackend, options.scale) : options.scale ?? 1,
+    weight: options.weight ?? 1,
+    treeBackend: options.treeBackend,
+    environment: {
+      light: options.environment?.light ?? 0.78,
+      moisture: options.environment?.moisture ?? 0.55,
+      crowding: options.environment?.crowding ?? 0.32,
+      biomeWarmth: options.environment?.biomeWarmth ?? 0.65,
+    },
+  };
+};
 
 const PAINT_BIOMES: Record<TerrainPaintKind, ProcPlantBiomeCandidate[]> = {
   meadow: [
@@ -195,6 +244,7 @@ const TREE_BACKEND_BY_PRESET: Partial<Record<string, ProcPlantTreeBackend>> = {
   oakCanopy: { kind: "lsystem", species: "cambridgeOak", leafScaleMultiplier: 1.8, maxLeaves: 190, maxStems: 48, maxBranchDepth: 2 },
   birchGrove: { kind: "lsystem", species: "silverBirch", leafScaleMultiplier: 2.9, maxLeaves: 170, maxStems: 40, maxBranchDepth: 2 },
   acaciaUmbrella: { kind: "lsystem", species: "sassafras", leafScaleMultiplier: 2.0, maxLeaves: 150, maxStems: 42, maxBranchDepth: 2, foliageMass: 0.58, foliageSpread: 0.28 },
+  blueSpruce: { kind: "lsystem", species: "smallPine", leafScaleMultiplier: 2.7, maxLeaves: 170, maxStems: 54, maxBranchDepth: 2, foliageMass: 1.08, foliageTipBias: 0.3, foliageSpread: 0.12 },
   alpineFir: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 2.8, maxLeaves: 180, maxStems: 44, maxBranchDepth: 2 },
   redwoodSpire: { kind: "lsystem", species: "douglasFir", leafScaleMultiplier: 2.4, maxLeaves: 180, maxStems: 44, maxBranchDepth: 2, foliageMass: 0.9, foliageTipBias: 0.34 },
 };
@@ -210,8 +260,8 @@ const patchFromEcologyPreset = (
   const windStress = sample.wind;
   return candidate(presetId, {
     weight,
-    density: THREE.MathUtils.clamp((isTree ? 0.18 : 0.58) * (0.62 + sample.moisture * 0.58) * (1 - sample.salinity * 0.22), 0.06, 0.88),
-    scale: THREE.MathUtils.clamp((isTree ? 5.8 : 1.05) * (1 - dryStress * 0.18) * (1 - windStress * 0.12), isTree ? 2.8 : 0.62, isTree ? 8.4 : 2.3),
+    density: THREE.MathUtils.clamp((isTree ? 0.07 : 0.58) * (0.62 + sample.moisture * 0.58) * (1 - sample.salinity * 0.22), isTree ? 0.025 : 0.06, isTree ? 0.18 : 0.88),
+    scale: THREE.MathUtils.clamp(adultScaleForProcPlantPreset(presetId) * (1 - dryStress * 0.18) * (1 - windStress * 0.12), isTree ? 6.5 : 0.62, isTree ? 20 : 2.3),
     treeBackend,
     environment: {
       light: sample.light,

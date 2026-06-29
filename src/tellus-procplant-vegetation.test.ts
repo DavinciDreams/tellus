@@ -19,6 +19,7 @@ import {
 import { buildingMaterialForEcology, resolveEcologySample } from "./tellus-ecology";
 import { createProcPlantVegetation, procPlantChunkSeed } from "./tellus-procplant-vegetation";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
+import { SEA_LEVEL } from "./tellus-constants";
 
 const templateBounds = (template: ProcPlantTemplate) => {
   const min = new THREE.Vector3(Infinity, Infinity, Infinity);
@@ -78,6 +79,8 @@ describe("procplant vegetation", () => {
     expect(snowTree).toBeTruthy();
     expect(treeBackendForBiomePatch(grassTree!)?.species).toMatch(/cambridgeOak|silverBirch/);
     expect(treeBackendForBiomePatch(snowTree!)?.species).toMatch(/balsamFir|douglasFir/);
+    expect(grassTree!.scale).toBeGreaterThanOrEqual(11.5);
+    expect(snowTree!.scale).toBeGreaterThanOrEqual(14.5);
   });
 
   it("can apply procplant foliage mass to wrapped L-system tree templates", () => {
@@ -237,6 +240,9 @@ describe("procplant vegetation", () => {
 
     expect(daylily?.presetId).toBe("daylilyFlower");
     expect(PROCPLANT_PLACEABLE_CATALOG.length).toBeGreaterThan(8);
+    expect(procPlantPlaceableById("procplant-oakcanopy")?.scale).toBeGreaterThan(12);
+    expect(procPlantPlaceableById("procplant-redwoodspire")?.scale).toBeGreaterThan(16);
+    expect(procPlantPlaceableById("procplant-daylilyflower")?.scale).toBeLessThan(2);
 
     const parsed = parseProceduralModelUrl(makeProcPlantModelUrl("daylilyFlower", 42));
     expect(parsed?.archetypeId).toBe("procplant-daylilyflower");
@@ -294,6 +300,36 @@ describe("procplant vegetation", () => {
     vegetation.dispose();
   });
 
+  it("keeps procplant placements out of shoreline water", () => {
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-waterline-test",
+      sampleHeight: () => SEA_LEVEL + 0.1,
+      samplePaint: () => "beach",
+      bounds: { minX: -20, maxX: 20, minZ: -20, maxZ: 20 },
+      densityMultiplier: 0,
+    });
+
+    expect(
+      vegetation.placeManualPlant({
+        id: "manual-waterline-tree",
+        presetId: "blueSpruce",
+        seed: 99,
+        x: 1,
+        z: 1,
+        scale: 10,
+      }),
+    ).toBe(true);
+
+    for (let i = 0; i < 8; i++) vegetation.update(0, 0, 1, 60, i * 16);
+
+    expect(vegetation.stats().manualPlants).toBe(1);
+    expect(vegetation.stats().plants).toBe(0);
+
+    vegetation.dispose();
+  });
+
   it("keeps the procplant visual ring stable when fps dips", () => {
     const scene = new THREE.Scene();
     const vegetation = createProcPlantVegetation({
@@ -317,7 +353,30 @@ describe("procplant vegetation", () => {
     vegetation.dispose();
   });
 
-  it("uses a wider cheaper procplant field in third person", () => {
+  it("can use full-detail procplants for close Tellus-template islands", () => {
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-64-any-id",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -80, maxX: 80, minZ: -80, maxZ: 80 },
+      densityMultiplier: 0,
+      viewMode: () => "third",
+      fullDetailLod: true,
+    });
+
+    vegetation.update(0, 0, 1, 60, 0);
+    const stats = vegetation.stats();
+    expect(stats.chunks).toBe(81);
+    expect(stats.lod0).toBe(81);
+    expect(stats.lod1).toBe(0);
+    expect(stats.lod2).toBe(0);
+
+    vegetation.dispose();
+  });
+
+  it("uses a wider cheaper procplant field in third person chunked worlds", () => {
     const scene = new THREE.Scene();
     const vegetation = createProcPlantVegetation({
       scene,

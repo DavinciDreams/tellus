@@ -786,6 +786,7 @@ function createTellusWorld(
   // layer. "tellus.grass"="0" disables this vegetation pass entirely; classic worlds remain opt-in.
   // Classic-world vegetation remains opt-in via "tellus.grass"="1".
   const isChunked = isChunkedWorldId(runtimeConfig.worldId);
+  const worldTemplate = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
   const isContinentalChunkedWorld = isChunked && usesContinentalChunkedTerrain();
   const chunkedDims = isChunked ? getChunkedWorldChunks() : null;
   const chunkedCenterForWorld = isChunked ? chunkedWorldCenter() : null;
@@ -1015,6 +1016,7 @@ function createTellusWorld(
         densityMultiplier: procPlantDensityPreference,
         isExcluded: terrainVegetationExcluded,
         viewMode: () => cameraMode,
+        fullDetailLod: worldTemplate === "tellus",
       })
     : {
         update: () => undefined,
@@ -6902,9 +6904,9 @@ function createTellusWorld(
       kind: procPlant.kind,
       tree: procPlant.kind === "tree",
       count: procPlant.scatterCount,
-      max: procPlant.kind === "tree" ? 8 : 22,
+      max: procPlant.kind === "tree" ? 6 : 22,
       radius: procPlant.scatterRadius,
-      minDistance: procPlant.kind === "tree" ? 6 : 2.5,
+      minDistance: procPlant.kind === "tree" ? Math.max(9, procPlant.scale * 0.75) : 2.5,
       modelUrl: (seed: number) => makeProcPlantModelUrl(procPlant.presetId, seed),
       assetId: (seed: number) => `procplant-${procPlant.presetId.toLowerCase()}-${seed.toString(16)}`,
       scale: (variation = 1) => procPlant.scale * variation,

@@ -16,6 +16,7 @@ import {
   vec4,
 } from "three/tsl";
 import { SEA_LEVEL, WORLD_RADIUS } from "./tellus-constants";
+import { createGltfLoader } from "./tellus-generation-client";
 import type { TerrainPaintKind } from "./tellus-types";
 import {
   type StampCursor,
@@ -138,6 +139,33 @@ const GRASS_BY_PAINT: Record<string, { accept: number; tint: number; tall: numbe
 
 const FLOWER_PALETTE = [0xffffff, 0xffd7e8, 0xffe9a8, 0xc9b8ff, 0xffb0a0, 0x9fd8ff];
 const CRYSTAL_PALETTE = [0xbef0ff, 0xffc9f0, 0xfff3b8, 0xc9ffd6];
+type TexturedTreeAssetId = "pine5" | "common3" | "retro1" | "retro3";
+
+interface TexturedTreeSubmesh {
+  geometry: THREE.BufferGeometry;
+  material: THREE.Material | THREE.Material[];
+}
+
+interface TexturedTreeAsset {
+  id: TexturedTreeAssetId;
+  submeshes: TexturedTreeSubmesh[];
+}
+
+interface TexturedTreePlacement {
+  assetId: TexturedTreeAssetId;
+  x: number;
+  y: number;
+  z: number;
+  scale: number;
+  yaw: number;
+}
+
+const TEXTURED_TREE_ASSETS: Record<TexturedTreeAssetId, string> = {
+  pine5: "/vegetation/quaternius-megakit/pine_5.gltf",
+  common3: "/vegetation/quaternius-megakit/common_tree_3.gltf",
+  retro1: "/vegetation/retro-tree-pack/retro_low_1.glb",
+  retro3: "/vegetation/retro-tree-pack/retro_low_3.glb",
+};
 
 interface PooledMesh extends StampTarget {
   mesh: THREE.Mesh;
@@ -152,6 +180,39 @@ interface ActiveChunk {
   rev: number;
   tier: number;
 }
+
+const cloneVegetationMaterial = (material: THREE.Material | THREE.Material[]): THREE.Material | THREE.Material[] => {
+  const cloneOne = (source: THREE.Material): THREE.Material => {
+    const clone = source.clone();
+    if ("side" in clone) clone.side = THREE.DoubleSide;
+    return clone;
+  };
+  return Array.isArray(material) ? material.map(cloneOne) : cloneOne(material);
+};
+
+const buildTexturedTreeAsset = (id: TexturedTreeAssetId, root: THREE.Object3D): TexturedTreeAsset | null => {
+  root.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(root);
+  const height = bounds.max.y - bounds.min.y;
+  if (!Number.isFinite(height) || height <= 0.001) return null;
+  const centerX = (bounds.min.x + bounds.max.x) * 0.5;
+  const centerZ = (bounds.min.z + bounds.max.z) * 0.5;
+  const normalize = new THREE.Matrix4()
+    .makeTranslation(-centerX, -bounds.min.y, -centerZ)
+    .premultiply(new THREE.Matrix4().makeScale(1 / height, 1 / height, 1 / height));
+  const submeshes: TexturedTreeSubmesh[] = [];
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh) || object instanceof THREE.InstancedMesh) return;
+    const geometry = object.geometry.clone();
+    geometry.applyMatrix4(object.matrixWorld);
+    geometry.applyMatrix4(normalize);
+    geometry.computeBoundingSphere();
+    geometry.computeBoundingBox();
+    const material = cloneVegetationMaterial(object.material);
+    submeshes.push({ geometry, material });
+  });
+  return submeshes.length > 0 ? { id, submeshes } : null;
+};
 
 export function createVegetation(options: VegetationOptions): VegetationSystem {
   const { scene, useWebGPU, sampleHeight, samplePaint, isExcluded, pondRing } = options;
@@ -259,6 +320,38 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   const group = new THREE.Group();
   group.name = "tellus-vegetation";
   scene.add(group);
+  const texturedTreeAssets = new Map<TexturedTreeAssetId, TexturedTreeAsset>();
+  let texturedTreeLoadStarted = false;
+  const requestTexturedTreeAssets = () => {
+    if (texturedTreeLoadStarted || typeof window === "undefined") return;
+    texturedTreeLoadStarted = true;
+    const loader = createGltfLoader();
+    let pending = Object.keys(TEXTURED_TREE_ASSETS).length;
+    let loadedAny = false;
+    const finishOne = () => {
+      pending--;
+      if (pending === 0 && loadedAny) terrainRev++;
+    };
+    (Object.entries(TEXTURED_TREE_ASSETS) as Array<[TexturedTreeAssetId, string]>).forEach(([id, url]) => {
+      loader.load(
+        url,
+        (gltf) => {
+          const asset = buildTexturedTreeAsset(id, gltf.scene);
+          if (asset) {
+            texturedTreeAssets.set(id, asset);
+            loadedAny = true;
+          }
+          finishOne();
+        },
+        undefined,
+        (error) => {
+          console.warn(`[vegetation] failed to load textured tree asset ${id}`, error);
+          finishOne();
+        },
+      );
+    });
+  };
+  requestTexturedTreeAssets();
 
   const chunkTuftCap = suppressGrass ? 0 : grassOnly ? Math.round(MAX_TUFTS * 1.65) : MAX_TUFTS;
   const chunkFlowerCap = grassOnly ? 0 : maxFlowersPerChunk;
@@ -555,6 +648,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     sz: number;
     trees: PooledMesh | null;
     rocks: PooledMesh | null;
+    texturedTrees: THREE.Group | null;
   }
   const sectors: Sector[] = [];
   if (sectorsEnabled) {
@@ -564,7 +658,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
         const centerZ = minWorldZ + sz * SECTOR + SECTOR / 2;
         // skip sectors entirely outside the island disc
         if (classicDiscBounds && Math.hypot(centerX, centerZ) - SECTOR * 0.71 > halfWorld) continue;
-        sectors.push({ sx, sz, trees: null, rocks: null });
+        sectors.push({ sx, sz, trees: null, rocks: null, texturedTrees: null });
       }
     }
   }
@@ -574,7 +668,61 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   let sectorBuildIndex = 0;
   let sectorColliders: TreeCollider[] = [];
 
-  const pickTree = (paint: TerrainPaintKind | null, h: number, r1: number, r2: number): { tpl: Template; scale: number } | null => {
+  const disposeTexturedSector = (sector: Sector) => {
+    if (!sector.texturedTrees) return;
+    group.remove(sector.texturedTrees);
+    sector.texturedTrees.traverse((object) => {
+      if (object instanceof THREE.InstancedMesh) object.dispose();
+    });
+    sector.texturedTrees.clear();
+    sector.texturedTrees = null;
+  };
+
+  const buildTexturedSector = (sector: Sector, placements: TexturedTreePlacement[]) => {
+    disposeTexturedSector(sector);
+    if (placements.length === 0) return;
+    const byAsset = new Map<TexturedTreeAssetId, TexturedTreePlacement[]>();
+    for (const placement of placements) {
+      const asset = texturedTreeAssets.get(placement.assetId);
+      if (!asset) continue;
+      let list = byAsset.get(asset.id);
+      if (!list) {
+        list = [];
+        byAsset.set(asset.id, list);
+      }
+      list.push(placement);
+    }
+    if (byAsset.size === 0) return;
+    const texturedGroup = new THREE.Group();
+    texturedGroup.name = `tellus-textured-trees-${sector.sx}:${sector.sz}`;
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    const matrix = new THREE.Matrix4();
+    for (const [assetId, assetPlacements] of byAsset) {
+      const asset = texturedTreeAssets.get(assetId);
+      if (!asset) continue;
+      for (const submesh of asset.submeshes) {
+        const mesh = new THREE.InstancedMesh(submesh.geometry, submesh.material, assetPlacements.length);
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        assetPlacements.forEach((placement, index) => {
+          position.set(placement.x, placement.y, placement.z);
+          quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), placement.yaw);
+          scale.setScalar(placement.scale);
+          matrix.compose(position, quaternion, scale);
+          mesh.setMatrixAt(index, matrix);
+        });
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        texturedGroup.add(mesh);
+      }
+    }
+    sector.texturedTrees = texturedGroup;
+    group.add(texturedGroup);
+  };
+
+  const pickTree = (paint: TerrainPaintKind | null, h: number, r1: number, r2: number): { tpl: Template; scale: number; assetId?: TexturedTreeAssetId } | null => {
     const meadowish = paint === "meadow" || paint === "grass" || paint === null || paint === "flowers";
     if (paint === "beach" || paint === "desert-sand") {
       if (r1 > 0.16) return null;
@@ -585,36 +733,32 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     if (paint === "snow" || paint === "rock" || h > 10.5) {
       if (r1 > 0.16) return null;
       return r2 < 0.6
-        ? { tpl: treeTpls.pine, scale: 7 + r2 * 4 }
-        : { tpl: treeTpls.conifer, scale: 5.5 + r2 * 3.2 };
+        ? { tpl: treeTpls.pine, scale: 8.5 + r2 * 5.5, assetId: "pine5" }
+        : { tpl: treeTpls.conifer, scale: 10 + r2 * 7.5, assetId: "common3" };
     }
     if (paint === "forest-floor" || paint === "jungle-moss") {
       if (r1 > (paint === "jungle-moss" ? 0.42 : 0.34)) return null;
-      if (r2 < 0.25) return { tpl: treeTpls.broadleaf, scale: 5.4 + r2 * 3.2 };
-      if (r2 < 0.58) return { tpl: treeTpls.birch, scale: 5.2 + r2 * 3.4 };
-      return { tpl: treeTpls.conifer, scale: 5.4 + r2 * 3 };
+      if (paint === "jungle-moss" && r2 > 0.68) return { tpl: treeTpls.palm, scale: 6.8 + r2 * 3.4 };
+      if (r2 < 0.46) return { tpl: treeTpls.broadleaf, scale: 5.6 + r2 * 3.6 };
+      return { tpl: treeTpls.birch, scale: 5.4 + r2 * 3.8 };
     }
     if (paint === "dirt") {
       if (r1 > 0.26) return null;
       if (r2 < 0.16) return { tpl: treeTpls.deadtree, scale: 4.2 + r2 * 4.5 };
-      return r2 < 0.55
-        ? { tpl: treeTpls.conifer, scale: 5.5 + r2 * 3.2 }
-        : { tpl: treeTpls.broadleaf, scale: 4.6 + r2 * 2.6 };
+      return { tpl: treeTpls.broadleaf, scale: 4.8 + r2 * 3.2 };
     }
     if (paint === "stone" || paint === "brick") return null;
     if (paint === "gravel") {
       if (r1 > 0.12) return null;
       return r2 < 0.62
-        ? { tpl: treeTpls.pine, scale: 6.2 + r2 * 3.4 }
-        : { tpl: treeTpls.conifer, scale: 5.0 + r2 * 2.8 };
+        ? { tpl: treeTpls.pine, scale: 8 + r2 * 4.8, assetId: "pine5" }
+        : { tpl: treeTpls.conifer, scale: 6.8 + r2 * 3.8, assetId: "retro3" };
     }
     if (meadowish) {
       const accept = paint === "flowers" ? 0.14 : 0.34;
       if (r1 > accept) return null;
-      if (r2 < 0.18) return { tpl: treeTpls.birch, scale: 5 + r2 * 4.5 };
-      if (r2 < 0.42) return { tpl: treeTpls.conifer, scale: 5.5 + r2 * 3.2 };
-      if (r2 < 0.5) return { tpl: treeTpls.pine, scale: 7 + r2 * 3.5 };
-      return { tpl: treeTpls.broadleaf, scale: 4.6 + r2 * 2.6 };
+      if (r2 < 0.36) return { tpl: treeTpls.birch, scale: 5 + r2 * 4.5 };
+      return { tpl: treeTpls.broadleaf, scale: 4.8 + r2 * 3.1 };
     }
     return null;
   };
@@ -629,6 +773,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     let minY = Infinity;
     let maxY = -Infinity;
     let stamped = 0;
+    const texturedPlacements: TexturedTreePlacement[] = [];
     for (let gx = ox + 3; gx < ox + SECTOR && stamped < TREES_PER_SECTOR; gx += 7.5) {
       for (let gz = oz + 3; gz < oz + SECTOR && stamped < TREES_PER_SECTOR; gz += 7.5) {
         const rng = mulberry32(cellSeed(Math.round(gx * 3), Math.round(gz * 3), 0x7ee5));
@@ -646,8 +791,13 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
         if (!choice) continue;
         tintColor.setHex(0xffffff);
         tintColor.offsetHSL((rng() - 0.5) * 0.05, (rng() - 0.5) * 0.18, (rng() - 0.5) * 0.1);
-        if (!stampTemplate(sector.trees, cur, choice.tpl, x, h - 0.06, z, choice.scale, rng() * Math.PI * 2, tintColor, rng() * Math.PI * 2, 1)) break;
-        sectorColliders.push({ x, z, r: Math.max(0.42, choice.scale * 0.085) });
+        const yaw = rng() * Math.PI * 2;
+        if (choice.assetId && texturedTreeAssets.has(choice.assetId)) {
+          texturedPlacements.push({ assetId: choice.assetId, x, y: h - 0.02, z, scale: choice.scale, yaw });
+        } else if (!stampTemplate(sector.trees, cur, choice.tpl, x, h - 0.06, z, choice.scale, yaw, tintColor, rng() * Math.PI * 2, 1)) {
+          break;
+        }
+        sectorColliders.push({ x, z, r: Math.max(0.42, choice.scale * 0.11) });
         stamped++;
         if (h < minY) minY = h;
         if (h + choice.scale > maxY) maxY = h + choice.scale;
@@ -655,6 +805,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     }
     markPooledUpdated(sector.trees, cur.i);
     if (cur.i > 0) setBounds(sector.trees, ox + SECTOR / 2, oz + SECTOR / 2, SECTOR, minY, maxY);
+    buildTexturedSector(sector, texturedPlacements);
     treeCount += stamped;
 
     if (ROCKS_PER_SECTOR > 0) {
@@ -829,6 +980,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       for (const p of freePool) p.geometry.dispose();
       freePool.length = 0;
       for (const sector of sectors) {
+        disposeTexturedSector(sector);
         sector.trees?.geometry.dispose();
         sector.rocks?.geometry.dispose();
       }
@@ -836,6 +988,14 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       grassMaterial.dispose();
       treeMaterial.dispose();
       rockMaterial.dispose();
+      for (const asset of texturedTreeAssets.values()) {
+        for (const submesh of asset.submeshes) {
+          submesh.geometry.dispose();
+          const materials = Array.isArray(submesh.material) ? submesh.material : [submesh.material];
+          for (const material of materials) material.dispose();
+        }
+      }
+      texturedTreeAssets.clear();
     },
   };
 }

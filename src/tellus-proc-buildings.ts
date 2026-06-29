@@ -532,12 +532,19 @@ function addMesh(group: THREE.Group, mesh: THREE.Mesh, collide = true) {
 function mergeBuildingMeshesByMaterial(group: THREE.Group) {
   group.updateMatrixWorld(true);
   const buckets = new Map<string, { material: THREE.Material; collide: boolean; geometries: THREE.BufferGeometry[]; meshes: THREE.Mesh[] }>();
+  const geometrySignature = (geometry: THREE.BufferGeometry): string => {
+    const attributes = Object.entries(geometry.attributes)
+      .map(([name, attribute]) => `${name}:${attribute.itemSize}:${attribute.normalized ? 1 : 0}`)
+      .sort()
+      .join(",");
+    return `${geometry.index ? "indexed" : "flat"}|${attributes}`;
+  };
   group.traverse((object) => {
     if (!(object instanceof THREE.Mesh) || object instanceof THREE.InstancedMesh) return;
     if (Array.isArray(object.material)) return;
     const geometry = object.geometry;
     if (!geometry || geometry.morphAttributes && Object.keys(geometry.morphAttributes).length > 0) return;
-    const key = `${object.material.uuid}:${object.userData.collide === false ? "ghost" : "solid"}`;
+    const key = `${object.material.uuid}:${object.userData.collide === false ? "ghost" : "solid"}:${geometrySignature(geometry)}`;
     let bucket = buckets.get(key);
     if (!bucket) {
       bucket = {
