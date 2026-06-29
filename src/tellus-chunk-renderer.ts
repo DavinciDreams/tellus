@@ -6,7 +6,6 @@ import {
   CHUNK_SEGMENTS,
   CHUNK_SPAN,
   CHUNK_VERTEX_COUNT,
-  chunkedWorldCenter,
   getChunkedWorldChunks,
 } from "./tellus-constants";
 import {
@@ -33,22 +32,6 @@ const CHUNK_SKIRT_DEPTH = 8;
 const CHUNK_PROVISIONAL_SEGMENTS = 8;
 const TERRAIN_KIND_CODE_WATER = terrainKindCode("water");
 
-const chunkWorldOffset = () => chunkedWorldCenter() ?? { x: 0, z: 0 };
-const chunkIndexFromWorld = (worldX: number, worldZ: number) => {
-  const offset = chunkWorldOffset();
-  return {
-    cx: Math.floor((worldX + offset.x) / CHUNK_SPAN),
-    cz: Math.floor((worldZ + offset.z) / CHUNK_SPAN),
-  };
-};
-const chunkWorldOrigin = (cx: number, cz: number) => {
-  const offset = chunkWorldOffset();
-  return {
-    x: cx * CHUNK_SPAN - offset.x,
-    z: cz * CHUNK_SPAN - offset.z,
-  };
-};
-
 // Sample the 65x65 sculpt grid (row-major z*65+x). Empty array => flat (revision 0).
 function sculptAt(offsets: number[], xi: number, zi: number): number {
   if (offsets.length === 0) return 0;
@@ -72,9 +55,8 @@ export function createChunkTerrainGeometry(
   const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
   const seg = Math.max(1, Math.min(lodSegments, CHUNK_SEGMENTS));
   const stride = CHUNK_SEGMENTS / seg; // 64/seg; integer for 64,32,16,8
-  const origin = chunkWorldOrigin(chunk.cx, chunk.cz);
-  const worldX0 = origin.x;
-  const worldZ0 = origin.z;
+  const worldX0 = chunk.cx * CHUNK_SPAN;
+  const worldZ0 = chunk.cz * CHUNK_SPAN;
 
   const positions: number[] = [];
   const colors: number[] = [];
@@ -378,7 +360,7 @@ export function createChunkRenderer(
       for (let dx = -radius; dx <= radius; dx++) {
         const tcx = cx + dx;
         const tcz = cz + dz;
-        if (tcx < 0 || tcz < 0) continue;
+        if (tcx < 0 || tcz < 0) continue; // world coords are [0, N*SPAN)
         if (bounds && (tcx >= bounds.w || tcz >= bounds.h)) continue; // past the world's far edge
         const ring = Math.max(Math.abs(dx), Math.abs(dz));
         const lod = lodForRing(ring);
@@ -397,7 +379,8 @@ export function createChunkRenderer(
 
   const update = (worldX: number, worldZ: number) => {
     if (disposed) return;
-    const { cx, cz } = chunkIndexFromWorld(worldX, worldZ);
+    const cx = Math.floor(worldX / CHUNK_SPAN);
+    const cz = Math.floor(worldZ / CHUNK_SPAN);
     const now = Date.now();
     const hasDueRetry = [...retryAt].some(([k, at]) => {
       if (at > now) return false;
@@ -427,14 +410,16 @@ export function createChunkRenderer(
 
   const prefetch = (worldX: number, worldZ: number, radius = 1) => {
     if (disposed) return;
-    const { cx, cz } = chunkIndexFromWorld(worldX, worldZ);
+    const cx = Math.floor(worldX / CHUNK_SPAN);
+    const cz = Math.floor(worldZ / CHUNK_SPAN);
     scheduleAround(cx, cz, Math.max(0, Math.min(2, Math.round(radius))), Date.now());
     pumpQueuedFetches(fetchStartBudget);
   };
 
   const ensureBaseChunk = (worldX: number, worldZ: number): boolean => {
     if (disposed) return false;
-    const { cx, cz } = chunkIndexFromWorld(worldX, worldZ);
+    const cx = Math.floor(worldX / CHUNK_SPAN);
+    const cz = Math.floor(worldZ / CHUNK_SPAN);
     const bounds = getChunkedWorldChunks();
     if (cx < 0 || cz < 0) return false;
     if (bounds && (cx >= bounds.w || cz >= bounds.h)) return false;
@@ -496,8 +481,7 @@ export function createChunkRenderer(
       return;
     }
     const mesh = new THREE.Mesh(geometry, material);
-    const origin = chunkWorldOrigin(mergedData.cx, mergedData.cz);
-    mesh.position.set(origin.x, 0, origin.z);
+    mesh.position.set(mergedData.cx * CHUNK_SPAN, 0, mergedData.cz * CHUNK_SPAN);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     group.add(mesh);
@@ -602,9 +586,8 @@ export function createChunkRenderer(
     const paintCode = terrainPaintCode(kind);
     const radiusSq = radius * radius;
     for (const [k, a] of active) {
-      const origin = chunkWorldOrigin(a.cx, a.cz);
-      const chunkX0 = origin.x;
-      const chunkZ0 = origin.z;
+      const chunkX0 = a.cx * CHUNK_SPAN;
+      const chunkZ0 = a.cz * CHUNK_SPAN;
       const nearestX = Math.max(chunkX0, Math.min(chunkX0 + CHUNK_SPAN, worldX));
       const nearestZ = Math.max(chunkZ0, Math.min(chunkZ0 + CHUNK_SPAN, worldZ));
       if ((nearestX - worldX) ** 2 + (nearestZ - worldZ) ** 2 > radiusSq) continue;
@@ -656,14 +639,14 @@ export function createChunkRenderer(
 
   const sampleHeight = (worldX: number, worldZ: number): number | null => {
     if (disposed) return null;
-    const { cx, cz } = chunkIndexFromWorld(worldX, worldZ);
+    const cx = Math.floor(worldX / CHUNK_SPAN);
+    const cz = Math.floor(worldZ / CHUNK_SPAN);
     const a = active.get(key(cx, cz));
     if (!a) return null; // chunk not loaded -> grounding falls back to the flat base
     if (a.sculptOffsets.length === 0) return largeWorldBaseHeight(worldX, worldZ);
     // Local coords within the chunk, in [0, CHUNK_SPAN]; convert to the 65-grid index space.
-    const origin = chunkWorldOrigin(cx, cz);
-    const lx = worldX - origin.x;
-    const lz = worldZ - origin.z;
+    const lx = worldX - cx * CHUNK_SPAN;
+    const lz = worldZ - cz * CHUNK_SPAN;
     const gx = (lx / CHUNK_SPAN) * CHUNK_SEGMENTS;
     const gz = (lz / CHUNK_SPAN) * CHUNK_SEGMENTS;
     const x0 = Math.max(0, Math.min(CHUNK_SEGMENTS, Math.floor(gx)));
@@ -687,12 +670,12 @@ export function createChunkRenderer(
 
   const samplePaint = (worldX: number, worldZ: number): TerrainPaintKind | null => {
     if (disposed) return null;
-    const { cx, cz } = chunkIndexFromWorld(worldX, worldZ);
+    const cx = Math.floor(worldX / CHUNK_SPAN);
+    const cz = Math.floor(worldZ / CHUNK_SPAN);
     const a = active.get(key(cx, cz));
     if (!a || a.paint.length === 0) return null;
-    const origin = chunkWorldOrigin(cx, cz);
-    const lx = worldX - origin.x;
-    const lz = worldZ - origin.z;
+    const lx = worldX - cx * CHUNK_SPAN;
+    const lz = worldZ - cz * CHUNK_SPAN;
     const gx = Math.max(0, Math.min(CHUNK_SEGMENTS, Math.round((lx / CHUNK_SPAN) * CHUNK_SEGMENTS)));
     const gz = Math.max(0, Math.min(CHUNK_SEGMENTS, Math.round((lz / CHUNK_SPAN) * CHUNK_SEGMENTS)));
     const code = a.paint[gz * CHUNK_VERTEX_COUNT + gx] ?? 0;

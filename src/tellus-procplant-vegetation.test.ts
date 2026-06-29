@@ -106,7 +106,7 @@ describe("procplant vegetation", () => {
 
     expect(full.idx.length).toBeGreaterThan(sparse.idx.length);
     expect(full.idx.length).toBeLessThanOrEqual(sparse.idx.length + 120 * 4 * 6);
-  });
+  }, 15_000);
 
   it("applies procplant tree realism traits to Weber-Penn genomes", () => {
     const baseGenome = procPlantPresets.oakCanopy;

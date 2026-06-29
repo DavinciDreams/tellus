@@ -935,6 +935,7 @@ function createTellusWorld(
   const archipelago = createDistantArchipelago(useWebGPU);
   let chunkRenderer: ChunkRenderer | null = null;
   let lastActiveChunkCount = -1; // defer placed-asset grounding when the active chunk set changes
+  let lastProvisionalChunkCount = -1;
   let chunkStreamGroundingPending = false;
   let lastChunkStreamGroundingAt = 0;
   const chunkStreamGroundingQueue: string[] = [];
@@ -956,10 +957,10 @@ function createTellusWorld(
   }
   const chunkedVegetationBounds = chunkedDims
     ? {
-        minX: -(chunkedDims.w * CHUNK_SPAN) / 2 - CHUNK_SPAN,
-        maxX: (chunkedDims.w * CHUNK_SPAN) / 2 + CHUNK_SPAN,
-        minZ: -(chunkedDims.h * CHUNK_SPAN) / 2 - CHUNK_SPAN,
-        maxZ: (chunkedDims.h * CHUNK_SPAN) / 2 + CHUNK_SPAN,
+        minX: 0,
+        maxX: chunkedDims.w * CHUNK_SPAN,
+        minZ: 0,
+        maxZ: chunkedDims.h * CHUNK_SPAN,
       }
     : undefined;
   const waterFeatureCenter = (() => {
@@ -1236,8 +1237,8 @@ function createTellusWorld(
           const terrainReady = !isChunked || Boolean(
             terrainStats &&
             (
-              terrainStats.active >= 9 ||
-              (terrainStats.active > 0 && terrainStats.pending === 0 && terrainStats.queued === 0 && terrainStats.inflight === 0)
+              terrainStats.active > 0 ||
+              (terrainStats.ready > 0 && terrainStats.inflight === 0)
             ),
           );
           const skyboxReady =
@@ -8959,6 +8960,7 @@ function createTellusWorld(
     phaseStartedAt = performance.now();
     if (chunkRenderer) {
       chunkRenderer.update(visitorPosition.x, visitorPosition.z); // current position owns eviction
+      chunkRenderer.ensureBaseChunk(visitorPosition.x, visitorPosition.z);
       if (chunkStreamProbe) {
         chunkRenderer.prefetch(chunkStreamProbe.x, chunkStreamProbe.z, 1);
         if (terrainOnlyDebug()) {
@@ -8979,9 +8981,14 @@ function createTellusWorld(
       // When the active chunk set changes (chunks streamed in/out), defer placed-asset grounding until
       // movement is idle. Treating streaming like a terrain edit used to invalidate all vegetation and
       // walk every generated thing on the boundary frame, which made every chunk crossing hitch.
-      const activeChunks = chunkRenderer.stats().active;
-      if (activeChunks !== lastActiveChunkCount) {
+      const postFlushChunkStats = chunkRenderer.stats();
+      const activeChunks = postFlushChunkStats.active;
+      const provisionalChunks = postFlushChunkStats.provisional;
+      if (activeChunks !== lastActiveChunkCount || provisionalChunks !== lastProvisionalChunkCount) {
         lastActiveChunkCount = activeChunks;
+        lastProvisionalChunkCount = provisionalChunks;
+        vegetation.notifyTerrainChanged();
+        procplants.notifyTerrainChanged();
         if (!chunkStreamGroundingPending && chunkStreamGroundingQueue.length === 0) {
           chunkStreamGroundingPending = true;
           for (const thing of generated) {
