@@ -10,7 +10,7 @@ import {
 } from "./tellus-procplant-biomes";
 import { resolveEcologySample, type EcologySample } from "./tellus-ecology";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
-import { buildStylizedEvergreenTemplate } from "./tellus-veg-archetypes";
+import { buildRetroCutoutTreeTemplate } from "./tellus-veg-archetypes";
 import {
   buildProcPlantInstancedParts,
   createProcPlantConiferSprayGeometry,
@@ -236,10 +236,10 @@ const buildCheapTreeTemplate = (species: string): ProcPlantTemplate => {
   if (cached) return cached;
   const conifer = /fir|pine|douglas|larch|spruce/i.test(species);
   if (conifer) {
-    const template = buildStylizedEvergreenTemplate(hashString(species), undefined, {
-      height: /small/i.test(species) ? 0.92 : /douglas|redwood/i.test(species) ? 1.32 : 1.14,
-      width: /small/i.test(species) ? 0.36 : /douglas|redwood/i.test(species) ? 0.46 : 0.42,
-      tiers: /small/i.test(species) ? 4 : /douglas|redwood/i.test(species) ? 7 : 6,
+    const template = buildRetroCutoutTreeTemplate(hashString(species), undefined, {
+      height: /small/i.test(species) ? 0.98 : /douglas|redwood/i.test(species) ? 1.36 : 1.18,
+      width: /small/i.test(species) ? 0.42 : /douglas|redwood/i.test(species) ? 0.56 : 0.5,
+      planes: /small/i.test(species) ? 3 : 4,
       trunkRadius: /small/i.test(species) ? 0.052 : 0.058,
     });
     cheapTreeTemplateCache.set(species, template);

@@ -812,13 +812,16 @@ const proceduralEvergreen = (
   label: string,
   colors: Pick<TreeTemplateOptions, "barkColor" | "leafColor">,
   palette: number[],
-  options?: Parameters<typeof buildStylizedEvergreenTemplate>[2],
+  options?: Parameters<typeof buildRetroCutoutTreeTemplate>[2] & { tiers?: number },
 ): ProceduralArchetype => ({
   id,
   label,
   emoji: "🌲",
   kind: "tree",
-  build: (seed) => buildStylizedEvergreenTemplate(seed, colors, options),
+  build: (seed) => buildRetroCutoutTreeTemplate(seed, colors, {
+    ...options,
+    planes: options?.planes ?? Math.min(4, Math.max(3, Math.round((options?.tiers ?? 5) * 0.55))),
+  }),
   palette,
 });
 
