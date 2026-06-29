@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { mulberry32 } from "./tellus-veg-archetypes";
 
 export type ProceduralBuildingType =
@@ -267,6 +268,7 @@ export const buildProceduralBuildingModel = (
     addShinglePorch(group, width, depth, recipe, mats);
   }
   addLighting(group, width, depth, height, options.lighting ?? "warm");
+  mergeBuildingMeshesByMaterial(group);
   return group;
 };
 
@@ -525,6 +527,49 @@ function addMesh(group: THREE.Group, mesh: THREE.Mesh, collide = true) {
   mesh.receiveShadow = true;
   mesh.userData.collide = collide;
   group.add(mesh);
+}
+
+function mergeBuildingMeshesByMaterial(group: THREE.Group) {
+  group.updateMatrixWorld(true);
+  const buckets = new Map<string, { material: THREE.Material; collide: boolean; geometries: THREE.BufferGeometry[]; meshes: THREE.Mesh[] }>();
+  group.traverse((object) => {
+    if (!(object instanceof THREE.Mesh) || object instanceof THREE.InstancedMesh) return;
+    if (Array.isArray(object.material)) return;
+    const geometry = object.geometry;
+    if (!geometry || geometry.morphAttributes && Object.keys(geometry.morphAttributes).length > 0) return;
+    const key = `${object.material.uuid}:${object.userData.collide === false ? "ghost" : "solid"}`;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        material: object.material,
+        collide: object.userData.collide !== false,
+        geometries: [],
+        meshes: [],
+      };
+      buckets.set(key, bucket);
+    }
+    bucket.geometries.push(geometry.clone().applyMatrix4(object.matrixWorld));
+    bucket.meshes.push(object);
+  });
+
+  for (const bucket of buckets.values()) {
+    if (bucket.meshes.length < 2) {
+      for (const geometry of bucket.geometries) geometry.dispose();
+      continue;
+    }
+    const merged = mergeGeometries(bucket.geometries, false);
+    for (const geometry of bucket.geometries) geometry.dispose();
+    if (!merged) continue;
+    for (const mesh of bucket.meshes) {
+      mesh.removeFromParent();
+      mesh.geometry.dispose();
+    }
+    const mesh = new THREE.Mesh(merged, bucket.material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.collide = bucket.collide;
+    group.add(mesh);
+  }
 }
 
 function addBox(

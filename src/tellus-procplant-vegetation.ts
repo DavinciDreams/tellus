@@ -39,6 +39,7 @@ export interface ProcPlantVegetationOptions {
   maxRing?: number;
   densityMultiplier?: number;
   isExcluded?: (x: number, z: number, height: number) => boolean;
+  viewMode?: () => "first" | "third";
 }
 
 export interface ProcPlantVegetationStats {
@@ -51,6 +52,19 @@ export interface ProcPlantVegetationStats {
   lod0: number;
   lod1: number;
   lod2: number;
+  viewMode: "first" | "third";
+  queuedRebuilds: number;
+  terrainInvalidations: number;
+  chunksCreated: number;
+  chunksEvicted: number;
+  chunksBuilt: number;
+  lastUpdateMs: number;
+  maxUpdateMs: number;
+  lastBuildMs: number;
+  maxBuildMs: number;
+  totalBuildMs: number;
+  builtLastUpdate: number;
+  buildPausedForMotion: boolean;
 }
 
 export interface ProcPlantVegetationSystem {
@@ -59,6 +73,7 @@ export interface ProcPlantVegetationSystem {
   placeManualPlant(placement: ProcPlantManualPlacement, options?: { persist?: boolean }): boolean;
   replaceManualPlants(placements: ProcPlantManualPlacement[], options?: { persist?: boolean }): void;
   removeManualPlant(id: string, options?: { persist?: boolean }): boolean;
+  manualPlantPlacements(): ProcPlantManualPlacement[];
   stats(): ProcPlantVegetationStats;
   dispose(): void;
 }
@@ -72,14 +87,22 @@ export interface ProcPlantManualPlacement {
   scale: number;
 }
 
+interface ChunkStats {
+  plants: number;
+  instances: number;
+  stemTriangles: number;
+  organDraws: number;
+}
+
 interface ActiveChunk {
   key: string;
   cx: number;
   cz: number;
   lod: 0 | 1 | 2;
   rev: number;
+  lastNeededMs: number;
   group: THREE.Group;
-  stats: Omit<ProcPlantVegetationStats, "chunks" | "manualPlants" | "lod0" | "lod1" | "lod2">;
+  stats: ChunkStats;
 }
 
 interface OrganBucket {
@@ -99,10 +122,17 @@ interface BiomeTreeTemplateOptions {
   foliageSpread?: number;
 }
 
-const DEFAULT_CHUNK_SIZE = 12;
-const DEFAULT_MAX_RING = 2;
-const MAX_LOD0_PLANTS = 16;
-const MAX_LOD1_PLANTS = 6;
+const DEFAULT_CHUNK_SIZE = 16;
+const DEFAULT_MAX_RING = 3;
+const THIRD_PERSON_MAX_RING = 4;
+const MAX_LOD0_PLANTS = 3;
+const MAX_LOD1_PLANTS = 3;
+const MAX_LOD2_PLANTS = 4;
+const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
+const LOW_FPS_BUILD_BUDGET = 1;
+const NORMAL_BUILD_BUDGET = 2;
+const LOW_FPS_BUILD_MS_BUDGET = 2.5;
+const NORMAL_BUILD_MS_BUDGET = 5;
 
 const foliageDefaultsForTreeSpecies = (
   species: string,
@@ -142,6 +172,85 @@ const buildBiomeTreeTemplate = (
     foliageSpread: options.foliageSpread,
     swayFrom: 0.3,
   });
+
+const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color): ProcPlantTemplate => {
+  const source = geometry.index ? geometry.toNonIndexed() : geometry;
+  const position = source.getAttribute("position");
+  const normal = source.getAttribute("normal");
+  const vertexCount = position.count;
+  const pos = new Float32Array(vertexCount * 3);
+  const nrm = new Float32Array(vertexCount * 3);
+  const col = new Float32Array(vertexCount * 3);
+  const tintable = new Uint8Array(vertexCount);
+  const sway = new Float32Array(vertexCount);
+  const idx = new Uint32Array(vertexCount);
+  for (let i = 0; i < vertexCount; i++) {
+    const offset = i * 3;
+    pos[offset] = position.getX(i);
+    pos[offset + 1] = position.getY(i);
+    pos[offset + 2] = position.getZ(i);
+    nrm[offset] = normal?.getX(i) ?? 0;
+    nrm[offset + 1] = normal?.getY(i) ?? 1;
+    nrm[offset + 2] = normal?.getZ(i) ?? 0;
+    col[offset] = color.r;
+    col[offset + 1] = color.g;
+    col[offset + 2] = color.b;
+    tintable[i] = 0;
+    sway[i] = 0;
+    idx[i] = i;
+  }
+  if (source !== geometry) source.dispose();
+  return { pos, nrm, col, tintable, sway, idx };
+};
+
+const cheapTreeTemplateCache = new Map<string, ProcPlantTemplate>();
+
+const buildCheapTreeTemplate = (species: string): ProcPlantTemplate => {
+  const cached = cheapTreeTemplateCache.get(species);
+  if (cached) return cached;
+  const conifer = /fir|pine|douglas|larch|spruce/i.test(species);
+  const trunk = new THREE.BoxGeometry(conifer ? 0.14 : 0.18, conifer ? 0.9 : 0.75, conifer ? 0.14 : 0.18);
+  trunk.translate(0, conifer ? 0.45 : 0.375, 0);
+  const crown = conifer
+    ? new THREE.ConeGeometry(0.55, 1.55, 5)
+    : new THREE.ConeGeometry(0.72, 1.0, 6);
+  crown.translate(0, conifer ? 1.25 : 1.05, 0);
+  const trunkTemplate = templateFromGeometry(trunk, new THREE.Color(0x5c3f24));
+  const crownTemplate = templateFromGeometry(crown, new THREE.Color(conifer ? 0x2f5b37 : 0x536f38));
+  trunk.dispose();
+  crown.dispose();
+  const vertexOffset = trunkTemplate.pos.length / 3;
+  const pos = new Float32Array(trunkTemplate.pos.length + crownTemplate.pos.length);
+  const nrm = new Float32Array(trunkTemplate.nrm.length + crownTemplate.nrm.length);
+  const col = new Float32Array(trunkTemplate.col.length + crownTemplate.col.length);
+  const tintable = new Uint8Array(trunkTemplate.tintable.length + crownTemplate.tintable.length);
+  const sway = new Float32Array(trunkTemplate.sway.length + crownTemplate.sway.length);
+  const idx = new Uint32Array(trunkTemplate.idx.length + crownTemplate.idx.length);
+  pos.set(trunkTemplate.pos, 0);
+  pos.set(crownTemplate.pos, trunkTemplate.pos.length);
+  nrm.set(trunkTemplate.nrm, 0);
+  nrm.set(crownTemplate.nrm, trunkTemplate.nrm.length);
+  col.set(trunkTemplate.col, 0);
+  col.set(crownTemplate.col, trunkTemplate.col.length);
+  tintable.set(trunkTemplate.tintable, 0);
+  tintable.set(crownTemplate.tintable, trunkTemplate.tintable.length);
+  sway.set(trunkTemplate.sway, 0);
+  sway.set(crownTemplate.sway, trunkTemplate.sway.length);
+  idx.set(trunkTemplate.idx, 0);
+  for (let i = 0; i < crownTemplate.idx.length; i++) {
+    idx[trunkTemplate.idx.length + i] = crownTemplate.idx[i] + vertexOffset;
+  }
+  const template = {
+    pos,
+    nrm,
+    col,
+    tintable,
+    sway,
+    idx,
+  };
+  cheapTreeTemplateCache.set(species, template);
+  return template;
+};
 
 const manualPlacementStorageKey = (worldId: string): string =>
   `tellus.procplants.manual.${worldId}`;
@@ -287,6 +396,19 @@ const emptyStats = (): ProcPlantVegetationStats => ({
   lod0: 0,
   lod1: 0,
   lod2: 0,
+  viewMode: "first",
+  queuedRebuilds: 0,
+  terrainInvalidations: 0,
+  chunksCreated: 0,
+  chunksEvicted: 0,
+  chunksBuilt: 0,
+  lastUpdateMs: 0,
+  maxUpdateMs: 0,
+  lastBuildMs: 0,
+  maxBuildMs: 0,
+  totalBuildMs: 0,
+  builtLastUpdate: 0,
+  buildPausedForMotion: false,
 });
 
 const isFinitePlacementNumber = (value: unknown): value is number =>
@@ -333,6 +455,21 @@ export function createProcPlantVegetation(
   options.scene.add(root);
 
   let terrainRev = 0;
+  let terrainDirty = false;
+  let terrainInvalidations = 0;
+  let chunksCreated = 0;
+  let chunksEvicted = 0;
+  let chunksBuilt = 0;
+  let lastUpdateMs = 0;
+  let maxUpdateMs = 0;
+  let lastBuildMs = 0;
+  let maxBuildMs = 0;
+  let totalBuildMs = 0;
+  let builtLastUpdate = 0;
+  let lastPlayerX: number | null = null;
+  let lastPlayerZ: number | null = null;
+  let lastPlayerMovedAt = Number.NEGATIVE_INFINITY;
+  let buildPausedForMotion = false;
   let disposed = false;
   const active = new Map<string, ActiveChunk>();
   const manualPlacements = new Map<string, ProcPlantManualPlacement>();
@@ -351,6 +488,24 @@ export function createProcPlantVegetation(
   const chunkKeyAt = (x: number, z: number) =>
     `${Math.floor(x / chunkSize)},${Math.floor(z / chunkSize)}`;
 
+  const viewMode = () => options.viewMode?.() ?? "first";
+
+  const activeMaxRing = () => {
+    if (options.maxRing !== undefined) return maxRing;
+    return viewMode() === "third" ? Math.max(maxRing, THIRD_PERSON_MAX_RING) : maxRing;
+  };
+
+  const lodForRing = (ring: number): 0 | 1 | 2 => {
+    if (viewMode() === "third") {
+      if (ring === 0) return 0;
+      if (ring <= 2) return 1;
+      return 2;
+    }
+    if (ring === 0) return 0;
+    if (ring <= 2) return 1;
+    return 2;
+  };
+
   const enqueue = (key: string, priority = false) => {
     if (queued.has(key)) {
       if (priority) {
@@ -365,6 +520,15 @@ export function createProcPlantVegetation(
     queued.add(key);
     if (priority) rebuildQueue.unshift(key);
     else rebuildQueue.push(key);
+  };
+
+  const prioritizeRebuildQueue = (centerCx: number, centerCz: number) => {
+    rebuildQueue.sort((a, b) => {
+      const [ax, az] = a.split(",").map(Number);
+      const [bx, bz] = b.split(",").map(Number);
+      return Math.max(Math.abs(ax - centerCx), Math.abs(az - centerCz)) -
+        Math.max(Math.abs(bx - centerCx), Math.abs(bz - centerCz));
+    });
   };
 
   const rememberManualPlacement = (placement: ProcPlantManualPlacement) => {
@@ -419,13 +583,13 @@ export function createProcPlantVegetation(
     disposeGroup(chunk.group);
     chunk.stats = { plants: 0, instances: 0, stemTriangles: 0, organDraws: 0 };
     chunk.rev = terrainRev;
-    const seed = procPlantChunkSeed(options.worldId, chunk.cx, chunk.cz, terrainRev);
+    const seed = procPlantChunkSeed(options.worldId, chunk.cx, chunk.cz, 0);
     const rand = mulberry32(seed);
     const plantCap = chunk.lod === 0
       ? Math.max(1, Math.round(MAX_LOD0_PLANTS * densityMultiplier))
       : chunk.lod === 1
         ? Math.max(1, Math.round(MAX_LOD1_PLANTS * densityMultiplier))
-        : 0;
+        : Math.max(1, Math.round(MAX_LOD2_PLANTS * densityMultiplier));
     const stemTemplates: Array<{ template: ProcPlantTemplate; matrix: THREE.Matrix4 }> = [];
     const organBuckets = new Map<string, OrganBucket>();
     const x0 = chunk.cx * chunkSize;
@@ -452,20 +616,12 @@ export function createProcPlantVegetation(
           terrainPaint: paint,
         });
       const patch = biomePatchForEcology(ecology, patchSeed) ?? biomePatchForPaint(paint, patchSeed);
-      if (!patch || rand() > patch.density * densityMultiplier * (chunk.lod === 0 ? 1 : 0.58)) continue;
+      const lodDensity = chunk.lod === 2 ? 0.65 : chunk.lod === 1 ? 0.52 : 0.48;
+      if (!patch || rand() > patch.density * densityMultiplier * lodDensity) continue;
       const genome = genomeForBiomePatch(patch);
       const treeBackend = treeBackendForBiomePatch(patch);
       if (treeBackend?.kind === "lsystem") {
-        const speciesFoliage = foliageDefaultsForTreeSpecies(treeBackend.species);
-        const template = buildBiomeTreeTemplate(treeBackend.species, patch.seed ^ i, {
-          ...treeBackend,
-          maxLeaves: treeBackend.maxLeaves ?? (chunk.lod === 0 ? 180 : 120),
-          foliageMass: treeBackend.foliageMass ?? genome.foliage?.mass ?? speciesFoliage.foliageMass,
-          foliageClusterDensity:
-            treeBackend.foliageClusterDensity ?? genome.foliage?.clusterDensity ?? speciesFoliage.foliageClusterDensity,
-          foliageTipBias: treeBackend.foliageTipBias ?? genome.foliage?.tipBias ?? speciesFoliage.foliageTipBias,
-          foliageSpread: treeBackend.foliageSpread ?? speciesFoliage.foliageSpread,
-        });
+        const template = buildCheapTreeTemplate(treeBackend.species);
         const scale = patch.scale * THREE.MathUtils.lerp(0.86, 1.16, rand());
         const matrix = new THREE.Matrix4()
           .makeRotationY(rand() * Math.PI * 2)
@@ -561,16 +717,37 @@ export function createProcPlantVegetation(
     }
   };
 
-  const update = (px: number, pz: number, _playerY: number, fps: number) => {
+  const update = (px: number, pz: number, _playerY: number, fps: number, nowMs: number) => {
     if (disposed) return;
-    const ringCap = fps < 28 ? Math.min(1, maxRing) : maxRing;
+    const updateStartedAt = performance.now();
+    builtLastUpdate = 0;
+    if (
+      lastPlayerX === null ||
+      lastPlayerZ === null ||
+      Math.hypot(px - lastPlayerX, pz - lastPlayerZ) > 0.15
+    ) {
+      lastPlayerMovedAt = nowMs;
+      lastPlayerX = px;
+      lastPlayerZ = pz;
+    }
+    if (terrainDirty && rebuildQueue.length > 0) {
+      terrainDirty = false;
+      terrainRev++;
+      for (const [key, chunk] of active) {
+        if (!queued.has(key)) chunk.rev = terrainRev;
+      }
+    } else if (terrainDirty) {
+      terrainDirty = false;
+      enqueueAllActive();
+    }
     const centerCx = Math.floor(px / chunkSize);
     const centerCz = Math.floor(pz / chunkSize);
     const needed = new Set<string>();
-    for (let dz = -ringCap; dz <= ringCap; dz++) {
-      for (let dx = -ringCap; dx <= ringCap; dx++) {
+    const ringLimit = activeMaxRing();
+    for (let dz = -ringLimit; dz <= ringLimit; dz++) {
+      for (let dx = -ringLimit; dx <= ringLimit; dx++) {
         const ring = Math.max(Math.abs(dx), Math.abs(dz));
-        const lod = ring <= 1 ? 0 : ring === 2 ? 1 : 2;
+        const lod = lodForRing(ring);
         const cx = centerCx + dx;
         const cz = centerCz + dz;
         const key = `${cx},${cz}`;
@@ -583,13 +760,16 @@ export function createProcPlantVegetation(
             cz,
             lod,
             rev: -1,
+            lastNeededMs: nowMs,
             group: new THREE.Group(),
             stats: { plants: 0, instances: 0, stemTriangles: 0, organDraws: 0 },
           };
+          chunksCreated++;
           chunk.group.name = `tellus-procplants-${key}`;
           active.set(key, chunk);
           root.add(chunk.group);
         }
+        chunk.lastNeededMs = nowMs;
         if (chunk.lod !== lod) {
           chunk.lod = lod;
           chunk.rev = -1;
@@ -599,25 +779,65 @@ export function createProcPlantVegetation(
     }
     for (const [key, chunk] of active) {
       if (needed.has(key)) continue;
+      if (nowMs - chunk.lastNeededMs < FAR_CHUNK_EVICT_GRACE_MS) continue;
       root.remove(chunk.group);
       disposeGroup(chunk.group);
       active.delete(key);
+      chunksEvicted++;
     }
-    let budget = 2;
+    prioritizeRebuildQueue(centerCx, centerCz);
+    const stationary = chunksBuilt === 0 || nowMs - lastPlayerMovedAt > 650;
+    buildPausedForMotion = !stationary && rebuildQueue.length > 0;
+    if (buildPausedForMotion) {
+      lastUpdateMs = performance.now() - updateStartedAt;
+      maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
+      return;
+    }
+    const maxBuilds = stationary
+      ? (fps < 28 ? LOW_FPS_BUILD_BUDGET + 1 : NORMAL_BUILD_BUDGET + 2)
+      : (fps < 28 ? LOW_FPS_BUILD_BUDGET : NORMAL_BUILD_BUDGET);
+    const buildMsBudget = stationary
+      ? (fps < 28 ? LOW_FPS_BUILD_MS_BUDGET + 1.5 : NORMAL_BUILD_MS_BUDGET + 3)
+      : (fps < 28 ? LOW_FPS_BUILD_MS_BUDGET : NORMAL_BUILD_MS_BUDGET);
+    const buildStartedAt = performance.now();
+    let budget = maxBuilds;
     while (budget > 0 && rebuildQueue.length > 0) {
       const key = rebuildQueue.shift()!;
       queued.delete(key);
       const chunk = active.get(key);
       if (!chunk || chunk.rev === terrainRev) continue;
+      const chunkBuildStartedAt = performance.now();
       buildChunk(chunk);
+      const chunkBuildMs = performance.now() - chunkBuildStartedAt;
+      lastBuildMs = chunkBuildMs;
+      maxBuildMs = Math.max(maxBuildMs, chunkBuildMs);
+      totalBuildMs += chunkBuildMs;
+      chunksBuilt++;
+      builtLastUpdate++;
       budget--;
+      if (performance.now() - buildStartedAt >= buildMsBudget) break;
     }
+    lastUpdateMs = performance.now() - updateStartedAt;
+    maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
   };
 
   const stats = (): ProcPlantVegetationStats => {
     const out = emptyStats();
     out.chunks = active.size;
     out.manualPlants = manualPlacements.size;
+    out.viewMode = viewMode();
+    out.queuedRebuilds = rebuildQueue.length;
+    out.terrainInvalidations = terrainInvalidations;
+    out.chunksCreated = chunksCreated;
+    out.chunksEvicted = chunksEvicted;
+    out.chunksBuilt = chunksBuilt;
+    out.lastUpdateMs = Math.round(lastUpdateMs * 10) / 10;
+    out.maxUpdateMs = Math.round(maxUpdateMs * 10) / 10;
+    out.lastBuildMs = Math.round(lastBuildMs * 10) / 10;
+    out.maxBuildMs = Math.round(maxBuildMs * 10) / 10;
+    out.totalBuildMs = Math.round(totalBuildMs);
+    out.builtLastUpdate = builtLastUpdate;
+    out.buildPausedForMotion = buildPausedForMotion;
     for (const chunk of active.values()) {
       out.plants += chunk.stats.plants;
       out.instances += chunk.stats.instances;
@@ -633,7 +853,8 @@ export function createProcPlantVegetation(
   return {
     update,
     notifyTerrainChanged: () => {
-      enqueueAllActive();
+      if (!terrainDirty) terrainInvalidations++;
+      terrainDirty = true;
     },
     placeManualPlant: (placement, writeOptions = {}) => {
       if (disposed) return false;
@@ -665,6 +886,7 @@ export function createProcPlantVegetation(
       if (removed && writeOptions.persist !== false) saveManualPlacements();
       return removed;
     },
+    manualPlantPlacements: () => [...manualPlacements.values()],
     stats,
     dispose: () => {
       disposed = true;

@@ -267,7 +267,7 @@ describe("procplant vegetation", () => {
       }),
     ).toBe(true);
 
-    vegetation.update(0, 0, 1, 60, 0);
+    for (let i = 0; i < 8; i++) vegetation.update(0, 0, 1, 60, i * 16);
     const stats = vegetation.stats();
 
     expect(stats.manualPlants).toBe(1);
@@ -285,9 +285,87 @@ describe("procplant vegetation", () => {
         scale: 1,
       }),
     ).toBe(true);
-    vegetation.update(0, 0, 1, 60, 16);
+    for (let i = 0; i < 12 && vegetation.stats().plants < 2; i++) {
+      vegetation.update(0, 0, 1, 60, 800 + i * 16);
+    }
     expect(vegetation.stats().manualPlants).toBe(2);
     expect(vegetation.stats().plants).toBeGreaterThanOrEqual(2);
+
+    vegetation.dispose();
+  });
+
+  it("keeps the procplant visual ring stable when fps dips", () => {
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-low-fps-ring-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -40, maxX: 40, minZ: -40, maxZ: 40 },
+      densityMultiplier: 0,
+    });
+
+    vegetation.update(0, 0, 1, 60, 0);
+    expect(vegetation.stats().chunks).toBe(49);
+    expect(vegetation.stats().lod0).toBe(1);
+    expect(vegetation.stats().lod1).toBe(24);
+    expect(vegetation.stats().lod2).toBe(24);
+
+    vegetation.update(0, 0, 1, 18, 16);
+    expect(vegetation.stats().chunks).toBe(49);
+
+    vegetation.dispose();
+  });
+
+  it("uses a wider cheaper procplant field in third person", () => {
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-third-person-lod-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -80, maxX: 80, minZ: -80, maxZ: 80 },
+      densityMultiplier: 0,
+      viewMode: () => "third",
+    });
+
+    vegetation.update(0, 0, 1, 60, 0);
+    const stats = vegetation.stats();
+    expect(stats.chunks).toBe(81);
+    expect(stats.lod0).toBe(1);
+    expect(stats.lod1).toBe(24);
+    expect(stats.lod2).toBe(56);
+
+    vegetation.dispose();
+  });
+
+  it("does not reseed procplants when terrain rebuild notifications repeat", () => {
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-stable-rebuild-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "forest-floor",
+      bounds: { minX: -80, maxX: 80, minZ: -80, maxZ: 80 },
+      densityMultiplier: 1,
+      viewMode: () => "first",
+    });
+
+    vegetation.update(0, 0, 1, 60, 0);
+    for (let i = 1; i < 80 && vegetation.stats().queuedRebuilds > 0; i++) {
+      vegetation.update(0, 0, 1, 60, i * 16);
+    }
+    const before = vegetation.stats();
+    vegetation.notifyTerrainChanged();
+    vegetation.update(0, 0, 1, 60, 500);
+    for (let i = 1; i < 80 && vegetation.stats().queuedRebuilds > 0; i++) {
+      vegetation.update(0, 0, 1, 60, 500 + i * 16);
+    }
+    const after = vegetation.stats();
+
+    expect(after.plants).toBe(before.plants);
+    expect(after.instances).toBe(before.instances);
+    expect(after.stemTriangles).toBe(before.stemTriangles);
 
     vegetation.dispose();
   });

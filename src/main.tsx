@@ -375,6 +375,27 @@ function createTellusWorld(
   let fpsFrames = 0;
   let fpsSampleStart = lastTime;
   let tick = 0;
+  const perfDiagnostics = {
+    frames: 0,
+    maxFrameMs: 0,
+    maxPlayerStep: 0,
+    maxVerticalStep: 0,
+    maxCameraStep: 0,
+    phases: {
+      chunkTerrainMs: 0,
+      vegetationMs: 0,
+      procplantsMs: 0,
+      physicsMs: 0,
+      renderMs: 0,
+      maxChunkTerrainMs: 0,
+      maxVegetationMs: 0,
+      maxProcplantsMs: 0,
+      maxPhysicsMs: 0,
+      maxRenderMs: 0,
+    },
+    lastPlayer: null as Vec3 | null,
+    lastCamera: null as Vec3 | null,
+  };
   let renderer: THREE.WebGLRenderer | WebGPURenderer | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let renderIssueLogged = false;
@@ -434,8 +455,18 @@ function createTellusWorld(
       instancedDraws += pool.instanced.length;
     }
     let visibleMeshes = 0;
+    let childMeshes = 0;
+    let visibleChildMeshes = 0;
+    const materialKeys = new Set<string>();
     for (const mesh of generatedMeshes.values()) {
       if (mesh.visible) visibleMeshes += 1;
+      mesh.traverse((child) => {
+        if (!(child instanceof THREE.Mesh) || child instanceof THREE.InstancedMesh) return;
+        childMeshes++;
+        if (child.visible && mesh.visible) visibleChildMeshes++;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) materialKeys.add(material.uuid);
+      });
     }
     return {
       things: generated.length,
@@ -470,6 +501,11 @@ function createTellusWorld(
       caches: {
         generatedGltf: generatedGltfCache.size,
         gltfObject: gltfObjectCache.size,
+      },
+      meshes: {
+        childMeshes,
+        visibleChildMeshes,
+        uniqueMaterials: materialKeys.size,
       },
       instancing: {
         enabled: instancingEnabled(),
@@ -978,6 +1014,7 @@ function createTellusWorld(
         bounds: chunkedVegetationBounds,
         densityMultiplier: procPlantDensityPreference,
         isExcluded: terrainVegetationExcluded,
+        viewMode: () => cameraMode,
       })
     : {
         update: () => undefined,
@@ -992,10 +1029,24 @@ function createTellusWorld(
           lod0: 0,
           lod1: 0,
           lod2: 0,
+          viewMode: "first" as const,
+          queuedRebuilds: 0,
+          terrainInvalidations: 0,
+          chunksCreated: 0,
+          chunksEvicted: 0,
+          chunksBuilt: 0,
+          lastUpdateMs: 0,
+          maxUpdateMs: 0,
+          lastBuildMs: 0,
+          maxBuildMs: 0,
+          totalBuildMs: 0,
+          builtLastUpdate: 0,
+          buildPausedForMotion: false,
         }),
         placeManualPlant: () => false,
         replaceManualPlants: () => undefined,
         removeManualPlant: () => false,
+        manualPlantPlacements: () => [],
         dispose: () => undefined,
       };
   const refreshVegetationForGeneratedThing = (thing: GeneratedThing | undefined) => {
@@ -2321,12 +2372,58 @@ function createTellusWorld(
     applyInterior(GENERATED_INTERIOR_SCENE_URL);
   };
   window.__tellusExitInterior = () => exitInterior();
+  const rendererDiagnostics = () => {
+    if (!renderer || !("info" in renderer)) return null;
+    const info = (renderer as THREE.WebGLRenderer).info;
+    return {
+      memory: {
+        geometries: info.memory.geometries,
+        textures: info.memory.textures,
+      },
+      render: {
+        calls: info.render.calls,
+        triangles: info.render.triangles,
+        points: info.render.points,
+        lines: info.render.lines,
+      },
+      programs: info.programs?.length ?? 0,
+    };
+  };
   // DEV-ONLY perf readout: window.__tellusPerf() -> { fps, vegetation, procplants }.
   window.__tellusPerf = () => ({
     fps: fpsValue,
+    frame: {
+      frames: perfDiagnostics.frames,
+      maxFrameMs: Math.round(perfDiagnostics.maxFrameMs * 10) / 10,
+      phases: {
+        chunkTerrainMs: Math.round(perfDiagnostics.phases.chunkTerrainMs * 10) / 10,
+        vegetationMs: Math.round(perfDiagnostics.phases.vegetationMs * 10) / 10,
+        procplantsMs: Math.round(perfDiagnostics.phases.procplantsMs * 10) / 10,
+        physicsMs: Math.round(perfDiagnostics.phases.physicsMs * 10) / 10,
+        renderMs: Math.round(perfDiagnostics.phases.renderMs * 10) / 10,
+        maxChunkTerrainMs: Math.round(perfDiagnostics.phases.maxChunkTerrainMs * 10) / 10,
+        maxVegetationMs: Math.round(perfDiagnostics.phases.maxVegetationMs * 10) / 10,
+        maxProcplantsMs: Math.round(perfDiagnostics.phases.maxProcplantsMs * 10) / 10,
+        maxPhysicsMs: Math.round(perfDiagnostics.phases.maxPhysicsMs * 10) / 10,
+        maxRenderMs: Math.round(perfDiagnostics.phases.maxRenderMs * 10) / 10,
+      },
+    },
+    motion: {
+      maxPlayerStep: Math.round(perfDiagnostics.maxPlayerStep * 1000) / 1000,
+      maxVerticalStep: Math.round(perfDiagnostics.maxVerticalStep * 1000) / 1000,
+      maxCameraStep: Math.round(perfDiagnostics.maxCameraStep * 1000) / 1000,
+      position: { ...visitorPosition },
+    },
     vegetation: vegetation.stats(),
     procplants: procplants.stats(),
     generatedAssets: generatedAssetPerfStats(),
+    chunkTerrain: chunkRenderer?.stats() ?? null,
+    physics: {
+      ambientBodies: ambientPhysics.activeCount(),
+      rapierSolids: rapierPhysics?.stats().solids ?? 0,
+      rapierReady: rapierPhysics?.stats().ready ?? false,
+    },
+    renderer: rendererDiagnostics(),
     terrainTextures: terrainTextureDiagnostics(renderer, useWebGPU),
   });
 
@@ -2340,9 +2437,12 @@ function createTellusWorld(
     z: placement.position.z,
     scale: placement.scale,
   });
+  const pendingProcPlantUpserts = new Map<string, number>();
+  const RECENT_PROCPLANT_UPSERT_GRACE_MS = 15_000;
 
   const publishProcPlantPlacement = (placement: WorldProcPlantPlacement) => {
     if (!tellusWorldBackendAvailable) return;
+    pendingProcPlantUpserts.set(placement.id, Date.now());
     const frame = {
       type: "procplant.upsert",
       visitorId,
@@ -3317,13 +3417,28 @@ function createTellusWorld(
       if (remoteProcPlants) {
         const placements = remoteProcPlants.map(procPlantPlacementFromWorld);
         if ((parsed as { type?: string } | null)?.type === "world.snapshot") {
+          const remoteIds = new Set(placements.map((placement) => placement.id));
+          const localPending = new Map(procplants.manualPlantPlacements().map((placement) => [placement.id, placement]));
+          const nowMs = Date.now();
+          for (const [id, sentAt] of [...pendingProcPlantUpserts]) {
+            if (remoteIds.has(id) || nowMs - sentAt > RECENT_PROCPLANT_UPSERT_GRACE_MS) {
+              pendingProcPlantUpserts.delete(id);
+              continue;
+            }
+            const placement = localPending.get(id);
+            if (placement) placements.push(placement);
+          }
           procplants.replaceManualPlants(placements);
         } else {
-          for (const placement of placements) procplants.placeManualPlant(placement);
+          for (const placement of placements) {
+            pendingProcPlantUpserts.delete(placement.id);
+            procplants.placeManualPlant(placement);
+          }
         }
       }
       const deletedProcPlant = procPlantDeletedFromWorldPatch(parsed);
       if (deletedProcPlant) {
+        pendingProcPlantUpserts.delete(deletedProcPlant);
         procplants.removeManualPlant(deletedProcPlant);
       }
       const chatMessages = worldChatFromWorldPatch(parsed);
@@ -8150,6 +8265,8 @@ function createTellusWorld(
   const animate = async () => {
     if (destroyed || !renderer) return;
     const now = performance.now();
+    perfDiagnostics.frames++;
+    perfDiagnostics.maxFrameMs = Math.max(perfDiagnostics.maxFrameMs, now - lastTime);
     fpsFrames++;
     if (now - fpsSampleStart >= 500) {
       fpsValue = Math.round((fpsFrames * 1000) / (now - fpsSampleStart));
@@ -8212,8 +8329,38 @@ function createTellusWorld(
       }
     }
     updateCamera();
+    if (perfDiagnostics.lastPlayer) {
+      perfDiagnostics.maxPlayerStep = Math.max(
+        perfDiagnostics.maxPlayerStep,
+        Math.hypot(
+          visitorPosition.x - perfDiagnostics.lastPlayer.x,
+          visitorPosition.z - perfDiagnostics.lastPlayer.z,
+        ),
+      );
+      perfDiagnostics.maxVerticalStep = Math.max(
+        perfDiagnostics.maxVerticalStep,
+        Math.abs(visitorPosition.y - perfDiagnostics.lastPlayer.y),
+      );
+    }
+    perfDiagnostics.lastPlayer = { ...visitorPosition };
+    if (perfDiagnostics.lastCamera) {
+      perfDiagnostics.maxCameraStep = Math.max(
+        perfDiagnostics.maxCameraStep,
+        Math.hypot(
+          camera.position.x - perfDiagnostics.lastCamera.x,
+          camera.position.y - perfDiagnostics.lastCamera.y,
+          camera.position.z - perfDiagnostics.lastCamera.z,
+        ),
+      );
+    }
+    perfDiagnostics.lastCamera = {
+      x: camera.position.x,
+      y: camera.position.y,
+      z: camera.position.z,
+    };
     updateDayNightCycle(Date.now(), now);
     flushTerrain();
+    let phaseStartedAt = performance.now();
     if (chunkRenderer) {
       chunkRenderer.update(visitorPosition.x, visitorPosition.z); // throttles internally on cell change
       chunkRenderer.flush(); // once/frame rebuild discipline
@@ -8239,6 +8386,11 @@ function createTellusWorld(
         }
       }
     }
+    perfDiagnostics.phases.chunkTerrainMs = performance.now() - phaseStartedAt;
+    perfDiagnostics.phases.maxChunkTerrainMs = Math.max(
+      perfDiagnostics.phases.maxChunkTerrainMs,
+      perfDiagnostics.phases.chunkTerrainMs,
+    );
     if (sailingThingId) {
       const mounted = thingById(sailingThingId);
       if (mounted && !isFreeMovingVehicle(mounted)) {
@@ -8278,12 +8430,36 @@ function createTellusWorld(
       lastPresencePruneAt = now;
       pruneStaleRemotePresence(Date.now());
     }
+    phaseStartedAt = performance.now();
     vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
+    perfDiagnostics.phases.vegetationMs = performance.now() - phaseStartedAt;
+    perfDiagnostics.phases.maxVegetationMs = Math.max(
+      perfDiagnostics.phases.maxVegetationMs,
+      perfDiagnostics.phases.vegetationMs,
+    );
+    phaseStartedAt = performance.now();
     procplants.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
+    perfDiagnostics.phases.procplantsMs = performance.now() - phaseStartedAt;
+    perfDiagnostics.phases.maxProcplantsMs = Math.max(
+      perfDiagnostics.phases.maxProcplantsMs,
+      perfDiagnostics.phases.procplantsMs,
+    );
+    phaseStartedAt = performance.now();
     ambientPhysics.step(delta);
+    perfDiagnostics.phases.physicsMs = performance.now() - phaseStartedAt;
+    perfDiagnostics.phases.maxPhysicsMs = Math.max(
+      perfDiagnostics.phases.maxPhysicsMs,
+      perfDiagnostics.phases.physicsMs,
+    );
     try {
+      phaseStartedAt = performance.now();
       renderPortalPreview();
       renderer.render(scene, camera);
+      perfDiagnostics.phases.renderMs = performance.now() - phaseStartedAt;
+      perfDiagnostics.phases.maxRenderMs = Math.max(
+        perfDiagnostics.phases.maxRenderMs,
+        perfDiagnostics.phases.renderMs,
+      );
     } catch (error) {
       if (!renderIssueLogged) {
         renderIssueLogged = true;
