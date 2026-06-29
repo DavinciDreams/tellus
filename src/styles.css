@@ -3672,6 +3672,43 @@ textarea::placeholder {
   border-color: var(--hud-border);
 }
 
+.terrain-brush-size {
+  align-items: center;
+  background: rgb(0 0 0 / 18%);
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 6px;
+  color: var(--hud-text);
+  display: grid;
+  gap: 7px;
+  grid-template-columns: auto minmax(0, 1fr) 32px;
+  min-width: 0;
+  padding: 6px 7px;
+}
+
+.terrain-brush-size span {
+  align-items: center;
+  color: var(--hud-gold-bright);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 900;
+  gap: 4px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.terrain-brush-size input {
+  accent-color: var(--hud-gold-bright);
+  min-width: 0;
+  width: 100%;
+}
+
+.terrain-brush-size output {
+  color: var(--hud-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .terrain-height-actions {
   margin-bottom: 2px;
 }
@@ -3753,13 +3790,24 @@ textarea::placeholder {
 }
 
 .terrain-scatter-tile:hover,
-.terrain-scatter-tile:focus-within {
+.terrain-scatter-tile:focus-within,
+.terrain-scatter-tile.active {
   border-color: var(--hud-border);
   background: var(--hud-bg-soft);
 }
 
+.terrain-scatter-tile.active {
+  box-shadow: 0 0 0 1px rgb(159 247 184 / 42%) inset;
+}
+
+.terrain-scatter-tile.active.multi {
+  box-shadow: 0 0 0 1px rgb(255 232 132 / 48%) inset;
+}
+
 button.terrain-scatter-tile {
   cursor: pointer;
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .terrain-scatter-place,
@@ -3779,8 +3827,10 @@ button.terrain-scatter-tile {
 }
 
 .terrain-scatter-burst {
-  display: grid;
-  place-items: center;
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
+  justify-content: center;
   min-height: 19px;
   border: 1px solid rgb(255 232 132 / 28%);
   border-radius: 4px;
@@ -3791,6 +3841,18 @@ button.terrain-scatter-tile {
 .terrain-scatter-place:hover .terrain-scatter-label,
 .terrain-scatter-burst:hover {
   color: #fff6b7;
+}
+
+.terrain-scatter-burst span {
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.terrain-scatter-tile.active.multi .terrain-scatter-burst {
+  border-color: rgb(255 232 132 / 56%);
+  color: #fff6b7;
+  background: rgb(255 232 132 / 16%);
 }
 
 .terrain-scatter-emoji {

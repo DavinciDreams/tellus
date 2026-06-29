@@ -132,8 +132,8 @@ const GRASS_BY_PAINT: Record<string, { accept: number; tint: number; tall: numbe
   beach: { accept: 0.1, tint: 0xb9c46a, tall: 0.55 },
   rock: { accept: 0.05, tint: 0x7d9a55, tall: 0.6 },
   snow: { accept: 0.04, tint: 0xa9c9a0, tall: 0.5 },
-  stone: { accept: 0.015, tint: 0x76866d, tall: 0.35 },
-  brick: { accept: 0.01, tint: 0x8a7a55, tall: 0.3 },
+  stone: { accept: 0, tint: 0x76866d, tall: 0.35 },
+  brick: { accept: 0, tint: 0x8a7a55, tall: 0.3 },
 };
 
 const FLOWER_PALETTE = [0xffffff, 0xffd7e8, 0xffe9a8, 0xc9b8ff, 0xffb0a0, 0x9fd8ff];
@@ -601,9 +601,12 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
         ? { tpl: treeTpls.conifer, scale: 5.5 + r2 * 3.2 }
         : { tpl: treeTpls.broadleaf, scale: 4.6 + r2 * 2.6 };
     }
-    if (paint === "gravel" || paint === "stone" || paint === "brick") {
-      if (r1 > 0.08) return null;
-      return { tpl: treeTpls.deadtree, scale: 3.4 + r2 * 2.2 };
+    if (paint === "stone" || paint === "brick") return null;
+    if (paint === "gravel") {
+      if (r1 > 0.12) return null;
+      return r2 < 0.62
+        ? { tpl: treeTpls.pine, scale: 6.2 + r2 * 3.4 }
+        : { tpl: treeTpls.conifer, scale: 5.0 + r2 * 2.8 };
     }
     if (meadowish) {
       const accept = paint === "flowers" ? 0.14 : 0.34;
@@ -678,7 +681,9 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
           if (isExcluded(x, z, h)) continue;
           const paint = samplePaint(x, z);
           const accept =
-            paint === "rock" ? 0.55 : paint === "dirt" ? 0.22 : paint === "beach" ? 0.18 : paint === "snow" ? 0.2 : 0.07;
+            paint === "stone" || paint === "brick"
+              ? 0
+              : paint === "rock" ? 0.55 : paint === "dirt" ? 0.22 : paint === "beach" ? 0.18 : paint === "snow" ? 0.2 : 0.07;
           if (rng() > accept) continue;
           const isBoulder = (paint === "rock" || paint === "dirt") && rng() < 0.16;
           tintColor.setHex(paint === "snow" ? 0xc9cdd4 : 0x8d8a84);

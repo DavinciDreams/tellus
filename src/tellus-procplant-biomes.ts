@@ -178,23 +178,17 @@ const PAINT_BIOMES: Record<TerrainPaintKind, ProcPlantBiomeCandidate[]> = {
     candidate("redwoodSpire", { density: 0.12, scale: 7.0, weight: 1, treeBackend: { kind: "lsystem", species: "douglasFir", leafScaleMultiplier: 2.4, maxLeaves: 180, maxStems: 44, maxBranchDepth: 2 }, environment: { light: 0.64, moisture: 0.48, crowding: 0.14, biomeWarmth: 0.2 } }),
     candidate("furGrass", { density: 0.16, scale: 0.8, weight: 1, environment: { light: 0.62, moisture: 0.34, crowding: 0.12, biomeWarmth: 0.18 } }),
   ],
-  stone: [
-    candidate("phiFern", { secondary: "furGrass", hybrid: 0.04, density: 0.12, scale: 0.8, weight: 2, environment: { light: 0.58, moisture: 0.36, crowding: 0.2, biomeWarmth: 0.52 } }),
-    candidate("vincaVine", { density: 0.08, scale: 0.9, weight: 1, environment: { light: 0.48, moisture: 0.42, crowding: 0.24, biomeWarmth: 0.56 } }),
-  ],
+  stone: [],
   gravel: [
+    candidate("alpineFir", { density: 0.14, scale: 4.8, weight: 3, treeBackend: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 2.6, maxLeaves: 140, maxStems: 36, maxBranchDepth: 2 }, environment: { light: 0.72, moisture: 0.3, crowding: 0.12, biomeWarmth: 0.34 } }),
     candidate("furGrass", { density: 0.1, scale: 0.75, weight: 2, environment: { light: 0.7, moisture: 0.28, crowding: 0.1, biomeWarmth: 0.52 } }),
-    candidate("vincaVine", { density: 0.06, scale: 0.75, weight: 1, environment: { light: 0.56, moisture: 0.34, crowding: 0.1, biomeWarmth: 0.52 } }),
   ],
   "jungle-moss": [
     candidate("phiFern", { secondary: "vincaVine", hybrid: 0.3, density: 0.74, scale: 1.2, weight: 3, environment: { light: 0.35, moisture: 0.92, crowding: 0.76, biomeWarmth: 0.84 } }),
     candidate("understoryShrub", { density: 0.42, scale: 2.4, weight: 2, environment: { light: 0.38, moisture: 0.86, crowding: 0.72, biomeWarmth: 0.82 } }),
     candidate("foldedPalm", { density: 0.2, scale: 3.8, weight: 1, environment: { light: 0.5, moisture: 0.84, crowding: 0.58, biomeWarmth: 0.9 } }),
   ],
-  brick: [
-    candidate("vincaVine", { density: 0.08, scale: 0.85, weight: 2, environment: { light: 0.52, moisture: 0.32, crowding: 0.14, biomeWarmth: 0.55 } }),
-    candidate("phiFern", { density: 0.06, scale: 0.72, weight: 1, environment: { light: 0.58, moisture: 0.3, crowding: 0.14, biomeWarmth: 0.55 } }),
-  ],
+  brick: [],
 };
 
 const TREE_BACKEND_BY_PRESET: Partial<Record<string, ProcPlantTreeBackend>> = {

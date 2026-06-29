@@ -53,6 +53,9 @@ describe("procplant vegetation", () => {
     expect(["daylilyFlower", "foxgloveSpike", "laceUmbel", "hillCherry"]).toContain(flowers?.primary);
     expect(beach?.primary).toBe("foldedPalm");
     expect(beach?.scale).toBeGreaterThan(2);
+    expect(biomePatchForPaint("stone", 1234)).toBeNull();
+    expect(biomePatchForPaint("brick", 1234)).toBeNull();
+    expect(biomePatchForPaint("gravel", 1234)).toBeTruthy();
     expect(biomePatchForPaint(null, 1234)).toBeNull();
 
     const genome = genomeForBiomePatch(flowers!);
@@ -243,10 +246,11 @@ describe("procplant vegetation", () => {
 
   it("renders manual procplant placements through the chunked vegetation system", () => {
     const scene = new THREE.Scene();
+    let height = 1;
     const vegetation = createProcPlantVegetation({
       scene,
       worldId: "chunked-test",
-      sampleHeight: () => 1,
+      sampleHeight: () => height,
       samplePaint: () => "meadow",
       bounds: { minX: -20, maxX: 20, minZ: -20, maxZ: 20 },
       densityMultiplier: 0,
@@ -269,6 +273,21 @@ describe("procplant vegetation", () => {
     expect(stats.manualPlants).toBe(1);
     expect(stats.plants).toBeGreaterThanOrEqual(1);
     expect(scene.children.some((child) => child.name === "tellus-procplant-vegetation")).toBe(true);
+
+    height = 2;
+    expect(
+      vegetation.placeManualPlant({
+        id: "manual-daylily-2",
+        presetId: "daylilyFlower",
+        seed: 43,
+        x: 2,
+        z: 2,
+        scale: 1,
+      }),
+    ).toBe(true);
+    vegetation.update(0, 0, 1, 60, 16);
+    expect(vegetation.stats().manualPlants).toBe(2);
+    expect(vegetation.stats().plants).toBeGreaterThanOrEqual(2);
 
     vegetation.dispose();
   });

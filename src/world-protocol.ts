@@ -165,6 +165,7 @@ export type WorldAction =
       visitorId: string;
       mode: TerrainEditMode;
       center: Vec3;
+      radius?: number;
     }
   | {
       type: "generation.request";
@@ -660,7 +661,11 @@ export function isWorldAction(value: unknown): value is WorldAction {
     return isTellusTerrainState(value.terrain);
   }
   if (value.type === "terrain.sculpt") {
-    return typeof value.mode === "string" && isVec3(value.center);
+    return (
+      typeof value.mode === "string" &&
+      isVec3(value.center) &&
+      (value.radius === undefined || (typeof value.radius === "number" && Number.isFinite(value.radius)))
+    );
   }
   if (value.type === "generation.request") {
     return isRecord(value.request) && typeof value.request.prompt === "string";
