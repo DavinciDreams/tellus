@@ -10,6 +10,7 @@ import {
   createChunkTerrainGeometry,
 } from "./tellus-chunk-renderer";
 import { largeWorldBaseHeight } from "./tellus-large-world-terrain";
+import { terrainPaintCode } from "./tellus-terrain";
 import {
   CHUNK_LOAD_RADIUS,
   CHUNK_SEGMENTS,
@@ -208,6 +209,38 @@ describe("createChunkRenderer lifecycle", () => {
     r.dispose();
   });
 
+  it("prefetches ahead without evicting the current center ring", async () => {
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    r.update(CHUNK_SPAN * 10 + 1, CHUNK_SPAN * 10 + 1);
+    await resolveAll();
+    r.flush();
+    expect(r.sampleHeight(CHUNK_SPAN * 10 + 1, CHUNK_SPAN * 10 + 1)).not.toBeNull();
+
+    r.prefetch(CHUNK_SPAN * 20 + 1, CHUNK_SPAN * 20 + 1, 1);
+    expect(r.stats().center).toEqual({ cx: 10, cz: 10 });
+    expect(r.sampleHeight(CHUNK_SPAN * 10 + 1, CHUNK_SPAN * 10 + 1)).not.toBeNull();
+    r.dispose();
+  });
+
+  it("can render a provisional base chunk immediately while authoritative data is still pending", async () => {
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    const x = CHUNK_SPAN * 12 + 1;
+    const z = CHUNK_SPAN * 12 + 1;
+    expect(r.sampleHeight(x, z)).toBeNull();
+    expect(r.ensureBaseChunk(x, z)).toBe(true);
+    expect(r.sampleHeight(x, z)).not.toBeNull();
+    expect(r.stats().provisional).toBe(1);
+
+    r.update(x, z);
+    await resolveAll();
+    r.flush();
+    expect(r.stats().provisional).toBe(0);
+    expect(r.sampleHeight(x, z)).not.toBeNull();
+    r.dispose();
+  });
+
   it("retries failed chunk fetches even when the player remains in the same center chunk", async () => {
     let now = 1_000;
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -321,6 +354,95 @@ describe("createChunkRenderer sampleHeight (walk the sculpted chunk height)", ()
     expect(r.samplePaint(x, z)).toBeNull();
     r.applyLocalPaint("stone", x, z, 8);
     expect(r.samplePaint(x, z)).toBe("stone");
+    r.dispose();
+  });
+
+  it("keeps prior local paint when a later chunk reload only contains the new stroke", async () => {
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    await loadRing(0, 0, r);
+    const gravelX = CHUNK_SPAN * 0.25;
+    const gravelZ = CHUNK_SPAN * 0.25;
+    const dirtX = CHUNK_SPAN * 0.72;
+    const dirtZ = CHUNK_SPAN * 0.72;
+    r.applyLocalPaint("gravel", gravelX, gravelZ, 6);
+    expect(r.samplePaint(gravelX, gravelZ)).toBe("gravel");
+
+    const dirtPaint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
+    const dirtXi = Math.round((dirtX / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    const dirtZi = Math.round((dirtZ / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    dirtPaint[dirtZi * CHUNK_VERTEX_COUNT + dirtXi] = terrainPaintCode("dirt");
+    overrides.set("0,0", { revision: 2, paint: dirtPaint });
+    r.reloadChunk(0, 0);
+    r.flush();
+    await new Promise((res) => setTimeout(res, 0));
+    r.flush();
+
+    expect(r.samplePaint(gravelX, gravelZ)).toBe("gravel");
+    expect(r.samplePaint(dirtX, dirtZ)).toBe("dirt");
+    r.dispose();
+  });
+
+  it("keeps already-loaded paint when a new local stroke reloads as a partial server grid", async () => {
+    const gravelPaint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
+    const gravelX = CHUNK_SPAN * 0.25;
+    const gravelZ = CHUNK_SPAN * 0.25;
+    const gravelXi = Math.round((gravelX / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    const gravelZi = Math.round((gravelZ / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    gravelPaint[gravelZi * CHUNK_VERTEX_COUNT + gravelXi] = terrainPaintCode("gravel");
+    overrides.set("0,0", { revision: 1, paint: gravelPaint });
+
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    await loadRing(0, 0, r);
+    expect(r.samplePaint(gravelX, gravelZ)).toBe("gravel");
+
+    const dirtX = CHUNK_SPAN * 0.72;
+    const dirtZ = CHUNK_SPAN * 0.72;
+    r.applyLocalPaint("dirt", dirtX, dirtZ, 6);
+    const dirtPaint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
+    const dirtXi = Math.round((dirtX / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    const dirtZi = Math.round((dirtZ / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    dirtPaint[dirtZi * CHUNK_VERTEX_COUNT + dirtXi] = terrainPaintCode("dirt");
+    overrides.set("0,0", { revision: 2, paint: dirtPaint });
+    r.reloadChunk(0, 0);
+    r.flush();
+    await new Promise((res) => setTimeout(res, 0));
+    r.flush();
+
+    expect(r.samplePaint(gravelX, gravelZ)).toBe("gravel");
+    expect(r.samplePaint(dirtX, dirtZ)).toBe("dirt");
+    r.dispose();
+  });
+
+  it("does not let a later snow reload zero out older gravel while preserving dirt", async () => {
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    await loadRing(0, 0, r);
+    const gravelX = CHUNK_SPAN * 0.22;
+    const gravelZ = CHUNK_SPAN * 0.22;
+    const dirtX = CHUNK_SPAN * 0.48;
+    const dirtZ = CHUNK_SPAN * 0.48;
+    const snowX = CHUNK_SPAN * 0.74;
+    const snowZ = CHUNK_SPAN * 0.74;
+    r.applyLocalPaint("gravel", gravelX, gravelZ, 4);
+    r.applyLocalPaint("dirt", dirtX, dirtZ, 4);
+    expect(r.samplePaint(gravelX, gravelZ)).toBe("gravel");
+    expect(r.samplePaint(dirtX, dirtZ)).toBe("dirt");
+
+    const snowPaint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
+    const snowXi = Math.round((snowX / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    const snowZi = Math.round((snowZ / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    snowPaint[snowZi * CHUNK_VERTEX_COUNT + snowXi] = terrainPaintCode("snow");
+    overrides.set("0,0", { revision: 2, paint: snowPaint });
+    r.reloadChunk(0, 0);
+    r.flush();
+    await new Promise((res) => setTimeout(res, 0));
+    r.flush();
+
+    expect(r.samplePaint(gravelX, gravelZ)).toBe("gravel");
+    expect(r.samplePaint(dirtX, dirtZ)).toBe("dirt");
+    expect(r.samplePaint(snowX, snowZ)).toBe("snow");
     r.dispose();
   });
 });

@@ -42,6 +42,8 @@ export interface ProcPlantVegetationOptions {
   isExcluded?: (x: number, z: number, height: number) => boolean;
   viewMode?: () => "first" | "third";
   fullDetailLod?: boolean;
+  shouldPauseBuild?: () => boolean;
+  shouldDeferBuild?: () => boolean;
 }
 
 export interface ProcPlantVegetationStats {
@@ -67,6 +69,7 @@ export interface ProcPlantVegetationStats {
   totalBuildMs: number;
   builtLastUpdate: number;
   buildPausedForMotion: boolean;
+  buildDeferred: boolean;
 }
 
 export interface ProcPlantVegetationSystem {
@@ -102,6 +105,9 @@ interface ActiveChunk {
   cz: number;
   lod: 0 | 1 | 2;
   rev: number;
+  styleRev: number;
+  styleCenterCx: number;
+  styleCenterCz: number;
   lastNeededMs: number;
   group: THREE.Group;
   stats: ChunkStats;
@@ -130,6 +136,12 @@ const THIRD_PERSON_MAX_RING = 4;
 const MAX_LOD0_PLANTS = 3;
 const MAX_LOD1_PLANTS = 3;
 const MAX_LOD2_PLANTS = 4;
+const PROC_TREE_NEAR_SCALE = 1.85;
+const PROC_TREE_MID_SCALE = 1.45;
+const PROC_TREE_FAR_SCALE = 1.15;
+const PROC_TREE_DETAIL_DISTANCE = 58;
+const PROC_TREE_DETAIL_DISTANCE_THIRD = 72;
+const PROCPLANT_RENDER_STYLE_REVISION = 3;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
 const LOW_FPS_BUILD_BUDGET = 1;
 const NORMAL_BUILD_BUDGET = 2;
@@ -207,6 +219,17 @@ const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color
 };
 
 const cheapTreeTemplateCache = new Map<string, ProcPlantTemplate>();
+const templateMinYCache = new WeakMap<ProcPlantTemplate, number>();
+
+const templateMinY = (template: ProcPlantTemplate): number => {
+  const cached = templateMinYCache.get(template);
+  if (cached !== undefined) return cached;
+  let minY = Infinity;
+  for (let i = 1; i < template.pos.length; i += 3) minY = Math.min(minY, template.pos[i] ?? 0);
+  const y = Number.isFinite(minY) ? minY : 0;
+  templateMinYCache.set(template, y);
+  return y;
+};
 
 const buildCheapTreeTemplate = (species: string): ProcPlantTemplate => {
   const cached = cheapTreeTemplateCache.get(species);
@@ -421,6 +444,7 @@ const emptyStats = (): ProcPlantVegetationStats => ({
   totalBuildMs: 0,
   builtLastUpdate: 0,
   buildPausedForMotion: false,
+  buildDeferred: false,
 });
 
 const isFinitePlacementNumber = (value: unknown): value is number =>
@@ -478,6 +502,7 @@ export function createProcPlantVegetation(
   let maxBuildMs = 0;
   let totalBuildMs = 0;
   let builtLastUpdate = 0;
+  let buildDeferred = false;
   let lastPlayerX: number | null = null;
   let lastPlayerZ: number | null = null;
   let lastPlayerMovedAt = Number.NEGATIVE_INFINITY;
@@ -597,6 +622,9 @@ export function createProcPlantVegetation(
     disposeGroup(chunk.group);
     chunk.stats = { plants: 0, instances: 0, stemTriangles: 0, organDraws: 0 };
     chunk.rev = terrainRev;
+    chunk.styleRev = PROCPLANT_RENDER_STYLE_REVISION;
+    chunk.styleCenterCx = Math.floor((lastPlayerX ?? chunk.cx * chunkSize) / chunkSize);
+    chunk.styleCenterCz = Math.floor((lastPlayerZ ?? chunk.cz * chunkSize) / chunkSize);
     const seed = procPlantChunkSeed(options.worldId, chunk.cx, chunk.cz, 0);
     const rand = mulberry32(seed);
     const plantCap = chunk.lod === 0
@@ -634,28 +662,53 @@ export function createProcPlantVegetation(
       if (!patch || rand() > patch.density * densityMultiplier * lodDensity) continue;
       const genome = genomeForBiomePatch(patch);
       const treeBackend = treeBackendForBiomePatch(patch);
+      const distanceToPlayer = Math.hypot(x - (lastPlayerX ?? x), z - (lastPlayerZ ?? z));
+      const detailDistance = viewMode() === "third" ? PROC_TREE_DETAIL_DISTANCE_THIRD : PROC_TREE_DETAIL_DISTANCE;
+      const useDetailedTree = distanceToPlayer <= detailDistance;
+      const treeScaleMultiplier = chunk.lod === 0
+        ? PROC_TREE_NEAR_SCALE
+        : chunk.lod === 1
+          ? PROC_TREE_MID_SCALE
+          : PROC_TREE_FAR_SCALE;
       if (treeBackend?.kind === "lsystem") {
-        const template = buildBiomeTreeTemplate(treeBackend.species, patch.seed ^ i, {
-          ...foliageDefaultsForTreeSpecies(treeBackend.species),
-          ...treeBackend,
-        });
-        const scale = patch.scale * THREE.MathUtils.lerp(0.86, 1.16, rand());
+        const template = useDetailedTree
+          ? buildBiomeTreeTemplate(treeBackend.species, patch.seed ^ i, {
+              ...foliageDefaultsForTreeSpecies(treeBackend.species),
+              ...treeBackend,
+            })
+          : buildCheapTreeTemplate(treeBackend.species);
+        const scaleMultiplier = fullDetailLod ? PROC_TREE_NEAR_SCALE : useDetailedTree ? treeScaleMultiplier : PROC_TREE_FAR_SCALE;
+        const scale = patch.scale * scaleMultiplier * THREE.MathUtils.lerp(0.9, 1.24, rand());
         const matrix = new THREE.Matrix4()
           .makeRotationY(rand() * Math.PI * 2)
           .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
-          .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02, z));
+          .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02 - templateMinY(template) * scale, z));
         stemTemplates.push({ template, matrix });
         chunk.stats.plants++;
         chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
       const env = environmentForBiomePatch(patch);
+      const useCheapDistantTree = !useDetailedTree && patch.scale >= 1.2;
+      if (useCheapDistantTree) {
+        const template = buildCheapTreeTemplate(genome.weberPenn?.species ?? genome.id);
+        const scale = patch.scale * PROC_TREE_FAR_SCALE * THREE.MathUtils.lerp(0.9, 1.2, rand());
+        const matrix = new THREE.Matrix4()
+          .makeRotationY(rand() * Math.PI * 2)
+          .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
+          .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02 - templateMinY(template) * scale, z));
+        stemTemplates.push({ template, matrix });
+        chunk.stats.plants++;
+        chunk.stats.stemTriangles += template.idx.length / 3;
+        continue;
+      }
       const built = buildProcPlantInstancedParts(genome, patch.seed ^ i, env);
-      const scale = patch.scale * THREE.MathUtils.lerp(0.82, 1.22, rand());
+      const scaleBase = patch.scale >= 1.2 ? patch.scale * treeScaleMultiplier : patch.scale;
+      const scale = scaleBase * THREE.MathUtils.lerp(0.82, 1.22, rand());
       const matrix = new THREE.Matrix4()
         .makeRotationY(rand() * Math.PI * 2)
         .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
-        .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02, z));
+        .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02 - templateMinY(built.stems) * scale, z));
       stemTemplates.push({ template: built.stems, matrix });
       chunk.stats.plants++;
       chunk.stats.stemTriangles += built.stats.stemTriangles;
@@ -691,7 +744,11 @@ export function createProcPlantVegetation(
       const matrix = new THREE.Matrix4()
         .makeRotationY(((placement.seed >>> 0) / 4294967296) * Math.PI * 2)
         .premultiply(new THREE.Matrix4().makeScale(placement.scale, placement.scale, placement.scale))
-        .premultiply(new THREE.Matrix4().makeTranslation(placement.x, height + 0.02, placement.z));
+        .premultiply(new THREE.Matrix4().makeTranslation(
+          placement.x,
+          height + 0.02 - templateMinY(built.stems) * placement.scale,
+          placement.z,
+        ));
       stemTemplates.push({ template: built.stems, matrix });
       chunk.stats.plants++;
       chunk.stats.stemTriangles += built.stats.stemTriangles;
@@ -713,8 +770,8 @@ export function createProcPlantVegetation(
     if (stemTemplates.length > 0) {
       const geometry = templateToGeometry(stemTemplates);
       const mesh = new THREE.Mesh(geometry, stemMaterial.clone());
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
       chunk.group.add(mesh);
     }
 
@@ -727,8 +784,8 @@ export function createProcPlantVegetation(
       });
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       mesh.instanceMatrix.needsUpdate = true;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
       chunk.group.add(mesh);
       chunk.stats.organDraws++;
     }
@@ -738,6 +795,7 @@ export function createProcPlantVegetation(
     if (disposed) return;
     const updateStartedAt = performance.now();
     builtLastUpdate = 0;
+    buildDeferred = options.shouldDeferBuild?.() ?? false;
     if (
       lastPlayerX === null ||
       lastPlayerZ === null ||
@@ -746,6 +804,12 @@ export function createProcPlantVegetation(
       lastPlayerMovedAt = nowMs;
       lastPlayerX = px;
       lastPlayerZ = pz;
+    }
+    if (buildDeferred) {
+      buildPausedForMotion = false;
+      lastUpdateMs = performance.now() - updateStartedAt;
+      maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
+      return;
     }
     if (terrainDirty && rebuildQueue.length > 0) {
       terrainDirty = false;
@@ -777,6 +841,9 @@ export function createProcPlantVegetation(
             cz,
             lod,
             rev: -1,
+            styleRev: 0,
+            styleCenterCx: Number.NaN,
+            styleCenterCz: Number.NaN,
             lastNeededMs: nowMs,
             group: new THREE.Group(),
             stats: { plants: 0, instances: 0, stemTriangles: 0, organDraws: 0 },
@@ -791,7 +858,12 @@ export function createProcPlantVegetation(
           chunk.lod = lod;
           chunk.rev = -1;
         }
-        if (chunk.rev !== terrainRev) enqueue(key);
+        if (
+          chunk.rev !== terrainRev ||
+          chunk.styleRev !== PROCPLANT_RENDER_STYLE_REVISION ||
+          chunk.styleCenterCx !== centerCx ||
+          chunk.styleCenterCz !== centerCz
+        ) enqueue(key);
       }
     }
     for (const [key, chunk] of active) {
@@ -803,7 +875,8 @@ export function createProcPlantVegetation(
       chunksEvicted++;
     }
     prioritizeRebuildQueue(centerCx, centerCz);
-    const stationary = chunksBuilt === 0 || nowMs - lastPlayerMovedAt > 650;
+    const movementIntentActive = options.shouldPauseBuild?.() ?? false;
+    const stationary = !movementIntentActive && (chunksBuilt === 0 || nowMs - lastPlayerMovedAt > 650);
     buildPausedForMotion = !stationary && rebuildQueue.length > 0;
     if (buildPausedForMotion) {
       lastUpdateMs = performance.now() - updateStartedAt;
@@ -855,6 +928,7 @@ export function createProcPlantVegetation(
     out.totalBuildMs = Math.round(totalBuildMs);
     out.builtLastUpdate = builtLastUpdate;
     out.buildPausedForMotion = buildPausedForMotion;
+    out.buildDeferred = buildDeferred;
     for (const chunk of active.values()) {
       out.plants += chunk.stats.plants;
       out.instances += chunk.stats.instances;

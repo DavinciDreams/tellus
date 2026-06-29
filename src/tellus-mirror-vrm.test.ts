@@ -2,8 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
   buildProceduralModel,
-  liveMirrorCount,
-  MAX_LIVE_MIRRORS,
   MIRROR_ARCHETYPE_ID,
   makeProceduralModelUrl,
   parseProceduralModelUrl,
@@ -38,47 +36,37 @@ describe("mirror procedural asset", () => {
     expect(parsed?.archetypeId).toBe("mirror");
   });
 
-  it("builds a live Reflector mirror on the WebGL path", () => {
+  it("uses static glass on the WebGL path", () => {
     resetLiveMirrors();
     const model = buildProceduralModel("procedural://mirror", false);
     expect(model).not.toBeNull();
-    expect(hasReflector(model!)).toBe(true);
-    expect(hasGlass(model!)).toBe(false);
-    expect(liveMirrorCount()).toBe(1);
-    expect(model!.userData.mirrorReflector).toBeTruthy();
+    expect(hasReflector(model!)).toBe(false);
+    expect(hasGlass(model!)).toBe(true);
+    expect(model!.userData.mirrorReflector).toBeFalsy();
+    expect(model!.userData.disposeMirror).toBeFalsy();
   });
 
-  it("uses static glass on the WebGPU path while live TSL reflectors are disabled", () => {
+  it("uses static glass on the WebGPU path", () => {
     resetLiveMirrors();
     const model = buildProceduralModel("procedural://mirror", true);
     expect(model).not.toBeNull();
     expect(hasReflector(model!)).toBe(false);
     expect(hasGlass(model!)).toBe(true);
-    expect(liveMirrorCount()).toBe(0);
     expect(model!.userData.mirrorReflector).toBeFalsy();
+    expect(model!.userData.disposeMirror).toBeFalsy();
   });
 
-  it("caps live mirrors and renders extras as glass", () => {
+  it("keeps every mirror static glass", () => {
     resetLiveMirrors();
     const models: THREE.Object3D[] = [];
-    for (let i = 0; i < MAX_LIVE_MIRRORS + 2; i++) {
+    for (let i = 0; i < 4; i++) {
       const model = buildProceduralModel("procedural://mirror", false);
       expect(model).not.toBeNull();
       models.push(model!);
     }
-    expect(liveMirrorCount()).toBe(MAX_LIVE_MIRRORS);
-    const live = models.filter(hasReflector).length;
-    const glass = models.filter(hasGlass).length;
-    expect(live).toBe(MAX_LIVE_MIRRORS);
-    expect(glass).toBe(2);
-  });
-
-  it("a removed mirror frees its live slot via disposeMirror", () => {
-    resetLiveMirrors();
-    const model = buildProceduralModel("procedural://mirror", false)!;
-    expect(liveMirrorCount()).toBe(1);
-    (model.userData.disposeMirror as () => void)();
-    expect(liveMirrorCount()).toBe(0);
+    expect(models.filter(hasReflector).length).toBe(0);
+    expect(models.filter(hasGlass).length).toBe(4);
+    expect(models.every((model) => !model.userData.mirrorReflector && !model.userData.disposeMirror)).toBe(true);
   });
 });
 

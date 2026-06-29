@@ -274,6 +274,23 @@ function chunkedIslandPoint(x: number, z: number): { cx: number; cz: number; r: 
   return chunkedTemplatePoint(x, z, templateWorldScaleMultiplier(template));
 }
 
+function chunkedIslandOceanShelfHeight(r: number): number {
+  const offshore = Math.max(0, r - CLASSIC_WORLD_RADIUS);
+  return SEA_LEVEL - 0.65 - Math.min(4.2, offshore * 0.055);
+}
+
+function blendChunkedIslandShoreShelf(height: number, r: number, beachStartRatio = 0.96, shelfEndRatio = 1.08): number {
+  const waterline = CLASSIC_WORLD_RADIUS * 1.04;
+  if (r <= waterline) {
+    const beachT = smoothstep(CLASSIC_WORLD_RADIUS * beachStartRatio, waterline, r);
+    const beachFloor = SEA_LEVEL + 0.45 - beachT * 0.24;
+    return Math.max(height, beachFloor);
+  }
+  const shelfT = smoothstep(waterline, CLASSIC_WORLD_RADIUS * shelfEndRatio, r);
+  const nearShelf = SEA_LEVEL - 0.35;
+  return nearShelf * (1 - shelfT) + chunkedIslandOceanShelfHeight(r) * shelfT;
+}
+
 export function usesContinentalChunkedTerrain(
   worldId = runtimeConfig.worldId,
   template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
@@ -296,7 +313,7 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
   const shape = resolveLandShapeConfig(template, runtimeConfig.landShape);
   const { cx, cz, r } = point;
   if (r > CLASSIC_WORLD_RADIUS * 1.08) {
-    return SEA_LEVEL - 0.65 - Math.min(3.8, (r - CLASSIC_WORLD_RADIUS) * 0.035);
+    return chunkedIslandOceanShelfHeight(r);
   }
 
   if (isEvoflowTemplate(template)) {
@@ -318,7 +335,7 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
     const networkHeight = rasterHeight ?? fallbackCanyon;
     const sandyFloor = 2.4 + fbm2(cx * 0.045, cz * 0.045, 4, 503) * 1.4;
     const detail = terrainDetailHeight(shape, cx, cz, r) * 0.32;
-    return sandyFloor + networkHeight * 1.1 + detail + shape.baseOffset;
+    return blendChunkedIslandShoreShelf(sandyFloor + networkHeight * 1.1 + detail + shape.baseOffset, r);
   }
 
   if (template === "ridge") {
@@ -340,7 +357,7 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
       Math.pow(gaussian(cx, cz, 42, 4, 120), 0.52) * 17;
     const shoulder = gaussian(cx, cz, -24, -18, 520) * 3.6 + gaussian(cx, cz, 28, 22, 640) * 2.8;
     const landMask = 1 - smoothstep(CLASSIC_WORLD_RADIUS * 0.9, CLASSIC_WORLD_RADIUS * 1.08, r);
-    return (
+    const height = (
       1.4 +
       Math.pow(Math.max(0, core), 1.7) * (28 + serration * 20 + peakTrain * 34 + clefts) +
       Math.pow(Math.max(0, secondary), 1.45) * (11 + ridgeNoise(along * 0.13, across * 0.09, 461) * 8) +
@@ -348,7 +365,8 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
       summitCaps +
       shoulder -
       smoothstep(36, 70, spineDistance) * 3.2
-    ) * landMask - (1 - landMask) * 2.4;
+    ) * landMask + (1 - landMask) * chunkedIslandOceanShelfHeight(r);
+    return blendChunkedIslandShoreShelf(height, r);
   }
 
   if (template === "low-poly-meadow") {
@@ -364,7 +382,10 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
       gaussian(cx, cz, 18, 34, 560) * 9.2;
     const stepped = Math.floor((fbm2(cx * 0.095, cz * 0.095, 4, 467) + 1) * 9.5) * 1.35;
     const flowerPlateaus = Math.max(0, Math.sin(cx * 0.12) * Math.cos(cz * 0.1)) * 2.2;
-    return (3.2 + broad + stepped + diagonalFacets + cellHeight + flowerPlateaus) * landMask - (1 - landMask) * 2.3;
+    const height =
+      (3.2 + broad + stepped + diagonalFacets + cellHeight + flowerPlateaus) * landMask +
+      (1 - landMask) * chunkedIslandOceanShelfHeight(r);
+    return blendChunkedIslandShoreShelf(height, r);
   }
 
   if (template === "cartoon-hills") {
@@ -381,8 +402,10 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
       gaussian(hx, hz, 38, 38, 260) * 13 +
       gaussian(hx, hz, -44, -32, 250) * 10;
     const toySteps = Math.floor((fbm2(hx * 0.055, hz * 0.055, 3, 431) + 1) * 4) * 1.35;
-    return (4.8 + bubbly + toySteps - softValleys + terrainDetailHeight(shape, cx, cz, r) * 0.12) * landMask -
-      (1 - landMask) * 2.6;
+    const height =
+      (4.8 + bubbly + toySteps - softValleys + terrainDetailHeight(shape, cx, cz, r) * 0.12) * landMask +
+      (1 - landMask) * chunkedIslandOceanShelfHeight(r);
+    return blendChunkedIslandShoreShelf(height, r);
   }
 
   if (template === "realistic-cove") {
@@ -418,8 +441,10 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
       (0.55 + smoothstep(-6, 44, cz) * 0.45);
     const scrubUndulation = fbm2(cx * 0.068 - 11, cz * 0.068 + 4, 5, 727) * 2.4;
     const sandFlat = 2.8 + fbm2(cx * 0.038, cz * 0.038, 4, 727) * 1.1;
-    return (sandFlat + westernHeadland + easternHeadland + backDunes + coastalBluffs + scrubUndulation - coveBasin) * landMask -
-      (1 - landMask) * 2.9;
+    const height =
+      (sandFlat + westernHeadland + easternHeadland + backDunes + coastalBluffs + scrubUndulation - coveBasin) * landMask +
+      (1 - landMask) * chunkedIslandOceanShelfHeight(r);
+    return blendChunkedIslandShoreShelf(height, r, 0.96, 1.08);
   }
 
   if (template === "fantasy-garden") {
@@ -436,8 +461,10 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
       gaussian(cx, cz, 28, -14, 720) * 9.2 +
       gaussian(cx, cz, 18, 34, 520) * 6.6;
     const terraces = Math.sin((cx - cz) * 0.1) * 1.5 + Math.sin((cx + cz) * 0.065) * 1.2;
-    return (4.6 + gardenBowls + flowerBeds + terraces - pathCarve - pond + terrainDetailHeight(shape, cx, cz, r) * 0.25) * landMask -
-      (1 - landMask) * 2.2;
+    const height =
+      (4.6 + gardenBowls + flowerBeds + terraces - pathCarve - pond + terrainDetailHeight(shape, cx, cz, r) * 0.25) * landMask +
+      (1 - landMask) * chunkedIslandOceanShelfHeight(r);
+    return blendChunkedIslandShoreShelf(height, r);
   }
 
   const mountain = Math.max(0, 1 - r / shape.mountain.radius);
@@ -456,7 +483,10 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
   const pond = gaussian(cx, cz, shape.pond.x, shape.pond.z, shape.pond.falloff) * shape.pond.depth;
   const profile = templateProfileHeight(template, cx, cz, r);
   const detail = terrainDetailHeight(shape, cx, cz, r);
-  return mound + shoulder + southernRise + ridge + profile + detail - rimDrop - pond + shape.baseOffset;
+  return blendChunkedIslandShoreShelf(
+    mound + shoulder + southernRise + ridge + profile + detail - rimDrop - pond + shape.baseOffset,
+    r,
+  );
 }
 
 function continentalBaseHeight(x: number, z: number): number {
