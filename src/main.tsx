@@ -3632,7 +3632,7 @@ function createTellusWorld(
       visitorId,
       mode,
       center: { x: center.x, y: 0, z: center.z },
-      radius: isTerrainPaintMode(mode) ? terrainPaintBrushRadius : undefined,
+      radius: terrainPaintBrushRadius,
     };
     if (worldSocket?.readyState === WebSocket.OPEN) {
       worldSocket.send(JSON.stringify(action));

@@ -183,6 +183,27 @@ describe("world protocol validators", () => {
     ).toBe(true);
   });
 
+  it("accepts terrain sculpt actions with finite brush radius", () => {
+    expect(
+      isWorldAction({
+        type: "terrain.sculpt",
+        visitorId: "visitor-1",
+        mode: "raise",
+        center: { x: 1, y: 0, z: 2 },
+        radius: 8,
+      }),
+    ).toBe(true);
+    expect(
+      isWorldAction({
+        type: "terrain.sculpt",
+        visitorId: "visitor-1",
+        mode: "raise",
+        center: { x: 1, y: 0, z: 2 },
+        radius: Number.NaN,
+      }),
+    ).toBe(false);
+  });
+
   it("accepts presence updates with and without an avatarId", () => {
     const base = {
       type: "presence.update",
