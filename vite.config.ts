@@ -112,10 +112,34 @@ export default defineConfig(({ mode }) => {
 
   return {
     build: {
+      // Split 3D engine/runtime code into cacheable vendor chunks; Rapier's physics
+      // runtime is intentionally larger than Vite's generic 500 KB web-app default.
+      chunkSizeWarningLimit: 2500,
       rollupOptions: {
         input: {
           main: "index.html",
           agentView: "agent-view.html",
+        },
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return undefined;
+            if (id.includes("@dimforge/rapier3d-compat")) return "vendor-rapier";
+            if (id.includes("@pixiv/three-vrm")) return "vendor-vrm";
+            if (id.includes("three")) return "vendor-three";
+            return "vendor";
+          },
+        },
+        onwarn(warning, warn) {
+          const message =
+            typeof warning.message === "string" ? warning.message : "";
+          if (
+            warning.code === "IMPORT_IS_UNDEFINED" &&
+            message.includes("tslFn") &&
+            message.includes("@pixiv/three-vrm")
+          ) {
+            return;
+          }
+          warn(warning);
         },
       },
     },
