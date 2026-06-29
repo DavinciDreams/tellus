@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AVATAR_CATALOG,
+  avatarThumbnailUrl,
   catalogEntryById,
   loadAvatarCatalog,
   resetAvatarCatalogForTests,
@@ -51,7 +52,7 @@ describe("avatar catalog loading", () => {
     expect(withStore.some((entry) => entry.id === "vrm:vrm-1")).toBe(true);
   });
 
-  it("classifies animated store assets with VRM variants as VRM avatars", async () => {
+  it("prefers VRM avatars over animated GLB variants when a VRM exists", async () => {
     runtimeConfig.worldApiBase = "https://hyades.example";
     vi.stubGlobal(
       "fetch",
@@ -85,5 +86,74 @@ describe("avatar catalog loading", () => {
     const staleGlbSelection = catalogEntryById("glb:7cddee11cafefeed");
     expect(staleGlbSelection?.kind).toBe("vrm");
     expect(staleGlbSelection?.id).toBe("vrm:7cddee11cafefeed");
+  });
+
+  it("does not cap store-loaded VRM avatars before the drawer can page them", async () => {
+    runtimeConfig.worldApiBase = "https://hyades.example";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/api/assets/vrm-models")) {
+          return new Response(
+            JSON.stringify({
+              avatars: Array.from({ length: 60 }, (_, index) => ({
+                id: `vrm-${index}`,
+                model_id: `vrm-${index}`,
+                name: `VRM Avatar ${index}`,
+                file_format: "vrm",
+              })),
+            }),
+          );
+        }
+        if (url.endsWith("/api/assets/animated-models")) {
+          return new Response(JSON.stringify({ models: [] }));
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    const catalog = await loadAvatarCatalog();
+
+    expect(catalog.filter((entry) => entry.id.startsWith("vrm:vrm-"))).toHaveLength(60);
+  });
+
+  it("normalizes store thumbnail metadata through the Tellus asset proxy", async () => {
+    runtimeConfig.worldApiBase = "https://hyades.example";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/api/assets/vrm-models")) {
+          return new Response(
+            JSON.stringify({
+              avatars: [
+                {
+                  id: "vrm-thumb",
+                  model_id: "vrm-thumb",
+                  name: "VRM With Thumbnail",
+                  file_format: "vrm",
+                  thumbnail_url: "/api/model/vrm-thumb/thumbnail",
+                  processing_state: {
+                    media_capture_ready: true,
+                    needs_thumbnail: false,
+                  },
+                },
+              ],
+            }),
+          );
+        }
+        if (url.endsWith("/api/assets/animated-models")) {
+          return new Response(JSON.stringify({ models: [] }));
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    const catalog = await loadAvatarCatalog();
+    const entry = catalog.find((item) => item.id === "vrm:vrm-thumb");
+
+    expect(entry?.mediaCaptureReady).toBe(true);
+    expect(entry ? avatarThumbnailUrl(entry) : undefined).toBe(
+      "https://hyades.example/api/assets/model/vrm-thumb/thumbnail",
+    );
   });
 });

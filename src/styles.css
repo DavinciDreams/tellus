@@ -2731,6 +2731,23 @@ textarea::placeholder {
   gap: 8px;
 }
 
+.asset-avatar-load-more {
+  width: 100%;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(255 255 255 / 6%);
+  color: var(--hud-text);
+  cursor: pointer;
+  padding: 8px 10px;
+  font: 800 12px/1 system-ui, sans-serif;
+}
+
+.asset-avatar-load-more:hover,
+.asset-avatar-load-more:focus-visible {
+  border-color: var(--hud-border);
+  background: rgb(225 189 85 / 10%);
+  outline: none;
+}
+
 .asset-avatar-scale {
   display: grid;
   gap: 6px;
@@ -3173,6 +3190,23 @@ textarea::placeholder {
 .asset-search-field input::placeholder {
   color: var(--hud-muted);
   opacity: 0.8;
+}
+
+.asset-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  color: var(--hud-muted);
+  font: 800 11px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.asset-filter-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--hud-gold-bright);
 }
 
 .asset-proc-panel {

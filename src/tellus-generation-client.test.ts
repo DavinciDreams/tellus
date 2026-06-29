@@ -64,6 +64,109 @@ describe("asset library browsing", () => {
     ]);
   });
 
+  it("populates the indoor furniture browse tab from furniture and props categories", async () => {
+    runtimeConfig.worldApiBase = "https://hyades.example";
+    const fetchMock = vi.fn(async (url: string) => {
+      const category = new URL(url).searchParams.get("category");
+      return new Response(
+        JSON.stringify({
+          has_next: category === "props",
+          total: category === "props" ? 2 : 1,
+          models:
+            category === "props"
+              ? [
+                  { id: "lamp-1", name: "Brass Desk Lamp", viewable: true },
+                  { id: "chair-1", name: "Duplicate Chair", viewable: true },
+                ]
+              : [{ id: "chair-1", name: "Velvet Lounge Chair", viewable: true }],
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await browseAssetLibrary("", 1, "newest", 24, "furniture");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://hyades.example/api/assets/models/browse?page=1&per_page=24&sort=newest&category=furniture",
+      { cache: "no-store" },
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://hyades.example/api/assets/models/browse?page=1&per_page=24&sort=newest&category=props",
+      { cache: "no-store" },
+    );
+    expect(result.hasNext).toBe(true);
+    expect(result.total).toBe(3);
+    expect(result.models.map((model) => model.id)).toEqual(["chair-1", "lamp-1"]);
+  });
+
+  it("lets typed asset searches override the furniture category fanout", async () => {
+    runtimeConfig.worldApiBase = "https://hyades.example";
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          has_next: false,
+          total: 1,
+          models: [{ id: "chair-1", name: "Velvet Lounge Chair", viewable: true }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await browseAssetLibrary("chair", 1, "downloads", 8, "furniture");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://hyades.example/api/assets/models/browse?page=1&per_page=8&sort=downloads&search=chair",
+      { cache: "no-store" },
+    );
+    expect(result.models.map((model) => model.id)).toEqual(["chair-1"]);
+  });
+
+  it("can filter asset browsing to animated GLBs from the direct endpoint", async () => {
+    runtimeConfig.worldApiBase = "https://hyades.example";
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          models: [
+            {
+              id: "dog-1",
+              name: "Golden Retriever",
+              file_format: "glb",
+              has_thumbnail: true,
+              has_game_optimized: true,
+            },
+            {
+              id: "bot-1",
+              name: "Robot VRM",
+              file_format: "vrm",
+            },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await browseAssetLibrary("", 1, "newest", 24, "animated");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://hyades.example/api/assets/animated-models",
+      { cache: "no-store" },
+    );
+    expect(result.total).toBe(1);
+    expect(result.models).toEqual([
+      expect.objectContaining({
+        id: "dog-1",
+        name: "Golden Retriever",
+        file_format: "glb",
+        hasThumbnail: true,
+        hasGameOptimized: true,
+      }),
+    ]);
+  });
+
   it("caches a missing generated-asset manifest as empty", async () => {
     runtimeConfig.worldApiBase = "https://hyades.example";
     const fetchMock = vi.fn(async () => new Response("missing", { status: 404 }));

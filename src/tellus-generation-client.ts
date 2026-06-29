@@ -182,19 +182,62 @@ const parseAnimationMetadataList = (record: Record<string, unknown>): AssetAnima
   return clips.length > 0 ? clips : undefined;
 };
 
-export async function browseAssetLibrary(
-  search: string,
+const parseAssetLibraryModels = (rawModels: unknown): AssetLibraryModel[] => {
+  const models: AssetLibraryModel[] = [];
+  for (const m of Array.isArray(rawModels) ? rawModels : []) {
+    if (!m || typeof m !== "object" || Array.isArray(m)) continue;
+    const record = m as Record<string, unknown>;
+    const id = stringField(record, "id", "model_id", "modelId", "asset_id", "assetId");
+    const name = stringField(record, "name", "title");
+    if (!id || !name) continue;
+    const model: AssetLibraryModel = {
+        id,
+        name,
+        description: name,
+        file_format: stringField(record, "file_format", "fileFormat", "format"),
+        download_count: numberField(record, "download_count", "downloadCount", "downloads"),
+        hasThumbnail: booleanField(record, "has_thumbnail", "hasThumbnail"),
+        hasGameOptimized: booleanField(record, "has_game_optimized", "hasGameOptimized"),
+        // The store's `viewable` flag means conversion finished and a renderable view URL exists.
+        // Cards omitting it (older or direct endpoint builds) are treated as viewable to avoid hiding
+        // endpoint-backed result sets.
+        viewable: record.viewable !== false,
+        tags: stringArrayField(record, "tags", "keywords"),
+        animationClips: parseAnimationMetadataList(record),
+        source: "asset-library" as const,
+      };
+    if (model.viewable !== false) models.push(model);
+  }
+  return models;
+};
+
+const assetModelsFromResponse = (parsed: unknown): unknown => {
+  if (Array.isArray(parsed)) return parsed;
+  if (!parsed || typeof parsed !== "object") return [];
+  const record = parsed as Record<string, unknown>;
+  return (
+    record.models ??
+    record.animated_models ??
+    record.animatedModels ??
+    record.items ??
+    record.results ??
+    record.data ??
+    []
+  );
+};
+
+async function fetchAssetBrowsePage(
+  searchTerm: string,
   page: number,
-  sort: AssetBrowseSort = "newest",
-  perPage = 24,
-  category = "",
+  sort: AssetBrowseSort,
+  perPage: number,
+  category: string,
 ): Promise<AssetBrowseResult> {
-  if (!runtimeConfig.worldApiBase) return { models: [], hasNext: false, total: 0 };
   const params = new URLSearchParams({ page: String(page), per_page: String(perPage), sort });
-  // A typed search overrides the category seed; otherwise filter by the store's real asset_category
-  // (flora / fauna / building / environment / material) for precise, on-topic results.
-  if (search.trim()) params.set("search", search.trim());
-  else if (category.trim()) params.set("category", category.trim());
+  // A typed search overrides the category seed; otherwise filter by the store's real
+  // asset_category values for precise, on-topic results.
+  if (searchTerm) params.set("search", searchTerm);
+  else if (category) params.set("category", category);
   const response = await fetch(tellusAssetLibraryUrl(`/api/assets/models/browse?${params.toString()}`), {
     cache: "no-store",
   });
@@ -204,34 +247,76 @@ export async function browseAssetLibrary(
     total?: number;
     models?: Array<Record<string, unknown>>;
   }>(response);
-  const models: AssetLibraryModel[] = (Array.isArray(parsed.models) ? parsed.models : [])
-    .filter(
-      (m): m is Record<string, unknown> & { id: string; name: string } =>
-        typeof m.id === "string" && typeof m.name === "string",
-    )
-    .map((m) => ({
-      id: m.id,
-      name: m.name,
-      description: m.name,
-      file_format: typeof m.file_format === "string" ? m.file_format : undefined,
-      download_count: typeof m.download_count === "number" ? m.download_count : undefined,
-      hasThumbnail: m.has_thumbnail === true,
-      hasGameOptimized: m.has_game_optimized === true,
-      // The store's `viewable` flag means conversion finished and a renderable view URL exists.
-      // Cards omitting it (older store builds) are treated as viewable to avoid hiding everything.
-      viewable: m.viewable !== false,
-      tags: Array.isArray(m.tags) ? m.tags.filter((t): t is string => typeof t === "string") : undefined,
-      animationClips: parseAnimationMetadataList(m),
-      source: "asset-library" as const,
-    }))
-    // Keep the catalog in sync with what the store can actually serve: drop cards the store can't
-    // render, so a click never tries to load a GLB that 404s (the "don't serve assets that aren't
-    // there" guarantee).
-    .filter((m) => m.viewable);
+  const models = parseAssetLibraryModels(parsed.models);
   return {
     models,
     hasNext: parsed.has_next === true,
     total: typeof parsed.total === "number" ? parsed.total : models.length,
+  };
+}
+
+async function fetchAnimatedAssetLibraryModels(
+  searchTerm: string,
+  page: number,
+  perPage: number,
+  sort: AssetBrowseSort,
+): Promise<AssetBrowseResult> {
+  const response = await fetch(tellusAssetLibraryUrl("/api/assets/animated-models"), {
+    cache: "no-store",
+  });
+  if (!response.ok) return { models: [], hasNext: false, total: 0 };
+  const parsed = await readJsonResponse<unknown>(response);
+  const needle = searchTerm.toLowerCase();
+  const allModels = parseAssetLibraryModels(assetModelsFromResponse(parsed)).filter((model) => {
+    const format = model.file_format?.toLowerCase();
+    if (format && format !== "glb" && format !== "gltf") return false;
+    if (!needle) return true;
+    const haystack = [model.name, model.description, ...(model.tags ?? [])].join(" ").toLowerCase();
+    return haystack.includes(needle);
+  });
+  if (sort === "name") allModels.sort((a, b) => a.name.localeCompare(b.name));
+  if (sort === "downloads") {
+    allModels.sort((a, b) => (b.download_count ?? 0) - (a.download_count ?? 0));
+  }
+  const start = Math.max(0, page - 1) * perPage;
+  return {
+    models: allModels.slice(start, start + perPage),
+    hasNext: start + perPage < allModels.length,
+    total: allModels.length,
+  };
+}
+
+export async function browseAssetLibrary(
+  search: string,
+  page: number,
+  sort: AssetBrowseSort = "newest",
+  perPage = 24,
+  category = "",
+): Promise<AssetBrowseResult> {
+  if (!runtimeConfig.worldApiBase) return { models: [], hasNext: false, total: 0 };
+  const searchTerm = search.trim();
+  if (category.trim() === "animated") {
+    return fetchAnimatedAssetLibraryModels(searchTerm, page, perPage, sort);
+  }
+  const categories =
+    !searchTerm && category.trim() === "furniture"
+      ? ["furniture", "props"]
+      : !searchTerm && category.trim()
+        ? [category.trim()]
+        : [""];
+  const pages = await Promise.all(
+    categories.map((assetCategory) => fetchAssetBrowsePage(searchTerm, page, sort, perPage, assetCategory)),
+  );
+  const modelsById = new Map<string, AssetLibraryModel>();
+  for (const pageResult of pages) {
+    for (const model of pageResult.models) {
+      if (!modelsById.has(model.id)) modelsById.set(model.id, model);
+    }
+  }
+  return {
+    models: [...modelsById.values()],
+    hasNext: pages.some((pageResult) => pageResult.hasNext),
+    total: pages.reduce((sum, pageResult) => sum + pageResult.total, 0),
   };
 }
 

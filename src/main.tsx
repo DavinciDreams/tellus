@@ -9815,6 +9815,7 @@ function useSpeechInput(onText: (text: string) => void): {
 // whole range stays usable; values land snapped to a tidy 2-significant-digit step, with a small
 // snap window around exactly 1× (the default must be reachable by drag).
 const AVATAR_SCALE_SLIDER_STEPS = 200;
+const AVATAR_DRAWER_BATCH_SIZE = 24;
 const avatarScaleToSlider = (scale: number): number =>
   Math.round(
     (Math.log(clampAvatarScale(scale) / AVATAR_SCALE_MIN) /
@@ -10081,15 +10082,24 @@ function App(): React.ReactElement {
   const [runtimeConfigLoaded, setRuntimeConfigLoaded] = useState(false);
   const [avatarCatalog, setAvatarCatalog] = useState<readonly AvatarCatalogEntry[]>(() => avatarCatalogSync());
   const [avatarSelection, setAvatarSelection] = useState<string>(() => storedAvatarId());
+  const [avatarCatalogLoading, setAvatarCatalogLoading] = useState(false);
+  const [avatarVisibleCount, setAvatarVisibleCount] = useState(AVATAR_DRAWER_BATCH_SIZE);
   useEffect(() => subscribeAvatarCatalog(() => setAvatarCatalog(avatarCatalogSync())), []);
+  useEffect(() => {
+    setAvatarVisibleCount((count) => Math.min(Math.max(count, AVATAR_DRAWER_BATCH_SIZE), avatarCatalog.length));
+  }, [avatarCatalog.length]);
   useEffect(() => {
     if (!runtimeConfigLoaded || !assetPanelOpen || assetPanelTab !== "avatar") return;
     let cancelled = false;
+    setAvatarCatalogLoading(true);
     loadAvatarCatalog()
       .then((catalog) => {
         if (!cancelled) setAvatarCatalog(catalog);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setAvatarCatalogLoading(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -10098,6 +10108,7 @@ function App(): React.ReactElement {
     setAvatarSelection(entry.id);
     worldRef.current?.setAvatarSelection(entry.id); // persists + swaps the rig + broadcasts
   };
+  const visibleAvatarCatalog = avatarCatalog.slice(0, avatarVisibleCount);
   // Avatar size (the "Size" slider): visual-only multiplier, persisted + broadcast like the pick.
   const [avatarScale, setAvatarScaleState] = useState<number>(() => storedAvatarScale());
   const onAvatarScale = (scale: number) => {
@@ -12365,6 +12376,7 @@ function App(): React.ReactElement {
   const [assetBrowseTotal, setAssetBrowseTotal] = useState(0);
   const [assetBrowseLoading, setAssetBrowseLoading] = useState(false);
   const [assetBrowseSort, setAssetBrowseSort] = useState<AssetBrowseSort>("newest");
+  const [assetAnimalAnimatedOnly, setAssetAnimalAnimatedOnly] = useState(false);
   const [procBuildingType, setProcBuildingType] = useState<ProceduralBuildingType>("simple-house");
   const [procBuildingMaterial, setProcBuildingMaterial] = useState<BuildingMaterialStyle>("auto");
   const [procBuildingLighting, setProcBuildingLighting] = useState<BuildingLightingStyle>("warm");
@@ -12373,17 +12385,18 @@ function App(): React.ReactElement {
   const assetPrimaryTab: Extract<AssetPanelTab, "building" | "furniture"> =
     assetWorldId.startsWith("interior-") ? "furniture" : "building";
   const assetPrimaryLabel = assetPrimaryTab === "furniture" ? "Furniture" : "Buildings";
-  // Map each browse tab to the store's REAL asset_category (flora / fauna / building). The store
-  // categorizes animals under "fauna" (not "animal"), so use the precise category filter rather than
-  // a fuzzy free-text search. A user-typed search overrides the category seed.
+  // Map each browse tab to the store's real asset_category values. The store categorizes animals
+  // under "fauna" (not "animal"), and the browse client expands furniture into furniture + props.
   const assetCategory =
     assetPanelTab === "flora"
       ? "flora"
       : assetPanelTab === "animal"
-        ? "fauna"
+        ? assetAnimalAnimatedOnly ? "animated" : "fauna"
         : assetPanelTab === "building"
           ? "building"
-          : "";
+          : assetPanelTab === "furniture"
+            ? "furniture"
+            : "";
   useEffect(() => {
     if (!assetPanelOpen) return;
     if ((assetPanelTab === "building" || assetPanelTab === "furniture") && assetPanelTab !== assetPrimaryTab) {
@@ -12411,9 +12424,7 @@ function App(): React.ReactElement {
       { scale: 1 },
     );
   }, [procBuildingLighting, procBuildingMaterial, procBuildingRoof, selectedProcBuilding]);
-  const assetBrowseQuery =
-    assetSearch.trim() ||
-    (assetPanelTab === "furniture" ? "furniture chair table sofa lamp bed decor" : "");
+  const assetBrowseQuery = assetSearch.trim();
   const assetBrowseSeq = useRef(0);
   const [assetReuseSuggestions, setAssetReuseSuggestions] = useState<AssetReuseCandidate[]>([]);
   const [assetReuseLoading, setAssetReuseLoading] = useState(false);
@@ -16048,10 +16059,14 @@ function App(): React.ReactElement {
               <div className="inventory-list asset-list asset-avatar-tab">
                 <div className="asset-tab-note">
                   <strong>Avatar</strong>
-                  <span>everyone sees your pick</span>
+                  <span>
+                    {avatarCatalogLoading
+                      ? "loading store avatars"
+                      : `${visibleAvatarCatalog.length}/${avatarCatalog.length} shown`}
+                  </span>
                 </div>
                 <div className="asset-avatar-grid">
-                  {avatarCatalog.map((entry) => (
+                  {visibleAvatarCatalog.map((entry) => (
                     <AvatarTile
                       key={entry.id}
                       entry={entry}
@@ -16060,6 +16075,19 @@ function App(): React.ReactElement {
                     />
                   ))}
                 </div>
+                {visibleAvatarCatalog.length < avatarCatalog.length && (
+                  <button
+                    type="button"
+                    className="asset-avatar-load-more"
+                    onClick={() =>
+                      setAvatarVisibleCount((count) =>
+                        Math.min(count + AVATAR_DRAWER_BATCH_SIZE, avatarCatalog.length),
+                      )
+                    }
+                  >
+                    Load more
+                  </button>
+                )}
                 <div className="asset-avatar-scale">
                   <div>
                     <span>
@@ -16169,6 +16197,16 @@ function App(): React.ReactElement {
                     aria-label="Search assets"
                   />
                 </label>
+                {assetPanelTab === "animal" && (
+                  <label className="asset-filter-toggle">
+                    <input
+                      type="checkbox"
+                      checked={assetAnimalAnimatedOnly}
+                      onChange={(event) => setAssetAnimalAnimatedOnly(event.target.checked)}
+                    />
+                    <span>Animated only</span>
+                  </label>
+                )}
                 <div className="asset-browse-controls" aria-label="Asset sort">
                   {(
                     [

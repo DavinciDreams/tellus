@@ -36,6 +36,10 @@ export interface AvatarCatalogEntry {
   rotateY?: number;
   /** Whether this entry came from the fixed floor or was discovered from the asset store. */
   source?: "built-in" | "asset-store";
+  /** Store-reported thumbnail route, normalized through the Tellus asset proxy when present. */
+  thumbnailUrl?: string;
+  /** Store readiness signal for whether thumbnail/media capture has completed. */
+  mediaCaptureReady?: boolean;
 }
 
 // Animals were each loaded and their embedded clips inventoried (2026-06-11); the comment per entry
@@ -110,6 +114,7 @@ export function resetAvatarCatalogForTests(): void {
 /** Store thumbnail for a catalog entry (undefined for "classic" — render an initials tile). */
 export function avatarThumbnailUrl(entry: AvatarCatalogEntry): string | undefined {
   if (!entry.storeId || !runtimeConfig.worldApiBase) return undefined;
+  if (entry.thumbnailUrl) return tellusAssetLibraryUrl(entry.thumbnailUrl);
   return tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(entry.storeId)}/thumbnail`);
 }
 
@@ -199,6 +204,18 @@ interface AssetBrowseModel {
   mime_type?: string;
   has_vrm_variant?: boolean;
   has_optimized_vrm_variant?: boolean;
+  thumbnail_url?: string;
+  thumbnailUrl?: string;
+  has_thumbnail?: boolean;
+  hasThumbnail?: boolean;
+  catalog_ready?: boolean;
+  ready_for_tellus?: boolean;
+  processing_state?: {
+    media_capture_ready?: boolean;
+    needs_thumbnail?: boolean;
+    ready_for_tellus?: boolean;
+    world_ready?: boolean;
+  };
   tags?: unknown;
 }
 
@@ -263,6 +280,33 @@ function assetId(model: AssetBrowseModel): string {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return "";
+}
+
+function normalizedThumbnailUrl(model: AssetBrowseModel): string | undefined {
+  const raw = typeof model.thumbnail_url === "string" ? model.thumbnail_url : model.thumbnailUrl;
+  if (typeof raw === "string" && raw.trim()) {
+    const trimmed = raw.trim();
+    const assetModelMatch = /^\/api\/model\/([^/?#]+)\/thumbnail(?:[?#].*)?$/i.exec(trimmed);
+    if (assetModelMatch) {
+      return `/api/assets/model/${encodeURIComponent(decodeURIComponent(assetModelMatch[1]))}/thumbnail`;
+    }
+    return trimmed;
+  }
+  if (model.has_thumbnail === true || model.hasThumbnail === true || model.processing_state?.needs_thumbnail === false) {
+    const id = assetId(model);
+    if (id) return `/api/assets/model/${encodeURIComponent(id)}/thumbnail`;
+  }
+  return undefined;
+}
+
+function mediaCaptureReady(model: AssetBrowseModel): boolean | undefined {
+  if (typeof model.processing_state?.media_capture_ready === "boolean") {
+    return model.processing_state.media_capture_ready;
+  }
+  if (model.processing_state?.needs_thumbnail === false) return true;
+  if (typeof model.has_thumbnail === "boolean") return model.has_thumbnail;
+  if (typeof model.hasThumbnail === "boolean") return model.hasThumbnail;
+  return undefined;
 }
 
 function modelLooksVrm(model: AssetBrowseModel): boolean {
@@ -337,9 +381,10 @@ export function loadAvatarCatalog(): Promise<readonly AvatarCatalogEntry[]> {
           kind: "vrm" as const,
           storeId: assetId(model),
           source: "asset-store" as const,
+          thumbnailUrl: normalizedThumbnailUrl(model),
+          mediaCaptureReady: mediaCaptureReady(model),
         }))
-        .filter((entry) => !existing.has(entry.id))
-        .slice(0, 48);
+        .filter((entry) => !existing.has(entry.id));
       const withVrms = new Set([...existing, ...vrms.map((entry) => entry.id)]);
       const animatedGlbs = dedupeModels(animatedModels)
         .filter(isAnimatedGlbModel)
@@ -351,9 +396,10 @@ export function loadAvatarCatalog(): Promise<readonly AvatarCatalogEntry[]> {
           storeId: assetId(model),
           heightHint: inferredGlbHeight(model),
           source: "asset-store" as const,
+          thumbnailUrl: normalizedThumbnailUrl(model),
+          mediaCaptureReady: mediaCaptureReady(model),
         }))
-        .filter((entry) => !withVrms.has(entry.id))
-        .slice(0, 48);
+        .filter((entry) => !withVrms.has(entry.id));
       avatarCatalogSnapshot = [...AVATAR_CATALOG, ...vrms, ...animatedGlbs];
       publishAvatarCatalog();
     } catch {
