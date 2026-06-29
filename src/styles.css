@@ -3621,6 +3621,13 @@ textarea::placeholder {
   min-height: 54px;
 }
 
+.terrain-actions .secondary-button.active {
+  background: rgb(255 232 132 / 14%);
+  border-color: var(--hud-accent);
+  box-shadow: 0 0 0 1px var(--hud-accent);
+  color: var(--hud-gold-bright);
+}
+
 .terrain-subtitle {
   color: var(--hud-gold-bright);
   font-size: 12px;

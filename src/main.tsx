@@ -2480,7 +2480,7 @@ function createTellusWorld(
       if (vegetationBrushMode === "multi") return Math.max(3.2 * WORLD_SCALE, (option?.radius ?? 12) * 0.55);
       return 0.42 * WORLD_SCALE;
     }
-    if (terrainBrushMode && isTerrainPaintMode(terrainBrushMode)) return terrainPaintBrushRadius;
+    if (terrainBrushMode) return terrainPaintBrushRadius;
     return TERRAIN_SCULPT_RADIUS * WORLD_SCALE;
   };
   const syncTerrainBrushPreviewStyle = () => {
@@ -3519,7 +3519,7 @@ function createTellusWorld(
           const point = distantIslandGridWorldPoint(distantIsland, xIndex, zIndex);
           if (point.localRadius > 1) continue;
           const distance = Math.hypot(point.x - center.x, point.z - center.z);
-          const brushRadius = paintCode ? terrainPaintBrushRadius : TERRAIN_SCULPT_RADIUS;
+          const brushRadius = terrainPaintBrushRadius / WORLD_SCALE;
           if (distance > brushRadius) continue;
           const falloff =
             (1 + Math.cos((distance / brushRadius) * Math.PI)) * 0.5;
@@ -3553,9 +3553,8 @@ function createTellusWorld(
       refreshDistantIslandGeometry(distantIsland);
     } else {
       const targetHeight = terrainHeight(center.x, center.z);
-      // The central brush radius scales with the world so it covers the same grid cells as the
-      // legacy brush — keeps the math identical to the server's compatibility sculpt port.
-      const brushRadius = paintCode ? terrainPaintBrushRadius : TERRAIN_SCULPT_RADIUS * WORLD_SCALE;
+      // The central brush radius is user-controlled and already scaled to the active world.
+      const brushRadius = terrainPaintBrushRadius;
       for (let zIndex = 0; zIndex <= TERRAIN_SEGMENTS; zIndex++) {
         const z = (zIndex / TERRAIN_SEGMENTS - 0.5) * WORLD_RADIUS * 2;
         for (let xIndex = 0; xIndex <= TERRAIN_SEGMENTS; xIndex++) {
@@ -13840,26 +13839,6 @@ function App(): React.ReactElement {
     textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 36), 116)}px`;
   }, [prompt]);
 
-  const repeatTimerRef = useRef<number | undefined>(undefined);
-  const stopRepeating = () => {
-    if (repeatTimerRef.current === undefined) return;
-    window.clearInterval(repeatTimerRef.current);
-    repeatTimerRef.current = undefined;
-  };
-  const pressRepeat = (action: () => void) => ({
-    onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      stopRepeating();
-      action();
-      repeatTimerRef.current = window.setInterval(action, 140);
-    },
-    onPointerUp: stopRepeating,
-    onPointerLeave: stopRepeating,
-    onPointerCancel: stopRepeating,
-  });
-
-  useEffect(() => stopRepeating, []);
-
   return (
     <main
       className={[
@@ -16591,26 +16570,30 @@ function App(): React.ReactElement {
           <div className="terrain-actions compact terrain-height-actions">
             <button
               type="button"
-              className="secondary-button terrain-hold"
-              title="Hold to raise terrain"
+              className={`secondary-button terrain-hold ${terrainBrushMode === "raise" ? "active" : ""}`}
+              title="Use raise brush"
               aria-label="Raise terrain"
-              {...pressRepeat(() => worldRef.current?.sculptTerrain("raise"))}
+              aria-pressed={terrainBrushMode === "raise"}
+              onClick={() => selectTerrainBrush("raise")}
             >
               <ArrowUp size={18} />
             </button>
             <button
               type="button"
-              className="secondary-button"
-              onClick={() => worldRef.current?.sculptTerrain("flatten")}
+              className={`secondary-button ${terrainBrushMode === "flatten" ? "active" : ""}`}
+              title="Use flatten brush"
+              aria-pressed={terrainBrushMode === "flatten"}
+              onClick={() => selectTerrainBrush("flatten")}
             >
               <span>Flatten</span>
             </button>
             <button
               type="button"
-              className="secondary-button terrain-hold"
-              title="Hold to lower terrain"
+              className={`secondary-button terrain-hold ${terrainBrushMode === "lower" ? "active" : ""}`}
+              title="Use lower brush"
               aria-label="Lower terrain"
-              {...pressRepeat(() => worldRef.current?.sculptTerrain("lower"))}
+              aria-pressed={terrainBrushMode === "lower"}
+              onClick={() => selectTerrainBrush("lower")}
             >
               <ArrowDown size={18} />
             </button>
@@ -16630,10 +16613,10 @@ function App(): React.ReactElement {
               </button>
             )}
           </div>
-          <label className="terrain-brush-size" title="Material paint brush size">
+          <label className="terrain-brush-size" title="Terrain brush size">
             <span>
               <Brush size={13} />
-              Paint size
+              Brush size
             </span>
             <input
               type="range"
