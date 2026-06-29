@@ -351,17 +351,29 @@ export function createProcPlantVegetation(
   const chunkKeyAt = (x: number, z: number) =>
     `${Math.floor(x / chunkSize)},${Math.floor(z / chunkSize)}`;
 
-  const enqueue = (key: string) => {
-    if (queued.has(key)) return;
+  const enqueue = (key: string, priority = false) => {
+    if (queued.has(key)) {
+      if (priority) {
+        const index = rebuildQueue.indexOf(key);
+        if (index > 0) {
+          rebuildQueue.splice(index, 1);
+          rebuildQueue.unshift(key);
+        }
+      }
+      return;
+    }
     queued.add(key);
-    rebuildQueue.push(key);
+    if (priority) rebuildQueue.unshift(key);
+    else rebuildQueue.push(key);
   };
 
   const rememberManualPlacement = (placement: ProcPlantManualPlacement) => {
     const key = chunkKeyAt(placement.x, placement.z);
     manualPlacements.set(placement.id, placement);
     manualPlacementChunks.set(placement.id, key);
-    enqueue(key);
+    const chunk = active.get(key);
+    if (chunk) chunk.rev = -1;
+    enqueue(key, true);
   };
 
   const enqueueAllActive = () => {
@@ -428,6 +440,7 @@ export function createProcPlantVegetation(
       if (height === null || height < SEA_LEVEL - 12) continue;
       if (options.isExcluded?.(x, z, height)) continue;
       const paint = options.samplePaint(x, z);
+      if (paint === "stone" || paint === "brick") continue;
       const patchSeed = seed ^ Math.imul(i + 1, 0x9e3779b1);
       const ecology = options.sampleEcology?.(x, z, height, paint, patchSeed) ??
         resolveEcologySample({

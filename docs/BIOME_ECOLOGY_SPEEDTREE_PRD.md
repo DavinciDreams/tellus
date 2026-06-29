@@ -159,6 +159,10 @@ Buildings should consume the dominant ecology biome plus local substrate/materia
 
 ## Implementation Plan
 
+### Implementation Notes
+
+- See [Vegetation Building Exclusion Notes](./VEGETATION_BUILDING_EXCLUSION_NOTES.md) for the procedural-building footprint/scaling gotcha: rendered bounds are authoritative after load; recipe dimensions are only a fit-scaled fallback.
+
 ### Phase 1: Ecology Resolver
 
 - Add `tellus-ecology.ts`.

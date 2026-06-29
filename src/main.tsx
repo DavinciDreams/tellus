@@ -7,6 +7,7 @@ import {
   ArrowUp,
   Bot,
   Box,
+  Brush,
   Building2,
   CircleHelp,
   Globe2,
@@ -842,6 +843,99 @@ function createTellusWorld(
       terrainPaint: paint,
       biomeCell: biomeCellAt(x, z, height),
     });
+  const generatedThingSuppressesVegetation = (thing: GeneratedThing): boolean => {
+    if (parseProceduralModelUrl(thing.modelUrl ?? "")?.building) return true;
+    const lower = `${thing.kind} ${thing.prompt}`.toLowerCase();
+    return (
+      thing.kind === "shrine" ||
+      lower.includes("house") ||
+      lower.includes("hut") ||
+      lower.includes("cabin") ||
+      lower.includes("building") ||
+      lower.includes("shop") ||
+      lower.includes("temple") ||
+      lower.includes("tower")
+    );
+  };
+  type VegetationExclusionFootprint =
+    | { kind: "aabb"; minX: number; maxX: number; minZ: number; maxZ: number }
+    | { kind: "oriented"; x: number; z: number; halfWidth: number; halfDepth: number; yaw: number };
+  const vegetationExclusionFootprintCache = new Map<string, VegetationExclusionFootprint | null>();
+  const vegetationExclusionFootprint = (thing: GeneratedThing): VegetationExclusionFootprint | null => {
+    if (!generatedThingSuppressesVegetation(thing)) return null;
+    const mesh = generatedMeshes.get(thing.id);
+    const meshKey = mesh && !shouldShowGenerationSwirl(thing) ? mesh.uuid : "fallback";
+    const key = [
+      thing.id,
+      thing.modelUrl ?? "",
+      meshKey,
+      thing.position.x.toFixed(2),
+      thing.position.z.toFixed(2),
+      thing.scale.toFixed(3),
+      (thing.rotationY ?? 0).toFixed(3),
+    ].join(":");
+    if (vegetationExclusionFootprintCache.has(key)) {
+      return vegetationExclusionFootprintCache.get(key) ?? null;
+    }
+    let footprint: VegetationExclusionFootprint | null = null;
+    if (mesh && !shouldShowGenerationSwirl(thing)) {
+      const box = measureModelBounds(mesh);
+      if (!box.isEmpty()) {
+        const pad = 1.1 * WORLD_SCALE;
+        footprint = {
+          kind: "aabb",
+          minX: box.min.x - pad,
+          maxX: box.max.x + pad,
+          minZ: box.min.z - pad,
+          maxZ: box.max.z + pad,
+        };
+      }
+    }
+    if (!footprint) {
+      const parsed = parseProceduralModelUrl(thing.modelUrl ?? "");
+      const dims = parsed?.building
+        ? proceduralBuildingDimensions(parsed.building.recipeId, parsed.seed)
+        : null;
+      // Recipe dimensions are pre-fit. Procedural buildings are later scaled by fitModelToHeight
+      // (avatar/world-object sizing), so mimic that only as a fallback until rendered bounds exist.
+      const fitScale = dims ? assetTargetHeight(thing) / Math.max(1, dims.bodyHeight) : 1;
+      const width = dims ? dims.width * fitScale : clamp(thing.scale * 4.5, 2.6, 18);
+      const depth = dims ? dims.depth * fitScale : clamp(thing.scale * 4.5, 2.6, 18);
+      const pad = dims ? 1.6 * WORLD_SCALE : 1.1 * WORLD_SCALE;
+      footprint = {
+        kind: "oriented",
+        x: thing.position.x,
+        z: thing.position.z,
+        halfWidth: width / 2 + pad,
+        halfDepth: depth / 2 + pad,
+        yaw: thing.rotationY ?? 0,
+      };
+    }
+    vegetationExclusionFootprintCache.set(key, footprint);
+    if (vegetationExclusionFootprintCache.size > 600) vegetationExclusionFootprintCache.clear();
+    return footprint;
+  };
+  const generatedBuildingExcludesVegetation = (x: number, z: number): boolean => {
+    for (const thing of generated) {
+      const footprint = vegetationExclusionFootprint(thing);
+      if (!footprint) continue;
+      if (footprint.kind === "aabb") {
+        if (x >= footprint.minX && x <= footprint.maxX && z >= footprint.minZ && z <= footprint.maxZ) return true;
+        continue;
+      }
+      const cos = Math.cos(-footprint.yaw);
+      const sin = Math.sin(-footprint.yaw);
+      const dx = x - footprint.x;
+      const dz = z - footprint.z;
+      const localX = dx * cos - dz * sin;
+      const localZ = dx * sin + dz * cos;
+      if (Math.abs(localX) <= footprint.halfWidth && Math.abs(localZ) <= footprint.halfDepth) return true;
+    }
+    return false;
+  };
+  const terrainVegetationExcluded = (x: number, z: number, h: number): boolean =>
+    (waterFeatureContains(x, z, 0.6) && h < waterFeatureLevel() + 0.35) ||
+    generatedBuildingExcludesVegetation(x, z);
   const vegetationEnabled = vegetationPreference !== "0" && (isChunked || vegetationPreference === "1");
   const groundGrassEnabled = !isChunked && vegetationPreference === "1";
   const vegetation = vegetationEnabled
@@ -858,16 +952,7 @@ function createTellusWorld(
         maxFlowersPerChunk: isChunked ? 36 : undefined,
         initialTier: isChunked ? 1 : undefined,
         maxTier: isChunked ? 2 : undefined,
-        isExcluded: isChunked
-          ? (x, z, h) =>
-              waterFeatureContains(x, z, 0.6) &&
-              h < waterFeatureLevel() + 0.35
-          : (x, z, h) => {
-              return (
-                waterFeatureContains(x, z, 0.6) &&
-                h < waterFeatureLevel() + 0.35
-              );
-            },
+        isExcluded: terrainVegetationExcluded,
         pondRing: {
           x: waterFeatureCenter.x,
           z: waterFeatureCenter.z,
@@ -892,9 +977,7 @@ function createTellusWorld(
         sampleEcology,
         bounds: chunkedVegetationBounds,
         densityMultiplier: procPlantDensityPreference,
-        isExcluded: (x, z, h) =>
-          waterFeatureContains(x, z, 0.6) &&
-          h < waterFeatureLevel() + 0.35,
+        isExcluded: terrainVegetationExcluded,
       })
     : {
         update: () => undefined,
@@ -915,6 +998,11 @@ function createTellusWorld(
         removeManualPlant: () => false,
         dispose: () => undefined,
       };
+  const refreshVegetationForGeneratedThing = (thing: GeneratedThing | undefined) => {
+    if (!thing || !generatedThingSuppressesVegetation(thing)) return;
+    vegetation.notifyTerrainChanged();
+    procplants.notifyTerrainChanged();
+  };
   const ambientPhysics = createAmbientPhysics({
     groundHeightAt: (x, z) => groundHeightAt(x, z) ?? SEA_LEVEL - 2.6,
     waterLevelAt: (x, z) => {
@@ -2328,19 +2416,23 @@ function createTellusWorld(
   let pointerY = 0;
   let pointerTravel = 0;
   let terrainBrushMode: TerrainEditMode | null = null;
+  let terrainPaintBrushRadius = TERRAIN_SCULPT_RADIUS * WORLD_SCALE * 0.68;
+  let vegetationBrushArchetypeId: string | null = null;
+  let vegetationBrushMode: "single" | "multi" = "single";
   const pointerNdc = new THREE.Vector2();
   const raycaster = new THREE.Raycaster();
-  const terrainBrushPreviewRadius = TERRAIN_SCULPT_RADIUS * WORLD_SCALE * 0.68;
+  const terrainBrushPreviewBaseRadius = TERRAIN_SCULPT_RADIUS * WORLD_SCALE * 0.68;
+  const terrainBrushPreviewMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffef9a,
+    transparent: true,
+    opacity: 0.92,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
   const terrainBrushPreview = new THREE.Mesh(
-    new THREE.RingGeometry(terrainBrushPreviewRadius * 0.96, terrainBrushPreviewRadius, 96),
-    new THREE.MeshBasicMaterial({
-      color: 0xffef9a,
-      transparent: true,
-      opacity: 0.92,
-      depthTest: false,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    }),
+    new THREE.RingGeometry(terrainBrushPreviewBaseRadius * 0.96, terrainBrushPreviewBaseRadius, 96),
+    terrainBrushPreviewMaterial,
   );
   terrainBrushPreview.name = "tellus-terrain-brush-preview";
   terrainBrushPreview.rotation.x = -Math.PI / 2;
@@ -2381,6 +2473,20 @@ function createTellusWorld(
   scene.add(pointWalkMarker);
   const hideTerrainBrushPreview = () => {
     terrainBrushPreview.visible = false;
+  };
+  const activeBrushRadius = (): number => {
+    if (vegetationBrushArchetypeId) {
+      const option = proceduralAssetOption(vegetationBrushArchetypeId);
+      if (vegetationBrushMode === "multi") return Math.max(3.2 * WORLD_SCALE, (option?.radius ?? 12) * 0.55);
+      return 0.42 * WORLD_SCALE;
+    }
+    if (terrainBrushMode && isTerrainPaintMode(terrainBrushMode)) return terrainPaintBrushRadius;
+    return TERRAIN_SCULPT_RADIUS * WORLD_SCALE;
+  };
+  const syncTerrainBrushPreviewStyle = () => {
+    const radius = activeBrushRadius();
+    terrainBrushPreview.scale.setScalar(radius / terrainBrushPreviewBaseRadius);
+    terrainBrushPreviewMaterial.color.setHex(vegetationBrushArchetypeId ? 0x9ff7b8 : 0xffef9a);
   };
   const clearPointWalkTarget = () => {
     pointWalkTarget = null;
@@ -3413,7 +3519,7 @@ function createTellusWorld(
           const point = distantIslandGridWorldPoint(distantIsland, xIndex, zIndex);
           if (point.localRadius > 1) continue;
           const distance = Math.hypot(point.x - center.x, point.z - center.z);
-          const brushRadius = paintCode ? TERRAIN_SCULPT_RADIUS * 0.68 : TERRAIN_SCULPT_RADIUS;
+          const brushRadius = paintCode ? terrainPaintBrushRadius : TERRAIN_SCULPT_RADIUS;
           if (distance > brushRadius) continue;
           const falloff =
             (1 + Math.cos((distance / brushRadius) * Math.PI)) * 0.5;
@@ -3449,7 +3555,7 @@ function createTellusWorld(
       const targetHeight = terrainHeight(center.x, center.z);
       // The central brush radius scales with the world so it covers the same grid cells as the
       // legacy brush — keeps the math identical to the server's compatibility sculpt port.
-      const brushRadius = TERRAIN_SCULPT_RADIUS * WORLD_SCALE * (paintCode ? 0.68 : 1);
+      const brushRadius = paintCode ? terrainPaintBrushRadius : TERRAIN_SCULPT_RADIUS * WORLD_SCALE;
       for (let zIndex = 0; zIndex <= TERRAIN_SEGMENTS; zIndex++) {
         const z = (zIndex / TERRAIN_SEGMENTS - 0.5) * WORLD_RADIUS * 2;
         for (let xIndex = 0; xIndex <= TERRAIN_SEGMENTS; xIndex++) {
@@ -3519,13 +3625,14 @@ function createTellusWorld(
   const sendChunkedSculpt = (mode: TerrainEditMode, center: Vec3) => {
     if (!tellusWorldBackendAvailable) return;
     if (isTerrainPaintMode(mode)) {
-      chunkRenderer?.applyLocalPaint(mode, center.x, center.z, TERRAIN_SCULPT_RADIUS * WORLD_SCALE * 0.68);
+      chunkRenderer?.applyLocalPaint(mode, center.x, center.z, terrainPaintBrushRadius);
     }
     const action = {
       type: "terrain.sculpt",
       visitorId,
       mode,
       center: { x: center.x, y: 0, z: center.z },
+      radius: isTerrainPaintMode(mode) ? terrainPaintBrushRadius : undefined,
     };
     if (worldSocket?.readyState === WebSocket.OPEN) {
       worldSocket.send(JSON.stringify(action));
@@ -3554,7 +3661,23 @@ function createTellusWorld(
 
   const setTerrainBrush = (mode: TerrainEditMode | null) => {
     terrainBrushMode = mode;
+    if (mode) vegetationBrushArchetypeId = null;
+    syncTerrainBrushPreviewStyle();
     if (!mode) hideTerrainBrushPreview();
+  };
+
+  const setTerrainBrushRadius = (radius: number) => {
+    if (!Number.isFinite(radius)) return;
+    terrainPaintBrushRadius = clamp(radius, 0.75 * WORLD_SCALE, 24 * WORLD_SCALE);
+    syncTerrainBrushPreviewStyle();
+  };
+
+  const setVegetationBrush = (archetypeId: string | null, mode: "single" | "multi" = "single") => {
+    vegetationBrushArchetypeId = archetypeId && proceduralAssetOption(archetypeId) ? archetypeId : null;
+    vegetationBrushMode = mode;
+    if (vegetationBrushArchetypeId) terrainBrushMode = null;
+    syncTerrainBrushPreviewStyle();
+    if (!vegetationBrushArchetypeId) hideTerrainBrushPreview();
   };
 
   const sculptTerrain = (mode: TerrainEditMode) => {
@@ -5226,6 +5349,7 @@ function createTellusWorld(
       const repairedInteriorPosition = repairInteriorThingPosition(existing);
       ensureGeneratedVisual(existing);
       updateThingMeshPosition(existing);
+      refreshVegetationForGeneratedThing(existing);
       // A remote animation pick on an already-loaded model restarts the loop in place (a model
       // still loading picks it up via startGeneratedAnimation after the load).
       if (animationChanged) {
@@ -5271,6 +5395,7 @@ function createTellusWorld(
     scene.add(mesh);
     syncTransformControls();
     updateThingMeshPosition(thing);
+    refreshVegetationForGeneratedThing(thing);
     loadRemoteGeneratedModel(thing);
     reconcileRemoteGeneratedManifest(thing);
     reconcileFailedAssetStorePrompt(thing);
@@ -5806,6 +5931,7 @@ function createTellusWorld(
     updateThingMeshPosition(thing);
     publishGeneratedThing(thing);
     syncAnchoredPortalsForThing(thing);
+    refreshVegetationForGeneratedThing(thing);
     publish();
   };
 
@@ -5848,6 +5974,7 @@ function createTellusWorld(
     updateThingMeshPosition(clone);
     loadRemoteGeneratedModel(clone);
     publishGeneratedThing(clone);
+    refreshVegetationForGeneratedThing(clone);
     selectGenerated(clone.id);
   };
 
@@ -5865,6 +5992,7 @@ function createTellusWorld(
     if (mesh) applyThingRotation(mesh, thing);
     publishGeneratedThing(thing);
     syncAnchoredPortalsForThing(thing);
+    refreshVegetationForGeneratedThing(thing);
     publish();
   };
 
@@ -5879,6 +6007,7 @@ function createTellusWorld(
     }
     publishGeneratedThing(thing);
     syncAnchoredPortalsForThing(thing);
+    refreshVegetationForGeneratedThing(thing);
     publish();
   };
 
@@ -5983,6 +6112,7 @@ function createTellusWorld(
         visitorPosition,
       );
     }
+    refreshVegetationForGeneratedThing(thing);
     selectedThingId =
       generated[Math.min(index, generated.length - 1)]?.id ?? undefined;
     // Deleting may drop the group below 2 (pop survivor out) and changes the selection (pop the new one out).
@@ -6245,6 +6375,7 @@ function createTellusWorld(
       hasExternalGenerationProvider(generationProvider) && directGenerationAvailable;
     thing.generationStatus = usesExternalGeneration ? "queued" : "local";
     generated.push(thing);
+    refreshVegetationForGeneratedThing(thing);
     const mesh = usesExternalGeneration
       ? createGenerationSwirl(thing)
       : createGeneratedMesh(thing);
@@ -6328,6 +6459,7 @@ function createTellusWorld(
           startGeneratedAnimation(thing.id, model);
           scene.add(model);
           updateThingMeshPosition(thing);
+          refreshVegetationForGeneratedThing(thing);
           syncTransformControls();
           addLog({
             agentId: "world",
@@ -6573,6 +6705,7 @@ function createTellusWorld(
       animationClips: model.animationClips,
     };
     generated.push(thing);
+    refreshVegetationForGeneratedThing(thing);
     const mesh = createGenerationSwirl(thing);
     generatedMeshes.set(thing.id, mesh);
     scene.add(mesh);
@@ -6605,6 +6738,7 @@ function createTellusWorld(
           placeObjectAboveGround(modelObject, interiorVisiblePlacementForThing(thing), 0.04);
         }
         updateThingMeshPosition(thing);
+        refreshVegetationForGeneratedThing(thing);
         syncTransformControls();
         publish();
       })
@@ -6682,7 +6816,6 @@ function createTellusWorld(
       scale,
     });
     if (!placed) return null;
-    procplants.notifyTerrainChanged();
     publishProcPlantPlacement({
       id,
       presetId: option.procPlantPresetId,
@@ -6700,7 +6833,12 @@ function createTellusWorld(
     };
   };
 
-  const scatterProceduralAsset = (archetypeId: string, count?: number): ProceduralAssetPlacement[] => {
+  const scatterProceduralAsset = (
+    archetypeId: string,
+    count?: number,
+    center: Vec3 = visitorPosition,
+    placement: "around-visitor" | "brush-centered" = "around-visitor",
+  ): ProceduralAssetPlacement[] => {
     const option = proceduralAssetOption(archetypeId);
     if (!option) return [];
     const rng = Math.random;
@@ -6713,11 +6851,17 @@ function createTellusWorld(
     for (let i = 0; i < total; i++) {
       const seed = (rng() * 0xffffffff) >>> 0;
       const angle = rng() * Math.PI * 2;
-      const distance = option.minDistance + Math.sqrt(rng()) * option.radius;
+      const brushRadius = Math.max(1.5, option.radius * 0.55);
+      const distance =
+        placement === "brush-centered"
+          ? i === 0
+            ? 0
+            : Math.sqrt(rng()) * brushRadius
+          : option.minDistance + Math.sqrt(rng()) * option.radius;
       const location = {
-        x: visitorPosition.x + Math.sin(angle) * distance,
+        x: center.x + Math.sin(angle) * distance,
         y: 0,
-        z: visitorPosition.z + Math.cos(angle) * distance,
+        z: center.z + Math.cos(angle) * distance,
       };
       const scale = option.scale(0.82 + rng() * 0.42);
       const plantPlacement = placeProcPlantAsset(option, seed, location, scale);
@@ -6749,7 +6893,45 @@ function createTellusWorld(
       agentId: "visitor",
       agentName: "Visitor",
       tool: "generate",
-      text: `scattered ${placed.length} ${option.label}`,
+      text: `${placement === "brush-centered" ? "placed" : "scattered"} ${placed.length} ${option.label}`,
+    });
+    publish();
+    return placed;
+  };
+
+  const placeVegetationBrushAt = (archetypeId: string, target: Vec3): ProceduralAssetPlacement | null => {
+    if (vegetationBrushMode === "multi") {
+      const placed = scatterProceduralAsset(archetypeId, undefined, target, "brush-centered");
+      return placed[0] ?? null;
+    }
+    const option = proceduralAssetOption(archetypeId);
+    if (!option) return null;
+    const seed = (Math.random() * 0xffffffff) >>> 0;
+    const scale = option.scale(0.9 + Math.random() * 0.22);
+    const placed = placeProcPlantAsset(option, seed, target, scale);
+    if (!placed) {
+      const thing = addLibraryAsset(
+        {
+          id: option.assetId(seed),
+          name: option.label,
+          description: option.description,
+          modelUrl: option.modelUrl(seed),
+          source: "generated",
+        },
+        { location: target, scale },
+      );
+      return {
+        id: thing.id,
+        archetypeId: option.id,
+        label: option.label,
+        generatedThingId: thing.id,
+      };
+    }
+    addLog({
+      agentId: "visitor",
+      agentName: "Visitor",
+      tool: "generate",
+      text: `placed ${option.label}`,
     });
     publish();
     return placed;
@@ -6968,18 +7150,7 @@ function createTellusWorld(
   };
 
   const isBuildingThing = (thing: GeneratedThing): boolean => {
-    if (parseProceduralModelUrl(thing.modelUrl ?? "")?.building) return true;
-    const lower = thing.prompt.toLowerCase();
-    return (
-      thing.kind === "shrine" ||
-      lower.includes("house") ||
-      lower.includes("hut") ||
-      lower.includes("cabin") ||
-      lower.includes("building") ||
-      lower.includes("shop") ||
-      lower.includes("temple") ||
-      lower.includes("tower")
-    );
+    return generatedThingSuppressesVegetation(thing);
   };
   const isFlatGroundThing = (thing: GeneratedThing): boolean => {
     const lower = thing.prompt.toLowerCase();
@@ -8264,12 +8435,19 @@ function createTellusWorld(
       }
       setMoveMode(null); // target vanished — drop the mode
     }
-    if (terrainBrushMode && !interiorObject && !isPointerFromUi(event.target) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    const hasTerrainSurfaceBrush = terrainBrushMode || vegetationBrushArchetypeId;
+    if (hasTerrainSurfaceBrush && !interiorObject && !isPointerFromUi(event.target) && !event.ctrlKey && !event.metaKey && !event.altKey) {
       const target = dragGroundTarget(event);
       if (target) {
         event.preventDefault();
+        syncTerrainBrushPreviewStyle();
         terrainBrushPreview.position.set(target.x, target.y + 0.08, target.z);
         terrainBrushPreview.visible = true;
+        if (vegetationBrushArchetypeId) {
+          placeVegetationBrushAt(vegetationBrushArchetypeId, target);
+          return;
+        }
+        if (!terrainBrushMode) return;
         sculptTerrainAtWorldPoint(terrainBrushMode, target);
         return;
       }
@@ -8323,7 +8501,7 @@ function createTellusWorld(
       dragMoved = true;
       return;
     }
-    if (terrainBrushMode) {
+    if (terrainBrushMode || vegetationBrushArchetypeId) {
       updateTerrainBrushPreview(event);
       return;
     }
@@ -8465,7 +8643,7 @@ function createTellusWorld(
   // teleport there, drag = carry); camera orbit is suspended until the mode is toggled off. ──
   const updateTerrainBrushPreview = (event: PointerEvent) => {
     if (
-      !terrainBrushMode ||
+      (!terrainBrushMode && !vegetationBrushArchetypeId) ||
       interiorObject ||
       isPointerFromUi(event.target) ||
       event.ctrlKey ||
@@ -8480,6 +8658,7 @@ function createTellusWorld(
       hideTerrainBrushPreview();
       return;
     }
+    syncTerrainBrushPreviewStyle();
     terrainBrushPreview.position.set(target.x, target.y + 0.08, target.z);
     terrainBrushPreview.visible = true;
   };
@@ -9571,6 +9750,8 @@ function createTellusWorld(
     disembark,
     setGeneratedPet,
     setTerrainBrush,
+    setTerrainBrushRadius,
+    setVegetationBrush,
     sculptTerrain,
     importGeneratedThings,
     setSkyboxUrl,
@@ -9962,9 +10143,18 @@ function App(): React.ReactElement {
   });
   const [prompt, setPrompt] = useState("");
   const [terrainBrushMode, setTerrainBrushMode] = useState<TerrainEditMode | null>(null);
+  const defaultTerrainBrushRadius = TERRAIN_SCULPT_RADIUS * WORLD_SCALE * 0.68;
+  const minTerrainBrushRadius = 0.75 * WORLD_SCALE;
+  const maxTerrainBrushRadius = 24 * WORLD_SCALE;
+  const [terrainBrushRadius, setTerrainBrushRadiusState] = useState(defaultTerrainBrushRadius);
+  const [vegetationBrushId, setVegetationBrushId] = useState<string | null>(null);
+  const [vegetationBrushMode, setVegetationBrushMode] = useState<"single" | "multi">("single");
   const clearTerrainBrush = () => {
     setTerrainBrushMode(null);
+    setVegetationBrushId(null);
+    setVegetationBrushMode("single");
     worldRef.current?.setTerrainBrush(null);
+    worldRef.current?.setVegetationBrush(null);
   };
   const selectTerrainBrush = (mode: TerrainEditMode) => {
     if (terrainBrushMode === mode) {
@@ -9973,7 +10163,22 @@ function App(): React.ReactElement {
     }
     const next = mode;
     setTerrainBrushMode(next);
+    setVegetationBrushId(null);
+    setVegetationBrushMode("single");
     worldRef.current?.setTerrainBrush(next);
+  };
+  const changeTerrainBrushRadius = (radius: number) => {
+    const next = Math.min(maxTerrainBrushRadius, Math.max(minTerrainBrushRadius, radius));
+    setTerrainBrushRadiusState(next);
+    worldRef.current?.setTerrainBrushRadius(next);
+  };
+  const selectVegetationBrush = (archetypeId: string, mode: "single" | "multi" = "single") => {
+    const next = vegetationBrushId === archetypeId && vegetationBrushMode === mode ? null : archetypeId;
+    setVegetationBrushId(next);
+    setVegetationBrushMode(next ? mode : "single");
+    setTerrainBrushMode(null);
+    worldRef.current?.setTerrainBrush(null);
+    worldRef.current?.setVegetationBrush(next, mode);
   };
   // Live Tellus account (null when logged out). World deletion is ultimately
   // server-gated; the world list carries can_delete for owners/admins.
@@ -16374,19 +16579,34 @@ function App(): React.ReactElement {
           </div>
           <div className="terrain-subtitle-row with-rule">
             <div className="terrain-subtitle">Materials</div>
-            {terrainBrushMode && (
+            {(terrainBrushMode || vegetationBrushId) && (
               <button
                 type="button"
                 className="terrain-brush-clear"
-                title="Exit paint mode"
-                aria-label="Exit paint mode"
+                title="Exit brush mode"
+                aria-label="Exit brush mode"
                 onClick={clearTerrainBrush}
               >
                 <X size={14} />
-                <span>Exit paint</span>
+                <span>Exit brush</span>
               </button>
             )}
           </div>
+          <label className="terrain-brush-size" title="Material paint brush size">
+            <span>
+              <Brush size={13} />
+              Paint size
+            </span>
+            <input
+              type="range"
+              min={minTerrainBrushRadius}
+              max={maxTerrainBrushRadius}
+              step={0.25}
+              value={terrainBrushRadius}
+              onChange={(event) => changeTerrainBrushRadius(Number(event.currentTarget.value))}
+            />
+            <output>{terrainBrushRadius.toFixed(1)}</output>
+          </label>
           <div className="terrain-material-swatches">
             <button
               type="button"
@@ -16430,8 +16650,8 @@ function App(): React.ReactElement {
             </button>
             <button
               type="button"
-              className={`terrain-swatch cobble ${terrainBrushMode === "rock" ? "active" : ""}`}
-              onClick={() => selectTerrainBrush("rock")}
+              className={`terrain-swatch cobble ${terrainBrushMode === "stone" ? "active" : ""}`}
+              onClick={() => selectTerrainBrush("stone")}
             >
               <span className="terrain-swatch-preview" />
               <span>Cobble</span>
@@ -16488,24 +16708,13 @@ function App(): React.ReactElement {
           <div className="terrain-subtitle with-rule">Scatter</div>
           <div className="terrain-scatter-grid">
             {PROCEDURAL_CATALOG.map((arch) => (
-              <div key={arch.id} className="terrain-scatter-tile">
+              <div key={arch.id} className={`terrain-scatter-tile ${vegetationBrushId === arch.id ? "active" : ""} ${vegetationBrushId === arch.id && vegetationBrushMode === "multi" ? "multi" : ""}`}>
                 <button
                   type="button"
                   className="terrain-scatter-place"
-                  title={`${arch.label} — tap again for a new variation`}
+                  title={`Place ${arch.label} exactly`}
                   aria-label={arch.label}
-                  onClick={() => {
-                    const seed = (Math.random() * 0xffffffff) >>> 0;
-                    worldRef.current?.addLibraryAsset({
-                      id: `proc-${arch.id}-${seed.toString(16)}`,
-                      name: arch.label,
-                      description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
-                      modelUrl: makeProceduralModelUrl(arch.id, seed),
-                      source: "generated",
-                    }, {
-                      scale: defaultScaleForRealisticKind(arch.kind, arch.label) * (arch.kind === "tree" ? 1.48 : 1),
-                    });
-                  }}
+                  onClick={() => selectVegetationBrush(arch.id, "single")}
                 >
                   <span className="terrain-scatter-emoji" aria-hidden="true">{arch.emoji}</span>
                   <span className="terrain-scatter-label">{arch.label}</span>
@@ -16513,22 +16722,23 @@ function App(): React.ReactElement {
                 <button
                   type="button"
                   className="terrain-scatter-burst"
-                  title={`Scatter ${arch.label}`}
-                  aria-label={`Scatter ${arch.label}`}
-                  onClick={() => worldRef.current?.scatterProceduralAsset(arch.id)}
+                  title={`Use ${arch.label} multi brush`}
+                  aria-label={`Use ${arch.label} multi brush`}
+                  onClick={() => selectVegetationBrush(arch.id, "multi")}
                 >
                   <Sprout size={13} />
+                  <span>{arch.kind === "tree" ? "x5" : arch.kind === "flower" ? "x14" : "x10"}</span>
                 </button>
               </div>
             ))}
             {PROCPLANT_PLACEABLE_CATALOG.map((entry) => (
-              <div key={entry.id} className="terrain-scatter-tile">
+              <div key={entry.id} className={`terrain-scatter-tile ${vegetationBrushId === entry.id ? "active" : ""} ${vegetationBrushId === entry.id && vegetationBrushMode === "multi" ? "multi" : ""}`}>
                 <button
                   type="button"
                   className="terrain-scatter-place"
-                  title={`${entry.label} procplant — tap again for a new variation`}
+                  title={`Place ${entry.label} exactly`}
                   aria-label={entry.label}
-                  onClick={() => worldRef.current?.scatterProceduralAsset(entry.id, 1)}
+                  onClick={() => selectVegetationBrush(entry.id, "single")}
                 >
                   <span className="terrain-scatter-emoji" aria-hidden="true">{entry.emoji}</span>
                   <span className="terrain-scatter-label">{entry.label}</span>
@@ -16536,11 +16746,12 @@ function App(): React.ReactElement {
                 <button
                   type="button"
                   className="terrain-scatter-burst"
-                  title={`Scatter ${entry.label}`}
-                  aria-label={`Scatter ${entry.label}`}
-                  onClick={() => worldRef.current?.scatterProceduralAsset(entry.id)}
+                  title={`Use ${entry.label} multi brush`}
+                  aria-label={`Use ${entry.label} multi brush`}
+                  onClick={() => selectVegetationBrush(entry.id, "multi")}
                 >
                   <Sprout size={13} />
+                  <span>x{entry.scatterCount}</span>
                 </button>
               </div>
             ))}
