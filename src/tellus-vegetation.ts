@@ -18,6 +18,7 @@ import {
 import { SEA_LEVEL, WORLD_RADIUS } from "./tellus-constants";
 import { createGltfLoader } from "./tellus-generation-client";
 import type { TerrainPaintKind } from "./tellus-types";
+import { assetStoreLodModelUrl } from "./tellus-urls-identity";
 import {
   type StampCursor,
   type StampTarget,
@@ -140,7 +141,16 @@ const GRASS_BY_PAINT: Record<string, { accept: number; tint: number; tall: numbe
 
 const FLOWER_PALETTE = [0xffffff, 0xffd7e8, 0xffe9a8, 0xc9b8ff, 0xffb0a0, 0x9fd8ff];
 const CRYSTAL_PALETTE = [0xbef0ff, 0xffc9f0, 0xfff3b8, 0xc9ffd6];
-type TexturedTreeAssetId = "pine5" | "common3" | "retro1" | "retro3";
+type TexturedTreeAssetId =
+  | "pine5"
+  | "common3"
+  | "retro1"
+  | "retro3"
+  | "tallConicalPine"
+  | "snowTippedPine"
+  | "oliveConicalPine"
+  | "stylizedPalm"
+  | "fantasyPalm";
 
 interface TexturedTreeSubmesh {
   geometry: THREE.BufferGeometry;
@@ -161,11 +171,21 @@ interface TexturedTreePlacement {
   yaw: number;
 }
 
-const TEXTURED_TREE_ASSETS: Record<TexturedTreeAssetId, string> = {
-  pine5: "/vegetation/quaternius-megakit/pine_5.gltf",
-  common3: "/vegetation/quaternius-megakit/common_tree_3.gltf",
-  retro1: "/vegetation/retro-tree-pack/retro_low_1.glb",
-  retro3: "/vegetation/retro-tree-pack/retro_low_3.glb",
+interface TexturedTreeAssetSpec {
+  url: string;
+  flatTint?: number;
+}
+
+const TEXTURED_TREE_ASSETS: Record<TexturedTreeAssetId, TexturedTreeAssetSpec> = {
+  pine5: { url: "/vegetation/quaternius-megakit/pine_5.gltf", flatTint: 0x4f6b32 },
+  common3: { url: "/vegetation/quaternius-megakit/common_tree_3.gltf" },
+  retro1: { url: "/vegetation/retro-tree-pack/retro_low_1.glb" },
+  retro3: { url: "/vegetation/retro-tree-pack/retro_low_3.glb" },
+  tallConicalPine: { url: "/vegetation/pine-pack-v1/tall_conical_pine_lod2_ktx2.glb", flatTint: 0x496c36 },
+  snowTippedPine: { url: "/vegetation/pine-pack-v1/snow_tipped_pine_lod2_ktx2.glb", flatTint: 0x78916a },
+  oliveConicalPine: { url: "/vegetation/pine-pack-v1/snow_tipped_pine_lod2_ktx2.glb", flatTint: 0x667d3f },
+  stylizedPalm: { url: assetStoreLodModelUrl("5d2f9e38-0359-4c28-924b-6b9243100fa1", 2) },
+  fantasyPalm: { url: assetStoreLodModelUrl("a2d48704-ef52-4260-a34b-fe872e97b4ca", 2) },
 };
 
 interface PooledMesh extends StampTarget {
@@ -191,7 +211,11 @@ const cloneVegetationMaterial = (material: THREE.Material | THREE.Material[]): T
   return Array.isArray(material) ? material.map(cloneOne) : cloneOne(material);
 };
 
+const flatVegetationMaterial = (color: number): THREE.Material =>
+  new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
+
 const buildTexturedTreeAsset = (id: TexturedTreeAssetId, root: THREE.Object3D): TexturedTreeAsset | null => {
+  const flatTint = TEXTURED_TREE_ASSETS[id].flatTint;
   root.updateMatrixWorld(true);
   const bounds = new THREE.Box3().setFromObject(root);
   const height = bounds.max.y - bounds.min.y;
@@ -209,7 +233,9 @@ const buildTexturedTreeAsset = (id: TexturedTreeAssetId, root: THREE.Object3D): 
     geometry.applyMatrix4(normalize);
     geometry.computeBoundingSphere();
     geometry.computeBoundingBox();
-    const material = cloneVegetationMaterial(object.material);
+    const material = flatTint === undefined
+      ? cloneVegetationMaterial(object.material)
+      : flatVegetationMaterial(flatTint);
     submeshes.push({ geometry, material });
   });
   return submeshes.length > 0 ? { id, submeshes } : null;
@@ -337,9 +363,9 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       pending--;
       if (pending === 0 && loadedAny) terrainRev++;
     };
-    (Object.entries(TEXTURED_TREE_ASSETS) as Array<[TexturedTreeAssetId, string]>).forEach(([id, url]) => {
+    (Object.entries(TEXTURED_TREE_ASSETS) as Array<[TexturedTreeAssetId, TexturedTreeAssetSpec]>).forEach(([id, spec]) => {
       loader.load(
-        url,
+        spec.url,
         (gltf) => {
           const asset = buildTexturedTreeAsset(id, gltf.scene);
           if (asset) {
@@ -356,8 +382,6 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       );
     });
   };
-  requestTexturedTreeAssets();
-
   const chunkTuftCap = suppressGrass ? 0 : grassOnly ? Math.round(MAX_TUFTS * 1.65) : MAX_TUFTS;
   const chunkFlowerCap = grassOnly ? 0 : maxFlowersPerChunk;
   const chunkExtraCap = grassOnly || suppressSmallFlora ? 0 : MAX_EXTRAS;
@@ -787,23 +811,46 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     group.add(texturedGroup);
   };
 
-  const pickTree = (paint: TerrainPaintKind | null, h: number, r1: number, r2: number): { tpl: Template; scale: number; assetId?: TexturedTreeAssetId } | null => {
+  const pickTree = (
+    paint: TerrainPaintKind | null,
+    h: number,
+    r1: number,
+    r2: number,
+  ): { tpl: Template; scale: number; assetId?: TexturedTreeAssetId; clumpMax?: number; clumpRadius?: number } | null => {
     const meadowish = paint === "meadow" || paint === "grass" || paint === null || paint === "flowers";
     if (paint === "beach" || paint === "desert-sand") {
-      if (r1 > 0.16) return null;
-      return paint === "desert-sand" && r2 < 0.55
+      if (r1 > 0.07) return null;
+      return paint === "desert-sand" && r2 < 0.42
         ? { tpl: treeTpls.deadtree, scale: 3.8 + r2 * 3.2 }
-        : { tpl: treeTpls.palm, scale: 5.5 + r2 * 3 };
+        : {
+            tpl: treeTpls.palm,
+            scale: 6.8 + r2 * 2.8,
+            assetId: r2 > 0.82 ? "fantasyPalm" : "stylizedPalm",
+            clumpMax: 3,
+            clumpRadius: 3.6,
+          };
     }
-    if (paint === "snow" || paint === "rock" || h > 10.5) {
+    if (paint === "snow") {
       if (r1 > 0.16) return null;
-      return r2 < 0.6
-        ? { tpl: treeTpls.pine, scale: 8.5 + r2 * 5.5, assetId: "pine5" }
-        : { tpl: treeTpls.conifer, scale: 10 + r2 * 7.5, assetId: "common3" };
+      return { tpl: treeTpls.pine, scale: 8.8 + r2 * 5.2, assetId: "snowTippedPine" };
+    }
+    if (paint === "rock" || h > 10.5) {
+      if (r1 > 0.16) return null;
+      if (r2 < 0.3) return { tpl: treeTpls.pine, scale: 8.5 + r2 * 5.5, assetId: "tallConicalPine" };
+      if (r2 < 0.55) return { tpl: treeTpls.pine, scale: 7.8 + r2 * 5.0, assetId: "oliveConicalPine" };
+      return { tpl: treeTpls.pine, scale: 8.2 + r2 * 5.8, assetId: "pine5" };
     }
     if (paint === "forest-floor" || paint === "jungle-moss") {
       if (r1 > (paint === "jungle-moss" ? 0.42 : 0.34)) return null;
-      if (paint === "jungle-moss" && r2 > 0.68) return { tpl: treeTpls.palm, scale: 6.8 + r2 * 3.4 };
+      if (paint === "jungle-moss" && r2 > 0.78) {
+        return {
+          tpl: treeTpls.palm,
+          scale: 7.2 + r2 * 2.8,
+          assetId: r2 > 0.9 ? "fantasyPalm" : "stylizedPalm",
+          clumpMax: 2,
+          clumpRadius: 3.2,
+        };
+      }
       if (r2 < 0.46) return { tpl: treeTpls.broadleaf, scale: 5.6 + r2 * 3.6 };
       return { tpl: treeTpls.birch, scale: 5.4 + r2 * 3.8 };
     }
@@ -815,9 +862,9 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     if (paint === "stone" || paint === "brick") return null;
     if (paint === "gravel") {
       if (r1 > 0.12) return null;
-      return r2 < 0.62
-        ? { tpl: treeTpls.pine, scale: 8 + r2 * 4.8, assetId: "pine5" }
-        : { tpl: treeTpls.conifer, scale: 6.8 + r2 * 3.8, assetId: "retro3" };
+      if (r2 < 0.35) return { tpl: treeTpls.pine, scale: 8 + r2 * 4.8, assetId: "tallConicalPine" };
+      if (r2 < 0.55) return { tpl: treeTpls.pine, scale: 7.2 + r2 * 4.2, assetId: "snowTippedPine" };
+      return { tpl: treeTpls.pine, scale: 7.4 + r2 * 4.6, assetId: "pine5" };
     }
     if (meadowish) {
       const accept = paint === "flowers" ? 0.14 : 0.34;
@@ -854,18 +901,44 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
         if (paint === "beach" && h > SEA_LEVEL + 2.4) continue;
         const choice = pickTree(paint, h, rng(), rng());
         if (!choice) continue;
-        tintColor.setHex(0xffffff);
-        tintColor.offsetHSL((rng() - 0.5) * 0.05, (rng() - 0.5) * 0.18, (rng() - 0.5) * 0.1);
-        const yaw = rng() * Math.PI * 2;
-        if (choice.assetId && texturedTreeAssets.has(choice.assetId)) {
-          texturedPlacements.push({ assetId: choice.assetId, x, y: h - 0.02, z, scale: choice.scale, yaw });
-        } else if (!stampTemplate(sector.trees, cur, choice.tpl, x, h - 0.06, z, choice.scale, yaw, tintColor, rng() * Math.PI * 2, 1)) {
-          break;
+        const baseTint = new THREE.Color(0xffffff).offsetHSL(
+          (rng() - 0.5) * 0.05,
+          (rng() - 0.5) * 0.18,
+          (rng() - 0.5) * 0.1,
+        );
+        const desiredCount = choice.clumpMax
+          ? 2 + Math.floor(rng() * Math.max(1, choice.clumpMax - 1))
+          : 1;
+        let clumpBlocked = false;
+        for (let member = 0; member < desiredCount && stamped < TREES_PER_SECTOR; member++) {
+          const angle = rng() * Math.PI * 2;
+          const radius = member === 0 ? 0 : (choice.clumpRadius ?? 3) * (0.45 + rng() * 0.65);
+          const tx = x + Math.cos(angle) * radius;
+          const tz = z + Math.sin(angle) * radius;
+          if (tx < ox || tz < oz || tx >= ox + SECTOR || tz >= oz + SECTOR) continue;
+          if (!inWorld(tx, tz, 3)) continue;
+          const th = member === 0 ? h : sampleHeight(tx, tz);
+          if (th < SEA_LEVEL + 0.45) continue;
+          if (isExcluded(tx, tz, th)) continue;
+          if (slopeAt(tx, tz, th) > 0.62) continue;
+          const memberPaint = member === 0 ? paint : samplePaint(tx, tz);
+          if (choice.clumpMax && memberPaint !== "beach" && memberPaint !== "desert-sand" && memberPaint !== "jungle-moss") continue;
+          tintColor.copy(baseTint);
+          tintColor.offsetHSL((rng() - 0.5) * 0.025, 0, (rng() - 0.5) * 0.04);
+          const yaw = rng() * Math.PI * 2;
+          const scale = choice.scale * THREE.MathUtils.lerp(0.86, 1.12, rng());
+          if (choice.assetId && texturedTreeAssets.has(choice.assetId)) {
+            texturedPlacements.push({ assetId: choice.assetId, x: tx, y: th - 0.02, z: tz, scale, yaw });
+          } else if (!stampTemplate(sector.trees, cur, choice.tpl, tx, th - 0.06, tz, scale, yaw, tintColor, rng() * Math.PI * 2, 1)) {
+            clumpBlocked = true;
+            break;
+          }
+          sectorColliders.push({ x: tx, z: tz, r: Math.max(0.42, scale * 0.11) });
+          stamped++;
+          if (th < minY) minY = th;
+          if (th + scale > maxY) maxY = th + scale;
         }
-        sectorColliders.push({ x, z, r: Math.max(0.42, choice.scale * 0.11) });
-        stamped++;
-        if (h < minY) minY = h;
-        if (h + choice.scale > maxY) maxY = h + choice.scale;
+        if (clumpBlocked) break;
       }
     }
     markPooledUpdated(sector.trees, cur.i);
@@ -961,6 +1034,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
 
   const update = (px: number, pz: number, playerY: number, fps: number, nowMs: number) => {
     if (disposed) return;
+    requestTexturedTreeAssets();
     uPlayer.value.set(px, playerY, pz);
     uCamXZ.value.set(px, pz);
     uFade.value.set(TIERS[tier].radius * 0.7, TIERS[tier].radius);

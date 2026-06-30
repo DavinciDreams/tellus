@@ -44,8 +44,8 @@ export function assetStoreIdFromModelUrl(url: string): string | null {
   }
   const pathname = parsed.pathname.replace(/^\/__hyades(?=\/api\/)/i, "");
   const match =
-    /^\/api\/(?:view|download|model)\/([^/?#]+)/i.exec(pathname) ??
-    /^\/api\/assets\/(?:model|download)\/([^/?#]+)/i.exec(pathname);
+    /^\/api\/(?:view|download|model)\/([^/?#/]+)/i.exec(pathname) ??
+    /^\/api\/assets\/(?:model|download)\/([^/?#/]+)/i.exec(pathname);
   return match ? decodeURIComponent(match[1]) : null;
 }
 

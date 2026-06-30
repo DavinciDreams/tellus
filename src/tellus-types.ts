@@ -190,6 +190,7 @@ export interface AssetLibraryModel {
   description?: string;
   file_format?: string;
   file_size?: number;
+  effective_file_size?: number;
   download_count?: number;
   /** Immutable 3D Asset Manager model id, when this card maps to a store asset. */
   assetStoreModelId?: string;
@@ -202,6 +203,48 @@ export interface AssetLibraryModel {
   viewable?: boolean;
   tags?: string[];
   animationClips?: AssetAnimationMetadata[];
+  effectiveMeshStats?: AssetMeshStats;
+  lodReady?: boolean;
+  lodStatus?: string;
+  lodAvailableLevels?: number[];
+  lodSummary?: AssetLodSummary;
+  lodVariants?: AssetLodVariant[];
+}
+
+export interface AssetMeshStats {
+  primitives?: number;
+  triangles?: number;
+  vertices?: number;
+}
+
+export interface AssetLodLevelSummary {
+  level: number;
+  recommended_use?: string;
+  size?: number;
+  size_mb?: number;
+  triangles?: number;
+  vertices?: number;
+}
+
+export interface AssetLodSummary {
+  cheapest_level?: number;
+  cheapest_size?: number;
+  cheapest_size_mb?: number;
+  cheapest_triangles?: number;
+  cheapest_vertices?: number;
+  levels?: AssetLodLevelSummary[];
+  missing_levels?: number[];
+  ready?: boolean;
+  recommended_use?: string;
+  status?: string;
+}
+
+export interface AssetLodVariant extends AssetLodLevelSummary {
+  file_format?: string;
+  status?: string;
+  url?: string;
+  download_url?: string;
+  mesh_stats?: AssetMeshStats;
 }
 
 export interface AssetLibraryResponse {
@@ -582,6 +625,10 @@ declare global {
       kind: string;
       prompt: string;
       status: string;
+      modelUrl?: string;
+      assetStoreModelId?: string;
+      loadedAssetRenderUrl?: string;
+      loadedAssetLodLevel?: number;
       hasMesh: boolean;
       meshVisible: boolean;
       inScene: boolean;

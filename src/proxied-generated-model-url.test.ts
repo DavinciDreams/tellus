@@ -70,6 +70,8 @@ describe("proxiedGeneratedModelUrl", () => {
       "abc123",
     );
     expect(assetStoreIdFromModelUrl("/api/assets/model/xyz/game-optimized")).toBe("xyz");
+    expect(assetStoreIdFromModelUrl("/api/assets/model/palm-1/lod/2")).toBe("palm-1");
+    expect(assetStoreIdFromModelUrl("/api/assets/model/palm-1/impostor")).toBe("palm-1");
     expect(assetStoreIdFromModelUrl("/__hyades/api/assets/model/dev-proxy/game-optimized")).toBe("dev-proxy");
     expect(assetStoreIdFromModelUrl("/generated-assets/local.glb")).toBeNull();
   });

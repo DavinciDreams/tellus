@@ -42,7 +42,6 @@ import { TilesRenderer } from "3d-tiles-renderer";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { PROCPLANT_PLACEABLE_CATALOG, procPlantPlaceableById } from "./tellus-procplant-biomes";
 import { createProcPlantVegetation } from "./tellus-procplant-vegetation";
-import { createVegetation } from "./tellus-vegetation";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
 import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, resetLiveMirrors } from "./tellus-procedural-assets";
 import {
@@ -148,7 +147,7 @@ import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, Generatio
 import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { parseWaterSettings, runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig, worldApiUrl } from "./tellus-runtime-config";
-import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, assetStoreOptimizedAssetUrls, toAssetId } from "./tellus-urls-identity";
+import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, assetStoreLodModelUrl, assetStoreOptimizedAssetUrls, toAssetId } from "./tellus-urls-identity";
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded, activeEvoflowWorldBiomeCellAt } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
@@ -622,6 +621,9 @@ function createTellusWorld(
             ? Math.round(generatedModelLoadStats.totalQueueWaitMs / generatedModelLoadStats.started)
             : 0,
         lastUrl: generatedModelLoadStats.lastUrl,
+        lastRenderUrl: generatedModelLoadStats.lastRenderUrl,
+        lodRequests: generatedModelLoadStats.lodRequests,
+        lodFallbacks: generatedModelLoadStats.lodFallbacks,
       },
       caches: {
         generatedGltf: generatedGltfCache.size,
@@ -940,13 +942,6 @@ function createTellusWorld(
   let lastChunkStreamGroundingAt = 0;
   const chunkStreamGroundingQueue: string[] = [];
   const queuedChunkStreamGrounding = new Set<string>();
-  // Ambient procedural vegetation (wind-swayed flowers/flora streamed around the player + island-wide
-  // trees/rocks) and the lightweight physics world (thrown things, player jump/obstacles). Both are
-  // deterministic from the synced terrain state — no protocol changes.
-  //
-  // Chunked worlds keep 3D flowers/reeds/small flora on by default, but suppress the hair-like grass
-  // layer. "tellus.grass"="0" disables this vegetation pass entirely; classic worlds remain opt-in.
-  // Classic-world vegetation remains opt-in via "tellus.grass"="1".
   const chunkedDims = isChunked ? getChunkedWorldChunks() : null;
   const chunkedCenterForWorld = isChunked ? chunkedWorldCenter() : null;
   if (chunkedCenterForWorld) {
@@ -988,13 +983,6 @@ function createTellusWorld(
       terrainHeight(waterFeatureCenter.x, waterFeatureCenter.z);
     return ground + 0.55;
   };
-  const vegetationPreference = (() => {
-    try {
-      return window.localStorage.getItem("tellus.grass");
-    } catch {
-      return null;
-    }
-  })();
   const procPlantPreference = (() => {
     try {
       return window.localStorage.getItem("tellus.procplants");
@@ -1186,38 +1174,14 @@ function createTellusWorld(
     isWaterTerrainForVegetation(x, z, h) ||
     (waterFeatureContains(x, z, 0.6) && h < waterFeatureLevel() + 0.35) ||
     generatedBuildingExcludesVegetation(x, z);
-  const vegetationEnabled = !terrainOnlyDebug() && vegetationPreference !== "0" && (isChunked || vegetationPreference === "1");
-  const groundGrassEnabled = !isChunked && vegetationPreference === "1";
-  const vegetation = vegetationEnabled
-    ? createVegetation({
-        scene,
-        useWebGPU,
-        sampleHeight: sampleVegetationHeight,
-        samplePaint: sampleVegetationPaint,
-        bounds: chunkedVegetationBounds,
-        sectorsEnabled: true,
-        sectorStreamRadius: isChunked ? 2 : undefined,
-        grassOnly: false,
-        suppressGrass: isChunked && !groundGrassEnabled,
-        suppressSmallFlora: isChunked,
-        maxFlowersPerChunk: isChunked ? 36 : undefined,
-        initialTier: isChunked ? 1 : undefined,
-        maxTier: isChunked ? 2 : undefined,
-        isExcluded: terrainVegetationExcluded,
-        pondRing: {
-          x: waterFeatureCenter.x,
-          z: waterFeatureCenter.z,
-          radius: waterFeatureRadius,
-          level: waterFeatureLevel(),
-        },
-      })
-    : {
-        update: () => undefined,
-        notifyTerrainChanged: () => undefined,
-        getTreeColliders: () => [],
-        stats: () => ({ tier: 0, chunks: 0, grassIndices: 0, trees: 0, sectors: 0 }),
-        dispose: () => undefined,
-      };
+  // Legacy mesh vegetation stays off: procplants/custom biome mixes own automatic biome plants.
+  const vegetation = {
+    update: (..._args: unknown[]) => undefined,
+    notifyTerrainChanged: () => undefined,
+    getTreeColliders: () => [],
+    stats: () => ({ tier: 0, chunks: 0, grassIndices: 0, trees: 0, sectors: 0 }),
+    dispose: () => undefined,
+  };
   const procplantsEnabled = !terrainOnlyDebug() && procPlantPreference !== "0" && (isChunked || procPlantPreference === "1");
   const procplants = procplantsEnabled
     ? createProcPlantVegetation({
@@ -2611,6 +2575,16 @@ function createTellusWorld(
         kind: thing.kind,
         prompt: thing.prompt.slice(0, 48),
         status: thing.generationStatus ?? "unknown",
+        modelUrl: thing.modelUrl,
+        assetStoreModelId: thing.assetStoreModelId,
+        loadedAssetRenderUrl:
+          typeof mesh?.userData.loadedAssetRenderUrl === "string"
+            ? (mesh.userData.loadedAssetRenderUrl as string)
+            : undefined,
+        loadedAssetLodLevel:
+          typeof mesh?.userData.loadedAssetLodLevel === "number"
+            ? (mesh.userData.loadedAssetLodLevel as number)
+            : undefined,
         hasMesh: Boolean(mesh),
         meshVisible: mesh?.visible ?? false,
         inScene,
@@ -5616,6 +5590,9 @@ function createTellusWorld(
     lastQueueWaitMs: 0,
     totalQueueWaitMs: 0,
     lastUrl: "",
+    lastRenderUrl: "",
+    lodRequests: 0,
+    lodFallbacks: 0,
   };
 
   const isDeadLegacyHyadesContentUrl = (url: string): boolean => {
@@ -5648,6 +5625,73 @@ function createTellusWorld(
 
   const isAssetStoreBackedModel = (thing: GeneratedThing, modelUrl: string): boolean =>
     Boolean(thing.assetStoreModelId?.trim() || assetStoreIdFromModelUrl(modelUrl));
+
+  type AssetStoreRenderLodLevel = 0 | 1 | 2;
+
+  const assetStoreRenderLodLevelForThing = (thing: GeneratedThing): AssetStoreRenderLodLevel => {
+    const distance = Math.hypot(
+      thing.position.x - visitorPosition.x,
+      thing.position.z - visitorPosition.z,
+    );
+    if (distance <= 40) return 0;
+    if (distance <= 120) return 1;
+    return 2;
+  };
+
+  const assetStoreRenderModelUrlForThing = (
+    thing: GeneratedThing,
+    canonicalModelUrl: string,
+  ): {
+    canonicalModelUrl: string;
+    renderModelUrl: string;
+    assetStoreModelId?: string;
+    lodLevel?: AssetStoreRenderLodLevel;
+  } => {
+    const assetStoreModelId =
+      thing.assetStoreModelId?.trim() || assetStoreIdFromModelUrl(canonicalModelUrl) || undefined;
+    if (!assetStoreModelId) {
+      return { canonicalModelUrl, renderModelUrl: canonicalModelUrl };
+    }
+    const lodLevel = assetStoreRenderLodLevelForThing(thing);
+    return {
+      canonicalModelUrl,
+      renderModelUrl: assetStoreLodModelUrl(assetStoreModelId, lodLevel),
+      assetStoreModelId,
+      lodLevel,
+    };
+  };
+
+  const loadGeneratedModelForThing = async (
+    canonicalModelUrl: string,
+    thing: GeneratedThing,
+  ): Promise<THREE.Object3D> => {
+    const resolved = assetStoreRenderModelUrlForThing(thing, canonicalModelUrl);
+    const hasAssetStoreLod =
+      resolved.assetStoreModelId && resolved.renderModelUrl !== resolved.canonicalModelUrl;
+    if (hasAssetStoreLod) {
+      generatedModelLoadStats.lodRequests += 1;
+    }
+    generatedModelLoadStats.lastRenderUrl = resolved.renderModelUrl;
+    try {
+      const model = await loadGeneratedModel(resolved.renderModelUrl, thing, useWebGPU);
+      model.userData.loadedModelUrl = resolved.canonicalModelUrl;
+      model.userData.loadedAssetRenderUrl = resolved.renderModelUrl;
+      model.userData.loadedAssetStoreModelId = resolved.assetStoreModelId;
+      model.userData.loadedAssetLodLevel = resolved.lodLevel;
+      return model;
+    } catch (error) {
+      if (!hasAssetStoreLod) throw error;
+      generatedModelLoadStats.lodFallbacks += 1;
+      const fallback = await loadGeneratedModel(resolved.canonicalModelUrl, thing, useWebGPU);
+      fallback.userData.loadedModelUrl = resolved.canonicalModelUrl;
+      fallback.userData.loadedAssetRenderUrl = resolved.canonicalModelUrl;
+      fallback.userData.loadedAssetStoreModelId = resolved.assetStoreModelId;
+      fallback.userData.loadedAssetLodLevel = undefined;
+      fallback.userData.loadedAssetLodFallbackError =
+        error instanceof Error ? error.message : String(error);
+      return fallback;
+    }
+  };
 
   const showTransientGeneratedLoadFailure = (thing: GeneratedThing, error: unknown) => {
     const oldMesh = generatedMeshes.get(thing.id);
@@ -5756,7 +5800,7 @@ function createTellusWorld(
       generatedModelLoadStats.lastQueueWaitMs = queueWaitMs;
       generatedModelLoadStats.totalQueueWaitMs += queueWaitMs;
       generatedModelLoadStats.lastUrl = modelUrl;
-      void loadGeneratedModel(modelUrl, thing, useWebGPU)
+      void loadGeneratedModelForThing(modelUrl, thing)
         .then((model) => {
           const loadMs = Math.max(0, performance.now() - loadStartedAt);
           generatedModelLoadStats.loaded += 1;
@@ -5782,7 +5826,6 @@ function createTellusWorld(
             scene.remove(oldMesh);
             disposeObject(oldMesh);
           }
-          model.userData.loadedModelUrl = modelUrl;
           ensureGeneratedBuildingLodProxy(current, model);
           generatedMeshes.set(id, model);
           startGeneratedAnimation(id, model);
@@ -7083,7 +7126,7 @@ function createTellusWorld(
             tool: "generate",
             text: `Pixel3D returned a model URL for ${thing.kind}; loading it into Tellus.`,
           });
-          const model = await loadGeneratedModel(modelUrl, thing, useWebGPU);
+          const model = await loadGeneratedModelForThing(modelUrl, thing);
           if (destroyed || generationPausedForThing(thing) || !thingById(thing.id)) {
             disposeObject(model);
             return;
@@ -7096,7 +7139,6 @@ function createTellusWorld(
             scene.remove(oldMesh);
             disposeObject(oldMesh);
           }
-          model.userData.loadedModelUrl = modelUrl;
           ensureGeneratedBuildingLodProxy(thing, model);
           generatedMeshes.set(thing.id, model);
           startGeneratedAnimation(thing.id, model);
@@ -7202,7 +7244,7 @@ function createTellusWorld(
             tool: "generate",
             text: `${providerName} used ${result.textImageProvider ?? "image"} source ${result.sourceImageUrl ? absoluteTellusApiUrl(result.sourceImageUrl) : "image"} and saved ${thing.kind} GLB to ${result.storedModelUrl ? absoluteTellusApiUrl(result.storedModelUrl) : thing.modelUrl}; loading it into Tellus.`,
           });
-          const model = await loadGeneratedModel(thing.modelUrl, thing, useWebGPU);
+          const model = await loadGeneratedModelForThing(thing.modelUrl, thing);
           if (destroyed || generationPausedForThing(thing) || !thingById(thing.id)) {
             disposeObject(model);
             return;
@@ -7214,7 +7256,6 @@ function createTellusWorld(
             scene.remove(oldMesh);
             disposeObject(oldMesh);
           }
-          model.userData.loadedModelUrl = thing.modelUrl;
           ensureGeneratedBuildingLodProxy(thing, model);
           generatedMeshes.set(thing.id, model);
           startGeneratedAnimation(thing.id, model);
@@ -7365,7 +7406,7 @@ function createTellusWorld(
     });
     publishGeneratedThing(thing);
     publish();
-    void loadGeneratedModel(modelUrl, thing, useWebGPU)
+    void loadGeneratedModelForThing(modelUrl, thing)
       .then((modelObject) => {
         if (destroyed) return;
         const oldMesh = generatedMeshes.get(thing.id);
@@ -7374,7 +7415,6 @@ function createTellusWorld(
           scene.remove(oldMesh);
           disposeObject(oldMesh);
         }
-        modelObject.userData.loadedModelUrl = modelUrl;
         ensureGeneratedBuildingLodProxy(thing, modelObject);
         generatedMeshes.set(thing.id, modelObject);
         startGeneratedAnimation(thing.id, modelObject); // VRM idle / embedded clip starts looping
@@ -17660,6 +17700,17 @@ function App(): React.ReactElement {
           </div>
           <div className="terrain-subtitle with-rule">Scatter</div>
           <div className="terrain-scatter-grid">
+            <a
+              className="terrain-scatter-tile"
+              href="/biome-mixer.html"
+              target="_blank"
+              rel="noreferrer"
+              title="Open biome mixer"
+              aria-label="Open biome mixer"
+            >
+              <span className="terrain-scatter-emoji" aria-hidden="true">Mix</span>
+              <span className="terrain-scatter-label">Biome Mixer</span>
+            </a>
             {PROCEDURAL_CATALOG.map((arch) => (
               <div key={arch.id} className={`terrain-scatter-tile ${vegetationBrushId === arch.id ? "active" : ""} ${vegetationBrushId === arch.id && vegetationBrushMode === "multi" ? "multi" : ""}`}>
                 <button
