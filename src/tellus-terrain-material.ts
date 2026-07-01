@@ -266,9 +266,9 @@ function buildDetailColorNode() {
   const greenMul = greenVariation(wp.x, wp.z, grassMask);
   const mossFine = mx_fractal_noise_float(vec3(wp.x.mul(0.42), wp.z.mul(0.42), float(0)), 3, 2.0, 0.5);
   const mossSpeckle = mx_noise_float(vec3(wp.x.mul(2.4), wp.z.mul(2.4), float(0))).mul(0.08);
-  const jungleBase = color(0x173f1c)
-    .mul(float(0.9).add(mossFine.mul(0.16)).add(mossSpeckle))
-    .add(color(0x2f6d32).mul(float(0.24).add(mossFine.mul(0.12))));
+  const jungleBase = color(0x285f2d)
+    .mul(float(0.96).add(mossFine.mul(0.18)).add(mossSpeckle))
+    .add(color(0x5f9a42).mul(float(0.28).add(mossFine.mul(0.14))));
   detailed = mix(detailed, detailed.mul(greenMul), meadowMask.max(grassMask));
   detailed = mix(detailed, jungleBase, jungleMask);
 

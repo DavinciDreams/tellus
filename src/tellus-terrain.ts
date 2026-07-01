@@ -554,6 +554,9 @@ export function terrainVertexColor(
     const warm = kind === "grass" ? new THREE.Color(0xc4b878) : new THREE.Color(0x86a352);
     const cool = kind === "grass" ? new THREE.Color(0x8f9a52) : new THREE.Color(0x5f7c44);
     color.lerp(t > 0.5 ? warm : cool, 0.14 + Math.abs(t - 0.5) * 0.22);
+  } else if (kind === "jungle-moss") {
+    const t = smoothTerrainTone(x, z) * 0.5 + 0.5;
+    color.lerp(t > 0.5 ? new THREE.Color(0x5c8f44) : new THREE.Color(0x275c2b), 0.34);
   }
   const noise = 0.96 + smoothTerrainTone(x * 1.4 + seed * 0.001, z * 1.4 - seed * 0.001) * 0.055;
   return color.multiplyScalar(noise);
