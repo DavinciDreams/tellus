@@ -312,15 +312,17 @@ const assetModelsFromResponse = (parsed: unknown): unknown => {
   if (Array.isArray(parsed)) return parsed;
   if (!parsed || typeof parsed !== "object") return [];
   const record = parsed as Record<string, unknown>;
-  return (
+  const models =
     record.models ??
     record.animated_models ??
     record.animatedModels ??
     record.items ??
     record.results ??
-    record.data ??
-    []
-  );
+    record.data;
+  if (models && typeof models === "object" && !Array.isArray(models)) {
+    return assetModelsFromResponse(models);
+  }
+  return models ?? [];
 };
 
 async function fetchAssetBrowsePage(
@@ -341,14 +343,24 @@ async function fetchAssetBrowsePage(
   if (!response.ok) return { models: [], hasNext: false, total: 0 };
   const parsed = await readJsonResponse<{
     has_next?: boolean;
+    hasNext?: boolean;
     total?: number;
+    count?: number;
     models?: Array<Record<string, unknown>>;
+    items?: Array<Record<string, unknown>>;
+    results?: Array<Record<string, unknown>>;
+    data?: unknown;
   }>(response);
-  const models = parseAssetLibraryModels(parsed.models);
+  const models = parseAssetLibraryModels(assetModelsFromResponse(parsed));
   return {
     models,
-    hasNext: parsed.has_next === true,
-    total: typeof parsed.total === "number" ? parsed.total : models.length,
+    hasNext: parsed.has_next === true || parsed.hasNext === true,
+    total:
+      typeof parsed.total === "number"
+        ? parsed.total
+        : typeof parsed.count === "number"
+          ? parsed.count
+          : models.length,
   };
 }
 

@@ -167,6 +167,40 @@ describe("asset library browsing", () => {
     expect(result.models.map((model) => model.id)).toEqual(["chair-1"]);
   });
 
+  it("accepts newer browse response shapes from the Hyades asset proxy", async () => {
+    runtimeConfig.worldApiBase = "https://hyades.example";
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          hasNext: true,
+          count: 2,
+          data: {
+            results: [
+              { assetId: "tree-1", title: "Dark Moss Jungle Tree", viewable: true },
+              { modelId: "tree-2", title: "Hidden Draft", viewable: false },
+            ],
+          },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await browseAssetLibrary("", 1, "newest", 24, "flora");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://hyades.example/api/assets/models/browse?page=1&per_page=24&sort=newest&category=flora",
+      { cache: "no-store" },
+    );
+    expect(result.hasNext).toBe(true);
+    expect(result.total).toBe(2);
+    expect(result.models).toEqual([
+      expect.objectContaining({
+        id: "tree-1",
+        name: "Dark Moss Jungle Tree",
+      }),
+    ]);
+  });
+
   it("can filter asset browsing to animated GLBs from the direct endpoint", async () => {
     runtimeConfig.worldApiBase = "https://hyades.example";
     const fetchMock = vi.fn(async () =>

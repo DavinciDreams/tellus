@@ -32,6 +32,13 @@ describe("proxiedGeneratedModelUrl", () => {
     expect(proxiedGeneratedModelUrl(url)).toBe(url);
   });
 
+  it("reroutes an app-origin absolute /api/assets URL to the Hyades asset proxy", () => {
+    runtimeConfig.worldApiBase = "https://hyades.gnostr.cloud";
+    expect(proxiedGeneratedModelUrl("https://tellus.app/api/assets/model/abc/game-optimized")).toBe(
+      "https://hyades.gnostr.cloud/api/assets/model/abc/game-optimized",
+    );
+  });
+
   it("routes stored relative asset proxy URLs through the configured world API", () => {
     runtimeConfig.worldApiBase = "https://hyades.gnostr.cloud";
     expect(proxiedGeneratedModelUrl("/api/assets/model/abc/game-optimized")).toBe(

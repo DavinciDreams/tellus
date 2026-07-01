@@ -948,6 +948,12 @@ function createTellusWorld(
   if (chunkedCenterForWorld) {
     ocean.position.x = chunkedCenterForWorld.x;
     ocean.position.z = chunkedCenterForWorld.z;
+    if (ocean.material instanceof THREE.ShaderMaterial && ocean.material.userData.tellusWaterShader) {
+      const shoreCenter = ocean.material.uniforms.uShoreCenter?.value;
+      if (shoreCenter && typeof shoreCenter.set === "function") {
+        shoreCenter.set(chunkedCenterForWorld.x, chunkedCenterForWorld.z);
+      }
+    }
     archipelago.position.x = chunkedCenterForWorld.x;
     archipelago.position.z = chunkedCenterForWorld.z;
   }
@@ -2519,6 +2525,12 @@ function createTellusWorld(
     worldId: runtimeConfig.worldId,
     runtimeTemplate: parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
     runtimeSkyboxUrl: runtimeConfig.skyboxUrl,
+    renderer: {
+      backend: useWebGPU ? "webgpu" : "webgl",
+      preference: rendererPreference ?? "default",
+      navigatorGpu: "gpu" in navigator,
+      prefersOriginalTellusIslandRenderer,
+    },
     chunkedWorldChunks: getChunkedWorldChunks(),
     terrainMode: {
       isChunked,
@@ -2528,6 +2540,24 @@ function createTellusWorld(
       oceanVisible: ocean.visible,
       archipelagoVisible: archipelago.visible,
       pondWaterVisible: pondWater.visible,
+      oceanMaterial: Array.isArray(ocean.material)
+        ? ocean.material.map((material) => material.type)
+        : ocean.material.type,
+      oceanShaderVariant: Array.isArray(ocean.material)
+        ? ocean.material.map((material) => material.userData.tellusWaterShaderVariant)
+        : ocean.material.userData.tellusWaterShaderVariant,
+      oceanShoreCenter:
+        !Array.isArray(ocean.material) &&
+        ocean.material instanceof THREE.ShaderMaterial &&
+        ocean.material.uniforms.uShoreCenter?.value
+          ? {
+              x: ocean.material.uniforms.uShoreCenter.value.x,
+              y: ocean.material.uniforms.uShoreCenter.value.y,
+            }
+          : undefined,
+      oceanTransparent: Array.isArray(ocean.material)
+        ? ocean.material.some((material) => material.transparent)
+        : ocean.material.transparent,
     },
   });
   window.__tellusAssetLodUrls = (assetIdOrUrl: string) => {
