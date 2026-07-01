@@ -32,6 +32,13 @@ describe("proxiedGeneratedModelUrl", () => {
     expect(proxiedGeneratedModelUrl(url)).toBe(url);
   });
 
+  it("reroutes an app-origin absolute /api/assets URL to the Hyades asset proxy", () => {
+    runtimeConfig.worldApiBase = "https://hyades.gnostr.cloud";
+    expect(proxiedGeneratedModelUrl("https://tellus.app/api/assets/model/abc/game-optimized")).toBe(
+      "https://hyades.gnostr.cloud/api/assets/model/abc/game-optimized",
+    );
+  });
+
   it("routes stored relative asset proxy URLs through the configured world API", () => {
     runtimeConfig.worldApiBase = "https://hyades.gnostr.cloud";
     expect(proxiedGeneratedModelUrl("/api/assets/model/abc/game-optimized")).toBe(
@@ -70,6 +77,8 @@ describe("proxiedGeneratedModelUrl", () => {
       "abc123",
     );
     expect(assetStoreIdFromModelUrl("/api/assets/model/xyz/game-optimized")).toBe("xyz");
+    expect(assetStoreIdFromModelUrl("/api/assets/model/palm-1/lod/2")).toBe("palm-1");
+    expect(assetStoreIdFromModelUrl("/api/assets/model/palm-1/impostor")).toBe("palm-1");
     expect(assetStoreIdFromModelUrl("/__hyades/api/assets/model/dev-proxy/game-optimized")).toBe("dev-proxy");
     expect(assetStoreIdFromModelUrl("/generated-assets/local.glb")).toBeNull();
   });

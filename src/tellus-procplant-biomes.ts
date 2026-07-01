@@ -1,8 +1,10 @@
 import * as THREE from "three";
 import type { TerrainPaintKind } from "./tellus-types";
 import {
+  ECOLOGY_BIOMES,
   resolveEcologyCommunity,
   resolveEcologySample,
+  type EcologyBiomeId,
   type EcologySample,
 } from "./tellus-ecology";
 import {
@@ -149,9 +151,11 @@ export const procPlantPlaceableById = (id: string): ProcPlantPlaceableCatalogEnt
   );
 };
 
-type ProcPlantBiomeCandidate = Omit<ProcPlantBiomePatch, "version" | "seed"> & {
+export type ProcPlantBiomeCandidate = Omit<ProcPlantBiomePatch, "version" | "seed"> & {
   weight: number;
 };
+
+const TEXTURED_TREE_REPLACED_AUTO_PRESETS = new Set(["foldedPalm"]);
 
 const candidate = (
   primary: string,
@@ -193,11 +197,10 @@ const PAINT_BIOMES: Record<TerrainPaintKind, ProcPlantBiomeCandidate[]> = {
     candidate("furGrass", { secondary: "meadowFlower", hybrid: 0.08, density: 0.82, scale: 1.15, weight: 4, environment: { light: 0.76, moisture: 0.55, crowding: 0.45, biomeWarmth: 0.64 } }),
     candidate("reedSedge", { density: 0.34, scale: 1.25, weight: 1, environment: { light: 0.7, moisture: 0.72, crowding: 0.36, biomeWarmth: 0.62 } }),
     candidate("understoryShrub", { density: 0.2, scale: 2.0, weight: 1, environment: { light: 0.66, moisture: 0.5, crowding: 0.34, biomeWarmth: 0.62 } }),
-    candidate("oakCanopy", { density: 0.18, scale: 6.2, weight: 1, treeBackend: { kind: "lsystem", species: "cambridgeOak", leafScaleMultiplier: 1.8, maxLeaves: 190, maxStems: 48, maxBranchDepth: 2 }, environment: { light: 0.7, moisture: 0.5, crowding: 0.32, biomeWarmth: 0.58 } }),
-    candidate("birchGrove", { density: 0.16, scale: 5.8, weight: 1, treeBackend: { kind: "lsystem", species: "silverBirch", leafScaleMultiplier: 2.9, maxLeaves: 170, maxStems: 40, maxBranchDepth: 2 }, environment: { light: 0.72, moisture: 0.52, crowding: 0.28, biomeWarmth: 0.5 } }),
+    candidate("oakCanopy", { density: 0.18, scale: 6.2, weight: 1, treeBackend: { kind: "lsystem", species: "cambridgeOak", leafScaleMultiplier: 2.9, maxLeaves: 220, maxStems: 48, maxBranchDepth: 2 }, environment: { light: 0.7, moisture: 0.5, crowding: 0.32, biomeWarmth: 0.58 } }),
+    candidate("birchGrove", { density: 0.16, scale: 5.8, weight: 1, treeBackend: { kind: "lsystem", species: "silverBirch", leafScaleMultiplier: 3.9, maxLeaves: 195, maxStems: 40, maxBranchDepth: 2 }, environment: { light: 0.72, moisture: 0.52, crowding: 0.28, biomeWarmth: 0.5 } }),
   ],
   beach: [
-    candidate("foldedPalm", { secondary: "furGrass", hybrid: 0.04, density: 0.3, scale: 3.2, weight: 2, environment: { light: 0.92, moisture: 0.36, crowding: 0.18, biomeWarmth: 0.9 } }),
     candidate("reedSedge", { density: 0.25, scale: 1.1, weight: 2, environment: { light: 0.86, moisture: 0.5, crowding: 0.2, biomeWarmth: 0.78 } }),
     candidate("desertRosette", { density: 0.16, scale: 1.25, weight: 1, environment: { light: 0.94, moisture: 0.22, crowding: 0.12, biomeWarmth: 0.86 } }),
   ],
@@ -205,49 +208,67 @@ const PAINT_BIOMES: Record<TerrainPaintKind, ProcPlantBiomeCandidate[]> = {
     candidate("desertRosette", { secondary: "vincaVine", hybrid: 0.1, density: 0.38, scale: 1.25, weight: 2, environment: { light: 0.8, moisture: 0.38, crowding: 0.24, biomeWarmth: 0.7 } }),
     candidate("roseBush", { density: 0.24, scale: 1.8, weight: 1, environment: { light: 0.74, moisture: 0.46, crowding: 0.3, biomeWarmth: 0.68 } }),
     candidate("understoryShrub", { density: 0.3, scale: 2.1, weight: 2, environment: { light: 0.68, moisture: 0.42, crowding: 0.34, biomeWarmth: 0.64 } }),
-    candidate("acaciaUmbrella", { density: 0.14, scale: 5.8, weight: 1, treeBackend: { kind: "lsystem", species: "sassafras", leafScaleMultiplier: 2.0, maxLeaves: 150, maxStems: 42, maxBranchDepth: 2 }, environment: { light: 0.82, moisture: 0.34, crowding: 0.2, biomeWarmth: 0.76 } }),
+    candidate("acaciaUmbrella", { density: 0.14, scale: 5.8, weight: 1, treeBackend: { kind: "lsystem", species: "sassafras", leafScaleMultiplier: 3.25, maxLeaves: 180, maxStems: 42, maxBranchDepth: 2 }, environment: { light: 0.82, moisture: 0.34, crowding: 0.2, biomeWarmth: 0.76 } }),
   ],
   "forest-floor": [
     candidate("understoryShrub", { secondary: "phiFern", hybrid: 0.22, density: 0.48, scale: 2.2, weight: 3, environment: { light: 0.42, moisture: 0.66, crowding: 0.62, biomeWarmth: 0.48 } }),
     candidate("phiFern", { density: 0.52, scale: 1.0, weight: 2, environment: { light: 0.38, moisture: 0.74, crowding: 0.58, biomeWarmth: 0.46 } }),
-    candidate("oakCanopy", { density: 0.18, scale: 6.5, weight: 1, treeBackend: { kind: "lsystem", species: "cambridgeOak", leafScaleMultiplier: 1.7, maxLeaves: 180, maxStems: 46, maxBranchDepth: 2 }, environment: { light: 0.46, moisture: 0.58, crowding: 0.56, biomeWarmth: 0.5 } }),
+    candidate("oakCanopy", { density: 0.18, scale: 6.5, weight: 1, treeBackend: { kind: "lsystem", species: "cambridgeOak", leafScaleMultiplier: 2.8, maxLeaves: 210, maxStems: 46, maxBranchDepth: 2 }, environment: { light: 0.46, moisture: 0.58, crowding: 0.56, biomeWarmth: 0.5 } }),
   ],
   "desert-sand": [
     candidate("desertRosette", { secondary: "agaveSucculent", hybrid: 0.16, density: 0.24, scale: 1.25, weight: 3, environment: { light: 0.96, moisture: 0.14, crowding: 0.1, biomeWarmth: 0.92 } }),
     candidate("agaveSucculent", { density: 0.18, scale: 1.4, weight: 2, environment: { light: 0.96, moisture: 0.12, crowding: 0.1, biomeWarmth: 0.9 } }),
-    candidate("acaciaUmbrella", { density: 0.1, scale: 5.8, weight: 1, treeBackend: { kind: "lsystem", species: "sassafras", leafScaleMultiplier: 1.8, maxLeaves: 120, maxStems: 34, maxBranchDepth: 2 }, environment: { light: 0.92, moisture: 0.18, crowding: 0.12, biomeWarmth: 0.88 } }),
+    candidate("acaciaUmbrella", { density: 0.1, scale: 5.8, weight: 1, treeBackend: { kind: "lsystem", species: "sassafras", leafScaleMultiplier: 3.05, maxLeaves: 145, maxStems: 34, maxBranchDepth: 2 }, environment: { light: 0.92, moisture: 0.18, crowding: 0.12, biomeWarmth: 0.88 } }),
   ],
   rock: [
     candidate("agaveSucculent", { secondary: "desertRosette", hybrid: 0.08, density: 0.22, scale: 1.3, weight: 3, environment: { light: 0.86, moisture: 0.24, crowding: 0.12, biomeWarmth: 0.62 } }),
     candidate("phiFern", { density: 0.1, scale: 0.85, weight: 1, environment: { light: 0.54, moisture: 0.34, crowding: 0.18, biomeWarmth: 0.5 } }),
   ],
   snow: [
-    candidate("alpineFir", { density: 0.2, scale: 6.1, weight: 3, treeBackend: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 2.8, maxLeaves: 180, maxStems: 44, maxBranchDepth: 2 }, environment: { light: 0.66, moisture: 0.44, crowding: 0.16, biomeWarmth: 0.14 } }),
+    candidate("alpineFir", { density: 0.2, scale: 6.1, weight: 3, treeBackend: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 4.35, maxLeaves: 210, maxStems: 44, maxBranchDepth: 2 }, environment: { light: 0.66, moisture: 0.44, crowding: 0.16, biomeWarmth: 0.14 } }),
     candidate("blueSpruce", { secondary: "furGrass", hybrid: 0.04, density: 0.22, scale: 3.2, weight: 2, environment: { light: 0.68, moisture: 0.42, crowding: 0.18, biomeWarmth: 0.16 } }),
-    candidate("redwoodSpire", { density: 0.12, scale: 7.0, weight: 1, treeBackend: { kind: "lsystem", species: "douglasFir", leafScaleMultiplier: 2.4, maxLeaves: 180, maxStems: 44, maxBranchDepth: 2 }, environment: { light: 0.64, moisture: 0.48, crowding: 0.14, biomeWarmth: 0.2 } }),
+    candidate("redwoodSpire", { density: 0.12, scale: 7.0, weight: 1, treeBackend: { kind: "lsystem", species: "douglasFir", leafScaleMultiplier: 3.9, maxLeaves: 205, maxStems: 44, maxBranchDepth: 2 }, environment: { light: 0.64, moisture: 0.48, crowding: 0.14, biomeWarmth: 0.2 } }),
     candidate("furGrass", { density: 0.16, scale: 0.8, weight: 1, environment: { light: 0.62, moisture: 0.34, crowding: 0.12, biomeWarmth: 0.18 } }),
   ],
   stone: [],
   gravel: [
-    candidate("alpineFir", { density: 0.14, scale: 4.8, weight: 3, treeBackend: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 2.6, maxLeaves: 140, maxStems: 36, maxBranchDepth: 2 }, environment: { light: 0.72, moisture: 0.3, crowding: 0.12, biomeWarmth: 0.34 } }),
+    candidate("alpineFir", { density: 0.14, scale: 4.8, weight: 3, treeBackend: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 4.1, maxLeaves: 165, maxStems: 36, maxBranchDepth: 2 }, environment: { light: 0.72, moisture: 0.3, crowding: 0.12, biomeWarmth: 0.34 } }),
     candidate("furGrass", { density: 0.1, scale: 0.75, weight: 2, environment: { light: 0.7, moisture: 0.28, crowding: 0.1, biomeWarmth: 0.52 } }),
   ],
   "jungle-moss": [
     candidate("phiFern", { secondary: "vincaVine", hybrid: 0.3, density: 0.74, scale: 1.2, weight: 3, environment: { light: 0.35, moisture: 0.92, crowding: 0.76, biomeWarmth: 0.84 } }),
     candidate("understoryShrub", { density: 0.42, scale: 2.4, weight: 2, environment: { light: 0.38, moisture: 0.86, crowding: 0.72, biomeWarmth: 0.82 } }),
-    candidate("foldedPalm", { density: 0.2, scale: 3.8, weight: 1, environment: { light: 0.5, moisture: 0.84, crowding: 0.58, biomeWarmth: 0.9 } }),
   ],
   brick: [],
 };
 
 const TREE_BACKEND_BY_PRESET: Partial<Record<string, ProcPlantTreeBackend>> = {
-  oakCanopy: { kind: "lsystem", species: "cambridgeOak", leafScaleMultiplier: 1.8, maxLeaves: 190, maxStems: 48, maxBranchDepth: 2 },
-  birchGrove: { kind: "lsystem", species: "silverBirch", leafScaleMultiplier: 2.9, maxLeaves: 170, maxStems: 40, maxBranchDepth: 2 },
-  acaciaUmbrella: { kind: "lsystem", species: "sassafras", leafScaleMultiplier: 2.0, maxLeaves: 150, maxStems: 42, maxBranchDepth: 2, foliageMass: 0.58, foliageSpread: 0.28 },
-  blueSpruce: { kind: "lsystem", species: "smallPine", leafScaleMultiplier: 2.7, maxLeaves: 170, maxStems: 54, maxBranchDepth: 2, foliageMass: 1.08, foliageTipBias: 0.3, foliageSpread: 0.12 },
-  alpineFir: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 2.8, maxLeaves: 180, maxStems: 44, maxBranchDepth: 2 },
-  redwoodSpire: { kind: "lsystem", species: "douglasFir", leafScaleMultiplier: 2.4, maxLeaves: 180, maxStems: 44, maxBranchDepth: 2, foliageMass: 0.9, foliageTipBias: 0.34 },
+  oakCanopy: { kind: "lsystem", species: "cambridgeOak", leafScaleMultiplier: 2.9, maxLeaves: 220, maxStems: 48, maxBranchDepth: 2 },
+  birchGrove: { kind: "lsystem", species: "silverBirch", leafScaleMultiplier: 3.9, maxLeaves: 195, maxStems: 40, maxBranchDepth: 2 },
+  acaciaUmbrella: { kind: "lsystem", species: "sassafras", leafScaleMultiplier: 3.25, maxLeaves: 180, maxStems: 42, maxBranchDepth: 2, foliageMass: 0.7, foliageSpread: 0.32 },
+  blueSpruce: { kind: "lsystem", species: "smallPine", leafScaleMultiplier: 4.2, maxLeaves: 205, maxStems: 54, maxBranchDepth: 2, foliageMass: 1.18, foliageTipBias: 0.28, foliageSpread: 0.14 },
+  alpineFir: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 4.35, maxLeaves: 210, maxStems: 44, maxBranchDepth: 2 },
+  redwoodSpire: { kind: "lsystem", species: "douglasFir", leafScaleMultiplier: 3.9, maxLeaves: 205, maxStems: 44, maxBranchDepth: 2, foliageMass: 1.02, foliageTipBias: 0.32 },
 };
+
+export const ECOLOGY_TERRAIN_PAINT_MAP: Record<EcologyBiomeId, TerrainPaintKind> = {
+  "tropical-rain-forest": "jungle-moss",
+  "temperate-rain-forest": "forest-floor",
+  grassland: "grass",
+  desert: "desert-sand",
+  coastal: "beach",
+  taiga: "dirt",
+  estuary: "flowers",
+  tundra: "gravel",
+  "arctic-alpine": "rock",
+  savanna: "meadow",
+};
+
+const patchFromCandidate = (candidate: ProcPlantBiomeCandidate, seed: number): ProcPlantBiomePatch => ({
+  version: 1,
+  seed,
+  ...candidate,
+});
 
 const patchFromEcologyPreset = (
   presetId: string,
@@ -295,22 +316,77 @@ export const biomePatchForPaint = (
   seed: number,
 ): ProcPlantBiomePatch | null => {
   if (!paint) return null;
-  const base = pickCandidate(PAINT_BIOMES[paint] ?? [], seed);
+  const base = pickCandidate(
+    (PAINT_BIOMES[paint] ?? []).filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.primary)),
+    seed,
+  );
   if (!base) return null;
-  return { version: 1, seed, ...base };
+  return patchFromCandidate(base, seed);
 };
+
+export const biomePatchesForPaint = (
+  paint: TerrainPaintKind | null,
+  seed: number,
+): ProcPlantBiomePatch[] =>
+  paint
+    ? (PAINT_BIOMES[paint] ?? [])
+        .filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.primary))
+        .map((entry, index) => patchFromCandidate(entry, seed ^ ((index + 1) * 0x9e3779b1)))
+    : [];
 
 export const biomePatchForEcology = (
   ecology: EcologySample,
   seed: number,
 ): ProcPlantBiomePatch | null => {
   const community = resolveEcologyCommunity(ecology, 6);
-  const candidates = community.map((entry) => patchFromEcologyPreset(entry.presetId, ecology, entry.score));
-  const fallback = ecology.terrainPaint ? PAINT_BIOMES[ecology.terrainPaint] ?? [] : [];
+  const candidates = community
+    .filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.presetId))
+    .map((entry) => patchFromEcologyPreset(entry.presetId, ecology, entry.score));
+  const fallback = ecology.terrainPaint
+    ? (PAINT_BIOMES[ecology.terrainPaint] ?? []).filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.primary))
+    : [];
   const base = pickCandidate(candidates.length > 0 ? candidates : fallback, seed);
   if (!base) return null;
-  return { version: 1, seed, ...base };
+  return patchFromCandidate(base, seed);
 };
+
+export const biomePatchesForEcology = (
+  ecology: EcologySample,
+  seed: number,
+  limit = 8,
+): ProcPlantBiomePatch[] => {
+  const community = resolveEcologyCommunity(ecology, limit);
+  const candidates = community
+    .filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.presetId))
+    .map((entry) => patchFromEcologyPreset(entry.presetId, ecology, entry.score));
+  const fallback = ecology.terrainPaint
+    ? (PAINT_BIOMES[ecology.terrainPaint] ?? []).filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.primary))
+    : [];
+  return (candidates.length > 0 ? candidates : fallback).map((entry, index) =>
+    patchFromCandidate(entry, seed ^ ((index + 1) * 0x85ebca6b)),
+  );
+};
+
+export const biomePatchesForEcologyBiome = (
+  biome: EcologyBiomeId,
+  seed: number,
+  limit = 8,
+): ProcPlantBiomePatch[] =>
+  biomePatchesForEcology(
+    resolveEcologySample({
+      seed,
+      x: 0,
+      z: 0,
+      height: biome === "arctic-alpine" || biome === "taiga" || biome === "tundra" ? 32 : biome === "coastal" || biome === "estuary" ? 1.2 : 8,
+      slope: biome === "arctic-alpine" ? 0.62 : biome === "desert" ? 0.2 : 0.12,
+      terrainPaint: ECOLOGY_TERRAIN_PAINT_MAP[biome],
+      biomeCell: { cx: 0, cz: 0, biome, intensity: 1 },
+    }),
+    seed,
+    limit,
+  );
+
+export const ECOLOGY_BIOME_OPTIONS = ECOLOGY_BIOMES;
 
 export const biomePatchForPaintEcology = (
   paint: TerrainPaintKind | null,

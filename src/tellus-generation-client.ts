@@ -6,8 +6,12 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 import type {
   AssetForgePipelineStart,
   AssetForgePipelineStatus,
+  AssetLodLevelSummary,
+  AssetLodSummary,
+  AssetLodVariant,
   AssetLibraryModel,
   AssetLibraryResponse,
+  AssetMeshStats,
   DirectGenerationProvider,
   DirectGenerationResponse,
   GeneratedAssetManifestEntry,
@@ -119,6 +123,17 @@ const booleanField = (record: Record<string, unknown>, ...keys: string[]): boole
   return undefined;
 };
 
+const numberArrayField = (record: Record<string, unknown>, ...keys: string[]): number[] | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) {
+      const numbers = value.filter((item): item is number => typeof item === "number" && Number.isFinite(item));
+      if (numbers.length > 0) return numbers;
+    }
+  }
+  return undefined;
+};
+
 const stringArrayField = (record: Record<string, unknown>, ...keys: string[]): string[] | undefined => {
   for (const key of keys) {
     const value = record[key];
@@ -128,6 +143,75 @@ const stringArrayField = (record: Record<string, unknown>, ...keys: string[]): s
     }
   }
   return undefined;
+};
+
+const parseMeshStats = (raw: unknown): AssetMeshStats | undefined => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const stats: AssetMeshStats = {
+    primitives: numberField(record, "primitives", "primitive_count", "primitiveCount"),
+    triangles: numberField(record, "triangles", "triangle_count", "triangleCount"),
+    vertices: numberField(record, "vertices", "vertex_count", "vertexCount"),
+  };
+  return Object.values(stats).some((value) => value !== undefined) ? stats : undefined;
+};
+
+const parseLodLevelSummary = (raw: unknown): AssetLodLevelSummary | null => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const level = numberField(record, "level");
+  if (level === undefined) return null;
+  return {
+    level,
+    recommended_use: stringField(record, "recommended_use", "recommendedUse"),
+    size: numberField(record, "size"),
+    size_mb: numberField(record, "size_mb", "sizeMb"),
+    triangles: numberField(record, "triangles", "triangle_count", "triangleCount"),
+    vertices: numberField(record, "vertices", "vertex_count", "vertexCount"),
+  };
+};
+
+const parseLodSummary = (raw: unknown): AssetLodSummary | undefined => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const levelsRaw = record.levels;
+  const levels = Array.isArray(levelsRaw)
+    ? levelsRaw.map(parseLodLevelSummary).filter((level): level is AssetLodLevelSummary => level !== null)
+    : undefined;
+  const summary: AssetLodSummary = {
+    cheapest_level: numberField(record, "cheapest_level", "cheapestLevel"),
+    cheapest_size: numberField(record, "cheapest_size", "cheapestSize"),
+    cheapest_size_mb: numberField(record, "cheapest_size_mb", "cheapestSizeMb"),
+    cheapest_triangles: numberField(record, "cheapest_triangles", "cheapestTriangles"),
+    cheapest_vertices: numberField(record, "cheapest_vertices", "cheapestVertices"),
+    levels: levels && levels.length > 0 ? levels : undefined,
+    missing_levels: numberArrayField(record, "missing_levels", "missingLevels"),
+    ready: booleanField(record, "ready"),
+    recommended_use: stringField(record, "recommended_use", "recommendedUse"),
+    status: stringField(record, "status"),
+  };
+  return Object.values(summary).some((value) => value !== undefined) ? summary : undefined;
+};
+
+const parseLodVariant = (raw: unknown): AssetLodVariant | null => {
+  const base = parseLodLevelSummary(raw);
+  if (!base) return null;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return base;
+  const record = raw as Record<string, unknown>;
+  return {
+    ...base,
+    file_format: stringField(record, "file_format", "fileFormat"),
+    status: stringField(record, "status"),
+    url: stringField(record, "url"),
+    download_url: stringField(record, "download_url", "downloadUrl"),
+    mesh_stats: parseMeshStats(record.mesh_stats ?? record.meshStats),
+  };
+};
+
+const parseLodVariants = (raw: unknown): AssetLodVariant[] | undefined => {
+  if (!Array.isArray(raw)) return undefined;
+  const variants = raw.map(parseLodVariant).filter((variant): variant is AssetLodVariant => variant !== null);
+  return variants.length > 0 ? variants : undefined;
 };
 
 const parseAnimationMetadata = (raw: unknown): AssetAnimationMetadata | null => {
@@ -200,6 +284,8 @@ const parseAssetLibraryModels = (rawModels: unknown): AssetLibraryModel[] => {
         name,
         description: name,
         file_format: stringField(record, "file_format", "fileFormat", "format"),
+        file_size: numberField(record, "file_size", "fileSize", "size"),
+        effective_file_size: numberField(record, "effective_file_size", "effectiveFileSize"),
         download_count: numberField(record, "download_count", "downloadCount", "downloads"),
         hasThumbnail: booleanField(record, "has_thumbnail", "hasThumbnail"),
         hasGameOptimized: booleanField(record, "has_game_optimized", "hasGameOptimized"),
@@ -209,6 +295,12 @@ const parseAssetLibraryModels = (rawModels: unknown): AssetLibraryModel[] => {
         viewable: record.viewable !== false,
         tags: stringArrayField(record, "tags", "keywords"),
         animationClips: parseAnimationMetadataList(record),
+        effectiveMeshStats: parseMeshStats(record.effective_mesh_stats ?? record.effectiveMeshStats),
+        lodReady: booleanField(record, "lod_ready", "lodReady"),
+        lodStatus: stringField(record, "lod_status", "lodStatus"),
+        lodAvailableLevels: numberArrayField(record, "lod_available_levels", "lodAvailableLevels"),
+        lodSummary: parseLodSummary(record.lod_summary ?? record.lodSummary),
+        lodVariants: parseLodVariants(record.lod_variants ?? record.lodVariants),
         source: "asset-library" as const,
       };
     if (model.viewable !== false) models.push(model);
@@ -220,15 +312,17 @@ const assetModelsFromResponse = (parsed: unknown): unknown => {
   if (Array.isArray(parsed)) return parsed;
   if (!parsed || typeof parsed !== "object") return [];
   const record = parsed as Record<string, unknown>;
-  return (
+  const models =
     record.models ??
     record.animated_models ??
     record.animatedModels ??
     record.items ??
     record.results ??
-    record.data ??
-    []
-  );
+    record.data;
+  if (models && typeof models === "object" && !Array.isArray(models)) {
+    return assetModelsFromResponse(models);
+  }
+  return models ?? [];
 };
 
 async function fetchAssetBrowsePage(
@@ -249,14 +343,24 @@ async function fetchAssetBrowsePage(
   if (!response.ok) return { models: [], hasNext: false, total: 0 };
   const parsed = await readJsonResponse<{
     has_next?: boolean;
+    hasNext?: boolean;
     total?: number;
+    count?: number;
     models?: Array<Record<string, unknown>>;
+    items?: Array<Record<string, unknown>>;
+    results?: Array<Record<string, unknown>>;
+    data?: unknown;
   }>(response);
-  const models = parseAssetLibraryModels(parsed.models);
+  const models = parseAssetLibraryModels(assetModelsFromResponse(parsed));
   return {
     models,
-    hasNext: parsed.has_next === true,
-    total: typeof parsed.total === "number" ? parsed.total : models.length,
+    hasNext: parsed.has_next === true || parsed.hasNext === true,
+    total:
+      typeof parsed.total === "number"
+        ? parsed.total
+        : typeof parsed.count === "number"
+          ? parsed.count
+          : models.length,
   };
 }
 

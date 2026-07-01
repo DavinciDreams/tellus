@@ -119,6 +119,8 @@ export default defineConfig(({ mode }) => {
         input: {
           main: "index.html",
           agentView: "agent-view.html",
+          treeLodGallery: "tree-lod-gallery.html",
+          biomeMixer: "biome-mixer.html",
         },
         output: {
           manualChunks(id) {

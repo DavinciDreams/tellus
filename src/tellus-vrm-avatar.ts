@@ -27,6 +27,7 @@ import {
   normalizeAnimationIntent,
   type AssetAnimationMetadata,
 } from "./tellus-animation-intents";
+import { tellusAssetLibraryUrl } from "./tellus-urls-identity";
 
 // ── Asset-store ids (the ONLY thing to touch when new avatars/clips land) ──────────────────────
 // All are plain GETs on the header-free /api/assets proxy (no session header on purpose).
@@ -195,7 +196,7 @@ export function classicAvatarRequested(): boolean {
 }
 
 export function assetDownloadUrl(id: string): string {
-  return `${runtimeConfig.worldApiBase}/api/assets/download/${encodeURIComponent(id)}`;
+  return tellusAssetLibraryUrl(`/api/assets/download/${encodeURIComponent(id)}`);
 }
 
 /** Stable FNV-1a hash → each visitorId (players AND agent:* ids) always gets the same robot. */
@@ -269,10 +270,9 @@ function fetchAssetIsVrm(id: string): Promise<boolean | undefined> {
   if (!pending) {
     pending = (async () => {
       if (!runtimeConfig.worldApiBase) return undefined;
-      const response = await fetch(
-        `${runtimeConfig.worldApiBase}/api/assets/model/${encodeURIComponent(id)}`,
-        { cache: "force-cache" },
-      );
+      const response = await fetch(tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(id)}`), {
+        cache: "force-cache",
+      });
       if (!response.ok) return undefined;
       const parsed = (await response.json()) as unknown;
       const model =
@@ -516,7 +516,7 @@ function vrmaFeedUrl(): string | null {
   // proxy, which prefixes store paths with /api/assets (same convention as assetDownloadUrl's
   // /api/assets/download/{id}). Live shape (3d.flobots.xyz/api/vrma):
   //   { animations: [ { id, name, download_url: "/api/download/{id}", source, ... } ] }
-  return `${runtimeConfig.worldApiBase}/api/assets/vrma`;
+  return tellusAssetLibraryUrl("/api/assets/vrma");
 }
 
 /** Fetch + cache the VRMA catalogue. Always resolves (never rejects): the built-in clips are the

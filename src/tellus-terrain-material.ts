@@ -787,7 +787,7 @@ float tellusGritDetail(vec3 sampleColor, float strength){
     vec3 meadowAlbedo = mossSample * vec3(0.96, 1.03, 0.96);
     vec3 flowersAlbedo = mossSample * vec3(1.04, 1.08, 1.08);
     vec3 grassAlbedo = mossSample * vec3(1.08, 1.12, 0.82);
-    vec3 jungleMossAlbedo = mossSample * vec3(0.38, 0.68, 0.34);
+    vec3 jungleMossAlbedo = mix(vec3(0.08, 0.24, 0.10), mossSample * vec3(0.58, 0.9, 0.52), 0.72);
     vec3 sandAlbedo = mix(tellusSandSurface(vTellusWorldPos.xz) * vec3(0.9, 0.84, 0.68), gritSample * vec3(1.18, 1.08, 0.88), 0.62);
     vec3 dirtBase = tellusDirtSurface(vTellusWorldPos.xz) * vec3(0.68, 0.5, 0.32);
     vec3 dirtGrain = mix(gritSample * vec3(0.5, 0.34, 0.2), gritSample * gritSample * vec3(0.42, 0.25, 0.13), 0.48);

@@ -214,6 +214,8 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
       uTintColor: { value: new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.38) },
       uOpacity: { value: water.opacity },
       uWaveStrength: { value: water.waveStrength },
+      uIslandRadius: { value: WORLD_RADIUS },
+      uShoreCenter: { value: new THREE.Vector2(0, 0) },
     },
     vertexShader: `
       varying vec2 vWorldXZ;
@@ -236,6 +238,8 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
       uniform vec3 uTintColor;
       uniform float uOpacity;
       uniform float uWaveStrength;
+      uniform float uIslandRadius;
+      uniform vec2 uShoreCenter;
       varying vec2 vWorldXZ;
       varying vec3 vWorldPosition;
       varying vec3 vWorldNormal;
@@ -268,26 +272,63 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
         float wave = 0.18 + uWaveStrength * 0.82;
         vec2 waterUV = vWorldXZ;
         float t = uTime * 0.62 * wave;
-        float broadFlow = worley(waterUV * (0.26 + wave * 0.1) + vec2(t * 0.52, -t * 0.31));
-        vec2 warpedUV = waterUV * (0.95 + wave * 0.4)
-          + vec2(broadFlow * (0.28 + wave * 0.1), broadFlow * -0.18)
-          + vec2(t, -t * 0.64);
-        float waveCells = worley(warpedUV);
-        float surface = clamp(waveCells * broadFlow * (0.86 + wave * 0.32), 0.0, 1.0);
-        surface = pow(surface, 0.72);
+        vec2 flow = vec2(t, -t * 0.73);
+        float waterLayer0 = worley(waterUV * (1.12 + wave * 0.24) + flow);
+        float waterLayer1 = worley(waterUV * (0.58 + wave * 0.14) - flow * 0.62);
+        float surface = clamp(pow(waterLayer0 * waterLayer1, 0.54) * 1.18, 0.0, 1.0);
+        float rippleScale = 0.11 + wave * 0.06;
+        float rippleX = pow(
+          worley((waterUV + vec2(rippleScale, 0.0)) * (1.12 + wave * 0.24) + flow)
+            * worley((waterUV + vec2(rippleScale, 0.0)) * (0.58 + wave * 0.14) - flow * 0.62),
+          0.54
+        ) * 1.18;
+        float rippleZ = pow(
+          worley((waterUV + vec2(0.0, rippleScale)) * (1.12 + wave * 0.24) + flow)
+            * worley((waterUV + vec2(0.0, rippleScale)) * (0.58 + wave * 0.14) - flow * 0.62),
+          0.54
+        ) * 1.18;
+        vec3 rippleNormal = normalize(vec3(
+          (surface - rippleX) * (2.6 + wave),
+          0.28,
+          (surface - rippleZ) * (2.6 + wave)
+        ));
+        surface = pow(surface, 0.78);
         vec3 viewDir = normalize(cameraPosition - vWorldPosition);
-        float facing = clamp(dot(viewDir, normalize(vWorldNormal)), 0.0, 1.0);
-        float fresnel = pow(1.0 - facing, 2.35);
+        float facing = clamp(dot(viewDir, rippleNormal), 0.0, 1.0);
+        float fresnel = mix(0.22, 1.0, pow(1.0 - facing, 3.0));
         float horizon = smoothstep(0.16, 0.72, fresnel);
-        float glintCells = worley(waterUV * (1.8 + wave * 0.72) + vec2(-t * 0.42, t * 0.33));
-        float glint = smoothstep(0.72, 0.98, glintCells * broadFlow + horizon * 0.45);
-        vec3 water = mix(uDeepColor, uShallowColor, surface);
-        float foam = smoothstep(0.58, 0.98, surface) * (0.12 * wave);
-        water = mix(water, uFoamColor, foam);
-        vec3 reflection = mix(vec3(0.52, 0.78, 0.98), uFoamColor, glint * 0.55);
-        water = mix(water, reflection, clamp(horizon * 0.46 + glint * 0.18, 0.0, 0.58));
-        water = mix(water, uTintColor, 0.08);
-        float alpha = clamp(uOpacity * (0.56 + surface * 0.26) + horizon * 0.14 + glint * 0.04, 0.32, uOpacity);
+        float glintCells = worley(waterUV * (3.2 + wave * 0.9) + vec2(-t * 0.42, t * 0.33));
+        float glint = smoothstep(0.58, 0.96, glintCells * surface + horizon * 0.45);
+        float islandDistance = length(waterUV - uShoreCenter);
+        float shoreIrregularity = worley((waterUV - uShoreCenter) * 0.052 + vec2(t * 0.04, -t * 0.03));
+        float shoreDistance = islandDistance - uIslandRadius + (shoreIrregularity - 0.5) * 5.2;
+        float shoreBand = smoothstep(-1.2, 1.2, shoreDistance) * (1.0 - smoothstep(8.0, 18.0, shoreDistance));
+        float shoreTravel = fract(shoreDistance * 0.22 - uTime * (0.62 + wave * 0.16));
+        float shoreLine = 1.0 - smoothstep(0.0, 0.2, abs(shoreTravel - 0.48));
+        float shoreLine2 = 1.0 - smoothstep(0.0, 0.16, abs(fract(shoreDistance * 0.16 - uTime * 0.38) - 0.52));
+        float shoreNoise = worley((waterUV - uShoreCenter) * 0.22 + vec2(t * 0.18, -t * 0.12));
+        float shoreFoam = shoreBand * max(shoreLine, shoreLine2 * 0.55) * mix(0.68, 1.0, shoreNoise);
+        vec3 lagoonBase = mix(uDeepColor, uShallowColor, 0.56);
+        vec3 rippleTint = mix(lagoonBase, uFoamColor, 0.42);
+        vec3 water = mix(lagoonBase, rippleTint, clamp(0.24 + surface * 0.58 + glint * 0.14, 0.0, 1.0));
+        float foam = smoothstep(0.62, 1.0, surface) * (0.1 * wave);
+        water = mix(water, uFoamColor, clamp(foam + shoreFoam * 0.95, 0.0, 0.92));
+        water = mix(water, vec3(1.0, 1.0, 1.0), clamp(shoreFoam * 0.62, 0.0, 0.72));
+        vec3 reflection = mix(vec3(0.48, 0.78, 1.0), uFoamColor, glint * 0.62);
+        water = mix(water, reflection, clamp(fresnel * 0.32 + glint * 0.16, 0.0, 0.48));
+        water = mix(water, uTintColor, 0.025);
+        water = mix(water, uShallowColor, 0.14);
+        float horizonHaze = smoothstep(uIslandRadius * 1.25, uIslandRadius * 2.65, islandDistance);
+        water = mix(water, mix(uDeepColor, uShallowColor, 0.42), horizonHaze * 0.32);
+        float alpha = clamp(
+          uOpacity * (0.28 + surface * 0.08) +
+            fresnel * 0.12 +
+            glint * 0.03 +
+            shoreFoam * 0.28 +
+            horizonHaze * 0.18,
+          0.18,
+          min(uOpacity, 0.72)
+        );
         gl_FragColor = vec4(water, alpha);
       }
     `,
@@ -296,6 +337,7 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
     depthWrite: false,
   });
   material.userData.tellusWaterShader = true;
+  material.userData.tellusWaterShaderVariant = "webgl-irregular-white-shore-haze";
   return material;
 }
 

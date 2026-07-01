@@ -31,6 +31,27 @@ describe("asset library browsing", () => {
               file_format: "glb",
               has_thumbnail: true,
               has_game_optimized: true,
+              lod_ready: true,
+              lod_status: "ready",
+              lod_available_levels: [0, 1, 2],
+              lod_summary: {
+                cheapest_level: 2,
+                cheapest_size_mb: 0.057,
+                cheapest_triangles: 12394,
+                cheapest_vertices: 6193,
+                levels: [
+                  { level: 0, size_mb: 0.187, triangles: 42146, vertices: 21079 },
+                  { level: 2, size_mb: 0.057, triangles: 12394, vertices: 6193 },
+                ],
+              },
+              lod_variants: [
+                {
+                  level: 2,
+                  url: "/api/assets/model/asset-1/lod/2",
+                  size_mb: 0.057,
+                  mesh_stats: { triangles: 12394, vertices: 6193 },
+                },
+              ],
               tags: ["building", "cottage"],
               viewable: true,
             },
@@ -59,6 +80,27 @@ describe("asset library browsing", () => {
         name: "Rustic Thatched Roof Cottage",
         hasThumbnail: true,
         hasGameOptimized: true,
+        lodReady: true,
+        lodStatus: "ready",
+        lodAvailableLevels: [0, 1, 2],
+        lodSummary: expect.objectContaining({
+          cheapest_level: 2,
+          cheapest_size_mb: 0.057,
+          cheapest_triangles: 12394,
+          cheapest_vertices: 6193,
+          levels: [
+            expect.objectContaining({ level: 0, triangles: 42146, vertices: 21079 }),
+            expect.objectContaining({ level: 2, triangles: 12394, vertices: 6193 }),
+          ],
+        }),
+        lodVariants: [
+          expect.objectContaining({
+            level: 2,
+            url: "/api/assets/model/asset-1/lod/2",
+            size_mb: 0.057,
+            mesh_stats: expect.objectContaining({ triangles: 12394, vertices: 6193 }),
+          }),
+        ],
         source: "asset-library",
       }),
     ]);
@@ -123,6 +165,40 @@ describe("asset library browsing", () => {
       { cache: "no-store" },
     );
     expect(result.models.map((model) => model.id)).toEqual(["chair-1"]);
+  });
+
+  it("accepts newer browse response shapes from the Hyades asset proxy", async () => {
+    runtimeConfig.worldApiBase = "https://hyades.example";
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          hasNext: true,
+          count: 2,
+          data: {
+            results: [
+              { assetId: "tree-1", title: "Dark Moss Jungle Tree", viewable: true },
+              { modelId: "tree-2", title: "Hidden Draft", viewable: false },
+            ],
+          },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await browseAssetLibrary("", 1, "newest", 24, "flora");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://hyades.example/api/assets/models/browse?page=1&per_page=24&sort=newest&category=flora",
+      { cache: "no-store" },
+    );
+    expect(result.hasNext).toBe(true);
+    expect(result.total).toBe(2);
+    expect(result.models).toEqual([
+      expect.objectContaining({
+        id: "tree-1",
+        name: "Dark Moss Jungle Tree",
+      }),
+    ]);
   });
 
   it("can filter asset browsing to animated GLBs from the direct endpoint", async () => {
