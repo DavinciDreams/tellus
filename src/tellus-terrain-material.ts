@@ -222,6 +222,10 @@ function buildDetailColorNode() {
   const isJungleMoss = band(PAINT_JUNGLE_MOSS);
   const isDesertSand = band(PAINT_DESERT_SAND);
   const unpainted = step(0.5, paintCode).oneMinus();
+  const isAutoMeadow = kindBand(KIND_MEADOW).mul(unpainted);
+  const isAutoGrass = kindBand(KIND_GRASS).mul(unpainted);
+  const isAutoFlowers = kindBand(KIND_FLOWERS).mul(unpainted);
+  const isAutoJungleMoss = kindBand(KIND_JUNGLE_MOSS).mul(unpainted);
   const isAutoBeach = kindBand(KIND_BEACH).mul(unpainted);
   const isAutoWater = kindBand(KIND_WATER).mul(unpainted);
   const isAutoDirt = kindBand(KIND_DIRT).mul(unpainted);
@@ -252,10 +256,21 @@ function buildDetailColorNode() {
   const litColor = base.mul(grain.add(1).sub(slopeDark)).mul(terrainPattern);
   let detailed = mix(litColor, litColor.add(coolTint), heightT);
 
-  // Green/khaki variation for meadow + grass (RGB multiplier). dry = 1 for grass, 0 for meadow.
-  const greenMask = isMeadow.max(isGrass).max(isJungleMoss);
-  const greenMul = greenVariation(wp.x, wp.z, isGrass).mul(mix(float(1), float(0.62), isJungleMoss));
-  detailed = mix(detailed, detailed.mul(greenMul), greenMask);
+  // Green/khaki/moss variation for painted and automatic biome greens. Auto terrain is the common
+  // deployed path, so include kind bands here or WebGPU worlds read smooth/flat while WebGL texture
+  // overlays show visible moss/grain.
+  const meadowMask = isMeadow.max(isAutoMeadow).max(isAutoFlowers);
+  const grassMask = isGrass.max(isAutoGrass);
+  const jungleMask = isJungleMoss.max(isAutoJungleMoss);
+  const greenMask = meadowMask.max(grassMask).max(jungleMask);
+  const greenMul = greenVariation(wp.x, wp.z, grassMask);
+  const mossFine = mx_fractal_noise_float(vec3(wp.x.mul(0.42), wp.z.mul(0.42), float(0)), 3, 2.0, 0.5);
+  const mossSpeckle = mx_noise_float(vec3(wp.x.mul(2.4), wp.z.mul(2.4), float(0))).mul(0.08);
+  const jungleBase = color(0x173f1c)
+    .mul(float(0.9).add(mossFine.mul(0.16)).add(mossSpeckle))
+    .add(color(0x2f6d32).mul(float(0.24).add(mossFine.mul(0.12))));
+  detailed = mix(detailed, detailed.mul(greenMul), meadowMask.max(grassMask));
+  detailed = mix(detailed, jungleBase, jungleMask);
 
   return detailed;
 }
