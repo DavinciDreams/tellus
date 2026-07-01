@@ -177,6 +177,7 @@ import {
   seatPositionForWorldThing,
   type WorldThingRuntimeProfile,
 } from "./tellus-world-object-profile";
+import { assetRenderLodLevel } from "./tellus-asset-lod-policy";
 import {
   DAY_NIGHT_MODE_OPTIONS,
   LIGHTING_MOOD_OPTIONS,
@@ -5629,13 +5630,22 @@ function createTellusWorld(
   type AssetStoreRenderLodLevel = 0 | 1 | 2;
 
   const assetStoreRenderLodLevelForThing = (thing: GeneratedThing): AssetStoreRenderLodLevel => {
-    const distance = Math.hypot(
-      thing.position.x - visitorPosition.x,
-      thing.position.z - visitorPosition.z,
-    );
-    if (distance <= 40) return 0;
-    if (distance <= 120) return 1;
-    return 2;
+    const dx = thing.position.x - visitorPosition.x;
+    const dz = thing.position.z - visitorPosition.z;
+    const distance = Math.hypot(dx, dz);
+    const viewerFacing =
+      distance > 0.001
+        ? (dx * Math.sin(yaw) + dz * Math.cos(yaw)) / distance
+        : 1;
+    return assetRenderLodLevel({
+      kind: thing.kind,
+      prompt: thing.prompt,
+      distance,
+      worldTemplate: activeWorldTemplate,
+      isChunkedWorld: isChunked,
+      selected: selectedThingId === thing.id,
+      viewerFacing,
+    });
   };
 
   const assetStoreRenderModelUrlForThing = (
