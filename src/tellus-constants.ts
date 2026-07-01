@@ -164,7 +164,7 @@ export const terrainColors: Record<TerrainKind, THREE.Color> = {
   "forest-floor": new THREE.Color(0x3c2f22),
   flowers: new THREE.Color(0x6daa35),
   gravel: new THREE.Color(0x77766c),
-  "jungle-moss": new THREE.Color(0x3f7a35),
+  "jungle-moss": new THREE.Color(0x4f9a3a),
   stone: new THREE.Color(0x8c8d86),
   brick: new THREE.Color(0x9b4e3d),
   "desert-sand": new THREE.Color(0xd98f45),
