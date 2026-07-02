@@ -18,6 +18,7 @@ import {
 } from "./tellus-procplant-biomes";
 import { buildingMaterialForEcology, resolveEcologySample } from "./tellus-ecology";
 import { createProcPlantVegetation, procPlantChunkSeed } from "./tellus-procplant-vegetation";
+import { planProcPlantPlacements } from "./tellus-plant-placement";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 import { SEA_LEVEL } from "./tellus-constants";
 
@@ -455,5 +456,94 @@ describe("procplant vegetation", () => {
     expect(after.stemTriangles).toBeGreaterThan(0);
 
     vegetation.dispose();
+  });
+
+  it("plans live vegetation from an applied custom biome mix", () => {
+    const environment = { light: 0.78, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.65 };
+    const placements = planProcPlantPlacements({
+      cx: 0,
+      cz: 0,
+      chunkSize: 16,
+      seed: 12345,
+      maxPlants: 4,
+      densityMultiplier: 1,
+      lodDensity: 1,
+      sampleHeight: () => 2,
+      samplePaint: () => "meadow",
+      sampleEcology: (x, z, height, paint, seed) =>
+        resolveEcologySample({ x, z, height, terrainPaint: paint, slope: 0.08, seed }),
+      estimateSlope: () => 0.08,
+      inBounds: () => true,
+      minGroundHeight: SEA_LEVEL + 0.25,
+      biomeMix: {
+        version: 1,
+        id: "custom-palm-world",
+        label: "Custom Palm World",
+        source: "custom",
+        targetTerrainPaint: "meadow",
+        seed: 12345,
+        density: 1.4,
+        diversity: 0.8,
+        targetVerticesPerChunk: 250000,
+        entries: [{
+          id: "big-leaf-palm",
+          label: "Big Leaf Palm",
+          source: "mutation",
+          genome: procPlantPresets.foldedPalm,
+          weight: 1,
+          density: 1.2,
+          scale: 8,
+          environment,
+          seed: 987,
+          enabled: true,
+        }],
+      },
+    });
+
+    expect(placements.length).toBeGreaterThan(0);
+    expect(placements.every((placement) => placement.entry?.id === "big-leaf-palm")).toBe(true);
+    expect(placements.every((placement) => placement.patch === undefined)).toBe(true);
+    expect(placements.every((placement) => placement.growthScale > 0)).toBe(true);
+
+    const wrongTerrainPlacements = planProcPlantPlacements({
+      cx: 0,
+      cz: 0,
+      chunkSize: 16,
+      seed: 12345,
+      maxPlants: 4,
+      densityMultiplier: 1,
+      lodDensity: 1,
+      sampleHeight: () => 2,
+      samplePaint: () => "desert-sand",
+      sampleEcology: (x, z, height, paint, seed) =>
+        resolveEcologySample({ x, z, height, terrainPaint: paint, slope: 0.08, seed }),
+      estimateSlope: () => 0.08,
+      inBounds: () => true,
+      minGroundHeight: SEA_LEVEL + 0.25,
+      biomeMix: {
+        version: 1,
+        id: "custom-palm-world",
+        label: "Custom Palm World",
+        source: "custom",
+        targetTerrainPaint: "meadow",
+        seed: 12345,
+        density: 1.4,
+        diversity: 0.8,
+        targetVerticesPerChunk: 250000,
+        entries: [{
+          id: "big-leaf-palm",
+          label: "Big Leaf Palm",
+          source: "mutation",
+          genome: procPlantPresets.foldedPalm,
+          weight: 1,
+          density: 1.2,
+          scale: 8,
+          environment,
+          seed: 987,
+          enabled: true,
+        }],
+      },
+    });
+    expect(wrongTerrainPlacements.every((placement) => placement.entry === undefined)).toBe(true);
   });
 });

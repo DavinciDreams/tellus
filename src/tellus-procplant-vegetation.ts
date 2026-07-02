@@ -2,12 +2,17 @@ import * as THREE from "three";
 import { SEA_LEVEL, WORLD_RADIUS } from "./tellus-constants";
 import type { TerrainPaintKind } from "./tellus-types";
 import {
-  biomePatchForEcology,
-  biomePatchForPaint,
   environmentForBiomePatch,
   genomeForBiomePatch,
   treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
+import { planProcPlantPlacements } from "./tellus-plant-placement";
+import {
+  activeBiomeMixStorageKey,
+  genomeForMixEntry,
+  loadActiveBiomeMixForWorld,
+  type TellusBiomeMixDefinition,
+} from "./tellus-biome-mix";
 import { resolveEcologySample, type EcologySample } from "./tellus-ecology";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 import { buildRetroCutoutTreeTemplate } from "./tellus-veg-archetypes";
@@ -511,6 +516,8 @@ export function createProcPlantVegetation(
   const active = new Map<string, ActiveChunk>();
   const manualPlacements = new Map<string, ProcPlantManualPlacement>();
   const manualPlacementChunks = new Map<string, string>();
+  const activeBiomeMixKey = activeBiomeMixStorageKey(options.worldId);
+  let activeBiomeMix: TellusBiomeMixDefinition | null = loadActiveBiomeMixForWorld(options.worldId);
   const queued = new Set<string>();
   const rebuildQueue: string[] = [];
   const stemMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
@@ -581,6 +588,7 @@ export function createProcPlantVegetation(
 
   const enqueueAllActive = () => {
     terrainRev++;
+    activeBiomeMix = loadActiveBiomeMixForWorld(options.worldId);
     for (const key of active.keys()) enqueue(key);
   };
 
@@ -618,6 +626,16 @@ export function createProcPlantVegetation(
     }
   }
 
+  const onBiomeMixStorage = (event: StorageEvent) => {
+    if (event.key !== activeBiomeMixKey) return;
+    activeBiomeMix = loadActiveBiomeMixForWorld(options.worldId);
+    enqueueAllActive();
+  };
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", onBiomeMixStorage);
+  }
+
   const buildChunk = (chunk: ActiveChunk) => {
     disposeGroup(chunk.group);
     chunk.stats = { plants: 0, instances: 0, stemTriangles: 0, organDraws: 0 };
@@ -626,7 +644,6 @@ export function createProcPlantVegetation(
     chunk.styleCenterCx = Math.floor((lastPlayerX ?? chunk.cx * chunkSize) / chunkSize);
     chunk.styleCenterCz = Math.floor((lastPlayerZ ?? chunk.cz * chunkSize) / chunkSize);
     const seed = procPlantChunkSeed(options.worldId, chunk.cx, chunk.cz, 0);
-    const rand = mulberry32(seed);
     const plantCap = chunk.lod === 0
       ? Math.max(1, Math.round(MAX_LOD0_PLANTS * densityMultiplier))
       : chunk.lod === 1
@@ -634,21 +651,19 @@ export function createProcPlantVegetation(
         : Math.max(1, Math.round(MAX_LOD2_PLANTS * densityMultiplier));
     const stemTemplates: Array<{ template: ProcPlantTemplate; matrix: THREE.Matrix4 }> = [];
     const organBuckets = new Map<string, OrganBucket>();
-    const x0 = chunk.cx * chunkSize;
-    const z0 = chunk.cz * chunkSize;
-    const attempts = plantCap * 5;
-
-    for (let i = 0; i < attempts && chunk.stats.plants < plantCap; i++) {
-      const x = x0 + rand() * chunkSize;
-      const z = z0 + rand() * chunkSize;
-      if (!inBounds(x, z)) continue;
-      const height = options.sampleHeight(x, z);
-      if (height === null || height < MIN_PROCPLANT_GROUND_HEIGHT) continue;
-      if (options.isExcluded?.(x, z, height)) continue;
-      const paint = options.samplePaint(x, z);
-      if (paint === "stone" || paint === "brick") continue;
-      const patchSeed = seed ^ Math.imul(i + 1, 0x9e3779b1);
-      const ecology = options.sampleEcology?.(x, z, height, paint, patchSeed) ??
+    const lodDensity = chunk.lod === 2 ? 0.65 : chunk.lod === 1 ? 0.52 : 0.48;
+    const placements = planProcPlantPlacements({
+      cx: chunk.cx,
+      cz: chunk.cz,
+      chunkSize,
+      seed,
+      maxPlants: plantCap,
+      densityMultiplier,
+      lodDensity,
+      sampleHeight: options.sampleHeight,
+      samplePaint: options.samplePaint,
+      sampleEcology: (x, z, height, paint, patchSeed) =>
+        options.sampleEcology?.(x, z, height, paint, patchSeed) ??
         resolveEcologySample({
           seed: patchSeed,
           x,
@@ -656,12 +671,23 @@ export function createProcPlantVegetation(
           height,
           slope: estimateSlope(x, z, height),
           terrainPaint: paint,
-        });
-      const patch = biomePatchForEcology(ecology, patchSeed) ?? biomePatchForPaint(paint, patchSeed);
-      const lodDensity = chunk.lod === 2 ? 0.65 : chunk.lod === 1 ? 0.52 : 0.48;
-      if (!patch || rand() > patch.density * densityMultiplier * lodDensity) continue;
-      const genome = genomeForBiomePatch(patch);
-      const treeBackend = treeBackendForBiomePatch(patch);
+        }),
+      estimateSlope,
+      isExcluded: options.isExcluded,
+      inBounds,
+      minGroundHeight: MIN_PROCPLANT_GROUND_HEIGHT,
+      biomeMix: activeBiomeMix,
+    });
+
+    for (let i = 0; i < placements.length && chunk.stats.plants < plantCap; i++) {
+      const placement = placements[i]!;
+      const { x, z, height } = placement;
+      const patch = placement.patch;
+      const mixEntry = placement.entry;
+      if (!patch && !mixEntry) continue;
+      const rand = mulberry32(placement.seed ^ 0xa511e9b3);
+      const genome = mixEntry ? genomeForMixEntry(mixEntry) : genomeForBiomePatch(patch!);
+      const treeBackend = patch ? treeBackendForBiomePatch(patch) : null;
       const distanceToPlayer = Math.hypot(x - (lastPlayerX ?? x), z - (lastPlayerZ ?? z));
       const detailDistance = viewMode() === "third" ? PROC_TREE_DETAIL_DISTANCE_THIRD : PROC_TREE_DETAIL_DISTANCE;
       const useDetailedTree = distanceToPlayer <= detailDistance;
@@ -670,7 +696,7 @@ export function createProcPlantVegetation(
         : chunk.lod === 1
           ? PROC_TREE_MID_SCALE
           : PROC_TREE_FAR_SCALE;
-      if (treeBackend?.kind === "lsystem") {
+      if (patch && treeBackend?.kind === "lsystem") {
         const template = useDetailedTree
           ? buildBiomeTreeTemplate(treeBackend.species, patch.seed ^ i, {
               ...foliageDefaultsForTreeSpecies(treeBackend.species),
@@ -678,7 +704,7 @@ export function createProcPlantVegetation(
             })
           : buildCheapTreeTemplate(treeBackend.species);
         const scaleMultiplier = fullDetailLod ? PROC_TREE_NEAR_SCALE : useDetailedTree ? treeScaleMultiplier : PROC_TREE_FAR_SCALE;
-        const scale = patch.scale * scaleMultiplier * THREE.MathUtils.lerp(0.9, 1.24, rand());
+        const scale = patch.scale * placement.growthScale * scaleMultiplier * THREE.MathUtils.lerp(0.94, 1.12, rand());
         const matrix = new THREE.Matrix4()
           .makeRotationY(rand() * Math.PI * 2)
           .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
@@ -688,11 +714,13 @@ export function createProcPlantVegetation(
         chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
-      const env = environmentForBiomePatch(patch);
-      const useCheapDistantTree = !useDetailedTree && patch.scale >= 1.2;
+      const env = mixEntry ? mixEntry.environment : environmentForBiomePatch(patch!);
+      const baseScale = mixEntry ? mixEntry.scale : patch!.scale;
+      const renderSeed = mixEntry ? mixEntry.seed ^ placement.seed : patch!.seed ^ i;
+      const useCheapDistantTree = !useDetailedTree && baseScale >= 1.2;
       if (useCheapDistantTree) {
         const template = buildCheapTreeTemplate(genome.weberPenn?.species ?? genome.id);
-        const scale = patch.scale * PROC_TREE_FAR_SCALE * THREE.MathUtils.lerp(0.9, 1.2, rand());
+        const scale = baseScale * placement.growthScale * PROC_TREE_FAR_SCALE * THREE.MathUtils.lerp(0.94, 1.12, rand());
         const matrix = new THREE.Matrix4()
           .makeRotationY(rand() * Math.PI * 2)
           .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
@@ -702,9 +730,9 @@ export function createProcPlantVegetation(
         chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
-      const built = buildProcPlantInstancedParts(genome, patch.seed ^ i, env);
-      const scaleBase = patch.scale >= 1.2 ? patch.scale * treeScaleMultiplier : patch.scale;
-      const scale = scaleBase * THREE.MathUtils.lerp(0.82, 1.22, rand());
+      const built = buildProcPlantInstancedParts(genome, renderSeed, env);
+      const scaleBase = baseScale >= 1.2 ? baseScale * treeScaleMultiplier : baseScale;
+      const scale = scaleBase * placement.growthScale * THREE.MathUtils.lerp(0.88, 1.14, rand());
       const matrix = new THREE.Matrix4()
         .makeRotationY(rand() * Math.PI * 2)
         .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
@@ -981,6 +1009,7 @@ export function createProcPlantVegetation(
     stats,
     dispose: () => {
       disposed = true;
+      if (typeof window !== "undefined") window.removeEventListener("storage", onBiomeMixStorage);
       for (const chunk of active.values()) disposeGroup(chunk.group);
       active.clear();
       root.clear();

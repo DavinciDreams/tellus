@@ -1,6 +1,7 @@
 import {
   biomePatchesForEcologyBiome,
   biomePatchesForPaint,
+  ECOLOGY_TERRAIN_PAINT_MAP,
   environmentForBiomePatch,
   genomeForBiomePatch,
   type ProcPlantBiomePatch,
@@ -37,12 +38,16 @@ export interface TellusBiomeMixDefinition {
   source: TellusBiomeMixSource;
   ecologyBiome?: EcologyBiomeId;
   terrainPaint?: TerrainPaintKind;
+  targetTerrainPaint?: TerrainPaintKind;
   seed: number;
   density: number;
   diversity: number;
   targetVerticesPerChunk: number;
   entries: TellusBiomeMixEntry[];
 }
+
+export const activeBiomeMixStorageKey = (worldId: string): string =>
+  `tellus.activeBiomeMix.${worldId.trim() || "main"}`;
 
 export interface ProcPlantLabExport {
   version?: number;
@@ -116,6 +121,7 @@ export const makeEcologyBiomeMix = (
   label: labelForProcPlantId(biome),
   source: "ecology",
   ecologyBiome: biome,
+  targetTerrainPaint: ECOLOGY_TERRAIN_PAINT_MAP[biome],
   seed,
   density: 0.72,
   diversity: 0.82,
@@ -132,6 +138,7 @@ export const makeTerrainPaintBiomeMix = (
   label: labelForProcPlantId(paint),
   source: "terrain-paint",
   terrainPaint: paint,
+  targetTerrainPaint: paint,
   seed,
   density: 0.65,
   diversity: 0.72,
@@ -196,10 +203,39 @@ export const normalizeBiomeMixDefinition = (raw: unknown): TellusBiomeMixDefinit
     source: raw.source === "terrain-paint" || raw.source === "ecology" ? raw.source : "custom",
     ecologyBiome: typeof raw.ecologyBiome === "string" ? (raw.ecologyBiome as EcologyBiomeId) : undefined,
     terrainPaint: typeof raw.terrainPaint === "string" ? (raw.terrainPaint as TerrainPaintKind) : undefined,
+    targetTerrainPaint: typeof raw.targetTerrainPaint === "string"
+      ? (raw.targetTerrainPaint as TerrainPaintKind)
+      : typeof raw.terrainPaint === "string"
+        ? (raw.terrainPaint as TerrainPaintKind)
+        : typeof raw.ecologyBiome === "string" && raw.ecologyBiome in ECOLOGY_TERRAIN_PAINT_MAP
+          ? ECOLOGY_TERRAIN_PAINT_MAP[raw.ecologyBiome as EcologyBiomeId]
+          : undefined,
     seed: typeof raw.seed === "number" ? raw.seed : 1,
     density: typeof raw.density === "number" ? raw.density : 0.65,
     diversity: typeof raw.diversity === "number" ? raw.diversity : 0.75,
     targetVerticesPerChunk: typeof raw.targetVerticesPerChunk === "number" ? raw.targetVerticesPerChunk : 250000,
     entries,
   };
+};
+
+export const loadActiveBiomeMixForWorld = (worldId: string): TellusBiomeMixDefinition | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(activeBiomeMixStorageKey(worldId));
+    if (!raw) return null;
+    return normalizeBiomeMixDefinition(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+};
+
+export const saveActiveBiomeMixForWorld = (worldId: string, mix: TellusBiomeMixDefinition): boolean => {
+  if (typeof window === "undefined") return false;
+  try {
+    window.localStorage.setItem(activeBiomeMixStorageKey(worldId), JSON.stringify(mix));
+    window.localStorage.setItem("tellus.lastAppliedBiomeMixWorld", worldId);
+    return true;
+  } catch {
+    return false;
+  }
 };

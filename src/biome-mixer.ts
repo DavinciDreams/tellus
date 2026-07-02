@@ -9,8 +9,8 @@ import {
   genomeForMixEntry,
   labelForProcPlantId,
   makeEcologyBiomeMix,
-  makeTerrainPaintBiomeMix,
   normalizeBiomeMixDefinition,
+  saveActiveBiomeMixForWorld,
   type TellusBiomeMixDefinition,
   type TellusBiomeMixEntry,
 } from "./tellus-biome-mix";
@@ -23,19 +23,6 @@ import {
 import { SPECIES, type SpeciesId } from "./vendor/proc-tree/index";
 import type { EcologyBiomeId } from "./tellus-ecology";
 import type { TerrainPaintKind } from "./tellus-types";
-
-const terrainPaints: TerrainPaintKind[] = [
-  "meadow",
-  "grass",
-  "flowers",
-  "forest-floor",
-  "jungle-moss",
-  "beach",
-  "dirt",
-  "desert-sand",
-  "rock",
-  "gravel",
-];
 
 const terrainSwatchColors: Record<TerrainPaintKind, [number, number]> = {
   meadow: [0x79a84a, 0x4f7c32],
@@ -78,7 +65,6 @@ root.innerHTML = `
     </header>
     <section class="biome-toolbar" aria-label="Biome mixer controls">
       <select id="ecology-select" class="state-select" aria-hidden="true"></select>
-      <select id="terrain-select" class="state-select" aria-hidden="true"></select>
       <label>
         Density
         <input id="density-slider" type="range" min="0.05" max="1.8" value="0.72" step="0.01" />
@@ -93,22 +79,22 @@ root.innerHTML = `
         Target verts/chunk
         <input id="vertex-target-input" type="number" min="10000" max="5000000" value="250000" step="10000" />
       </label>
+      <dl class="budget-stats" aria-label="Biome render budget">
+        <div><dt>Rendered</dt><dd id="rendered-output">-</dd></div>
+        <div><dt>Target</dt><dd id="vertex-target-output">-</dd></div>
+        <div><dt>Current</dt><dd id="vertex-current-output">-</dd></div>
+      </dl>
       <div class="button-row">
         <button type="button" id="import-button">Import JSON</button>
+        <button type="button" id="apply-world-button">Apply World</button>
         <button type="button" id="export-button">Export Mix</button>
         <button type="button" id="json-toggle-button" aria-pressed="false">Show JSON</button>
         <input id="file-input" type="file" accept="application/json,.json" multiple hidden />
       </div>
     </section>
-    <section class="swatch-board" aria-label="Biome and terrain swatches">
-      <div>
-        <h2>Biome</h2>
-        <div class="swatch-grid" id="ecology-swatch-grid"></div>
-      </div>
-      <div>
-        <h2>Terrain</h2>
-        <div class="swatch-grid" id="terrain-swatch-grid"></div>
-      </div>
+    <section class="swatch-board" aria-label="Biome presets">
+      <h2>Biome</h2>
+      <div class="swatch-grid" id="ecology-swatch-grid"></div>
     </section>
     <section class="workspace json-hidden" id="workspace">
       <aside class="entry-panel">
@@ -117,29 +103,10 @@ root.innerHTML = `
           <span id="mix-count">0 plants</span>
         </div>
         <div class="entry-list" id="entry-list"></div>
-        <div class="add-row">
-          <label>
-            Add preset
-            <select id="preset-select"></select>
-          </label>
-          <button type="button" id="add-preset-button">Add</button>
-        </div>
-        <div class="add-row">
-          <label>
-            Add Weber/Penn
-            <select id="weber-penn-select"></select>
-          </label>
-          <button type="button" id="add-weber-penn-button">Add</button>
-        </div>
         <div class="entry-editor" id="entry-editor"></div>
       </aside>
       <section class="stage-panel">
         <canvas id="biome-canvas" aria-label="Biome mix preview"></canvas>
-        <dl class="stats">
-          <div><dt>Rendered</dt><dd id="rendered-output">-</dd></div>
-          <div><dt>Target</dt><dd id="vertex-target-output">-</dd></div>
-          <div><dt>Current</dt><dd id="vertex-current-output">-</dd></div>
-        </dl>
       </section>
       <aside class="json-panel">
         <div class="panel-title">
@@ -160,7 +127,7 @@ style.textContent = `
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; min-width: 1120px; background: #eef2f4; }
+  body { margin: 0; min-width: 980px; background: #eef2f4; }
   .biome-page { min-height: 100vh; padding: 22px 28px 28px; }
   .biome-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
   h1, h2 { margin: 0; line-height: 1.08; }
@@ -194,26 +161,21 @@ style.textContent = `
   .state-select { display: none; }
   .biome-toolbar {
     display: grid;
-    grid-template-columns: 180px 180px 180px minmax(320px, 1fr);
-    gap: 14px;
+    grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) 170px minmax(330px, 1.4fr) auto;
+    gap: 12px;
     align-items: end;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     padding: 12px;
     border: 1px solid #d4dbe4;
     border-radius: 8px;
     background: rgba(255,255,255,0.78);
   }
   .swatch-board {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin-bottom: 16px;
-  }
-  .swatch-board > div {
     border: 1px solid #d4dbe4;
     border-radius: 8px;
     background: rgba(255,255,255,0.78);
     padding: 12px;
+    margin-bottom: 16px;
   }
   .swatch-board h2 {
     margin-bottom: 10px;
@@ -223,39 +185,31 @@ style.textContent = `
   }
   .swatch-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
     gap: 8px;
   }
   .swatch-button {
-    min-height: 62px;
-    display: grid;
-    grid-template-rows: 26px auto;
-    gap: 5px;
-    padding: 7px;
-    text-align: left;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 10px;
+    text-align: center;
   }
-  .swatch-button.active {
-    background: #17341f;
-    color: #f6edbd;
-    border-color: #8b9657;
-  }
-  .swatch-preview {
-    width: 100%;
-    height: 26px;
-    border-radius: 6px;
-    border: 1px solid rgba(0,0,0,0.18);
-  }
+  .swatch-button.active { color: #f6edbd; border-color: #8b9657; }
   .swatch-label {
-    font-size: 12px;
-    line-height: 1.05;
+    font-size: 13px;
+    line-height: 1.15;
     font-weight: 900;
     white-space: normal;
   }
+  .swatch-button.active .swatch-label { text-shadow: 0 1px 2px rgba(0,0,0,0.4); }
   .workspace {
     display: grid;
     grid-template-columns: 330px minmax(520px, 1fr) 360px;
     gap: 16px;
-    min-height: calc(100vh - 170px);
+    height: calc(100vh - 354px);
+    min-height: 520px;
   }
   .workspace.json-hidden { grid-template-columns: 330px minmax(680px, 1fr); }
   .workspace.json-hidden .json-panel { display: none; }
@@ -264,6 +218,11 @@ style.textContent = `
     border-radius: 8px;
     background: #fff;
     overflow: hidden;
+  }
+  .entry-panel {
+    display: grid;
+    grid-template-rows: auto minmax(96px, 28vh) minmax(0, 1fr);
+    min-height: 0;
   }
   .panel-title {
     min-height: 58px;
@@ -276,7 +235,7 @@ style.textContent = `
   }
   .panel-title span { color: #64748b; font-size: 13px; font-weight: 800; }
   .entry-list {
-    max-height: 38vh;
+    min-height: 0;
     overflow: auto;
     border-bottom: 1px solid #e6ebf0;
   }
@@ -298,10 +257,10 @@ style.textContent = `
   .entry-name { display: block; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .entry-meta { display: block; margin-top: 3px; color: #64748b; font-size: 12px; font-weight: 700; }
   .entry-score { color: #334155; font-size: 12px; font-weight: 900; text-align: right; }
-  .add-row { padding: 12px; border-bottom: 1px solid #e6ebf0; }
+  .add-row { padding: 0 0 12px; border-bottom: 1px solid #e6ebf0; }
   .add-row label { flex: 1; }
   .add-row select { width: 100%; }
-  .entry-editor { padding: 14px; display: grid; gap: 12px; }
+  .entry-editor { min-height: 0; padding: 14px; display: grid; gap: 12px; overflow: auto; align-content: start; }
   .entry-editor .inline { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .entry-editor .danger { border-color: #e2b4aa; color: #7f1d1d; }
   .entry-editor input:not([type="range"]) {
@@ -325,21 +284,34 @@ style.textContent = `
     font-size: 14px;
     line-height: 1.2;
   }
-  .stage-panel { position: relative; min-height: 620px; }
+  details {
+    display: grid;
+    gap: 10px;
+    border-top: 1px solid #dce8d7;
+    padding-top: 9px;
+  }
+  details > summary {
+    cursor: pointer;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+  .stage-panel { position: relative; min-height: 0; }
   #biome-canvas { width: 100%; height: 100%; display: block; background: #dfe9ee; }
-  .stats {
-    position: absolute;
-    left: 14px;
-    right: 14px;
-    bottom: 14px;
+  .budget-stats {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 8px;
     margin: 0;
-    padding: 10px;
+    padding: 0;
+  }
+  .budget-stats div {
+    min-width: 0;
+    padding: 8px 10px;
     border: 1px solid rgba(21, 38, 25, 0.28);
     border-radius: 8px;
-    background: rgba(255,255,255,0.86);
+    background: rgba(246, 250, 244, 0.88);
   }
   dl div { min-width: 0; }
   dt { color: #64748b; font-size: 11px; font-weight: 900; text-transform: uppercase; }
@@ -360,7 +332,6 @@ style.textContent = `
 document.head.appendChild(style);
 
 const ecologySelect = document.querySelector<HTMLSelectElement>("#ecology-select")!;
-const terrainSelect = document.querySelector<HTMLSelectElement>("#terrain-select")!;
 const densitySlider = document.querySelector<HTMLInputElement>("#density-slider")!;
 const diversitySlider = document.querySelector<HTMLInputElement>("#diversity-slider")!;
 const vertexTargetInput = document.querySelector<HTMLInputElement>("#vertex-target-input")!;
@@ -370,9 +341,8 @@ const entryList = document.querySelector<HTMLDivElement>("#entry-list")!;
 const entryEditor = document.querySelector<HTMLDivElement>("#entry-editor")!;
 const mixTitle = document.querySelector<HTMLHeadingElement>("#mix-title")!;
 const mixCount = document.querySelector<HTMLSpanElement>("#mix-count")!;
-const presetSelect = document.querySelector<HTMLSelectElement>("#preset-select")!;
-const weberPennSelect = document.querySelector<HTMLSelectElement>("#weber-penn-select")!;
 const fileInput = document.querySelector<HTMLInputElement>("#file-input")!;
+const applyWorldButton = document.querySelector<HTMLButtonElement>("#apply-world-button")!;
 const jsonOutput = document.querySelector<HTMLTextAreaElement>("#json-output")!;
 const statusOutput = document.querySelector<HTMLSpanElement>("#status-output")!;
 const renderedOutput = document.querySelector<HTMLElement>("#rendered-output")!;
@@ -381,23 +351,11 @@ const vertexCurrentOutput = document.querySelector<HTMLElement>("#vertex-current
 const canvas = document.querySelector<HTMLCanvasElement>("#biome-canvas")!;
 const workspace = document.querySelector<HTMLElement>("#workspace")!;
 const ecologySwatchGrid = document.querySelector<HTMLDivElement>("#ecology-swatch-grid")!;
-const terrainSwatchGrid = document.querySelector<HTMLDivElement>("#terrain-swatch-grid")!;
 const jsonToggleButton = document.querySelector<HTMLButtonElement>("#json-toggle-button")!;
 
 ecologySelect.innerHTML = ECOLOGY_BIOME_OPTIONS.map(
   (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
 ).join("");
-terrainSelect.innerHTML = `<option value="">Load terrain...</option>${terrainPaints.map(
-  (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
-).join("")}`;
-presetSelect.innerHTML = procPlantPresetIds.map(
-  (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
-).join("");
-presetSelect.value = selectedPresetId;
-weberPennSelect.innerHTML = weberPennSpeciesIds.map(
-  (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
-).join("");
-weberPennSelect.value = selectedWeberPennSpecies;
 ecologySelect.value = currentMix.ecologyBiome ?? "taiga";
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
@@ -460,10 +418,23 @@ const formatCount = (value: number): string =>
       ? `${Math.round(value / 1000)}k`
       : String(Math.round(value));
 
-const colorCss = (value: number): string => `#${value.toString(16).padStart(6, "0").slice(-6)}`;
+const activeTellusWorldId = (): string => {
+  try {
+    return window.localStorage.getItem("tellus.activeWorldId")?.trim() || "main";
+  } catch {
+    return "main";
+  }
+};
 
 const activeTerrainPaint = (): TerrainPaintKind =>
   currentMix.terrainPaint ?? (currentMix.ecologyBiome ? ECOLOGY_TERRAIN_PAINT_MAP[currentMix.ecologyBiome] : "grass");
+
+const colorCss = (value: number): string => `#${value.toString(16).padStart(6, "0").slice(-6)}`;
+
+const swatchStyle = (biome: EcologyBiomeId): string => {
+  const [a, b] = terrainSwatchColors[ECOLOGY_TERRAIN_PAINT_MAP[biome]];
+  return `background: linear-gradient(135deg, ${colorCss(a)}, ${colorCss(b)});`;
+};
 
 const updatePreviewTerrain = () => {
   const paint = activeTerrainPaint();
@@ -484,44 +455,16 @@ const geometryVertexCount = (object: THREE.Object3D): number => {
 
 const selectedEntry = () => currentMix.entries.find((entry) => entry.id === selectedEntryId) ?? currentMix.entries[0];
 
-const swatchStyle = (paint: TerrainPaintKind): string => {
-  const [a, b] = terrainSwatchColors[paint];
-  if (paint === "flowers") {
-    return `background:
-      radial-gradient(circle at 24% 42%, ${colorCss(b)} 0 2px, transparent 3px),
-      radial-gradient(circle at 68% 52%, #ffffff 0 2px, transparent 3px),
-      linear-gradient(135deg, ${colorCss(a)}, ${colorCss(terrainSwatchColors.grass[1])});`;
-  }
-  if (paint === "gravel" || paint === "rock" || paint === "stone") {
-    return `background:
-      radial-gradient(circle at 24% 35%, rgba(255,255,255,0.45) 0 2px, transparent 3px),
-      radial-gradient(circle at 68% 62%, rgba(0,0,0,0.22) 0 2px, transparent 3px),
-      linear-gradient(135deg, ${colorCss(a)}, ${colorCss(b)});`;
-  }
-  return `background: linear-gradient(135deg, ${colorCss(a)}, ${colorCss(b)});`;
-};
-
 const renderSwatches = () => {
   ecologySwatchGrid.innerHTML = ECOLOGY_BIOME_OPTIONS.map((id) => {
-    const paint = ECOLOGY_TERRAIN_PAINT_MAP[id];
     return `
-      <button type="button" class="swatch-button ${currentMix.ecologyBiome === id ? "active" : ""}" data-ecology="${id}">
-        <span class="swatch-preview" style="${swatchStyle(paint)}"></span>
+      <button type="button" class="swatch-button ${currentMix.ecologyBiome === id ? "active" : ""}" data-ecology="${id}" style="${swatchStyle(id)}">
         <span class="swatch-label">${labelForProcPlantId(id)}</span>
       </button>
     `;
   }).join("");
-  terrainSwatchGrid.innerHTML = terrainPaints.map((id) => `
-    <button type="button" class="swatch-button ${currentMix.terrainPaint === id ? "active" : ""}" data-terrain="${id}">
-      <span class="swatch-preview" style="${swatchStyle(id)}"></span>
-      <span class="swatch-label">${labelForProcPlantId(id)}</span>
-    </button>
-  `).join("");
   ecologySwatchGrid.querySelectorAll<HTMLButtonElement>("[data-ecology]").forEach((button) => {
     button.addEventListener("click", () => loadEcologyBiome(button.dataset.ecology as EcologyBiomeId));
-  });
-  terrainSwatchGrid.querySelectorAll<HTMLButtonElement>("[data-terrain]").forEach((button) => {
-    button.addEventListener("click", () => loadTerrainPaint(button.dataset.terrain as TerrainPaintKind));
   });
 };
 
@@ -559,12 +502,17 @@ const makeWeberPennGenome = (species: SpeciesId, seed: number): ProcPlantGenome 
     branchSamples: base.weberPenn?.branchSamples ?? 2,
     barkColor: base.weberPenn?.barkColor ?? (palm ? 0x7a5630 : 0x5d4327),
     leafColor: base.weberPenn?.leafColor ?? base.leaf.colorA,
+    nativeLeaves: base.weberPenn?.nativeLeaves ?? true,
+    crownFill: base.weberPenn?.crownFill ?? false,
+    foliageSource: base.weberPenn?.foliageSource ?? "species",
+    fillAnchor: base.weberPenn?.fillAnchor ?? "leaf-sites",
   };
   base.foliage = {
-    mass: base.foliage?.mass ?? (conifer ? 1.08 : 0.74),
-    clusterDensity: base.foliage?.clusterDensity ?? (conifer ? 1.42 : 1.24),
-    whorlDensity: base.foliage?.whorlDensity ?? (conifer ? 0.92 : 0.48),
+    mass: base.foliage?.mass ?? 0,
+    clusterDensity: base.foliage?.clusterDensity ?? (conifer ? 1.08 : 1.12),
+    whorlDensity: base.foliage?.whorlDensity ?? (conifer ? 0.58 : 0.48),
     tipBias: base.foliage?.tipBias ?? (conifer ? 0.34 : 0.62),
+    size: base.foliage?.size ?? (conifer ? 0.32 : 0.54),
   };
   base.treeRealism = {
     crownSpread: base.treeRealism?.crownSpread ?? (conifer ? 0.36 : 0.72),
@@ -602,6 +550,116 @@ const editableGenomeForEntry = (entry: TellusBiomeMixEntry): ProcPlantGenome => 
     entry.source = "mutation";
   }
   return entry.genome;
+};
+
+const weberFoliageMode = (genome: ProcPlantGenome): "plain" | "procplants" | "conifer" | "mixed" => {
+  const nativeLeaves = genome.weberPenn?.nativeLeaves !== false;
+  const crownFill = genome.weberPenn?.crownFill === true ||
+    (genome.weberPenn?.crownFill === undefined && Boolean(genome.weberPenn?.foliageSource && genome.weberPenn.foliageSource !== "species"));
+  const mass = crownFill ? genome.foliage?.mass ?? 0 : 0;
+  const source = genome.weberPenn?.foliageSource ?? "species";
+  if (nativeLeaves && mass <= 0.001) return "plain";
+  if (!nativeLeaves && mass > 0.001 && source === "procplants") return "procplants";
+  if (!nativeLeaves && mass > 0.001 && source === "conifer-spray") return "conifer";
+  return "mixed";
+};
+
+const applyWeberFoliageMode = (
+  genome: ProcPlantGenome,
+  mode: "plain" | "procplants" | "conifer" | "mixed",
+) => {
+  genome.weberPenn = genome.weberPenn ?? { species: "balsamFir" as SpeciesId };
+  genome.foliage = genome.foliage ?? { mass: 0, clusterDensity: 1.1, whorlDensity: 0.55, tipBias: 0.5, size: 0.4 };
+  if (mode === "plain") {
+    genome.weberPenn.nativeLeaves = true;
+    genome.weberPenn.crownFill = false;
+    genome.weberPenn.foliageSource = "species";
+    genome.foliage.mass = 0;
+    return;
+  }
+  if (mode === "procplants") {
+    genome.weberPenn.nativeLeaves = false;
+    genome.weberPenn.crownFill = true;
+    genome.weberPenn.foliageSource = "procplants";
+    genome.weberPenn.fillAnchor = genome.weberPenn.fillAnchor ?? "leaf-sites";
+    genome.foliage.mass = Math.max(0.45, genome.foliage.mass);
+    genome.foliage.clusterDensity = Math.min(genome.foliage.clusterDensity, 1.35);
+    genome.foliage.size = Math.min(genome.foliage.size ?? 0.5, 0.58);
+    return;
+  }
+  if (mode === "conifer") {
+    genome.weberPenn.nativeLeaves = false;
+    genome.weberPenn.crownFill = true;
+    genome.weberPenn.foliageSource = "conifer-spray";
+    genome.weberPenn.fillAnchor = genome.weberPenn.fillAnchor ?? "leaf-sites";
+    genome.foliage.mass = Math.max(0.42, genome.foliage.mass);
+    genome.foliage.clusterDensity = Math.min(genome.foliage.clusterDensity, 1.25);
+    genome.foliage.whorlDensity = Math.min(genome.foliage.whorlDensity, 0.72);
+    genome.foliage.size = Math.min(genome.foliage.size ?? 0.34, 0.38);
+  }
+};
+
+const addPresetEntry = () => {
+  const id = selectedPresetId;
+  const genome = genomeForMixEntry({
+    id,
+    label: id,
+    source: "preset",
+    presetId: id,
+    weight: 1,
+    density: 0.45,
+    scale: 1,
+    environment: currentMix.entries[0]?.environment ?? { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
+    seed: currentMix.seed ^ currentMix.entries.length,
+    enabled: true,
+  });
+  const entry: TellusBiomeMixEntry = {
+    id: `${id}-${Date.now().toString(36)}`,
+    label: labelForProcPlantId(id),
+    source: "preset",
+    presetId: id,
+    weight: 1,
+    density: 0.45,
+    scale: genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm" ? 8 : 1,
+    environment: currentMix.entries[0]?.environment ?? { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
+    seed: currentMix.seed ^ ((currentMix.entries.length + 1) * 0x9e37),
+    enabled: true,
+  };
+  currentMix.entries.push(entry);
+  selectedEntryId = entry.id;
+  updateStatus(`Added ${entry.label}.`);
+  renderUi();
+  rebuildPreview();
+};
+
+const addWeberPennEntry = () => {
+  const entry = makeWeberPennEntry(selectedWeberPennSpecies as SpeciesId);
+  currentMix.entries.push(entry);
+  selectedEntryId = entry.id;
+  updateStatus(`Added Weber/Penn ${entry.label}.`);
+  renderUi();
+  rebuildPreview();
+};
+
+const bindAddControls = () => {
+  const presetSelect = entryEditor.querySelector<HTMLSelectElement>("#preset-select")!;
+  const weberPennSelect = entryEditor.querySelector<HTMLSelectElement>("#weber-penn-select")!;
+  presetSelect.innerHTML = procPlantPresetIds.map(
+    (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
+  ).join("");
+  presetSelect.value = selectedPresetId;
+  weberPennSelect.innerHTML = weberPennSpeciesIds.map(
+    (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
+  ).join("");
+  weberPennSelect.value = selectedWeberPennSpecies;
+  presetSelect.addEventListener("change", () => {
+    selectedPresetId = presetSelect.value;
+  });
+  weberPennSelect.addEventListener("change", () => {
+    selectedWeberPennSpecies = weberPennSelect.value;
+  });
+  entryEditor.querySelector<HTMLButtonElement>("#add-preset-button")!.addEventListener("click", addPresetEntry);
+  entryEditor.querySelector<HTMLButtonElement>("#add-weber-penn-button")!.addEventListener("click", addWeberPennEntry);
 };
 
 const toHexColor = (value: number | undefined, fallback: number): string =>
@@ -653,7 +711,24 @@ const renderEntryEditor = () => {
   const weberPenn = previewGenome.weberPenn;
   const foliage = previewGenome.foliage;
   const realism = previewGenome.treeRealism;
+  const foliageMode = weberFoliageMode(previewGenome);
+  const fillMass = foliageMode === "plain" ? 0 : foliage?.mass ?? 0;
+  const fillSize = foliage?.size ?? (previewGenome.habit === "conifer" ? 0.34 : 0.54);
   entryEditor.innerHTML = `
+    <div class="add-row">
+      <label>
+        Add preset
+        <select id="preset-select"></select>
+      </label>
+      <button type="button" id="add-preset-button">Add</button>
+    </div>
+    <div class="add-row">
+      <label>
+        Add Weber/Penn
+        <select id="weber-penn-select"></select>
+      </label>
+      <button type="button" id="add-weber-penn-button">Add</button>
+    </div>
     <label>
       Label
       <input id="entry-label" value="${entry.label.replace(/"/g, "&quot;")}" />
@@ -693,6 +768,17 @@ const renderEntryEditor = () => {
             ${weberPennSpeciesIds.map((id) => `<option value="${id}" ${id === weberPenn.species ? "selected" : ""}>${labelForProcPlantId(id)}</option>`).join("")}
           </select>
         </label>
+        <label>
+          Foliage mode
+          <select id="weber-foliage-mode">
+            <option value="plain" ${foliageMode === "plain" ? "selected" : ""}>Plain W/P leaves</option>
+            <option value="procplants" ${foliageMode === "procplants" ? "selected" : ""}>Procplants fill only</option>
+            <option value="conifer" ${foliageMode === "conifer" ? "selected" : ""}>Conifer fill only</option>
+            <option value="mixed" ${foliageMode === "mixed" ? "selected" : ""}>Custom mixed</option>
+          </select>
+        </label>
+        <details open>
+          <summary>Structure</summary>
         <div class="inline">
           <label>
             Branch depth
@@ -729,14 +815,34 @@ const renderEntryEditor = () => {
             <output>${weberPenn.radialSegments ?? 4}</output>
           </label>
         </div>
+        </details>
+        <details open>
+          <summary>Leaves & Crown</summary>
         <div class="inline">
           <label>
-            Foliage mass
-            <input id="foliage-mass" type="range" min="0" max="2" value="${foliage?.mass ?? 0.9}" step="0.01" />
-            <output>${(foliage?.mass ?? 0.9).toFixed(2)}</output>
+            Native leaves
+            <select id="weber-native-leaves">
+              <option value="true" ${weberPenn.nativeLeaves === false ? "" : "selected"}>On</option>
+              <option value="false" ${weberPenn.nativeLeaves === false ? "selected" : ""}>Off</option>
+            </select>
           </label>
           <label>
-            Cluster density
+            Crown fill
+            <select id="weber-foliage-source">
+              <option value="species" ${(weberPenn.foliageSource ?? "species") === "species" ? "selected" : ""}>W/P leaf shape</option>
+              <option value="procplants" ${weberPenn.foliageSource === "procplants" ? "selected" : ""}>Procplants leaf</option>
+              <option value="conifer-spray" ${weberPenn.foliageSource === "conifer-spray" ? "selected" : ""}>Conifer spray</option>
+            </select>
+          </label>
+        </div>
+        <div class="inline">
+          <label>
+            Fill mass
+            <input id="foliage-mass" type="range" min="0" max="2" value="${fillMass}" step="0.01" />
+            <output>${fillMass.toFixed(2)}</output>
+          </label>
+          <label>
+            Fill density
             <input id="foliage-clusters" type="range" min="0.2" max="2.4" value="${foliage?.clusterDensity ?? 1.2}" step="0.01" />
             <output>${(foliage?.clusterDensity ?? 1.2).toFixed(2)}</output>
           </label>
@@ -753,6 +859,23 @@ const renderEntryEditor = () => {
             <output>${(foliage?.tipBias ?? 0.5).toFixed(2)}</output>
           </label>
         </div>
+        <div class="inline">
+          <label>
+            Fill anchor
+            <select id="weber-fill-anchor">
+              <option value="leaf-sites" ${(weberPenn.fillAnchor ?? "leaf-sites") === "leaf-sites" ? "selected" : ""}>W/P leaf sites</option>
+              <option value="branch-tips" ${weberPenn.fillAnchor === "branch-tips" ? "selected" : ""}>Branch tips</option>
+            </select>
+          </label>
+          <label>
+            Fill size
+            <input id="foliage-size" type="range" min="0.05" max="1.5" value="${fillSize}" step="0.01" />
+            <output>${fillSize.toFixed(2)}</output>
+          </label>
+        </div>
+        </details>
+        <details>
+          <summary>Realism & Colors</summary>
         <div class="inline">
           <label>
             Crown spread
@@ -787,10 +910,12 @@ const renderEntryEditor = () => {
             <input id="weber-leaf-color" type="color" value="${toHexColor(weberPenn.leafColor, previewGenome.leaf.colorA)}" />
           </label>
         </div>
+        </details>
       </section>
     ` : ""}
     <button type="button" class="danger" id="remove-entry">Remove Plant</button>
   `;
+  bindAddControls();
   const bindNumber = (selector: string, key: "weight" | "density" | "scale") => {
     const input = entryEditor.querySelector<HTMLInputElement>(selector)!;
     const output = input.nextElementSibling as HTMLOutputElement;
@@ -826,7 +951,7 @@ const renderEntryEditor = () => {
     const updateTree = (fn: (genome: ProcPlantGenome) => void, options: { renderList?: boolean; renderEditor?: boolean } = {}) => {
       const genome = editableGenomeForEntry(entry);
       genome.weberPenn = genome.weberPenn ?? { species: weberPenn.species };
-      genome.foliage = genome.foliage ?? { mass: 0.9, clusterDensity: 1.2, whorlDensity: 0.6, tipBias: 0.5 };
+      genome.foliage = genome.foliage ?? { mass: 0, clusterDensity: 1.2, whorlDensity: 0.6, tipBias: 0.5, size: 0.5 };
       genome.treeRealism = genome.treeRealism ?? {
         crownSpread: 0.6,
         crownTaper: 0.5,
@@ -871,10 +996,42 @@ const renderEntryEditor = () => {
     bindTreeNumber("#weber-leaf-scale", (v) => v.toFixed(2), (genome, value) => { genome.weberPenn!.leafScaleMultiplier = value; });
     bindTreeNumber("#weber-branch-samples", (v) => String(Math.round(v)), (genome, value) => { genome.weberPenn!.branchSamples = Math.round(value); });
     bindTreeNumber("#weber-radial", (v) => String(Math.round(v)), (genome, value) => { genome.weberPenn!.radialSegments = Math.round(value); });
-    bindTreeNumber("#foliage-mass", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.mass = value; });
+    entryEditor.querySelector<HTMLSelectElement>("#weber-foliage-mode")!.addEventListener("change", (event) => {
+      updateTree((genome) => {
+        applyWeberFoliageMode(
+          genome,
+          (event.currentTarget as HTMLSelectElement).value as "plain" | "procplants" | "conifer" | "mixed",
+        );
+      }, { renderEditor: true });
+    });
+    entryEditor.querySelector<HTMLSelectElement>("#weber-native-leaves")!.addEventListener("change", (event) => {
+      updateTree((genome) => { genome.weberPenn!.nativeLeaves = (event.currentTarget as HTMLSelectElement).value === "true"; });
+    });
+    entryEditor.querySelector<HTMLSelectElement>("#weber-foliage-source")!.addEventListener("change", (event) => {
+      updateTree((genome) => {
+        const source = (event.currentTarget as HTMLSelectElement).value as "species" | "procplants" | "conifer-spray";
+        genome.weberPenn!.foliageSource = source;
+        genome.weberPenn!.crownFill = source !== "species";
+        genome.weberPenn!.fillAnchor = genome.weberPenn!.fillAnchor ?? "leaf-sites";
+        if (source !== "species" && (genome.foliage!.mass ?? 0) <= 0.001) {
+          genome.foliage!.mass = source === "conifer-spray" ? 0.55 : 0.35;
+        }
+      }, { renderEditor: true });
+    });
+    entryEditor.querySelector<HTMLSelectElement>("#weber-fill-anchor")!.addEventListener("change", (event) => {
+      updateTree((genome) => { genome.weberPenn!.fillAnchor = (event.currentTarget as HTMLSelectElement).value as "leaf-sites" | "branch-tips"; });
+    });
+    bindTreeNumber("#foliage-mass", (v) => v.toFixed(2), (genome, value) => {
+      genome.foliage!.mass = value;
+      genome.weberPenn!.crownFill = value > 0.001;
+      if (value <= 0.001 && genome.weberPenn!.foliageSource !== "species") {
+        genome.weberPenn!.foliageSource = "species";
+      }
+    });
     bindTreeNumber("#foliage-clusters", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.clusterDensity = value; });
     bindTreeNumber("#foliage-spread", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.whorlDensity = value; });
     bindTreeNumber("#foliage-tip", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.tipBias = value; });
+    bindTreeNumber("#foliage-size", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.size = value; });
     bindTreeNumber("#realism-spread", (v) => v.toFixed(2), (genome, value) => { genome.treeRealism!.crownSpread = value; });
     bindTreeNumber("#realism-taper", (v) => v.toFixed(2), (genome, value) => { genome.treeRealism!.crownTaper = value; });
     bindTreeNumber("#realism-bend", (v) => v.toFixed(2), (genome, value) => { genome.treeRealism!.trunkBend = value; });
@@ -963,16 +1120,6 @@ const rebuildPreview = () => {
 const loadEcologyBiome = (biome: EcologyBiomeId) => {
   currentMix = makeEcologyBiomeMix(biome, currentMix.seed);
   ecologySelect.value = biome;
-  terrainSelect.value = "";
-  selectedEntryId = currentMix.entries[0]?.id ?? "";
-  updateStatus(`Loaded ${currentMix.label}.`);
-  renderUi();
-  rebuildPreview();
-};
-
-const loadTerrainPaint = (paint: TerrainPaintKind) => {
-  currentMix = makeTerrainPaintBiomeMix(paint, currentMix.seed);
-  terrainSelect.value = paint;
   selectedEntryId = currentMix.entries[0]?.id ?? "";
   updateStatus(`Loaded ${currentMix.label}.`);
   renderUi();
@@ -981,11 +1128,6 @@ const loadTerrainPaint = (paint: TerrainPaintKind) => {
 
 ecologySelect.addEventListener("change", () => {
   loadEcologyBiome(ecologySelect.value as EcologyBiomeId);
-});
-
-terrainSelect.addEventListener("change", () => {
-  if (!terrainSelect.value) return;
-  loadTerrainPaint(terrainSelect.value as TerrainPaintKind);
 });
 
 densitySlider.addEventListener("input", () => {
@@ -1010,56 +1152,6 @@ jsonToggleButton.addEventListener("click", () => {
   jsonVisible = !jsonVisible;
   renderJson();
   resize();
-});
-
-presetSelect.addEventListener("change", () => {
-  selectedPresetId = presetSelect.value;
-});
-
-weberPennSelect.addEventListener("change", () => {
-  selectedWeberPennSpecies = weberPennSelect.value;
-});
-
-document.querySelector<HTMLButtonElement>("#add-preset-button")!.addEventListener("click", () => {
-  const id = selectedPresetId;
-  const genome = genomeForMixEntry({
-    id,
-    label: id,
-    source: "preset",
-    presetId: id,
-    weight: 1,
-    density: 0.45,
-    scale: 1,
-    environment: currentMix.entries[0]?.environment ?? { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
-    seed: currentMix.seed ^ currentMix.entries.length,
-    enabled: true,
-  });
-  const entry: TellusBiomeMixEntry = {
-    id: `${id}-${Date.now().toString(36)}`,
-    label: labelForProcPlantId(id),
-    source: "preset",
-    presetId: id,
-    weight: 1,
-    density: 0.45,
-    scale: genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm" ? 8 : 1,
-    environment: currentMix.entries[0]?.environment ?? { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
-    seed: currentMix.seed ^ ((currentMix.entries.length + 1) * 0x9e37),
-    enabled: true,
-  };
-  currentMix.entries.push(entry);
-  selectedEntryId = entry.id;
-  updateStatus(`Added ${entry.label}.`);
-  renderUi();
-  rebuildPreview();
-});
-
-document.querySelector<HTMLButtonElement>("#add-weber-penn-button")!.addEventListener("click", () => {
-  const entry = makeWeberPennEntry(selectedWeberPennSpecies as SpeciesId);
-  currentMix.entries.push(entry);
-  selectedEntryId = entry.id;
-  updateStatus(`Added Weber/Penn ${entry.label}.`);
-  renderUi();
-  rebuildPreview();
 });
 
 document.querySelector<HTMLButtonElement>("#import-button")!.addEventListener("click", () => fileInput.click());
@@ -1087,6 +1179,19 @@ fileInput.addEventListener("change", async () => {
   updateStatus(imported ? `Imported ${imported} JSON file${imported === 1 ? "" : "s"}.` : "No compatible JSON found.");
   renderUi();
   rebuildPreview();
+});
+
+applyWorldButton.addEventListener("click", () => {
+  const worldId = activeTellusWorldId();
+  const targetTerrainPaint = activeTerrainPaint();
+  const appliedMix = { ...currentMix, targetTerrainPaint };
+  if (saveActiveBiomeMixForWorld(worldId, appliedMix)) {
+    currentMix = appliedMix;
+    updateStatus(`Applied ${currentMix.label} to ${targetTerrainPaint} terrain in ${worldId}.`);
+  } else {
+    updateStatus("Could not save this biome mix for the active world.");
+  }
+  renderJson();
 });
 
 document.querySelector<HTMLButtonElement>("#export-button")!.addEventListener("click", () => {

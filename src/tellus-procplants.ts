@@ -1,5 +1,13 @@
 import * as THREE from "three";
-import { generateBakedTree, type BakeOptions, type SpeciesId } from "./vendor/proc-tree/index";
+import {
+  generateBakedTree,
+  generateTreeData,
+  SPECIES,
+  type BakeOptions,
+  type SpeciesId,
+  type TreeData,
+} from "./vendor/proc-tree/index";
+import { getLeafShape } from "./vendor/proc-tree/LeafShapes";
 
 export interface ProcPlantTemplate {
   pos: Float32Array;
@@ -81,6 +89,7 @@ export interface ProcPlantGenome {
     clusterDensity: number;
     whorlDensity: number;
     tipBias: number;
+    size?: number;
   };
   treeRealism?: {
     crownSpread: number;
@@ -93,6 +102,10 @@ export interface ProcPlantGenome {
   };
   weberPenn?: {
     species: SpeciesId;
+    nativeLeaves?: boolean;
+    crownFill?: boolean;
+    foliageSource?: "species" | "procplants" | "conifer-spray";
+    fillAnchor?: "leaf-sites" | "branch-tips";
     maxBranchDepth?: number;
     maxStems?: number;
     maxLeaves?: number;
@@ -3350,6 +3363,61 @@ const combineTemplates = (base: ProcPlantTemplate, extra: ProcPlantTemplate): Pr
 
 const emptyGraph = (): ProcPlantGraph => ({ stems: [], segments: [], organs: [] });
 
+interface WeberPennFoliageAnchor {
+  position: THREE.Vector3;
+  direction: THREE.Vector3;
+  t: number;
+}
+
+const geometryFromWeberPennLeafShape = (genome: ProcPlantGenome): THREE.BufferGeometry => {
+  const species = genome.weberPenn?.species;
+  const shape = getLeafShape(species ? SPECIES[species]?.leafShape ?? 0 : 0);
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  for (const vertex of shape.vertices) {
+    positions.push(vertex[0], vertex[1], vertex[2]);
+    normals.push(0, 1, 0);
+  }
+  for (const face of shape.faces) {
+    if (face.length === 3) {
+      indices.push(face[0]!, face[1]!, face[2]!);
+    } else {
+      for (let i = 1; i < face.length - 1; i++) {
+        indices.push(face[0]!, face[i]!, face[i + 1]!);
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+const createWeberPennFoliageGeometry = (genome: ProcPlantGenome, conifer: boolean): THREE.BufferGeometry => {
+  const source = genome.weberPenn?.foliageSource ?? "species";
+  if (source === "conifer-spray") return createProcPlantConiferSprayGeometry();
+  if (source === "procplants") {
+    return createProcPlantLeafGeometry(
+      genome.leaf.shape,
+      genome.leaf.widthRatio,
+      genome.leaf.serration,
+      genome.leaf.curl,
+    );
+  }
+  if (conifer && source !== "species") return createProcPlantConiferSprayGeometry();
+  return geometryFromWeberPennLeafShape(genome);
+};
+
+const isWeberPennCrownFillEnabled = (genome: ProcPlantGenome): boolean => {
+  const options = genome.weberPenn;
+  if (!options) return false;
+  if (options.crownFill !== undefined) return options.crownFill;
+  return Boolean(options.foliageSource && options.foliageSource !== "species");
+};
+
 const isWeberPennConifer = (genome: ProcPlantGenome) => {
   const species = genome.weberPenn?.species.toLowerCase() ?? "";
   return (
@@ -3391,10 +3459,6 @@ const weberPennBakeOptions = (genome: ProcPlantGenome): BakeOptions => {
     maxLeaves: options?.maxLeaves ?? 240,
     leafScaleMultiplier: options?.leafScaleMultiplier ?? 2,
     blossomScaleMultiplier: options?.blossomScaleMultiplier ?? options?.leafScaleMultiplier ?? 2,
-    foliageMass: genome.foliage?.mass ?? 0,
-    foliageClusterDensity: genome.foliage?.clusterDensity ?? 1,
-    foliageTipBias: genome.foliage?.tipBias ?? 0.5,
-    foliageSpread: genome.foliage?.whorlDensity ?? 0.5,
   };
 };
 
@@ -3405,60 +3469,85 @@ const addWeberPennFoliageMass = (
   env: ProcPlantEnvironment,
   source: ProcPlantTemplate,
   branchVerts: number,
+  fillAnchors: WeberPennFoliageAnchor[] = [],
 ) => {
+  if (!isWeberPennCrownFillEnabled(genome)) return 0;
   const leafVerts = source.pos.length / 3 - branchVerts;
-  if (leafVerts <= 0) return 0;
+  if (leafVerts <= 0 && fillAnchors.length === 0) return 0;
   const rng = rngFromSeed(seed ^ 0x5f3759df);
   const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
-  const foliage = {
-    mass: genome.foliage?.mass ?? (genome.habit === "conifer" ? 0.84 : 0.58),
-    clusterDensity: genome.foliage?.clusterDensity ?? 1,
-    whorlDensity: genome.foliage?.whorlDensity ?? (genome.habit === "conifer" ? 0.82 : 0.42),
-    tipBias: genome.foliage?.tipBias ?? 0.5,
-  };
   const conifer = isWeberPennConifer(genome);
+  const foliage = {
+    mass: Math.max(0, genome.foliage?.mass ?? 0),
+    clusterDensity: genome.foliage?.clusterDensity ?? 1,
+    whorlDensity: genome.foliage?.whorlDensity ?? (conifer ? 0.64 : 0.42),
+    tipBias: genome.foliage?.tipBias ?? 0.5,
+    size: genome.foliage?.size ?? (conifer ? 0.34 : 0.56),
+  };
   const budgetBase = conifer ? 72 : 42;
   const budget = Math.round(
     THREE.MathUtils.clamp(
       budgetBase * foliage.mass * foliage.clusterDensity * (0.72 + env.moisture * 0.36),
-      conifer ? 36 : 18,
+      0,
       conifer ? 150 : 96,
     ),
   );
-  const sprayGeometry = conifer ? createProcPlantConiferSprayGeometry() : createProcPlantLeafGeometry(
-    genome.leaf.shape,
-    genome.leaf.widthRatio,
-    genome.leaf.serration,
-    genome.leaf.curl,
-  );
+  if (budget <= 0) return 0;
+  const spread = THREE.MathUtils.clamp(foliage.whorlDensity, 0, 1.6);
+  const fillSize = THREE.MathUtils.clamp(foliage.size, 0.05, 1.5);
+  const sourceMode = genome.weberPenn?.foliageSource ?? "species";
+  const sprayGeometry = createWeberPennFoliageGeometry(genome, conifer);
+  const useAttachmentAnchors = fillAnchors.length > 0 && sourceMode !== "species";
   let added = 0;
   for (let i = 0; i < budget; i++) {
-    const vi = branchVerts + Math.floor(rng() * leafVerts);
+    const anchor = useAttachmentAnchors
+      ? fillAnchors[Math.floor(rng() * fillAnchors.length)]!
+      : undefined;
+    const vi = anchor ? 0 : branchVerts + Math.floor(rng() * leafVerts);
     const o = vi * 3;
-    const t = THREE.MathUtils.clamp(source.pos[o + 1] ?? 0, 0, 1);
+    const t = anchor?.t ?? THREE.MathUtils.clamp(source.pos[o + 1] ?? 0, 0, 1);
     const tipBoost = THREE.MathUtils.lerp(1, t, foliage.tipBias);
     if (rng() > 0.58 + tipBoost * 0.3 + foliage.mass * 0.08) continue;
-    const position = new THREE.Vector3(source.pos[o] ?? 0, source.pos[o + 1] ?? 0, source.pos[o + 2] ?? 0);
+    const position = anchor
+      ? anchor.position.clone()
+      : new THREE.Vector3(source.pos[o] ?? 0, source.pos[o + 1] ?? 0, source.pos[o + 2] ?? 0);
     const radial = new THREE.Vector3(position.x, 0, position.z);
     if (radial.lengthSq() < 0.0001) radial.set(Math.cos(i), 0, Math.sin(i));
     radial.normalize();
     const yaw = rng() * Math.PI * 2;
+    const branchDirection = anchor?.direction.clone().normalize();
     const direction = conifer
-      ? radial.clone().multiplyScalar(0.86).add(new THREE.Vector3(0, -0.22 - t * 0.18, 0)).normalize()
-      : radial.clone().multiplyScalar(0.44).add(new THREE.Vector3(0, 0.5 + rng() * 0.28, 0)).normalize();
+      ? (branchDirection ?? radial).clone()
+        .multiplyScalar(anchor ? 0.58 : 0)
+        .add(radial.clone().multiplyScalar(0.86))
+        .add(new THREE.Vector3(0, -0.22 - t * 0.18, 0))
+        .normalize()
+      : (branchDirection ?? radial).clone()
+        .multiplyScalar(anchor ? 0.42 : 0)
+        .add(radial.clone().multiplyScalar(0.44))
+        .add(new THREE.Vector3(0, 0.5 + rng() * 0.28, 0))
+        .normalize();
     const right = tangentBasis(direction).right.applyAxisAngle(direction, yaw).normalize();
+    const sourceLength = curve(genome.leaf.length, t);
+    const sizeBase = conifer ? 0.18 + fillSize * 0.32 : 0.34 + fillSize * 0.55;
+    const sourceDamping = sourceMode === "conifer-spray" ? 0.82 : sourceMode === "procplants" ? 0.9 : 1;
     const scale =
-      curve(genome.leaf.length, t) *
-      (conifer ? 0.58 + foliage.whorlDensity * 0.3 : 1.15 + foliage.mass * 0.34) *
+      sourceLength *
+      sizeBase *
+      sourceDamping *
       (0.78 + rng() * 0.34) *
-      (1 + shade * genome.lightResponse.leafBoostInShade * 0.5);
+      (1 + shade * genome.lightResponse.leafBoostInShade * 0.25);
     const color = new THREE.Color(genome.leaf.colorA).lerp(
       new THREE.Color(genome.leaf.colorB),
       conifer ? 0.35 + t * 0.45 : t,
     );
     const normal = new THREE.Vector3().crossVectors(right, direction).normalize().negate();
+    const anchorJitter = useAttachmentAnchors ? 0.006 + spread * 0.025 : 0.025 + spread * 0.09;
+    const jitteredPosition = position
+      .add(radial.multiplyScalar((rng() - 0.5) * anchorJitter))
+      .add(new THREE.Vector3(0, (rng() - 0.5) * spread * (useAttachmentAnchors ? 0.012 : 0.035), 0));
     const matrix = instanceMatrixFromFrame(
-      position.add(radial.multiplyScalar((rng() - 0.5) * 0.035)),
+      jitteredPosition,
       right,
       direction,
       normal,
@@ -3479,11 +3568,21 @@ export const buildWeberPennProcPlantTemplate = (
   if (!genome.weberPenn) {
     return buildProcPlantTemplate({ ...genome, weberPenn: undefined }, seed, env);
   }
+  const nativeLeaves = genome.weberPenn.nativeLeaves !== false;
+  const foliageMass = isWeberPennCrownFillEnabled(genome) ? genome.foliage?.mass ?? 0 : 0;
+  const bakeOptions = weberPennBakeOptions(genome);
+  const generateLeaves = (genome.weberPenn.maxLeaves ?? 1) !== 0 && (nativeLeaves || foliageMass > 0);
+  const treeData = generateTreeData(
+    genome.weberPenn.species,
+    seed >>> 0,
+    generateLeaves,
+    bakeOptions.maxBranchDepth,
+  );
   const baked = generateBakedTree(
     genome.weberPenn.species,
     seed >>> 0,
-    weberPennBakeOptions(genome),
-    (genome.weberPenn.maxLeaves ?? 1) !== 0,
+    bakeOptions,
+    generateLeaves,
   );
   const barkColor = new THREE.Color(genome.weberPenn.barkColor ?? 0x5d4327);
   const leafColor = new THREE.Color(genome.weberPenn.leafColor ?? genome.leaf.colorA);
@@ -3495,7 +3594,7 @@ export const buildWeberPennProcPlantTemplate = (
   const branchVerts = baked.branches.positions.length / 3;
   const leafVerts = baked.leaves.positions.length / 3;
   const totalVerts = branchVerts + leafVerts;
-  const totalIdx = baked.branches.indices.length + baked.leaves.indices.length;
+  const totalIdx = baked.branches.indices.length + (nativeLeaves ? baked.leaves.indices.length : 0);
   const pos = new Float32Array(totalVerts * 3);
   const nrm = new Float32Array(totalVerts * 3);
   const col = new Float32Array(totalVerts * 3);
@@ -3531,6 +3630,92 @@ export const buildWeberPennProcPlantTemplate = (
     }
     p.add(bendDir.clone().multiplyScalar(Math.pow(h, 1.35) * bendAmount));
     return p;
+  };
+  const makeLeafSiteAnchors = (tree: TreeData): WeberPennFoliageAnchor[] => {
+    let leaves = tree.leaves;
+    if (leaves.length > (bakeOptions.maxLeaves ?? Infinity)) {
+      const step = leaves.length / Math.max(1, bakeOptions.maxLeaves ?? 1);
+      const sampled: typeof leaves = [];
+      for (let i = 0; i < (bakeOptions.maxLeaves ?? 0); i++) {
+        sampled.push(leaves[Math.floor(i * step)]!);
+      }
+      leaves = sampled;
+    }
+    return leaves.map((leaf, index) => {
+      const leafYUp = new THREE.Vector3(leaf.position.x, leaf.position.z, -leaf.position.y);
+      const ny = (leafYUp.y - baseY) * scale;
+      const position = warpPosition(
+        (leafYUp.x - cx) * scale,
+        ny,
+        (leafYUp.z - cz) * scale,
+        seed + index * 31,
+        true,
+      );
+      const direction = new THREE.Vector3(leaf.direction.x, leaf.direction.z, -leaf.direction.y);
+      if (direction.lengthSq() < 0.0001) direction.set(position.x, 0.1, position.z);
+      direction.normalize();
+      return {
+        position,
+        direction,
+        t: THREE.MathUtils.clamp(ny, 0, 1),
+      };
+    });
+  };
+  const makeBranchTipAnchors = (tree: TreeData): WeberPennFoliageAnchor[] => {
+    const maxDepth = bakeOptions.maxBranchDepth ?? Infinity;
+    let stems = maxDepth < Infinity
+      ? tree.stems.filter((stem) => stem.depth <= maxDepth)
+      : tree.stems;
+    if (stems.length > (bakeOptions.maxStems ?? Infinity)) {
+      stems = [...stems]
+        .sort((a, b) => (a.depth !== b.depth ? a.depth - b.depth : b.radius - a.radius))
+        .slice(0, bakeOptions.maxStems);
+    }
+    const included = new Set(stems.map((stem) => tree.stems.indexOf(stem)));
+    const anchors = stems
+      .map((stem, index) => ({ stem, index }))
+      .filter(({ stem }) => stem.points.length >= 2)
+      .filter(({ stem }) => stem.depth > 0 || !stems.some((candidate) => candidate.depth > 0))
+      .filter(({ stem }) => !stem.childIndices.some((child) => included.has(child)))
+      .map(({ stem, index }) => {
+        const end = stem.points[stem.points.length - 1]!.position;
+        const prev = stem.points[stem.points.length - 2]!.position;
+        const endYUp = new THREE.Vector3(end.x, end.z, -end.y);
+        const prevYUp = new THREE.Vector3(prev.x, prev.z, -prev.y);
+        const ny = (endYUp.y - baseY) * scale;
+        const position = warpPosition(
+          (endYUp.x - cx) * scale,
+          ny,
+          (endYUp.z - cz) * scale,
+          seed + index * 43,
+          false,
+        );
+        const prevNy = (prevYUp.y - baseY) * scale;
+        const previous = warpPosition(
+          (prevYUp.x - cx) * scale,
+          prevNy,
+          (prevYUp.z - cz) * scale,
+          seed + index * 43 - 7,
+          false,
+        );
+        const direction = position.clone().sub(previous);
+        if (direction.lengthSq() < 0.0001) direction.set(position.x, 0.1, position.z);
+        direction.normalize();
+        return {
+          position,
+          direction,
+          t: THREE.MathUtils.clamp(ny, 0, 1),
+        };
+      });
+    if (anchors.length > 0) return anchors;
+    return [];
+  };
+  const makeFoliageAnchors = (tree: TreeData): WeberPennFoliageAnchor[] => {
+    if ((genome.weberPenn?.fillAnchor ?? "leaf-sites") === "branch-tips") {
+      return makeBranchTipAnchors(tree);
+    }
+    const leafSiteAnchors = makeLeafSiteAnchors(tree);
+    return leafSiteAnchors.length > 0 ? leafSiteAnchors : makeBranchTipAnchors(tree);
   };
   const varyColor = (color: THREE.Color, vertexSeed: number, amount = realism.colorVariance) => {
     const out = color.clone();
@@ -3597,21 +3782,31 @@ export const buildWeberPennProcPlantTemplate = (
   baked.branches.indices.forEach((v, i) => {
     idx[i] = v;
   });
-  const offset = baked.branches.indices.length;
-  baked.leaves.indices.forEach((v, i) => {
-    idx[offset + i] = v + branchVerts;
-  });
+  if (nativeLeaves) {
+    const offset = baked.branches.indices.length;
+    baked.leaves.indices.forEach((v, i) => {
+      idx[offset + i] = v + branchVerts;
+    });
+  }
 
   const baseTemplate = { pos, nrm, col, tintable, sway, idx };
   const massBuilder = new TemplateBuilder();
-  const massLeaves = addWeberPennFoliageMass(massBuilder, genome, seed, env, baseTemplate, branchVerts);
+  const massLeaves = addWeberPennFoliageMass(
+    massBuilder,
+    genome,
+    seed,
+    env,
+    baseTemplate,
+    branchVerts,
+    makeFoliageAnchors(treeData),
+  );
   const template = combineTemplates(baseTemplate, massBuilder.build());
   return {
     template,
     graph: emptyGraph(),
     stats: {
       stems: baked.branches.indices.length / 6,
-      leaves: Math.round(baked.leaves.indices.length / 6) + massLeaves,
+      leaves: (nativeLeaves ? Math.round(baked.leaves.indices.length / 6) : 0) + massLeaves,
       flowers: 0,
       triangles: template.idx.length / 3,
     },
