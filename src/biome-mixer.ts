@@ -1,16 +1,24 @@
 import * as THREE from "three";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import {
   ECOLOGY_BIOME_OPTIONS,
   ECOLOGY_TERRAIN_PAINT_MAP,
 } from "./tellus-procplant-biomes";
 import {
+  biomeMixTargetTerrainPaint,
   entryFromProcPlantLabExport,
   genomeForMixEntry,
+  isAssetMixEntry,
   labelForProcPlantId,
   makeEcologyBiomeMix,
   makeTerrainPaintBiomeMix,
   normalizeBiomeMixDefinition,
+  saveActiveBiomeMixForWorld,
+  saveActiveBiomeMixRegistryToServer,
   type TellusBiomeMixDefinition,
   type TellusBiomeMixEntry,
 } from "./tellus-biome-mix";
@@ -23,6 +31,7 @@ import {
 import { SPECIES, type SpeciesId } from "./vendor/proc-tree/index";
 import type { EcologyBiomeId } from "./tellus-ecology";
 import type { TerrainPaintKind } from "./tellus-types";
+import { loadRuntimeConfig } from "./tellus-runtime-config";
 
 const terrainPaints: TerrainPaintKind[] = [
   "meadow",
@@ -60,9 +69,15 @@ let currentMix = makeEcologyBiomeMix("taiga");
 let selectedEntryId = currentMix.entries[0]?.id ?? "";
 let selectedPresetId = "blueSpruce";
 let selectedWeberPennSpecies = "balsamFir";
+let selectedImportedAssetId = "";
 let jsonVisible = false;
 let statusText = "Ready.";
 const weberPennSpeciesIds = Object.keys(SPECIES).sort() as SpeciesId[];
+const gltfLoader = new GLTFLoader();
+const dracoLoader = new DRACOLoader();
+const ktx2Loader = new KTX2Loader();
+const importedAssets = new Map<string, THREE.Object3D>();
+const importedAssetOptions: Array<{ id: string; label: string; name: string }> = [];
 
 root.innerHTML = `
   <main class="biome-page">
@@ -93,11 +108,18 @@ root.innerHTML = `
         Target verts/chunk
         <input id="vertex-target-input" type="number" min="10000" max="5000000" value="250000" step="10000" />
       </label>
+      <label>
+        World
+        <input id="world-id-input" type="text" value="main" />
+      </label>
       <div class="button-row">
         <button type="button" id="import-button">Import JSON</button>
+        <button type="button" id="import-glb-button">Import GLB</button>
+        <button type="button" id="apply-world-button">Apply to World</button>
         <button type="button" id="export-button">Export Mix</button>
         <button type="button" id="json-toggle-button" aria-pressed="false">Show JSON</button>
         <input id="file-input" type="file" accept="application/json,.json" multiple hidden />
+        <input id="glb-input" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" multiple hidden />
       </div>
     </section>
     <section class="swatch-board" aria-label="Biome and terrain swatches">
@@ -130,6 +152,13 @@ root.innerHTML = `
             <select id="weber-penn-select"></select>
           </label>
           <button type="button" id="add-weber-penn-button">Add</button>
+        </div>
+        <div class="add-row">
+          <label>
+            Add imported GLB
+            <select id="imported-asset-select"></select>
+          </label>
+          <button type="button" id="add-imported-asset-button">Import</button>
         </div>
         <div class="entry-editor" id="entry-editor"></div>
       </aside>
@@ -168,7 +197,7 @@ style.textContent = `
   h2 { font-size: 18px; }
   p { margin: 8px 0 0; color: #4b5563; font-size: 17px; }
   nav, .button-row, .add-row { display: flex; gap: 8px; align-items: end; }
-  a, button, select {
+  a, button, select, input[type="text"] {
     border: 1px solid #c6d0dc;
     border-radius: 8px;
     background: #fff;
@@ -180,6 +209,7 @@ style.textContent = `
   button { padding: 10px 12px; cursor: pointer; }
   button.active { background: #17341f; color: #f6edbd; border-color: #8b9657; }
   select { height: 42px; padding: 0 10px; min-width: 150px; }
+  input[type="text"] { height: 42px; width: 132px; padding: 0 10px; }
   label {
     display: grid;
     gap: 7px;
@@ -194,7 +224,7 @@ style.textContent = `
   .state-select { display: none; }
   .biome-toolbar {
     display: grid;
-    grid-template-columns: 180px 180px 180px minmax(320px, 1fr);
+    grid-template-columns: 170px 170px 180px 150px minmax(360px, 1fr);
     gap: 14px;
     align-items: end;
     margin-bottom: 16px;
@@ -364,6 +394,7 @@ const terrainSelect = document.querySelector<HTMLSelectElement>("#terrain-select
 const densitySlider = document.querySelector<HTMLInputElement>("#density-slider")!;
 const diversitySlider = document.querySelector<HTMLInputElement>("#diversity-slider")!;
 const vertexTargetInput = document.querySelector<HTMLInputElement>("#vertex-target-input")!;
+const worldIdInput = document.querySelector<HTMLInputElement>("#world-id-input")!;
 const densityOutput = document.querySelector<HTMLOutputElement>("#density-output")!;
 const diversityOutput = document.querySelector<HTMLOutputElement>("#diversity-output")!;
 const entryList = document.querySelector<HTMLDivElement>("#entry-list")!;
@@ -373,6 +404,9 @@ const mixCount = document.querySelector<HTMLSpanElement>("#mix-count")!;
 const presetSelect = document.querySelector<HTMLSelectElement>("#preset-select")!;
 const weberPennSelect = document.querySelector<HTMLSelectElement>("#weber-penn-select")!;
 const fileInput = document.querySelector<HTMLInputElement>("#file-input")!;
+const glbInput = document.querySelector<HTMLInputElement>("#glb-input")!;
+const importedAssetSelect = document.querySelector<HTMLSelectElement>("#imported-asset-select")!;
+const importedAssetButton = document.querySelector<HTMLButtonElement>("#add-imported-asset-button")!;
 const jsonOutput = document.querySelector<HTMLTextAreaElement>("#json-output")!;
 const statusOutput = document.querySelector<HTMLSpanElement>("#status-output")!;
 const renderedOutput = document.querySelector<HTMLElement>("#rendered-output")!;
@@ -383,6 +417,15 @@ const workspace = document.querySelector<HTMLElement>("#workspace")!;
 const ecologySwatchGrid = document.querySelector<HTMLDivElement>("#ecology-swatch-grid")!;
 const terrainSwatchGrid = document.querySelector<HTMLDivElement>("#terrain-swatch-grid")!;
 const jsonToggleButton = document.querySelector<HTMLButtonElement>("#json-toggle-button")!;
+const applyWorldButton = document.querySelector<HTMLButtonElement>("#apply-world-button")!;
+
+const currentWorldId = (): string => {
+  const queryWorld = new URLSearchParams(window.location.search).get("world")?.trim();
+  const storedWorld = window.localStorage.getItem("tellus.activeWorldId")?.trim();
+  return queryWorld || storedWorld || "main";
+};
+
+worldIdInput.value = currentWorldId();
 
 ecologySelect.innerHTML = ECOLOGY_BIOME_OPTIONS.map(
   (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
@@ -403,6 +446,12 @@ ecologySelect.value = currentMix.ecologyBiome ?? "taiga";
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.shadowMap.enabled = true;
+dracoLoader.setDecoderPath("/node_modules/three/examples/jsm/libs/draco/gltf/");
+ktx2Loader.setTranscoderPath("/node_modules/three/examples/jsm/libs/basis/");
+ktx2Loader.detectSupport(renderer);
+gltfLoader.setDRACOLoader(dracoLoader);
+gltfLoader.setKTX2Loader(ktx2Loader);
+gltfLoader.setMeshoptDecoder(MeshoptDecoder);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xdfe9ee);
 scene.fog = new THREE.Fog(0xdfe9ee, 65, 190);
@@ -443,7 +492,79 @@ const disposeObject = (object: THREE.Object3D) => {
   });
 };
 
+const disposeImportedAssetInstance = (object: THREE.Object3D) => {
+  object.traverse((child) => {
+    const material = (child as THREE.Mesh).material;
+    if (Array.isArray(material)) {
+      material.forEach((item) => {
+        if (item.userData.importedAssetMaterial) item.dispose();
+      });
+    } else if (material?.userData.importedAssetMaterial) {
+      material.dispose();
+    }
+  });
+};
+
+const prepareImportedAsset = (object: THREE.Object3D): THREE.Object3D => {
+  const model = object.clone(true);
+  model.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxSide = Math.max(size.x, size.y, size.z, 1e-4);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  const rootObject = new THREE.Group();
+  rootObject.name = object.name || "Imported GLB";
+  model.position.set(-center.x, -box.min.y, -center.z);
+  rootObject.add(model);
+  rootObject.scale.setScalar(1 / maxSide);
+  rootObject.updateMatrixWorld(true);
+  const groundedBox = new THREE.Box3().setFromObject(rootObject);
+  rootObject.position.y -= groundedBox.min.y;
+  rootObject.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+  });
+  return rootObject;
+};
+
+const tintMaterial = (material: THREE.Material, color: number | undefined): THREE.Material => {
+  const cloned = material.clone();
+  cloned.userData.importedAssetMaterial = true;
+  if (color !== undefined && "color" in cloned) {
+    (cloned as THREE.Material & { color: THREE.Color }).color.set(color);
+  }
+  return cloned;
+};
+
+const cloneImportedAssetInstance = (prototype: THREE.Object3D, color: number | undefined): THREE.Object3D => {
+  const instance = prototype.clone(true);
+  instance.userData.importedAssetClone = true;
+  instance.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.material) return;
+    mesh.material = Array.isArray(mesh.material)
+      ? mesh.material.map((material) => tintMaterial(material, color))
+      : tintMaterial(mesh.material, color);
+  });
+  return instance;
+};
+
+const loadGlbFile = async (file: File): Promise<THREE.Object3D> => {
+  const url = URL.createObjectURL(file);
+  try {
+    const gltf = await gltfLoader.loadAsync(url);
+    return prepareImportedAsset(gltf.scene);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+};
+
 const colorForEntry = (entry: TellusBiomeMixEntry): number => {
+  if (isAssetMixEntry(entry)) return entry.asset.color ?? 0x6b7f4c;
   const genome = genomeForMixEntry(entry);
   return genome.flower?.color ?? genome.leaf.colorA ?? 0x4f7a39;
 };
@@ -463,7 +584,7 @@ const formatCount = (value: number): string =>
 const colorCss = (value: number): string => `#${value.toString(16).padStart(6, "0").slice(-6)}`;
 
 const activeTerrainPaint = (): TerrainPaintKind =>
-  currentMix.terrainPaint ?? (currentMix.ecologyBiome ? ECOLOGY_TERRAIN_PAINT_MAP[currentMix.ecologyBiome] : "grass");
+  biomeMixTargetTerrainPaint(currentMix) ?? "grass";
 
 const updatePreviewTerrain = () => {
   const paint = activeTerrainPaint();
@@ -551,6 +672,10 @@ const makeWeberPennGenome = (species: SpeciesId, seed: number): ProcPlantGenome 
   base.habit = conifer ? "conifer" : palm ? "palm" : bamboo ? "grass" : "tree";
   base.weberPenn = {
     species,
+    nativeLeaves: true,
+    crownFill: false,
+    foliageSource: "species",
+    fillAnchor: "leaf-sites",
     maxBranchDepth: base.weberPenn?.maxBranchDepth ?? 3,
     maxStems: base.weberPenn?.maxStems ?? (conifer ? 96 : 80),
     maxLeaves: base.weberPenn?.maxLeaves ?? (conifer ? 220 : 190),
@@ -561,10 +686,11 @@ const makeWeberPennGenome = (species: SpeciesId, seed: number): ProcPlantGenome 
     leafColor: base.weberPenn?.leafColor ?? base.leaf.colorA,
   };
   base.foliage = {
-    mass: base.foliage?.mass ?? (conifer ? 1.08 : 0.74),
-    clusterDensity: base.foliage?.clusterDensity ?? (conifer ? 1.42 : 1.24),
-    whorlDensity: base.foliage?.whorlDensity ?? (conifer ? 0.92 : 0.48),
+    mass: 0,
+    clusterDensity: base.foliage?.clusterDensity ?? (conifer ? 1.08 : 1.12),
+    whorlDensity: base.foliage?.whorlDensity ?? (conifer ? 0.58 : 0.48),
     tipBias: base.foliage?.tipBias ?? (conifer ? 0.34 : 0.62),
+    size: base.foliage?.size ?? (conifer ? 0.32 : 0.54),
   };
   base.treeRealism = {
     crownSpread: base.treeRealism?.crownSpread ?? (conifer ? 0.36 : 0.72),
@@ -600,8 +726,56 @@ const editableGenomeForEntry = (entry: TellusBiomeMixEntry): ProcPlantGenome => 
   if (!entry.genome) {
     entry.genome = cloneGenome(genomeForMixEntry(entry));
     entry.source = "mutation";
+    entry.presetId = undefined;
   }
   return entry.genome;
+};
+
+const weberFoliageMode = (genome: ProcPlantGenome): "plain" | "procplants" | "conifer" | "mixed" => {
+  const nativeLeaves = genome.weberPenn?.nativeLeaves !== false;
+  const crownFill = genome.weberPenn?.crownFill === true ||
+    (genome.weberPenn?.crownFill === undefined && Boolean(genome.weberPenn?.foliageSource && genome.weberPenn.foliageSource !== "species"));
+  const mass = crownFill ? genome.foliage?.mass ?? 0 : 0;
+  const source = genome.weberPenn?.foliageSource ?? "species";
+  if (nativeLeaves && mass <= 0.001) return "plain";
+  if (!nativeLeaves && mass > 0.001 && source === "procplants") return "procplants";
+  if (!nativeLeaves && mass > 0.001 && source === "conifer-spray") return "conifer";
+  return "mixed";
+};
+
+const applyWeberFoliageMode = (
+  genome: ProcPlantGenome,
+  mode: "plain" | "procplants" | "conifer" | "mixed",
+) => {
+  genome.weberPenn = genome.weberPenn ?? { species: "balsamFir" as SpeciesId };
+  genome.foliage = genome.foliage ?? { mass: 0, clusterDensity: 1.1, whorlDensity: 0.55, tipBias: 0.5, size: 0.4 };
+  if (mode === "plain") {
+    genome.weberPenn.nativeLeaves = true;
+    genome.weberPenn.crownFill = false;
+    genome.weberPenn.foliageSource = "species";
+    genome.foliage.mass = 0;
+    return;
+  }
+  if (mode === "procplants") {
+    genome.weberPenn.nativeLeaves = false;
+    genome.weberPenn.crownFill = true;
+    genome.weberPenn.foliageSource = "procplants";
+    genome.weberPenn.fillAnchor = genome.weberPenn.fillAnchor ?? "leaf-sites";
+    genome.foliage.mass = Math.max(0.45, genome.foliage.mass);
+    genome.foliage.clusterDensity = Math.min(genome.foliage.clusterDensity, 1.35);
+    genome.foliage.size = Math.min(genome.foliage.size ?? 0.5, 0.58);
+    return;
+  }
+  if (mode === "conifer") {
+    genome.weberPenn.nativeLeaves = false;
+    genome.weberPenn.crownFill = true;
+    genome.weberPenn.foliageSource = "conifer-spray";
+    genome.weberPenn.fillAnchor = genome.weberPenn.fillAnchor ?? "leaf-sites";
+    genome.foliage.mass = Math.max(0.42, genome.foliage.mass);
+    genome.foliage.clusterDensity = Math.min(genome.foliage.clusterDensity, 1.25);
+    genome.foliage.whorlDensity = Math.min(genome.foliage.whorlDensity, 0.72);
+    genome.foliage.size = Math.min(genome.foliage.size ?? 0.34, 0.38);
+  }
 };
 
 const toHexColor = (value: number | undefined, fallback: number): string =>
@@ -610,6 +784,63 @@ const toHexColor = (value: number | undefined, fallback: number): string =>
 const fromHexColor = (value: string, fallback: number): number => {
   const parsed = Number.parseInt(value.replace("#", ""), 16);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const slug = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "asset";
+
+const importErrorMessage = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/No DRACOLoader|draco/i.test(message)) return "Draco-compressed GLB could not be decoded.";
+  if (/Meshopt|meshopt/i.test(message)) return "Meshopt-compressed GLB could not be decoded.";
+  if (/KTX2|ktx2|Basis/i.test(message)) return "KTX2 texture-compressed GLB could not be decoded.";
+  return message || "unknown import error";
+};
+
+const renderImportedAssetOptions = () => {
+  importedAssetSelect.innerHTML = importedAssetOptions.length
+    ? importedAssetOptions.map((asset) => `<option value="${asset.id}">${asset.label}</option>`).join("")
+    : `<option value="">Import GLB first</option>`;
+  if (!importedAssetOptions.some((asset) => asset.id === selectedImportedAssetId)) {
+    selectedImportedAssetId = importedAssetOptions[0]?.id ?? "";
+  }
+  importedAssetSelect.value = selectedImportedAssetId;
+  importedAssetSelect.disabled = importedAssetOptions.length === 0;
+  importedAssetButton.textContent = importedAssetOptions.length ? "Add" : "Import";
+};
+
+const makeImportedAssetEntry = (assetId: string): TellusBiomeMixEntry | null => {
+  const option = importedAssetOptions.find((item) => item.id === assetId);
+  if (!option || !importedAssets.has(assetId)) return null;
+  return {
+    id: `${assetId}-entry-${Date.now().toString(36)}-${currentMix.entries.length}`,
+    label: option.label,
+    source: "asset",
+    asset: { kind: "glb", name: option.name, libraryId: assetId, color: 0x6b7f4c, runtimeOnly: true },
+    weight: 1,
+    density: 0.22,
+    scale: 10,
+    environment: currentMix.entries[0]?.environment ?? { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
+    seed: currentMix.seed ^ ((currentMix.entries.length + 1) * 0x51ed),
+    enabled: true,
+  };
+};
+
+const addImportedAssetEntry = () => {
+  const entry = makeImportedAssetEntry(selectedImportedAssetId);
+  if (!entry) {
+    updateStatus("Import a GLB before adding one from the picker.");
+    return;
+  }
+  currentMix.entries.push(entry);
+  selectedEntryId = entry.id;
+  updateStatus(`Added GLB ${entry.label}.`);
+  renderUi();
+  rebuildPreview();
 };
 
 const normalizedEnabledEntries = () => {
@@ -629,7 +860,7 @@ const renderEntryList = () => {
       <span class="plant-dot" style="background:#${colorForEntry(entry).toString(16).padStart(6, "0")}"></span>
       <span>
         <span class="entry-name">${entry.label}</span>
-        <span class="entry-meta">${entry.source}${entry.presetId ? ` / ${entry.presetId}` : ""}</span>
+        <span class="entry-meta">${isAssetMixEntry(entry) ? "GLB asset" : `${entry.source}${entry.presetId ? ` / ${entry.presetId}` : ""}`}</span>
       </span>
       <span class="entry-score">w ${entry.weight.toFixed(2)}</span>
     </button>
@@ -649,10 +880,14 @@ const renderEntryEditor = () => {
     entryEditor.innerHTML = "<p>No plants in this mix yet.</p>";
     return;
   }
+  const isAssetEntry = isAssetMixEntry(entry);
   const previewGenome = genomeForMixEntry(entry);
   const weberPenn = previewGenome.weberPenn;
   const foliage = previewGenome.foliage;
   const realism = previewGenome.treeRealism;
+  const foliageMode = weberFoliageMode(previewGenome);
+  const fillMass = foliageMode === "plain" ? 0 : foliage?.mass ?? 0;
+  const fillSize = foliage?.size ?? (previewGenome.habit === "conifer" ? 0.34 : 0.54);
   entryEditor.innerHTML = `
     <label>
       Label
@@ -684,6 +919,21 @@ const renderEntryEditor = () => {
         </select>
       </label>
     </div>
+    ${isAssetEntry ? `
+      <section class="weber-editor">
+        <h3>Imported GLB</h3>
+        <div class="inline">
+          <label>
+            Asset color
+            <input id="asset-color" type="color" value="${toHexColor(entry.asset.color, 0x6b7f4c)}" />
+          </label>
+          <label>
+            Source
+            <input value="${entry.asset.name.replace(/"/g, "&quot;")}" disabled />
+          </label>
+        </div>
+      </section>
+    ` : ""}
     ${weberPenn ? `
       <section class="weber-editor">
         <h3>Weber/Penn Tree Traits</h3>
@@ -731,22 +981,64 @@ const renderEntryEditor = () => {
         </div>
         <div class="inline">
           <label>
-            Foliage mass
-            <input id="foliage-mass" type="range" min="0" max="2" value="${foliage?.mass ?? 0.9}" step="0.01" />
-            <output>${(foliage?.mass ?? 0.9).toFixed(2)}</output>
+            Foliage mode
+            <select id="weber-foliage-mode">
+              <option value="plain" ${foliageMode === "plain" ? "selected" : ""}>Plain W/P leaves</option>
+              <option value="procplants" ${foliageMode === "procplants" ? "selected" : ""}>Procplants fill only</option>
+              <option value="conifer" ${foliageMode === "conifer" ? "selected" : ""}>Conifer fill only</option>
+              <option value="mixed" ${foliageMode === "mixed" ? "selected" : ""}>Custom mixed</option>
+            </select>
           </label>
           <label>
-            Cluster density
+            Native leaves
+            <select id="weber-native-leaves">
+              <option value="true" ${weberPenn.nativeLeaves === false ? "" : "selected"}>On</option>
+              <option value="false" ${weberPenn.nativeLeaves === false ? "selected" : ""}>Off</option>
+            </select>
+          </label>
+        </div>
+        <div class="inline">
+          <label>
+            Crown fill
+            <select id="weber-foliage-source">
+              <option value="species" ${(weberPenn.foliageSource ?? "species") === "species" ? "selected" : ""}>W/P leaf shape</option>
+              <option value="procplants" ${weberPenn.foliageSource === "procplants" ? "selected" : ""}>Procplants leaf</option>
+              <option value="conifer-spray" ${weberPenn.foliageSource === "conifer-spray" ? "selected" : ""}>Conifer spray</option>
+            </select>
+          </label>
+          <label>
+            Fill anchors
+            <select id="weber-fill-anchor">
+              <option value="leaf-sites" ${(weberPenn.fillAnchor ?? "leaf-sites") === "leaf-sites" ? "selected" : ""}>W/P leaf sites</option>
+              <option value="branch-tips" ${weberPenn.fillAnchor === "branch-tips" ? "selected" : ""}>Branch tips</option>
+            </select>
+          </label>
+        </div>
+        <div class="inline">
+          <label>
+            Fill mass
+            <input id="foliage-mass" type="range" min="0" max="2" value="${fillMass}" step="0.01" />
+            <output>${fillMass.toFixed(2)}</output>
+          </label>
+          <label>
+            Fill density
             <input id="foliage-clusters" type="range" min="0.2" max="2.4" value="${foliage?.clusterDensity ?? 1.2}" step="0.01" />
             <output>${(foliage?.clusterDensity ?? 1.2).toFixed(2)}</output>
           </label>
         </div>
         <div class="inline">
           <label>
+            Fill size
+            <input id="foliage-size" type="range" min="0.05" max="1.5" value="${fillSize}" step="0.01" />
+            <output>${fillSize.toFixed(2)}</output>
+          </label>
+          <label>
             Foliage spread
             <input id="foliage-spread" type="range" min="0" max="1.6" value="${foliage?.whorlDensity ?? 0.6}" step="0.01" />
             <output>${(foliage?.whorlDensity ?? 0.6).toFixed(2)}</output>
           </label>
+        </div>
+        <div class="inline">
           <label>
             Tip bias
             <input id="foliage-tip" type="range" min="0" max="1" value="${foliage?.tipBias ?? 0.5}" step="0.01" />
@@ -816,6 +1108,13 @@ const renderEntryEditor = () => {
     renderEntryList();
     rebuildPreview();
   });
+  entryEditor.querySelector<HTMLInputElement>("#asset-color")?.addEventListener("input", (event) => {
+    if (!isAssetMixEntry(entry)) return;
+    entry.asset.color = fromHexColor((event.currentTarget as HTMLInputElement).value, entry.asset.color ?? 0x6b7f4c);
+    renderJson();
+    renderEntryList();
+    rebuildPreview();
+  });
   entryEditor.querySelector<HTMLButtonElement>("#remove-entry")!.addEventListener("click", () => {
     currentMix.entries = currentMix.entries.filter((item) => item.id !== entry.id);
     selectedEntryId = currentMix.entries[0]?.id ?? "";
@@ -826,7 +1125,7 @@ const renderEntryEditor = () => {
     const updateTree = (fn: (genome: ProcPlantGenome) => void, options: { renderList?: boolean; renderEditor?: boolean } = {}) => {
       const genome = editableGenomeForEntry(entry);
       genome.weberPenn = genome.weberPenn ?? { species: weberPenn.species };
-      genome.foliage = genome.foliage ?? { mass: 0.9, clusterDensity: 1.2, whorlDensity: 0.6, tipBias: 0.5 };
+      genome.foliage = genome.foliage ?? { mass: 0, clusterDensity: 1.1, whorlDensity: 0.55, tipBias: 0.5, size: 0.4 };
       genome.treeRealism = genome.treeRealism ?? {
         crownSpread: 0.6,
         crownTaper: 0.5,
@@ -871,8 +1170,33 @@ const renderEntryEditor = () => {
     bindTreeNumber("#weber-leaf-scale", (v) => v.toFixed(2), (genome, value) => { genome.weberPenn!.leafScaleMultiplier = value; });
     bindTreeNumber("#weber-branch-samples", (v) => String(Math.round(v)), (genome, value) => { genome.weberPenn!.branchSamples = Math.round(value); });
     bindTreeNumber("#weber-radial", (v) => String(Math.round(v)), (genome, value) => { genome.weberPenn!.radialSegments = Math.round(value); });
-    bindTreeNumber("#foliage-mass", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.mass = value; });
+    entryEditor.querySelector<HTMLSelectElement>("#weber-foliage-mode")!.addEventListener("change", (event) => {
+      const mode = (event.currentTarget as HTMLSelectElement).value as "plain" | "procplants" | "conifer" | "mixed";
+      if (mode === "mixed") return;
+      updateTree((genome) => applyWeberFoliageMode(genome, mode), { renderEditor: true });
+    });
+    entryEditor.querySelector<HTMLSelectElement>("#weber-native-leaves")!.addEventListener("change", (event) => {
+      updateTree((genome) => {
+        genome.weberPenn!.nativeLeaves = (event.currentTarget as HTMLSelectElement).value === "true";
+      }, { renderEditor: true });
+    });
+    entryEditor.querySelector<HTMLSelectElement>("#weber-foliage-source")!.addEventListener("change", (event) => {
+      updateTree((genome) => {
+        genome.weberPenn!.crownFill = true;
+        genome.weberPenn!.foliageSource = (event.currentTarget as HTMLSelectElement).value as "species" | "procplants" | "conifer-spray";
+      }, { renderEditor: true });
+    });
+    entryEditor.querySelector<HTMLSelectElement>("#weber-fill-anchor")!.addEventListener("change", (event) => {
+      updateTree((genome) => {
+        genome.weberPenn!.fillAnchor = (event.currentTarget as HTMLSelectElement).value as "leaf-sites" | "branch-tips";
+      }, { renderEditor: true });
+    });
+    bindTreeNumber("#foliage-mass", (v) => v.toFixed(2), (genome, value) => {
+      genome.weberPenn!.crownFill = value > 0.001;
+      genome.foliage!.mass = value;
+    });
     bindTreeNumber("#foliage-clusters", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.clusterDensity = value; });
+    bindTreeNumber("#foliage-size", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.size = value; });
     bindTreeNumber("#foliage-spread", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.whorlDensity = value; });
     bindTreeNumber("#foliage-tip", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.tipBias = value; });
     bindTreeNumber("#realism-spread", (v) => v.toFixed(2), (genome, value) => { genome.treeRealism!.crownSpread = value; });
@@ -910,6 +1234,7 @@ const renderUi = () => {
   updatePreviewTerrain();
   renderSwatches();
   renderEntryList();
+  renderImportedAssetOptions();
   renderEntryEditor();
   renderJson();
 };
@@ -924,7 +1249,8 @@ const rebuildPreview = () => {
     const child = previewGroup.children.pop();
     if (child) {
       previewGroup.remove(child);
-      disposeObject(child);
+      if (child.userData.importedAssetClone) disposeImportedAssetInstance(child);
+      else disposeObject(child);
     }
   }
   const enabled = normalizedEnabledEntries();
@@ -932,15 +1258,20 @@ const rebuildPreview = () => {
   let rendered = 0;
   let currentVertices = 0;
   enabled.forEach((entry, entryIndex) => {
-    const genome = genomeForMixEntry(entry);
-    const prototype = buildProcPlantObject(genome, entry.seed, entry.environment);
+    const assetKey = isAssetMixEntry(entry) ? entry.asset.libraryId ?? entry.id : "";
+    const assetPrototype = isAssetMixEntry(entry) ? importedAssets.get(assetKey) : undefined;
+    if (isAssetMixEntry(entry) && !assetPrototype) return;
+    const genome = isAssetMixEntry(entry) ? null : genomeForMixEntry(entry);
+    const prototype = assetPrototype ?? buildProcPlantObject(genome!, entry.seed, entry.environment);
     const verticesPerPlant = geometryVertexCount(prototype);
     const share = Math.max(0.01, entry.weight) / weightTotal;
-    const habitCap = genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm" ? 12 : 36;
+    const habitCap = isAssetMixEntry(entry) || genome?.habit === "tree" || genome?.habit === "conifer" || genome?.habit === "palm" ? 12 : 36;
     const count = Math.max(1, Math.min(habitCap, Math.round(70 * currentMix.density * entry.density * share)));
     currentVertices += verticesPerPlant * count;
     for (let i = 0; i < count; i++) {
-      const instance = i === 0 ? prototype : prototype.clone(true);
+      const instance = isAssetMixEntry(entry)
+        ? cloneImportedAssetInstance(prototype, entry.asset.color)
+        : i === 0 ? prototype : prototype.clone(true);
       const n = rendered + i + entry.seed + entryIndex * 97;
       const radius = 7 + Math.sqrt(hash01(n)) * 46;
       const angle = hash01(n + 31) * Math.PI * 2;
@@ -1020,6 +1351,10 @@ weberPennSelect.addEventListener("change", () => {
   selectedWeberPennSpecies = weberPennSelect.value;
 });
 
+importedAssetSelect.addEventListener("change", () => {
+  selectedImportedAssetId = importedAssetSelect.value;
+});
+
 document.querySelector<HTMLButtonElement>("#add-preset-button")!.addEventListener("click", () => {
   const id = selectedPresetId;
   const genome = genomeForMixEntry({
@@ -1062,7 +1397,16 @@ document.querySelector<HTMLButtonElement>("#add-weber-penn-button")!.addEventLis
   rebuildPreview();
 });
 
+importedAssetButton.addEventListener("click", () => {
+  if (importedAssetOptions.length === 0) {
+    glbInput.click();
+    return;
+  }
+  addImportedAssetEntry();
+});
+
 document.querySelector<HTMLButtonElement>("#import-button")!.addEventListener("click", () => fileInput.click());
+document.querySelector<HTMLButtonElement>("#import-glb-button")!.addEventListener("click", () => glbInput.click());
 
 fileInput.addEventListener("change", async () => {
   const files = Array.from(fileInput.files ?? []);
@@ -1087,6 +1431,63 @@ fileInput.addEventListener("change", async () => {
   updateStatus(imported ? `Imported ${imported} JSON file${imported === 1 ? "" : "s"}.` : "No compatible JSON found.");
   renderUi();
   rebuildPreview();
+});
+
+glbInput.addEventListener("change", async () => {
+  const files = Array.from(glbInput.files ?? []);
+  let imported = 0;
+  const failures: string[] = [];
+  if (files.length > 0) updateStatus(`Importing ${files.length} GLB file${files.length === 1 ? "" : "s"}...`);
+  for (const file of files) {
+    try {
+      const object = await loadGlbFile(file);
+      const label = file.name.replace(/\.(glb|gltf)$/i, "");
+      const assetId = `asset-${slug(label)}-${Date.now().toString(36)}-${imported}`;
+      importedAssets.set(assetId, object);
+      importedAssetOptions.push({ id: assetId, label, name: file.name });
+      selectedImportedAssetId = assetId;
+      const entry = makeImportedAssetEntry(assetId);
+      if (entry) {
+        currentMix.entries.push(entry);
+        selectedEntryId = entry.id;
+        imported++;
+      }
+    } catch (error) {
+      console.error(error);
+      failures.push(`${file.name}: ${importErrorMessage(error)}`);
+    }
+  }
+  glbInput.value = "";
+  if (imported) {
+    updateStatus(`Imported ${imported} GLB asset${imported === 1 ? "" : "s"} for this session${failures.length ? `; ${failures.length} failed.` : "."}`);
+  } else if (failures.length) {
+    updateStatus(`Could not import ${failures[0]}`);
+  } else {
+    updateStatus("No GLB file selected.");
+  }
+  renderUi();
+  rebuildPreview();
+});
+
+applyWorldButton.addEventListener("click", () => {
+  const worldId = worldIdInput.value.trim() || currentWorldId();
+  worldIdInput.value = worldId;
+  const targetPaint = biomeMixTargetTerrainPaint(currentMix);
+  if (!targetPaint) {
+    updateStatus("Choose a biome or terrain target before applying.");
+    return;
+  }
+  const registry = saveActiveBiomeMixForWorld(worldId, currentMix);
+  if (!registry) {
+    updateStatus("Could not save biome mix for this world.");
+    return;
+  }
+  updateStatus(`Applied ${currentMix.label} to ${labelForProcPlantId(targetPaint)} in ${registry.worldId}.`);
+  void saveActiveBiomeMixRegistryToServer(registry).then((saved) => {
+    updateStatus(saved
+      ? `Applied ${currentMix.label} to ${labelForProcPlantId(targetPaint)} in ${registry.worldId} and saved to Hyades.`
+      : `Applied ${currentMix.label} locally; Hyades save is unavailable.`);
+  });
 });
 
 document.querySelector<HTMLButtonElement>("#export-button")!.addEventListener("click", () => {
@@ -1115,7 +1516,9 @@ const animate = () => {
 };
 
 window.addEventListener("resize", resize);
-renderUi();
-rebuildPreview();
-resize();
+void loadRuntimeConfig().finally(() => {
+  renderUi();
+  rebuildPreview();
+  resize();
+});
 animate();
