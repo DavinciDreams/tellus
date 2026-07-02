@@ -19,6 +19,7 @@ import {
   loadActiveBiomeMixRegistryForWorld,
   loadActiveBiomeMixRegistryFromServer,
   type TellusBiomeMixDefinition,
+  type TellusBiomeAssetTemplate,
   type TellusBiomeMixEntry,
   type TellusBiomeMixRegistry,
 } from "./tellus-biome-mix";
@@ -55,6 +56,7 @@ export interface ProcPlantVegetationOptions {
   fullDetailLod?: boolean;
   shouldPauseBuild?: () => boolean;
   shouldDeferBuild?: () => boolean;
+  biomeMixRegistry?: TellusBiomeMixRegistry;
 }
 
 export interface ProcPlantVegetationStats {
@@ -231,6 +233,37 @@ const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color
 
 const cheapTreeTemplateCache = new Map<string, ProcPlantTemplate>();
 const templateMinYCache = new WeakMap<ProcPlantTemplate, number>();
+const assetTemplateCache = new WeakMap<TellusBiomeAssetTemplate, Map<string, ProcPlantTemplate>>();
+
+const procPlantTemplateFromAssetTemplate = (
+  asset: TellusBiomeAssetTemplate,
+  tintColor?: number,
+): ProcPlantTemplate => {
+  const cacheKey = tintColor === undefined ? "natural" : `tint:${tintColor.toString(16)}`;
+  const cached = assetTemplateCache.get(asset)?.get(cacheKey);
+  if (cached) return cached;
+  const colors = new Float32Array(asset.colors);
+  if (tintColor !== undefined) {
+    const tint = new THREE.Color(tintColor);
+    for (let i = 0; i < colors.length; i += 3) {
+      colors[i] *= tint.r;
+      colors[i + 1] *= tint.g;
+      colors[i + 2] *= tint.b;
+    }
+  }
+  const template: ProcPlantTemplate = {
+    pos: new Float32Array(asset.positions),
+    nrm: new Float32Array(asset.normals),
+    col: colors,
+    tintable: new Uint8Array(asset.vertexCount),
+    sway: new Float32Array(asset.vertexCount),
+    idx: new Uint32Array(asset.indices),
+  };
+  const templateCache = assetTemplateCache.get(asset) ?? new Map<string, ProcPlantTemplate>();
+  templateCache.set(cacheKey, template);
+  assetTemplateCache.set(asset, templateCache);
+  return template;
+};
 
 const templateMinY = (template: ProcPlantTemplate): number => {
   const cached = templateMinYCache.get(template);
@@ -485,10 +518,10 @@ const normalizeManualPlacement = (value: unknown): ProcPlantManualPlacement | nu
   };
 };
 
-const proceduralEntriesForMix = (mix: TellusBiomeMixDefinition): TellusBiomeMixEntry[] =>
+const renderableEntriesForMix = (mix: TellusBiomeMixDefinition): TellusBiomeMixEntry[] =>
   mix.entries.filter((entry) =>
     entry.enabled !== false &&
-    !isAssetMixEntry(entry) &&
+    (!isAssetMixEntry(entry) || Boolean(entry.asset.template)) &&
     Math.max(0, entry.weight) > 0 &&
     Math.max(0, entry.density) > 0
   );
@@ -499,7 +532,7 @@ const chooseBiomeMixEntry = (
   densityMultiplier: number,
   lodDensity: number,
 ): TellusBiomeMixEntry | null => {
-  const candidates = proceduralEntriesForMix(mix);
+  const candidates = renderableEntriesForMix(mix);
   if (candidates.length === 0) return null;
   const mixDensity = THREE.MathUtils.clamp(mix.density * densityMultiplier * lodDensity, 0, 1.8);
   if (rand() > mixDensity) return null;
@@ -559,7 +592,8 @@ export function createProcPlantVegetation(
     color: 0xffffff,
     side: THREE.DoubleSide,
   });
-  let activeBiomeMixRegistry: TellusBiomeMixRegistry = loadActiveBiomeMixRegistryForWorld(options.worldId);
+  let activeBiomeMixRegistry: TellusBiomeMixRegistry =
+    options.biomeMixRegistry ?? loadActiveBiomeMixRegistryForWorld(options.worldId);
 
   const inBounds = (x: number, z: number) =>
     x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
@@ -729,6 +763,22 @@ export function createProcPlantVegetation(
       if (customMix && !customEntry) continue;
       const patch = customEntry ? null : biomePatchForEcology(ecology, patchSeed) ?? biomePatchForPaint(paint, patchSeed);
       if (!customEntry && (!patch || rand() > patch.density * densityMultiplier * lodDensity)) continue;
+      if (customEntry && isAssetMixEntry(customEntry)) {
+        const template = customEntry.asset.template
+          ? procPlantTemplateFromAssetTemplate(customEntry.asset.template, customEntry.asset.color)
+          : null;
+        if (!template) continue;
+        const baseScale = customEntry.scale;
+        const scale = baseScale * THREE.MathUtils.lerp(0.82, 1.22, rand());
+        const matrix = new THREE.Matrix4()
+          .makeRotationY(rand() * Math.PI * 2)
+          .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
+          .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02 - templateMinY(template) * scale, z));
+        stemTemplates.push({ template, matrix });
+        chunk.stats.plants++;
+        chunk.stats.stemTriangles += template.idx.length / 3;
+        continue;
+      }
       const genome = customEntry ? genomeForMixEntry(customEntry) : genomeForBiomePatch(patch!);
       const treeBackend = patch ? treeBackendForBiomePatch(patch) : undefined;
       const environment = customEntry ? customEntry.environment : environmentForBiomePatch(patch!);

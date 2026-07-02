@@ -19,6 +19,7 @@ import {
   normalizeBiomeMixDefinition,
   saveActiveBiomeMixForWorld,
   saveActiveBiomeMixRegistryToServer,
+  type TellusBiomeAssetTemplate,
   type TellusBiomeMixDefinition,
   type TellusBiomeMixEntry,
 } from "./tellus-biome-mix";
@@ -77,7 +78,9 @@ const gltfLoader = new GLTFLoader();
 const dracoLoader = new DRACOLoader();
 const ktx2Loader = new KTX2Loader();
 const importedAssets = new Map<string, THREE.Object3D>();
+const importedAssetTemplates = new Map<string, TellusBiomeAssetTemplate>();
 const importedAssetOptions: Array<{ id: string; label: string; name: string }> = [];
+const MAX_IMPORTED_ASSET_VERTICES = 12000;
 
 root.innerHTML = `
   <main class="biome-page">
@@ -563,6 +566,76 @@ const loadGlbFile = async (file: File): Promise<THREE.Object3D> => {
   }
 };
 
+const rounded = (value: number): number => Math.round(value * 10000) / 10000;
+
+const materialColorForMesh = (mesh: THREE.Mesh, triangleIndex: number): THREE.Color => {
+  const geometry = mesh.geometry;
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  let materialIndex = 0;
+  if (geometry.groups.length > 0) {
+    const triangleStart = triangleIndex * 3;
+    const group = geometry.groups.find((item) => triangleStart >= item.start && triangleStart < item.start + item.count);
+    materialIndex = group?.materialIndex ?? 0;
+  }
+  const material = materials[materialIndex] ?? materials[0];
+  const color = material && "color" in material
+    ? (material as THREE.Material & { color: THREE.Color }).color
+    : undefined;
+  return color?.isColor ? color : new THREE.Color(0x6b7f4c);
+};
+
+const bakeImportedAssetTemplate = (object: THREE.Object3D, tintColor?: number): TellusBiomeAssetTemplate => {
+  object.updateMatrixWorld(true);
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+  const position = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const normalMatrix = new THREE.Matrix3();
+  const tint = tintColor === undefined ? null : new THREE.Color(tintColor);
+  object.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry) return;
+    const geometry = mesh.geometry;
+    const positionAttr = geometry.getAttribute("position");
+    if (!positionAttr) return;
+    const normalAttr = geometry.getAttribute("normal");
+    const colorAttr = geometry.getAttribute("color");
+    const indexAttr = geometry.getIndex();
+    normalMatrix.getNormalMatrix(mesh.matrixWorld);
+    const triangleCount = indexAttr ? Math.floor(indexAttr.count / 3) : Math.floor(positionAttr.count / 3);
+    for (let triangle = 0; triangle < triangleCount; triangle++) {
+      const materialColor = tint ?? materialColorForMesh(mesh, triangle);
+      for (let corner = 0; corner < 3; corner++) {
+        const sourceIndex = indexAttr ? indexAttr.getX(triangle * 3 + corner) : triangle * 3 + corner;
+        position.fromBufferAttribute(positionAttr, sourceIndex).applyMatrix4(mesh.matrixWorld);
+        if (normalAttr) normal.fromBufferAttribute(normalAttr, sourceIndex).applyMatrix3(normalMatrix).normalize();
+        else normal.set(0, 1, 0);
+        const vertexIndex = positions.length / 3;
+        positions.push(rounded(position.x), rounded(position.y), rounded(position.z));
+        normals.push(rounded(normal.x), rounded(normal.y), rounded(normal.z));
+        if (colorAttr && !tint) {
+          colors.push(
+            rounded(colorAttr.getX(sourceIndex)),
+            rounded(colorAttr.getY(sourceIndex)),
+            rounded(colorAttr.getZ(sourceIndex)),
+          );
+        } else {
+          colors.push(rounded(materialColor.r), rounded(materialColor.g), rounded(materialColor.b));
+        }
+        indices.push(vertexIndex);
+      }
+      if (positions.length / 3 > MAX_IMPORTED_ASSET_VERTICES) {
+        throw new Error(`Imported GLB has more than ${MAX_IMPORTED_ASSET_VERTICES.toLocaleString()} baked vertices.`);
+      }
+    }
+  });
+  const vertexCount = positions.length / 3;
+  if (vertexCount === 0) throw new Error("Imported GLB did not contain mesh geometry.");
+  return { version: 1, vertexCount, positions, normals, colors, indices };
+};
+
 const colorForEntry = (entry: TellusBiomeMixEntry): number => {
   if (isAssetMixEntry(entry)) return entry.asset.color ?? 0x6b7f4c;
   const genome = genomeForMixEntry(entry);
@@ -815,12 +888,13 @@ const renderImportedAssetOptions = () => {
 
 const makeImportedAssetEntry = (assetId: string): TellusBiomeMixEntry | null => {
   const option = importedAssetOptions.find((item) => item.id === assetId);
-  if (!option || !importedAssets.has(assetId)) return null;
+  const template = importedAssetTemplates.get(assetId);
+  if (!option || !importedAssets.has(assetId) || !template) return null;
   return {
     id: `${assetId}-entry-${Date.now().toString(36)}-${currentMix.entries.length}`,
     label: option.label,
     source: "asset",
-    asset: { kind: "glb", name: option.name, libraryId: assetId, color: 0x6b7f4c, runtimeOnly: true },
+    asset: { kind: "glb", name: option.name, libraryId: assetId, runtimeOnly: false, template },
     weight: 1,
     density: 0.22,
     scale: 10,
@@ -1444,6 +1518,7 @@ glbInput.addEventListener("change", async () => {
       const label = file.name.replace(/\.(glb|gltf)$/i, "");
       const assetId = `asset-${slug(label)}-${Date.now().toString(36)}-${imported}`;
       importedAssets.set(assetId, object);
+      importedAssetTemplates.set(assetId, bakeImportedAssetTemplate(object));
       importedAssetOptions.push({ id: assetId, label, name: file.name });
       selectedImportedAssetId = assetId;
       const entry = makeImportedAssetEntry(assetId);

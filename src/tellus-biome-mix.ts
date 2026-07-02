@@ -32,6 +32,7 @@ export interface TellusBiomeMixEntry {
     libraryId?: string;
     color?: number;
     runtimeOnly?: boolean;
+    template?: TellusBiomeAssetTemplate;
   };
   weight: number;
   density: number;
@@ -39,6 +40,15 @@ export interface TellusBiomeMixEntry {
   environment: ProcPlantEnvironment;
   seed: number;
   enabled: boolean;
+}
+
+export interface TellusBiomeAssetTemplate {
+  version: 1;
+  vertexCount: number;
+  positions: number[];
+  normals: number[];
+  colors: number[];
+  indices: number[];
 }
 
 export interface TellusBiomeMixDefinition {
@@ -212,6 +222,7 @@ export const normalizeBiomeMixDefinition = (raw: unknown): TellusBiomeMixDefinit
           libraryId: typeof entry.asset.libraryId === "string" ? entry.asset.libraryId : undefined,
           color: typeof entry.asset.color === "number" ? entry.asset.color : undefined,
           runtimeOnly: entry.asset.runtimeOnly !== false,
+          template: normalizeBiomeAssetTemplate(entry.asset.template),
         }
         : undefined;
       if (source === "asset" && !asset) return null;
@@ -254,6 +265,39 @@ export const normalizeBiomeMixDefinition = (raw: unknown): TellusBiomeMixDefinit
     targetVerticesPerChunk: typeof raw.targetVerticesPerChunk === "number" ? raw.targetVerticesPerChunk : 250000,
     entries,
   };
+};
+
+const normalizeNumberArray = (value: unknown, maxLength: number): number[] | undefined => {
+  if (!Array.isArray(value) || value.length > maxLength) return undefined;
+  const out: number[] = [];
+  for (const item of value) {
+    if (typeof item !== "number" || !Number.isFinite(item)) return undefined;
+    out.push(item);
+  }
+  return out;
+};
+
+const normalizeBiomeAssetTemplate = (value: unknown): TellusBiomeAssetTemplate | undefined => {
+  if (!isRecord(value) || value.version !== 1 || typeof value.vertexCount !== "number") return undefined;
+  const vertexCount = Math.floor(value.vertexCount);
+  if (vertexCount <= 0 || vertexCount > 20000) return undefined;
+  const positions = normalizeNumberArray(value.positions, vertexCount * 3);
+  const normals = normalizeNumberArray(value.normals, vertexCount * 3);
+  const colors = normalizeNumberArray(value.colors, vertexCount * 3);
+  const indices = normalizeNumberArray(value.indices, vertexCount * 6);
+  if (
+    !positions ||
+    !normals ||
+    !colors ||
+    !indices ||
+    positions.length !== vertexCount * 3 ||
+    normals.length !== vertexCount * 3 ||
+    colors.length !== vertexCount * 3 ||
+    indices.length === 0
+  ) {
+    return undefined;
+  }
+  return { version: 1, vertexCount, positions, normals, colors, indices };
 };
 
 const normalizeBiomeMixRegistry = (raw: unknown, worldId: string): TellusBiomeMixRegistry => {

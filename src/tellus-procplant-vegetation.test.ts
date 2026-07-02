@@ -301,6 +301,72 @@ describe("procplant vegetation", () => {
     vegetation.dispose();
   });
 
+  it("scatters baked GLB asset entries from applied biome mixes", () => {
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-asset-biome-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -20, maxX: 20, minZ: -20, maxZ: 20 },
+      densityMultiplier: 1,
+      biomeMixRegistry: {
+        version: 1,
+        worldId: "chunked-asset-biome-test",
+        updatedAt: new Date(0).toISOString(),
+        mixesByEcologyBiome: {},
+        mixesByTerrainPaint: {
+          meadow: {
+            version: 1,
+            id: "asset-meadow",
+            label: "Asset Meadow",
+            source: "terrain-paint",
+            terrainPaint: "meadow",
+            targetTerrainPaint: "meadow",
+            seed: 1,
+            density: 1,
+            diversity: 1,
+            targetVerticesPerChunk: 12000,
+            entries: [{
+              id: "asset-grass-clump",
+              label: "Asset Grass Clump",
+              source: "asset",
+              asset: {
+                kind: "glb",
+                name: "grass-clump.glb",
+                runtimeOnly: false,
+                template: {
+                  version: 1,
+                  vertexCount: 3,
+                  positions: [0, 0, 0, 0.2, 0, 0, 0.1, 0.4, 0],
+                  normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+                  colors: [0.2, 0.7, 0.25, 0.2, 0.7, 0.25, 0.2, 0.7, 0.25],
+                  indices: [0, 1, 2],
+                },
+              },
+              weight: 1,
+              density: 1,
+              scale: 1,
+              environment: { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
+              seed: 2,
+              enabled: true,
+            }],
+          },
+        },
+      },
+    });
+
+    for (let i = 0; i < 12 && vegetation.stats().plants === 0; i++) {
+      vegetation.update(0, 0, 1, 60, i * 16);
+    }
+    const stats = vegetation.stats();
+
+    expect(stats.plants).toBeGreaterThan(0);
+    expect(stats.stemTriangles).toBeGreaterThan(0);
+
+    vegetation.dispose();
+  });
+
   it("keeps procplant placements out of shoreline water", () => {
     const scene = new THREE.Scene();
     const vegetation = createProcPlantVegetation({
