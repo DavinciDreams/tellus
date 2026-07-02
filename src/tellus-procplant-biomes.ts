@@ -55,6 +55,7 @@ export interface ProcPlantPlaceableCatalogEntry {
 }
 
 export const ASSET_BACKED_PROCPLANT_MODEL_IDS = [
+  "3e610d94-51a5-4257-9899-34f5c8eaa0bb",
   "2b64b91a-cc16-4b03-afef-7f09cbf3a0cc",
   "c2c100e2-df7c-4da7-96e3-b4dbe33645d9",
   "73fd0d30-9023-4c85-922c-7e56e6cd10e8",
@@ -89,6 +90,7 @@ const ASSET_BACKED_PROCPLANT_REPLACEMENTS: Partial<Record<string, {
   assetStoreModelId: string;
   scale?: number;
 }>> = {
+  furGrass: { assetStoreModelId: "3e610d94-51a5-4257-9899-34f5c8eaa0bb", scale: 1.15 },
   phiFern: { assetStoreModelId: "2b64b91a-cc16-4b03-afef-7f09cbf3a0cc", scale: 1.15 },
   fanPalmUnderstory: { assetStoreModelId: "c2c100e2-df7c-4da7-96e3-b4dbe33645d9", scale: 3.4 },
   agaveSucculent: { assetStoreModelId: "73fd0d30-9023-4c85-922c-7e56e6cd10e8", scale: 1.45 },
