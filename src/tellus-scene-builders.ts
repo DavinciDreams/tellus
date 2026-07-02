@@ -58,6 +58,14 @@ import { tryLoadVrmObject, VrmObjectRig } from "./tellus-vrm-avatar";
 import { createTerrainMaterial, terrainKindCode } from "./tellus-terrain-material";
 import { worldThingTargetHeight } from "./tellus-world-object-profile";
 
+const ASSET_BACKED_PROCPLANT_OPAQUE_MODEL_IDS = new Set([
+  "2b64b91a-cc16-4b03-afef-7f09cbf3a0cc",
+  "c2c100e2-df7c-4da7-96e3-b4dbe33645d9",
+  "73fd0d30-9023-4c85-922c-7e56e6cd10e8",
+  "f75adff3-7810-44ac-9c86-e183c19eb616",
+  "124d6b49-4d5e-4b05-bc81-848ef6f7377a",
+]);
+
 const SKYBOX_MODEL_VERTICAL_OFFSETS: Record<string, number> = {
   "/skybox/free_-_skybox_basic_sky.glb": -30,
 };
@@ -1085,6 +1093,12 @@ export async function loadGeneratedModel(
   }
   const { model, animations } = await loadGeneratedGltfObject(url);
   model.name = `pixel3d-${thing.id}`;
+  if (
+    thing.assetStoreModelId &&
+    ASSET_BACKED_PROCPLANT_OPAQUE_MODEL_IDS.has(thing.assetStoreModelId)
+  ) {
+    forceOpaqueFoliageMaterials(model);
+  }
   const fitted = fitModelToHeight(model, assetTargetHeight(thing));
   fitted.userData = { ...fitted.userData, tellusId: thing.id, kind: thing.kind, sharedGltf: true };
   if (animations.length > 0) {
@@ -1098,6 +1112,27 @@ export async function loadGeneratedModel(
   }
   return fitted;
 }
+
+const forceOpaqueFoliageMaterials = (root: THREE.Object3D) => {
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) {
+      if (!material) continue;
+      material.transparent = false;
+      material.opacity = 1;
+      material.depthWrite = true;
+      material.depthTest = true;
+      material.side = THREE.DoubleSide;
+      material.blending = THREE.NormalBlending;
+      if ("alphaTest" in material) {
+        const mat = material as THREE.Material & { alphaTest: number; alphaMap?: THREE.Texture | null; map?: THREE.Texture | null };
+        mat.alphaTest = Math.max(mat.alphaTest || 0, mat.alphaMap || mat.map ? 0.45 : 0);
+      }
+      material.needsUpdate = true;
+    }
+  });
+};
 
 export function createPondWater(options: {
   center?: { x: number; z: number };

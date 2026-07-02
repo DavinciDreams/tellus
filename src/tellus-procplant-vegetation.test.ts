@@ -251,6 +251,14 @@ describe("procplant vegetation", () => {
     expect(parsed?.procPlant?.presetId).toBe("daylilyFlower");
   });
 
+  it("maps selected procplant picker entries to asset-store replacement models", () => {
+    expect(procPlantPlaceableById("phiFern")?.assetStoreModelId).toBe("2b64b91a-cc16-4b03-afef-7f09cbf3a0cc");
+    expect(procPlantPlaceableById("fanPalmUnderstory")?.assetStoreModelId).toBe("c2c100e2-df7c-4da7-96e3-b4dbe33645d9");
+    expect(procPlantPlaceableById("agaveSucculent")?.assetStoreModelId).toBe("73fd0d30-9023-4c85-922c-7e56e6cd10e8");
+    expect(procPlantPlaceableById("reedSedge")?.assetStoreModelId).toBe("f75adff3-7810-44ac-9c86-e183c19eb616");
+    expect(procPlantPlaceableById("understoryShrub")?.assetStoreModelId).toBe("124d6b49-4d5e-4b05-bc81-848ef6f7377a");
+  });
+
   it("renders manual procplant placements through the chunked vegetation system", () => {
     const scene = new THREE.Scene();
     let height = 1;

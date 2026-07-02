@@ -7508,6 +7508,7 @@ function createTellusWorld(
     }
     const procPlant = procPlantPlaceableById(archetypeId);
     if (!procPlant) return null;
+    const assetBacked = Boolean(procPlant.assetStoreModelId && procPlant.assetModelUrl);
     return {
       id: procPlant.id,
       label: procPlant.label,
@@ -7517,11 +7518,14 @@ function createTellusWorld(
       max: procPlant.kind === "tree" ? 6 : 22,
       radius: procPlant.scatterRadius,
       minDistance: procPlant.kind === "tree" ? Math.max(9, procPlant.scale * 0.75) : 2.5,
-      modelUrl: (seed: number) => makeProcPlantModelUrl(procPlant.presetId, seed),
-      assetId: (seed: number) => `procplant-${procPlant.presetId.toLowerCase()}-${seed.toString(16)}`,
+      modelUrl: (seed: number) => assetBacked ? procPlant.assetModelUrl! : makeProcPlantModelUrl(procPlant.presetId, seed),
+      assetId: (seed: number) => assetBacked
+        ? procPlant.assetStoreModelId!
+        : `procplant-${procPlant.presetId.toLowerCase()}-${seed.toString(16)}`,
       scale: (variation = 1) => procPlant.scale * variation,
       description: `${procPlant.label} procplant`,
-      procPlantPresetId: procPlant.presetId,
+      procPlantPresetId: assetBacked ? undefined : procPlant.presetId,
+      assetStoreModelId: procPlant.assetStoreModelId,
     };
   };
 
@@ -7601,7 +7605,8 @@ function createTellusWorld(
           name: option.label,
           description: option.description,
           modelUrl: option.modelUrl(seed),
-          source: "generated",
+          assetStoreModelId: option.assetStoreModelId,
+          source: option.assetStoreModelId ? "asset-library" : "generated",
         },
         {
           location,
@@ -7642,7 +7647,8 @@ function createTellusWorld(
           name: option.label,
           description: option.description,
           modelUrl: option.modelUrl(seed),
-          source: "generated",
+          assetStoreModelId: option.assetStoreModelId,
+          source: option.assetStoreModelId ? "asset-library" : "generated",
         },
         { location: target, scale },
       );
@@ -10245,7 +10251,8 @@ function createTellusWorld(
               name: option.label,
               description: option.description,
               modelUrl: option.modelUrl(seed),
-              source: "generated",
+              assetStoreModelId: option.assetStoreModelId,
+              source: option.assetStoreModelId ? "asset-library" : "generated",
             },
             {
               creatorId: visitorId as GenerateRequest["creatorId"],

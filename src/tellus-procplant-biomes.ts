@@ -50,7 +50,19 @@ export interface ProcPlantPlaceableCatalogEntry {
   scatterCount: number;
   scatterRadius: number;
   scale: number;
+  assetStoreModelId?: string;
+  assetModelUrl?: string;
 }
+
+export const ASSET_BACKED_PROCPLANT_MODEL_IDS = [
+  "2b64b91a-cc16-4b03-afef-7f09cbf3a0cc",
+  "c2c100e2-df7c-4da7-96e3-b4dbe33645d9",
+  "73fd0d30-9023-4c85-922c-7e56e6cd10e8",
+  "f75adff3-7810-44ac-9c86-e183c19eb616",
+  "124d6b49-4d5e-4b05-bc81-848ef6f7377a",
+] as const;
+
+export const ASSET_BACKED_PROCPLANT_MODEL_ID_SET = new Set<string>(ASSET_BACKED_PROCPLANT_MODEL_IDS);
 
 const ADULT_TREE_SCALE_BY_PRESET: Partial<Record<string, number>> = {
   oakCanopy: 13.5,
@@ -71,6 +83,17 @@ const ADULT_TREE_SCALE_BY_SPECIES: Partial<Record<string, number>> = {
   silverbirch: 11.5,
   sassafras: 9.5,
   blacktupelo: 11,
+};
+
+const ASSET_BACKED_PROCPLANT_REPLACEMENTS: Partial<Record<string, {
+  assetStoreModelId: string;
+  scale?: number;
+}>> = {
+  phiFern: { assetStoreModelId: "2b64b91a-cc16-4b03-afef-7f09cbf3a0cc", scale: 1.15 },
+  fanPalmUnderstory: { assetStoreModelId: "c2c100e2-df7c-4da7-96e3-b4dbe33645d9", scale: 3.4 },
+  agaveSucculent: { assetStoreModelId: "73fd0d30-9023-4c85-922c-7e56e6cd10e8", scale: 1.45 },
+  reedSedge: { assetStoreModelId: "f75adff3-7810-44ac-9c86-e183c19eb616", scale: 1.15 },
+  understoryShrub: { assetStoreModelId: "124d6b49-4d5e-4b05-bc81-848ef6f7377a", scale: 2.1 },
 };
 
 const labelForPreset = (id: string): string =>
@@ -132,6 +155,7 @@ const adultScaleForTreeBackend = (
 export const PROCPLANT_PLACEABLE_CATALOG: ProcPlantPlaceableCatalogEntry[] = procPlantPresetIds.map((presetId) => {
   const genome = procPlantPresets[presetId];
   const kind = placeableKindForGenome(genome);
+  const replacement = ASSET_BACKED_PROCPLANT_REPLACEMENTS[presetId];
   return {
     id: `procplant-${presetId.toLowerCase()}`,
     presetId,
@@ -140,7 +164,11 @@ export const PROCPLANT_PLACEABLE_CATALOG: ProcPlantPlaceableCatalogEntry[] = pro
     kind,
     scatterCount: kind === "tree" ? 4 : kind === "flower" ? 12 : 10,
     scatterRadius: kind === "tree" ? 30 : 11,
-    scale: adultScaleForProcPlantPreset(presetId),
+    scale: replacement?.scale ?? adultScaleForProcPlantPreset(presetId),
+    assetStoreModelId: replacement?.assetStoreModelId,
+    assetModelUrl: replacement
+      ? `/api/assets/model/${encodeURIComponent(replacement.assetStoreModelId)}/game-optimized`
+      : undefined,
   };
 });
 
