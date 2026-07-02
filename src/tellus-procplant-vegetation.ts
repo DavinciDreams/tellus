@@ -12,6 +12,17 @@ import { resolveEcologySample, type EcologySample } from "./tellus-ecology";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 import { buildRetroCutoutTreeTemplate } from "./tellus-veg-archetypes";
 import {
+  BIOME_MIX_STORAGE_EVENT,
+  activeBiomeMixStorageKey,
+  genomeForMixEntry,
+  isAssetMixEntry,
+  loadActiveBiomeMixRegistryForWorld,
+  loadActiveBiomeMixRegistryFromServer,
+  type TellusBiomeMixDefinition,
+  type TellusBiomeMixEntry,
+  type TellusBiomeMixRegistry,
+} from "./tellus-biome-mix";
+import {
   buildProcPlantInstancedParts,
   createProcPlantConiferSprayGeometry,
   createProcPlantDaylilyBloomGeometry,
@@ -474,6 +485,36 @@ const normalizeManualPlacement = (value: unknown): ProcPlantManualPlacement | nu
   };
 };
 
+const proceduralEntriesForMix = (mix: TellusBiomeMixDefinition): TellusBiomeMixEntry[] =>
+  mix.entries.filter((entry) =>
+    entry.enabled !== false &&
+    !isAssetMixEntry(entry) &&
+    Math.max(0, entry.weight) > 0 &&
+    Math.max(0, entry.density) > 0
+  );
+
+const chooseBiomeMixEntry = (
+  mix: TellusBiomeMixDefinition,
+  rand: () => number,
+  densityMultiplier: number,
+  lodDensity: number,
+): TellusBiomeMixEntry | null => {
+  const candidates = proceduralEntriesForMix(mix);
+  if (candidates.length === 0) return null;
+  const mixDensity = THREE.MathUtils.clamp(mix.density * densityMultiplier * lodDensity, 0, 1.8);
+  if (rand() > mixDensity) return null;
+  const total = candidates.reduce(
+    (sum, entry) => sum + Math.max(0.01, entry.weight) * Math.max(0.01, entry.density),
+    0,
+  );
+  let roll = rand() * total;
+  for (const entry of candidates) {
+    roll -= Math.max(0.01, entry.weight) * Math.max(0.01, entry.density);
+    if (roll <= 0) return entry;
+  }
+  return candidates[candidates.length - 1] ?? null;
+};
+
 export function createProcPlantVegetation(
   options: ProcPlantVegetationOptions,
 ): ProcPlantVegetationSystem {
@@ -518,6 +559,7 @@ export function createProcPlantVegetation(
     color: 0xffffff,
     side: THREE.DoubleSide,
   });
+  let activeBiomeMixRegistry: TellusBiomeMixRegistry = loadActiveBiomeMixRegistryForWorld(options.worldId);
 
   const inBounds = (x: number, z: number) =>
     x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
@@ -583,6 +625,30 @@ export function createProcPlantVegetation(
     terrainRev++;
     for (const key of active.keys()) enqueue(key);
   };
+
+  const reloadActiveBiomeMixes = () => {
+    activeBiomeMixRegistry = loadActiveBiomeMixRegistryForWorld(options.worldId);
+    enqueueAllActive();
+  };
+
+  const onBiomeMixStorage = (event: StorageEvent) => {
+    if (event.key === activeBiomeMixStorageKey(options.worldId)) reloadActiveBiomeMixes();
+  };
+
+  const onBiomeMixCustomEvent = (event: Event) => {
+    const detail = (event as CustomEvent<{ worldId?: string }>).detail;
+    if (!detail?.worldId || detail.worldId === options.worldId) reloadActiveBiomeMixes();
+  };
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", onBiomeMixStorage);
+    window.addEventListener(BIOME_MIX_STORAGE_EVENT, onBiomeMixCustomEvent);
+    void loadActiveBiomeMixRegistryFromServer(options.worldId).then((registry) => {
+      if (!registry || disposed) return;
+      activeBiomeMixRegistry = registry;
+      enqueueAllActive();
+    });
+  }
 
   const estimateSlope = (x: number, z: number, height: number): number => {
     const step = 2.5;
@@ -657,11 +723,17 @@ export function createProcPlantVegetation(
           slope: estimateSlope(x, z, height),
           terrainPaint: paint,
         });
-      const patch = biomePatchForEcology(ecology, patchSeed) ?? biomePatchForPaint(paint, patchSeed);
       const lodDensity = chunk.lod === 2 ? 0.65 : chunk.lod === 1 ? 0.52 : 0.48;
-      if (!patch || rand() > patch.density * densityMultiplier * lodDensity) continue;
-      const genome = genomeForBiomePatch(patch);
-      const treeBackend = treeBackendForBiomePatch(patch);
+      const customMix = paint ? activeBiomeMixRegistry.mixesByTerrainPaint[paint] : undefined;
+      const customEntry = customMix ? chooseBiomeMixEntry(customMix, rand, densityMultiplier, lodDensity) : null;
+      if (customMix && !customEntry) continue;
+      const patch = customEntry ? null : biomePatchForEcology(ecology, patchSeed) ?? biomePatchForPaint(paint, patchSeed);
+      if (!customEntry && (!patch || rand() > patch.density * densityMultiplier * lodDensity)) continue;
+      const genome = customEntry ? genomeForMixEntry(customEntry) : genomeForBiomePatch(patch!);
+      const treeBackend = patch ? treeBackendForBiomePatch(patch) : undefined;
+      const environment = customEntry ? customEntry.environment : environmentForBiomePatch(patch!);
+      const baseScale = customEntry ? customEntry.scale : patch!.scale;
+      const renderSeed = customEntry ? (customEntry.seed ^ patchSeed) : (patch!.seed ^ i);
       const distanceToPlayer = Math.hypot(x - (lastPlayerX ?? x), z - (lastPlayerZ ?? z));
       const detailDistance = viewMode() === "third" ? PROC_TREE_DETAIL_DISTANCE_THIRD : PROC_TREE_DETAIL_DISTANCE;
       const useDetailedTree = distanceToPlayer <= detailDistance;
@@ -672,13 +744,13 @@ export function createProcPlantVegetation(
           : PROC_TREE_FAR_SCALE;
       if (treeBackend?.kind === "lsystem") {
         const template = useDetailedTree
-          ? buildBiomeTreeTemplate(treeBackend.species, patch.seed ^ i, {
+          ? buildBiomeTreeTemplate(treeBackend.species, patch!.seed ^ i, {
               ...foliageDefaultsForTreeSpecies(treeBackend.species),
               ...treeBackend,
             })
           : buildCheapTreeTemplate(treeBackend.species);
         const scaleMultiplier = fullDetailLod ? PROC_TREE_NEAR_SCALE : useDetailedTree ? treeScaleMultiplier : PROC_TREE_FAR_SCALE;
-        const scale = patch.scale * scaleMultiplier * THREE.MathUtils.lerp(0.9, 1.24, rand());
+        const scale = baseScale * scaleMultiplier * THREE.MathUtils.lerp(0.9, 1.24, rand());
         const matrix = new THREE.Matrix4()
           .makeRotationY(rand() * Math.PI * 2)
           .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
@@ -688,11 +760,10 @@ export function createProcPlantVegetation(
         chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
-      const env = environmentForBiomePatch(patch);
-      const useCheapDistantTree = !useDetailedTree && patch.scale >= 1.2;
+      const useCheapDistantTree = !useDetailedTree && baseScale >= 1.2;
       if (useCheapDistantTree) {
         const template = buildCheapTreeTemplate(genome.weberPenn?.species ?? genome.id);
-        const scale = patch.scale * PROC_TREE_FAR_SCALE * THREE.MathUtils.lerp(0.9, 1.2, rand());
+        const scale = baseScale * PROC_TREE_FAR_SCALE * THREE.MathUtils.lerp(0.9, 1.2, rand());
         const matrix = new THREE.Matrix4()
           .makeRotationY(rand() * Math.PI * 2)
           .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
@@ -702,8 +773,8 @@ export function createProcPlantVegetation(
         chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
-      const built = buildProcPlantInstancedParts(genome, patch.seed ^ i, env);
-      const scaleBase = patch.scale >= 1.2 ? patch.scale * treeScaleMultiplier : patch.scale;
+      const built = buildProcPlantInstancedParts(genome, renderSeed, environment);
+      const scaleBase = baseScale >= 1.2 ? baseScale * treeScaleMultiplier : baseScale;
       const scale = scaleBase * THREE.MathUtils.lerp(0.82, 1.22, rand());
       const matrix = new THREE.Matrix4()
         .makeRotationY(rand() * Math.PI * 2)
@@ -981,6 +1052,10 @@ export function createProcPlantVegetation(
     stats,
     dispose: () => {
       disposed = true;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("storage", onBiomeMixStorage);
+        window.removeEventListener(BIOME_MIX_STORAGE_EVENT, onBiomeMixCustomEvent);
+      }
       for (const chunk of active.values()) disposeGroup(chunk.group);
       active.clear();
       root.clear();

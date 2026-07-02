@@ -17,7 +17,9 @@ import {
   positionWorld,
   smoothstep,
   step,
+  texture,
   varying,
+  vec2,
   vec3,
   vertexColor,
 } from "three/tsl";
@@ -178,7 +180,7 @@ const DETAIL = {
 } as const;
 
 /** WebGPU path: a TSL node graph that tints the vertex color with procedural detail. */
-function buildDetailColorNode() {
+function buildDetailColorNode(mossTexture?: THREE.Texture) {
   const wp = positionWorld;
 
   // Fractal mottling — two octaves at different scales summed into a roughly [-1,1] signal.
@@ -225,6 +227,7 @@ function buildDetailColorNode() {
   const isAutoMeadow = kindBand(KIND_MEADOW).mul(unpainted);
   const isAutoGrass = kindBand(KIND_GRASS).mul(unpainted);
   const isAutoFlowers = kindBand(KIND_FLOWERS).mul(unpainted);
+  const isAutoForestFloor = kindBand(KIND_FOREST_FLOOR).mul(unpainted);
   const isAutoJungleMoss = kindBand(KIND_JUNGLE_MOSS).mul(unpainted);
   const isAutoBeach = kindBand(KIND_BEACH).mul(unpainted);
   const isAutoWater = kindBand(KIND_WATER).mul(unpainted);
@@ -246,6 +249,7 @@ function buildDetailColorNode() {
       .add(isAutoRock)
       .add(isAutoSnow)
       .add(isForestFloor)
+      .add(isAutoForestFloor)
       .add(isDesertSand)
       .add(structuralMask)
       .clamp(0, 1),
@@ -262,6 +266,7 @@ function buildDetailColorNode() {
   const meadowMask = isMeadow.max(isAutoMeadow).max(isAutoFlowers);
   const grassMask = isGrass.max(isAutoGrass);
   const jungleMask = isJungleMoss.max(isAutoJungleMoss);
+  const forestFloorMask = isForestFloor.max(isAutoForestFloor);
   const greenMask = meadowMask.max(grassMask).max(jungleMask);
   const greenMul = greenVariation(wp.x, wp.z, grassMask);
   const mossFine = mx_fractal_noise_float(vec3(wp.x.mul(0.42), wp.z.mul(0.42), float(0)), 3, 2.0, 0.5);
@@ -271,6 +276,29 @@ function buildDetailColorNode() {
     .add(color(0x77b957).mul(float(0.24).add(mossFine.mul(0.1))));
   detailed = mix(detailed, detailed.mul(greenMul), meadowMask.max(grassMask));
   detailed = mix(detailed, jungleBase, jungleMask);
+
+  if (mossTexture) {
+    const mossUv = vec2(wp.x.mul(0.16), wp.z.mul(0.16));
+    const mossSample = texture(mossTexture, mossUv).rgb;
+    const meadowMoss = mossSample.mul(color(0xa9d783));
+    const grassMoss = mossSample.mul(color(0xb7d65e));
+    const flowerMoss = mossSample.mul(color(0xc7dfaa));
+    const jungleMoss = mossSample.mul(color(0x5ca348)).add(color(0x123a18).mul(0.2));
+    const forestMoss = mossSample.mul(color(0x5d5a32)).add(color(0x1c170e).mul(0.28));
+    const flowerMask = isAutoFlowers.max(band(PAINT_FLOWERS));
+    const mossMask = meadowMask
+      .max(grassMask)
+      .max(jungleMask)
+      .max(forestFloorMask)
+      .max(flowerMask)
+      .clamp(0, 1);
+    const mossTint = meadowMoss.mul(meadowMask)
+      .add(grassMoss.mul(grassMask))
+      .add(flowerMoss.mul(flowerMask))
+      .add(jungleMoss.mul(jungleMask))
+      .add(forestMoss.mul(forestFloorMask));
+    detailed = mix(detailed, mix(detailed, mossTint, 0.62), mossMask);
+  }
 
   return detailed;
 }
@@ -431,12 +459,12 @@ export function terrainTextureDiagnostics(
     return {
       renderer: "webgpu",
       requestedImageTextures,
-      activeMode: "procedural",
+      activeMode: requestedImageTextures ? "biome-lite-textures" : "procedural",
       maxTextureImageUnits: null,
       estimatedNineSamplerUnits: ESTIMATED_NINE_SAMPLER_UNITS,
       supportsNineSamplerPaint: false,
       reason: requestedImageTextures
-        ? "WebGPU terrain image textures are disabled because prior TSL texture-node attempts blanked the world."
+        ? "WebGPU moss terrain texture is active as a one-sampler TSL path; grit/cobble remain procedural."
         : "Procedural terrain detail is active.",
     };
   }
@@ -603,6 +631,35 @@ function whiteTerrainTexture(): THREE.Texture {
   texture.needsUpdate = true;
   generatedTerrainTextures.set("white", texture);
   return texture;
+}
+
+function webGpuMossFallbackTexture(): THREE.Texture {
+  const cached = generatedTerrainTextures.get("webgpu-moss-fallback");
+  if (cached) return cached;
+  const texture = new THREE.DataTexture(new Uint8Array([120, 164, 82, 255]), 1, 1, THREE.RGBAFormat);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  generatedTerrainTextures.set("webgpu-moss-fallback", texture);
+  return texture;
+}
+
+function applyWebGpuMossTerrainTexture(
+  material: MeshStandardNodeMaterial,
+  options: TerrainMaterialOptions,
+): void {
+  if (!terrainImageTexturesRequested()) return;
+  const repeat = options.textureRepeat ?? 34;
+  material.colorNode = buildDetailColorNode(prepareRepeatTexture(
+    webGpuMossFallbackTexture(),
+    repeat,
+    THREE.SRGBColorSpace,
+  ));
+  void loadTerrainTextureCandidate(BIOME_LITE_TEXTURE_URLS.moss, repeat, THREE.SRGBColorSpace)
+    .then((mossTexture) => {
+      material.colorNode = buildDetailColorNode(mossTexture);
+      material.needsUpdate = true;
+    })
+    .catch((error) => console.warn("Tellus WebGPU terrain moss texture failed", error));
 }
 
 function applyBiomeLiteTerrainOverlay(
@@ -908,6 +965,7 @@ export function createTerrainMaterial(
     material.roughness = roughness;
     material.metalness = 0;
     material.colorNode = buildDetailColorNode();
+    applyWebGpuMossTerrainTexture(material, options);
     return material;
   }
 
