@@ -64,6 +64,7 @@ const ASSET_BACKED_PROCPLANT_OPAQUE_MODEL_IDS = new Set([
   "73fd0d30-9023-4c85-922c-7e56e6cd10e8",
   "f75adff3-7810-44ac-9c86-e183c19eb616",
   "124d6b49-4d5e-4b05-bc81-848ef6f7377a",
+  "80b4a76f-27f4-4ba3-bb63-47c54f5995b9",
 ]);
 
 const SKYBOX_MODEL_VERTICAL_OFFSETS: Record<string, number> = {

@@ -7489,6 +7489,9 @@ function createTellusWorld(
   const proceduralAssetOption = (archetypeId: string) => {
     const arch = PROCEDURAL_CATALOG.find((item) => item.id === archetypeId);
     if (arch) {
+      const assetStoreModelId = arch.id === "mushroom"
+        ? "80b4a76f-27f4-4ba3-bb63-47c54f5995b9"
+        : undefined;
       return {
         id: arch.id,
         label: arch.label,
@@ -7498,12 +7501,15 @@ function createTellusWorld(
         max: arch.kind === "tree" ? 9 : 24,
         radius: arch.kind === "tree" ? 24 : 12,
         minDistance: arch.kind === "tree" ? 7 : 3,
-        modelUrl: (seed: number) => makeProceduralModelUrl(arch.id, seed),
-        assetId: (seed: number) => `proc-${arch.id}-${seed.toString(16)}`,
+        modelUrl: (seed: number) => assetStoreModelId
+          ? assetStoreGameOptimizedModelUrl(assetStoreModelId)
+          : makeProceduralModelUrl(arch.id, seed),
+        assetId: (seed: number) => assetStoreModelId ?? `proc-${arch.id}-${seed.toString(16)}`,
         scale: (variation = 1) =>
-          defaultScaleForRealisticKind(arch.kind, arch.label) * (arch.kind === "tree" ? 1.48 : 1) * variation,
+          (assetStoreModelId ? 1.15 : defaultScaleForRealisticKind(arch.kind, arch.label) * (arch.kind === "tree" ? 1.48 : 1)) * variation,
         description: arch.kind === "tree" ? `${arch.label} tree` : arch.label,
         procPlantPresetId: undefined,
+        assetStoreModelId,
       };
     }
     const procPlant = procPlantPlaceableById(archetypeId);
