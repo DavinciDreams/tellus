@@ -157,6 +157,7 @@ const PROC_TREE_DETAIL_DISTANCE = 58;
 const PROC_TREE_DETAIL_DISTANCE_THIRD = 72;
 const PROCPLANT_RENDER_STYLE_REVISION = 5;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
+const BIOME_MIX_SERVER_REFRESH_MS = 8_000;
 const LOW_FPS_BUILD_BUDGET = 1;
 const NORMAL_BUILD_BUDGET = 2;
 const LOW_FPS_BUILD_MS_BUDGET = 2.5;
@@ -634,6 +635,9 @@ export function createProcPlantVegetation(
   let totalBuildMs = 0;
   let builtLastUpdate = 0;
   let buildDeferred = false;
+  let lastBiomeMixServerRefreshMs = 0;
+  let biomeMixServerRefreshInFlight = false;
+  let activeBiomeMixSignature = "";
   let lastPlayerX: number | null = null;
   let lastPlayerZ: number | null = null;
   let lastMoveDirX = 0;
@@ -653,6 +657,7 @@ export function createProcPlantVegetation(
   });
   let activeBiomeMixRegistry: TellusBiomeMixRegistry =
     options.biomeMixRegistry ?? loadActiveBiomeMixRegistryForWorld(options.worldId);
+  activeBiomeMixSignature = JSON.stringify(activeBiomeMixRegistry);
 
   const inBounds = (x: number, z: number) =>
     x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
@@ -726,9 +731,33 @@ export function createProcPlantVegetation(
     for (const key of active.keys()) enqueue(key);
   };
 
-  const reloadActiveBiomeMixes = () => {
-    activeBiomeMixRegistry = loadActiveBiomeMixRegistryForWorld(options.worldId);
+  const applyBiomeMixRegistry = (registry: TellusBiomeMixRegistry) => {
+    const signature = JSON.stringify(registry);
+    if (signature === activeBiomeMixSignature) return false;
+    activeBiomeMixRegistry = registry;
+    activeBiomeMixSignature = signature;
     enqueueAllActive();
+    return true;
+  };
+
+  const reloadActiveBiomeMixes = () => {
+    applyBiomeMixRegistry(loadActiveBiomeMixRegistryForWorld(options.worldId));
+  };
+
+  const refreshBiomeMixesFromServer = (force = false) => {
+    if (typeof window === "undefined" || disposed || biomeMixServerRefreshInFlight) return;
+    const now = performance.now();
+    if (!force && now - lastBiomeMixServerRefreshMs < BIOME_MIX_SERVER_REFRESH_MS) return;
+    lastBiomeMixServerRefreshMs = now;
+    biomeMixServerRefreshInFlight = true;
+    void loadActiveBiomeMixRegistryFromServer(options.worldId)
+      .then((registry) => {
+        if (!registry || disposed) return;
+        applyBiomeMixRegistry(registry);
+      })
+      .finally(() => {
+        biomeMixServerRefreshInFlight = false;
+      });
   };
 
   const onBiomeMixStorage = (event: StorageEvent) => {
@@ -739,15 +768,17 @@ export function createProcPlantVegetation(
     const detail = (event as CustomEvent<{ worldId?: string }>).detail;
     if (!detail?.worldId || detail.worldId === options.worldId) reloadActiveBiomeMixes();
   };
+  const onBiomeMixVisibility = () => {
+    if (document.visibilityState === "visible") refreshBiomeMixesFromServer(true);
+  };
+  const onBiomeMixFocus = () => refreshBiomeMixesFromServer(true);
 
   if (typeof window !== "undefined") {
     window.addEventListener("storage", onBiomeMixStorage);
     window.addEventListener(BIOME_MIX_STORAGE_EVENT, onBiomeMixCustomEvent);
-    void loadActiveBiomeMixRegistryFromServer(options.worldId).then((registry) => {
-      if (!registry || disposed) return;
-      activeBiomeMixRegistry = registry;
-      enqueueAllActive();
-    });
+    window.addEventListener("focus", onBiomeMixFocus);
+    document.addEventListener("visibilitychange", onBiomeMixVisibility);
+    refreshBiomeMixesFromServer(true);
   }
 
   const estimateSlope = (x: number, z: number, height: number): number => {
@@ -1142,6 +1173,7 @@ export function createProcPlantVegetation(
     if (disposed) return;
     const updateStartedAt = performance.now();
     builtLastUpdate = 0;
+    refreshBiomeMixesFromServer();
     buildDeferred = options.shouldDeferBuild?.() ?? false;
     if (
       lastPlayerX === null ||
@@ -1335,6 +1367,8 @@ export function createProcPlantVegetation(
       if (typeof window !== "undefined") {
         window.removeEventListener("storage", onBiomeMixStorage);
         window.removeEventListener(BIOME_MIX_STORAGE_EVENT, onBiomeMixCustomEvent);
+        window.removeEventListener("focus", onBiomeMixFocus);
+        document.removeEventListener("visibilitychange", onBiomeMixVisibility);
       }
       for (const chunk of active.values()) disposeGroup(chunk.group);
       active.clear();
