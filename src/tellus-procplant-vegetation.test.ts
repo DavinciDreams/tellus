@@ -253,6 +253,8 @@ describe("procplant vegetation", () => {
 
   it("maps selected procplant picker entries to asset-store replacement models", () => {
     expect(procPlantPlaceableById("furGrass")?.assetStoreModelId).toBe("3e610d94-51a5-4257-9899-34f5c8eaa0bb");
+    expect(procPlantPlaceableById("meadowFlower")?.assetStoreModelId).toBe("78f6d91e-7382-4760-903c-c1b73b9c38cd");
+    expect(procPlantPlaceableById("foxgloveSpike")?.assetStoreModelId).toBe("cae23ae2-7392-4ace-baec-cfaf09423ae8");
     expect(procPlantPlaceableById("phiFern")?.assetStoreModelId).toBe("2b64b91a-cc16-4b03-afef-7f09cbf3a0cc");
     expect(procPlantPlaceableById("fanPalmUnderstory")?.assetStoreModelId).toBe("c2c100e2-df7c-4da7-96e3-b4dbe33645d9");
     expect(procPlantPlaceableById("agaveSucculent")?.assetStoreModelId).toBe("73fd0d30-9023-4c85-922c-7e56e6cd10e8");

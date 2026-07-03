@@ -7489,9 +7489,11 @@ function createTellusWorld(
   const proceduralAssetOption = (archetypeId: string) => {
     const arch = PROCEDURAL_CATALOG.find((item) => item.id === archetypeId);
     if (arch) {
-      const assetStoreModelId = arch.id === "mushroom"
-        ? "80b4a76f-27f4-4ba3-bb63-47c54f5995b9"
-        : undefined;
+      const proceduralAssetStoreModelIds: Partial<Record<string, string>> = {
+        flower: "cab852ab-b072-4316-aad0-6e4d5f4507f2",
+        mushroom: "80b4a76f-27f4-4ba3-bb63-47c54f5995b9",
+      };
+      const assetStoreModelId = proceduralAssetStoreModelIds[arch.id];
       return {
         id: arch.id,
         label: arch.label,

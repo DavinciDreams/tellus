@@ -60,6 +60,9 @@ import { worldThingTargetHeight } from "./tellus-world-object-profile";
 
 const ASSET_BACKED_PROCPLANT_OPAQUE_MODEL_IDS = new Set([
   "3e610d94-51a5-4257-9899-34f5c8eaa0bb",
+  "78f6d91e-7382-4760-903c-c1b73b9c38cd",
+  "cae23ae2-7392-4ace-baec-cfaf09423ae8",
+  "cab852ab-b072-4316-aad0-6e4d5f4507f2",
   "2b64b91a-cc16-4b03-afef-7f09cbf3a0cc",
   "c2c100e2-df7c-4da7-96e3-b4dbe33645d9",
   "73fd0d30-9023-4c85-922c-7e56e6cd10e8",
