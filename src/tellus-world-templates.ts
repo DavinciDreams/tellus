@@ -12,6 +12,7 @@ const TEMPLATE_IDS = new Set<WorldTemplateId>([
   "fantasy-garden",
   "realistic-cove",
   "flight-range",
+  "grassland-field",
   "low-poly-meadow",
   "cartoon-hills",
   "interior-studio",
@@ -168,6 +169,26 @@ const TEMPLATE_PRESETS: Record<
         terraceFrequency: 0.22,
       },
       baseOffset: -1.2,
+    },
+  },
+  "grassland-field": {
+    defaultSkyboxUrl: "/skybox/free_-_skybox_basic_sky.glb",
+    landShape: {
+      mountain: { height: 1.8, radius: 96, exponent: 1.15 },
+      shoulder: { x: -30, z: 18, radius: 780, height: 1.3 },
+      southernRise: { x: 42, z: -30, radius: 720, height: 1.1 },
+      ridge: { sinScale: 0.08, cosScale: 0.06, diagonalScale: 0.04 },
+      shore: { startRatio: 1, widthRatio: 0.01, drop: 0 },
+      pond: { x: 0, z: 0, radius: 0.1, depth: 0, falloff: 1 },
+      detail: {
+        amplitude: 0.5,
+        scale: 0.015,
+        warp: 4,
+        ridgeAmplitude: 0.08,
+        terraceAmplitude: 0.02,
+        terraceFrequency: 0.18,
+      },
+      baseOffset: 1.2,
     },
   },
   "low-poly-meadow": {
@@ -438,6 +459,7 @@ export function templateForWorldId(
   if (id.includes("ridge") || id.includes("mountain")) return "ridge";
   if (id.includes("fantasy") || id.includes("garden")) return "fantasy-garden";
   if (id.includes("realistic") || id.includes("cove")) return "realistic-cove";
+  if (id.includes("grassland") || id.includes("prairie") || id.includes("field")) return "grassland-field";
   if (id.includes("flight") || id.includes("simulator") || id.includes("range")) return "flight-range";
   if (id.includes("low-poly") || id.includes("lowpoly")) return "low-poly-meadow";
   if (id.includes("cartoon") || id.includes("toon")) return "cartoon-hills";

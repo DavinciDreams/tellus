@@ -37,6 +37,9 @@ export interface TellusBiomeMixEntry {
   weight: number;
   density: number;
   scale: number;
+  grassHeight?: number;
+  grassSpread?: number;
+  grassLean?: number;
   environment: ProcPlantEnvironment;
   seed: number;
   enabled: boolean;
@@ -237,6 +240,9 @@ export const normalizeBiomeMixDefinition = (raw: unknown): TellusBiomeMixDefinit
         weight: typeof entry.weight === "number" ? entry.weight : 1,
         density: typeof entry.density === "number" ? entry.density : 0.45,
         scale: typeof entry.scale === "number" ? entry.scale : 1,
+        grassHeight: typeof entry.grassHeight === "number" ? entry.grassHeight : undefined,
+        grassSpread: typeof entry.grassSpread === "number" ? entry.grassSpread : undefined,
+        grassLean: typeof entry.grassLean === "number" ? entry.grassLean : undefined,
         environment: isRecord(entry.environment)
           ? { ...defaultPlantEnvironment(), ...(entry.environment as Partial<ProcPlantEnvironment>) }
           : defaultPlantEnvironment(),

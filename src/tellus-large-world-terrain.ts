@@ -94,6 +94,12 @@ function canyonFoldHeight(cx: number, cz: number, seed: number): number {
 }
 
 function templateProfileHeight(template: WorldTemplateId, cx: number, cz: number, r: number): number {
+  if (template === "grassland-field") {
+    const longSwell = fbm2(cx * 0.018, cz * 0.018, 4, 781) * 1.2;
+    const meadowRoll = fbm2(cx * 0.055 + 7, cz * 0.055 - 3, 3, 787) * 0.45;
+    return longSwell + meadowRoll;
+  }
+
   if (template === "wide-island") {
     const eastPeninsula = gaussian(cx, cz, 39, -2, 720) * 3.8;
     const westHeadland = gaussian(cx, cz, -42, 18, 520) * 2.9;
@@ -248,6 +254,7 @@ function templateWorldScaleMultiplier(template: WorldTemplateId): number {
   if (template === "cartoon-hills") return 3.7;
   if (template === "fantasy-garden") return 5.6;
   if (template === "low-poly-meadow") return 5.4;
+  if (template === "grassland-field") return 2.8;
   if (template === "lowlands") return 2;
   if (template === "realistic-cove") return 4.7;
   if (template === "wide-island") return 2.4;
@@ -491,6 +498,17 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
 
 function continentalBaseHeight(x: number, z: number): number {
   const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
+  if (template === "grassland-field") {
+    const warpA = fbm2(x * 0.0022 + 11, z * 0.0022 - 17, 4, 811);
+    const warpB = fbm2(x * 0.0022 - 23, z * 0.0022 + 29, 4, 821);
+    const wx = x + warpA * 48;
+    const wz = z + warpB * 48;
+    const broad = fbm2(wx * 0.0015, wz * 0.0015, 5, 831) * 2.2;
+    const roll = fbm2(wx * 0.006, wz * 0.006, 4, 839) * 1.05;
+    const detail = fbm2(wx * 0.022, wz * 0.022, 3, 853) * 0.22;
+    const shallowSwale = smoothstep(0.12, 0.72, Math.abs(fbm2(wx * 0.002, wz * 0.002, 3, 859))) * 0.65;
+    return 4.8 + broad + roll + detail - shallowSwale;
+  }
   const evoflow = isEvoflowTemplate(template);
   const templatePoint = chunkedTemplatePoint(x, z, templateWorldScaleMultiplier(template));
   const warpA = fbm2(x * 0.0028 + 91.7, z * 0.0028 - 33.1, 4, 17);
@@ -688,6 +706,14 @@ export function largeWorldTerrainKind(
 
   const slope = largeWorldSlope(x, z);
   const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
+  if (template === "grassland-field") {
+    const flowerBand =
+      Math.sin(x * 0.018 + fbm2(x * 0.004, z * 0.004, 3, 877) * 1.5) *
+      Math.cos(z * 0.016 - fbm2(x * 0.004, z * 0.004, 3, 883) * 1.2);
+    if (slope > 0.58) return "dirt";
+    if (flowerBand > 0.48 || fbm2(x * 0.009, z * 0.009, 3, 887) > 0.36) return "flowers";
+    return "grass";
+  }
   if (isEvoflowTemplate(template)) {
     const point = chunkedTemplatePoint(x, z, 10);
     const kind = point ? activeEvoflowTerrainKind(point.cx, point.cz, y) : null;

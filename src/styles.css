@@ -585,6 +585,10 @@ textarea::placeholder {
   background: linear-gradient(135deg, #c9edff 0%, #74a85e 38%, #91b969 63%, #4b95c8 100%);
 }
 
+.world-template-swatch.template-grassland-field {
+  background: linear-gradient(135deg, #c8e99b 0%, #78b94e 34%, #4f8f3c 62%, #b4d987 100%);
+}
+
 .world-template-swatch.template-low-poly-meadow {
   background: linear-gradient(135deg, #9bd35b 0 24%, #5c963f 24% 46%, #d8c36f 46% 62%, #73b3db 62% 100%);
 }

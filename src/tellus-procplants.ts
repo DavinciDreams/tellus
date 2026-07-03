@@ -91,6 +91,17 @@ export interface ProcPlantGenome {
     tipBias: number;
     size?: number;
   };
+  /**
+   * Grow herbaceous procplants as several offset shoots instead of a single stalk.
+   * This lets grasses, ferns, and flowers read as ground-cover mounds in biome mixes.
+   */
+  clump?: {
+    count: number;
+    radius: number;
+    jitter?: number;
+    scaleVar?: number;
+    lean?: number;
+  };
   treeRealism?: {
     crownSpread: number;
     crownTaper: number;
@@ -322,6 +333,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorB: 0xa6cf62,
     },
     grass: { blades: 38, furBias: 0.9, heightJitter: 0.38 },
+    clump: { count: 5, radius: 0.22, jitter: 0.6, scaleVar: 0.32, lean: 0.5 },
     lightResponse: {
       shadeAvoidance: 0.45,
       leafBoostInShade: 0.2,
@@ -350,6 +362,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorB: 0x73b851,
     },
     fern: { pinnae: 19, leafletPairs: 5, arch: 0.72 },
+    clump: { count: 6, radius: 0.26, jitter: 0.55, scaleVar: 0.3, lean: 0.62 },
     lightResponse: {
       shadeAvoidance: 0.2,
       leafBoostInShade: 0.45,
@@ -384,6 +397,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       color: 0xffc0d7,
       centerColor: 0xf4c94c,
     },
+    clump: { count: 6, radius: 0.28, jitter: 0.6, scaleVar: 0.3, lean: 0.34 },
     lightResponse: {
       shadeAvoidance: 0.72,
       leafBoostInShade: 0.18,
@@ -656,6 +670,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       color: 0xf4e8ff,
       centerColor: 0xd8c4ee,
     },
+    clump: { count: 6, radius: 0.22, jitter: 0.5, scaleVar: 0.24, lean: 0.22 },
     lightResponse: {
       shadeAvoidance: 0.18,
       leafBoostInShade: 0.32,
@@ -847,6 +862,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       color: 0x8a6336,
       centerColor: 0x5f3d25,
     },
+    clump: { count: 5, radius: 0.24, jitter: 0.5, scaleVar: 0.22, lean: 0.34 },
     lightResponse: {
       shadeAvoidance: 0.62,
       leafBoostInShade: 0.08,
@@ -943,6 +959,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorB: 0xb8d46c,
     },
     grass: { blades: 18, furBias: 0.12, heightJitter: 0.12 },
+    clump: { count: 7, radius: 0.32, jitter: 0.5, scaleVar: 0.28, lean: 0.42 },
     lightResponse: {
       shadeAvoidance: 0.7,
       leafBoostInShade: 0.08,
@@ -1452,6 +1469,7 @@ export const hybridizePlantGenomes = (
           }
         : undefined,
     weberPenn: pick(a.weberPenn, b.weberPenn),
+    clump: pick(a.clump, b.clump),
     tree: pick(a.tree, b.tree),
     lightResponse: {
       shadeAvoidance: THREE.MathUtils.lerp(
@@ -3101,6 +3119,18 @@ export const buildProcPlantInstancedParts = (
       },
     };
   }
+  const clump = genome.clump;
+  if (clump && clump.count > 1) {
+    return buildProcPlantClumpParts(genome, seed, env, clump);
+  }
+  return buildProcPlantSingleShootParts(genome, seed, env);
+};
+
+const buildProcPlantSingleShootParts = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+): ProcPlantInstancedParts => {
   const graph = buildProcPlantGraph(genome, seed, env);
   const stemBuilder = new TemplateBuilder();
   const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
@@ -3144,6 +3174,74 @@ export const buildProcPlantInstancedParts = (
       stemTriangles: stems.idx.length / 3,
       instances: instances.length,
       triangles: stems.idx.length / 3 + instances.length,
+    },
+  };
+};
+
+const buildProcPlantClumpParts = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+  clump: NonNullable<ProcPlantGenome["clump"]>,
+): ProcPlantInstancedParts => {
+  const count = Math.max(1, Math.min(24, Math.round(clump.count)));
+  const radius = Math.max(0, clump.radius);
+  const jitter = THREE.MathUtils.clamp(clump.jitter ?? 0.4, 0, 1);
+  const scaleVar = THREE.MathUtils.clamp(clump.scaleVar ?? 0.25, 0, 1);
+  const lean = clump.lean ?? 0.18;
+  const rng = rngFromSeed((seed ^ 0x27d4eb2f) >>> 0);
+
+  let mergedStems: ProcPlantTemplate | null = null;
+  const instances: ProcPlantInstance[] = [];
+  let leaves = 0;
+  let flowers = 0;
+  let stemTriangles = 0;
+
+  for (let i = 0; i < count; i++) {
+    const shoot = buildProcPlantSingleShootParts(genome, (seed + i * 2749) >>> 0, env);
+    const ringT = count > 1 ? i / (count - 1) : 0;
+    const spread = i === 0 ? 0 : radius * (0.35 + ringT * 0.65);
+    const angle = i * GOLDEN_ANGLE + (rng() - 0.5) * jitter * 1.4;
+    const jitterR = spread * (1 + (rng() - 0.5) * jitter);
+    const ox = Math.cos(angle) * jitterR;
+    const oz = Math.sin(angle) * jitterR;
+    const shootScale = 1 + (rng() - 0.5) * scaleVar;
+    const leanAxis = new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle));
+    const leanQuat = new THREE.Quaternion().setFromAxisAngle(leanAxis, lean * ringT);
+    const spinQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng() * Math.PI * 2, 0));
+    const matrix = new THREE.Matrix4().compose(
+      new THREE.Vector3(ox, 0, oz),
+      leanQuat.multiply(spinQuat),
+      new THREE.Vector3(shootScale, shootScale, shootScale),
+    );
+
+    const transformedStems = transformTemplate(shoot.stems, matrix);
+    mergedStems = mergedStems ? combineTemplates(mergedStems, transformedStems) : transformedStems;
+    for (const inst of shoot.instances) {
+      instances.push({
+        kind: inst.kind,
+        matrix: matrix.clone().multiply(inst.matrix),
+        color: inst.color.clone(),
+        sway: inst.sway,
+      });
+    }
+    leaves += shoot.stats.leaves;
+    flowers += shoot.stats.flowers;
+    stemTriangles += shoot.stats.stemTriangles;
+  }
+
+  const stems = mergedStems ?? buildProcPlantSingleShootParts(genome, seed, env).stems;
+  return {
+    stems,
+    instances,
+    graph: emptyGraph(),
+    stats: {
+      stems: 0,
+      leaves,
+      flowers,
+      stemTriangles,
+      instances: instances.length,
+      triangles: stemTriangles + instances.length,
     },
   };
 };
@@ -3359,6 +3457,32 @@ const combineTemplates = (base: ProcPlantTemplate, extra: ProcPlantTemplate): Pr
   idx.set(base.idx);
   for (let i = 0; i < extra.idx.length; i++) idx[base.idx.length + i] = extra.idx[i] + baseVerts;
   return { pos, nrm, col, tintable, sway, idx };
+};
+
+const transformTemplate = (template: ProcPlantTemplate, matrix: THREE.Matrix4): ProcPlantTemplate => {
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
+  const pos = new Float32Array(template.pos.length);
+  const nrm = new Float32Array(template.nrm.length);
+  const p = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  for (let i = 0; i < template.pos.length; i += 3) {
+    p.set(template.pos[i]!, template.pos[i + 1]!, template.pos[i + 2]!).applyMatrix4(matrix);
+    n.set(template.nrm[i]!, template.nrm[i + 1]!, template.nrm[i + 2]!).applyMatrix3(normalMatrix).normalize();
+    pos[i] = p.x;
+    pos[i + 1] = p.y;
+    pos[i + 2] = p.z;
+    nrm[i] = n.x;
+    nrm[i + 1] = n.y;
+    nrm[i + 2] = n.z;
+  }
+  return {
+    pos,
+    nrm,
+    col: template.col.slice(),
+    tintable: template.tintable.slice(),
+    sway: template.sway.slice(),
+    idx: template.idx.slice(),
+  };
 };
 
 const emptyGraph = (): ProcPlantGraph => ({ stems: [], segments: [], organs: [] });

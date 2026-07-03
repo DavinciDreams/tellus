@@ -25,6 +25,7 @@ import {
 } from "./tellus-biome-mix";
 import {
   buildProcPlantObject,
+  GOLDEN_ANGLE_RADIANS,
   procPlantPresets,
   procPlantPresetIds,
   type ProcPlantGenome,
@@ -676,6 +677,102 @@ const geometryVertexCount = (object: THREE.Object3D): number => {
   return total;
 };
 
+const createBiomeGrassTuftGeometry = (seed: number, bladeCount = 12): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < bladeCount; i++) {
+    const yaw = i * GOLDEN_ANGLE_RADIANS + (hash01(seed + i * 17) - 0.5) * 1.15;
+    const radial = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+    const side = new THREE.Vector3(-radial.z, 0, radial.x);
+    const height = 0.34 + hash01(seed + i * 31) * 0.5;
+    const width = 0.012 + hash01(seed + i * 43) * 0.014;
+    const baseSpread = Math.sqrt(hash01(seed + i * 59)) * 0.11;
+    const base = radial.clone().multiplyScalar(baseSpread);
+    const bend = radial.clone().multiplyScalar((0.08 + hash01(seed + i * 71) * 0.28) * height);
+    const mid = base.clone().add(up.clone().multiplyScalar(height * 0.55)).add(bend.clone().multiplyScalar(0.42));
+    const tip = base.clone().add(up.clone().multiplyScalar(height)).add(bend);
+    const normal = new THREE.Vector3().crossVectors(side, tip.clone().sub(base)).normalize();
+    const start = positions.length / 3;
+    const points = [
+      base.clone().add(side.clone().multiplyScalar(-width)),
+      base.clone().add(side.clone().multiplyScalar(width)),
+      mid.clone().add(side.clone().multiplyScalar(width * 0.58)),
+      mid.clone().add(side.clone().multiplyScalar(-width * 0.58)),
+      tip,
+    ];
+    for (const point of points) {
+      positions.push(point.x, point.y, point.z);
+      normals.push(normal.x, normal.y, normal.z);
+    }
+    indices.push(start, start + 1, start + 2, start, start + 2, start + 3, start + 3, start + 2, start + 4);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+const buildGrassWorldObject = (
+  entry: TellusBiomeMixEntry,
+  genome: ProcPlantGenome,
+  count: number,
+): THREE.Object3D => {
+  const bladeCount = Math.round(THREE.MathUtils.clamp(8 + (genome.foliage?.mass ?? 0.8) * 5, 7, 16));
+  const geometry = createBiomeGrassTuftGeometry(entry.seed ^ 0x61a55, bladeCount);
+  const material = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  const mesh = new THREE.InstancedMesh(geometry, material, count);
+  mesh.name = `grass-world-${entry.id}`;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  const baseColor = new THREE.Color(genome.leaf.colorA);
+  const tipColor = new THREE.Color(genome.leaf.colorB);
+  const matrix = new THREE.Matrix4();
+  const quat = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const color = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const n = entry.seed + i * 97;
+    const radius = 2 + Math.sqrt(hash01(n)) * 39;
+    const angle = i * GOLDEN_ANGLE_RADIANS + hash01(n + 31) * 0.45;
+    const x = Math.sin(angle) * radius;
+    const z = Math.cos(angle) * radius;
+    const y = Math.max(0, z + 40) * 0.035 + 0.012;
+    const moistureLift = THREE.MathUtils.lerp(0.74, 1.18, entry.environment.moisture);
+    const shadeStretch = THREE.MathUtils.lerp(0.86, 1.22, 1 - entry.environment.light);
+    const grassHeight = entry.grassHeight ?? entry.scale;
+    const grassSpread = entry.grassSpread ?? 1;
+    const grassLean = entry.grassLean ?? 0.42;
+    const widthScale = Math.max(0.55, grassSpread) * (0.17 + hash01(n + 71) * 0.19) * moistureLift;
+    const heightScale = grassHeight * (0.17 + hash01(n + 71) * 0.19) * moistureLift * shadeStretch;
+    const yaw = hash01(n + 131) * Math.PI * 2;
+    const leanDirection = yaw + (hash01(n + 101) - 0.5) * Math.PI;
+    const leanAngle = grassLean * THREE.MathUtils.lerp(0.2, 1, hash01(n + 151));
+    quat.setFromEuler(new THREE.Euler(
+      Math.cos(leanDirection) * leanAngle,
+      yaw,
+      Math.sin(leanDirection) * leanAngle,
+    ));
+    scale.set(widthScale, heightScale * (0.9 + (genome.foliage?.mass ?? 0.8) * 0.16), widthScale);
+    matrix.compose(new THREE.Vector3(x, y, z), quat, scale);
+    mesh.setMatrixAt(i, matrix);
+    color.copy(baseColor).lerp(tipColor, 0.25 + hash01(n + 191) * 0.62);
+    if (hash01(n + 211) < 0.2) color.lerp(new THREE.Color(0xd8cc76), 0.12 + hash01(n + 223) * 0.2);
+    mesh.setColorAt(i, color);
+  }
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.instanceMatrix.needsUpdate = true;
+  const group = new THREE.Group();
+  group.name = `grass-world-${entry.label}`;
+  group.userData.grassWorld = { count, bladeCount };
+  group.add(mesh);
+  return group;
+};
+
 const selectedEntry = () => currentMix.entries.find((entry) => entry.id === selectedEntryId) ?? currentMix.entries[0];
 
 const swatchStyle = (paint: TerrainPaintKind): string => {
@@ -962,6 +1059,10 @@ const renderEntryEditor = () => {
   const foliageMode = weberFoliageMode(previewGenome);
   const fillMass = foliageMode === "plain" ? 0 : foliage?.mass ?? 0;
   const fillSize = foliage?.size ?? (previewGenome.habit === "conifer" ? 0.34 : 0.54);
+  const isGrassEntry = previewGenome.habit === "grass";
+  const grassHeight = entry.grassHeight ?? entry.scale;
+  const grassSpread = entry.grassSpread ?? 1;
+  const grassLean = entry.grassLean ?? 0.42;
   entryEditor.innerHTML = `
     <label>
       Label
@@ -993,6 +1094,28 @@ const renderEntryEditor = () => {
         </select>
       </label>
     </div>
+    ${isGrassEntry ? `
+      <section class="weber-editor">
+        <h3>Grass Carpet</h3>
+        <div class="inline">
+          <label>
+            Height
+            <input id="grass-height" type="range" min="0.12" max="3.2" value="${grassHeight}" step="0.02" />
+            <output>${grassHeight.toFixed(2)}</output>
+          </label>
+          <label>
+            Spread
+            <input id="grass-spread" type="range" min="0.55" max="2.4" value="${grassSpread}" step="0.02" />
+            <output>${grassSpread.toFixed(2)}</output>
+          </label>
+        </div>
+        <label>
+          Lean
+          <input id="grass-lean" type="range" min="0" max="1.1" value="${grassLean}" step="0.02" />
+          <output>${grassLean.toFixed(2)}</output>
+        </label>
+      </section>
+    ` : ""}
     ${isAssetEntry ? `
       <section class="weber-editor">
         <h3>Imported GLB</h3>
@@ -1171,6 +1294,25 @@ const renderEntryEditor = () => {
   bindNumber("#entry-weight", "weight");
   bindNumber("#entry-density", "density");
   bindNumber("#entry-scale", "scale");
+  const bindOptionalNumber = (
+    selector: string,
+    key: "grassHeight" | "grassSpread" | "grassLean",
+    format: (value: number) => string,
+  ) => {
+    const input = entryEditor.querySelector<HTMLInputElement>(selector);
+    if (!input) return;
+    const output = input.nextElementSibling as HTMLOutputElement;
+    input.addEventListener("input", () => {
+      entry[key] = Number(input.value);
+      output.textContent = format(entry[key] ?? 0);
+      renderJson();
+      renderEntryList();
+      rebuildPreview();
+    });
+  };
+  bindOptionalNumber("#grass-height", "grassHeight", (value) => value.toFixed(2));
+  bindOptionalNumber("#grass-spread", "grassSpread", (value) => value.toFixed(2));
+  bindOptionalNumber("#grass-lean", "grassLean", (value) => value.toFixed(2));
   entryEditor.querySelector<HTMLInputElement>("#entry-label")!.addEventListener("input", (event) => {
     entry.label = (event.currentTarget as HTMLInputElement).value || entry.label;
     renderJson();
@@ -1336,9 +1478,21 @@ const rebuildPreview = () => {
     const assetPrototype = isAssetMixEntry(entry) ? importedAssets.get(assetKey) : undefined;
     if (isAssetMixEntry(entry) && !assetPrototype) return;
     const genome = isAssetMixEntry(entry) ? null : genomeForMixEntry(entry);
+    const share = Math.max(0.01, entry.weight) / weightTotal;
+    if (genome?.habit === "grass") {
+      const grassCount = Math.max(
+        80,
+        Math.min(2400, Math.round(720 * currentMix.density * entry.density * (0.6 + share * 1.6))),
+      );
+      const grassWorld = buildGrassWorldObject(entry, genome, grassCount);
+      const verticesPerTuft = geometryVertexCount(grassWorld);
+      currentVertices += verticesPerTuft * grassCount;
+      previewGroup.add(grassWorld);
+      rendered += grassCount;
+      return;
+    }
     const prototype = assetPrototype ?? buildProcPlantObject(genome!, entry.seed, entry.environment);
     const verticesPerPlant = geometryVertexCount(prototype);
-    const share = Math.max(0.01, entry.weight) / weightTotal;
     const habitCap = isAssetMixEntry(entry) || genome?.habit === "tree" || genome?.habit === "conifer" || genome?.habit === "palm" ? 12 : 36;
     const count = Math.max(1, Math.min(habitCap, Math.round(70 * currentMix.density * entry.density * share)));
     currentVertices += verticesPerPlant * count;

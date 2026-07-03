@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { makeProcPlantModelUrl, parseProceduralModelUrl } from "./tellus-procedural-assets";
 import {
+  buildProcPlantInstancedParts,
   buildProcPlantTemplate,
   buildProcPlantRuntimePackage,
   procPlantPresets,
@@ -108,6 +109,14 @@ describe("procplant vegetation", () => {
     expect(full.idx.length).toBeGreaterThan(sparse.idx.length);
     expect(full.idx.length).toBeLessThanOrEqual(sparse.idx.length + 120 * 4 * 6);
   }, 15_000);
+
+  it("renders grass presets as multi-shoot clumps for biome ground cover", () => {
+    const built = buildProcPlantInstancedParts(procPlantPresets.furGrass, 1234);
+
+    expect(procPlantPresets.furGrass.clump?.count).toBeGreaterThan(1);
+    expect(built.instances.length).toBeGreaterThan((procPlantPresets.furGrass.grass?.blades ?? 0) * 3);
+    expect(built.stats.instances).toBe(built.instances.length);
+  });
 
   it("applies procplant tree realism traits to Weber-Penn genomes", () => {
     const baseGenome = procPlantPresets.oakCanopy;
@@ -374,6 +383,61 @@ describe("procplant vegetation", () => {
 
     expect(stats.plants).toBeGreaterThan(0);
     expect(stats.stemTriangles).toBeGreaterThan(0);
+
+    vegetation.dispose();
+  });
+
+  it("scatters biome grass mixes as a dense carpet instead of large clumps", () => {
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-grass-carpet-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -24, maxX: 24, minZ: -24, maxZ: 24 },
+      densityMultiplier: 1,
+      biomeMixRegistry: {
+        version: 1,
+        worldId: "chunked-grass-carpet-test",
+        updatedAt: new Date(0).toISOString(),
+        mixesByEcologyBiome: {},
+        mixesByTerrainPaint: {
+          meadow: {
+            version: 1,
+            id: "grass-meadow",
+            label: "Grass Meadow",
+            source: "terrain-paint",
+            terrainPaint: "meadow",
+            targetTerrainPaint: "meadow",
+            seed: 1,
+            density: 1,
+            diversity: 1,
+            targetVerticesPerChunk: 12000,
+            entries: [{
+              id: "fur-grass",
+              label: "Fur Grass",
+              source: "preset",
+              presetId: "furGrass",
+              weight: 1,
+              density: 1,
+              scale: 1,
+              environment: { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
+              seed: 2,
+              enabled: true,
+            }],
+          },
+        },
+      },
+    });
+
+    for (let i = 0; i < 20 && vegetation.stats().plants === 0; i++) {
+      vegetation.update(0, 0, 1, 60, i * 16);
+    }
+    const stats = vegetation.stats();
+
+    expect(stats.plants).toBeGreaterThan(0);
+    expect(stats.instances).toBeGreaterThanOrEqual(stats.plants * 20);
+    expect(stats.stemTriangles).toBe(0);
 
     vegetation.dispose();
   });
