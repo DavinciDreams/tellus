@@ -287,6 +287,7 @@ const parseAssetLibraryModels = (rawModels: unknown): AssetLibraryModel[] => {
         file_size: numberField(record, "file_size", "fileSize", "size"),
         effective_file_size: numberField(record, "effective_file_size", "effectiveFileSize"),
         download_count: numberField(record, "download_count", "downloadCount", "downloads"),
+        assetStoreModelId: stringField(record, "assetStoreModelId", "asset_store_model_id", "model_id", "modelId"),
         hasThumbnail: booleanField(record, "has_thumbnail", "hasThumbnail"),
         hasGameOptimized: booleanField(record, "has_game_optimized", "hasGameOptimized"),
         // The store's `viewable` flag means conversion finished and a renderable view URL exists.
