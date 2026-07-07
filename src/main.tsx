@@ -340,6 +340,35 @@ function AgentToolChipPill({ chip }: { chip: AgentToolChip }) {
 // (2r+1)² loaded chunks. Persisted here, read by both the world closure (on init) and the React HUD.
 const CHUNK_LOAD_RADIUS_STORAGE_KEY = "tellus.chunkLoadRadius";
 
+function readDebugModeFlags(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const storage = window.localStorage;
+    const flags: string[] = [];
+    if (storage.getItem("tellus.terrainOnly") === "1") flags.push("terrain only");
+    const procplants = storage.getItem("tellus.procplants");
+    if (procplants === "0") flags.push("plants off");
+    if (procplants === "1") flags.push("plants forced");
+    const plantDensity = Number(storage.getItem("tellus.procplants.density"));
+    if (Number.isFinite(plantDensity) && plantDensity > 0 && Math.abs(plantDensity - 1) > 0.01) {
+      flags.push(`plant density ${plantDensity.toFixed(2).replace(/\.?0+$/, "")}`);
+    }
+    if (storage.getItem("tellus.lowGpu") === "1") flags.push("low GPU");
+    const renderEvery = Number(storage.getItem("tellus.renderEvery"));
+    if (Number.isFinite(renderEvery) && renderEvery > 1) flags.push(`render every ${Math.round(renderEvery)}`);
+    if (storage.getItem("tellus.frameDriver") === "timeout") flags.push("timeout frames");
+    const renderer = storage.getItem("tellus.renderer");
+    if (renderer === "webgpu" || renderer === "webgl") flags.push(renderer);
+    const pixelRatioCap = Number(storage.getItem("tellus.pixelRatioCap"));
+    if (Number.isFinite(pixelRatioCap) && pixelRatioCap > 0) {
+      flags.push(`pixel cap ${pixelRatioCap.toFixed(2).replace(/\.?0+$/, "")}`);
+    }
+    return flags;
+  } catch {
+    return [];
+  }
+}
+
 // Turn a Hyades portal `action.rejected` reason into clear player-facing guidance. The server reasons
 // come straight from the world grain (ApplyPortalUpsert/Delete/Enter): ownership, feature flag, target
 // validity, allowlist, cap. NOT a chunked-world thing — portals are terrain-provider independent.
@@ -11228,6 +11257,7 @@ function App(): React.ReactElement {
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
   const [showFps, setShowFps] = useState(false);
   const [fps, setFps] = useState(0);
+  const [debugModeFlags, setDebugModeFlags] = useState<string[]>(() => readDebugModeFlags());
   const brandClicksRef = useRef<number[]>([]);
   const handleBrandTripleClick = () => {
     const now = performance.now();
@@ -11240,6 +11270,29 @@ function App(): React.ReactElement {
     }
   };
   // ── P2P video state (RX inbound default ON, TX local camera default OFF) ──
+  useEffect(() => {
+    const refresh = () => {
+      const next = readDebugModeFlags();
+      setDebugModeFlags((current) => (current.join("|") === next.join("|") ? current : next));
+    };
+    refresh();
+    const intervalId = window.setInterval(refresh, 1000);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("storage", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("storage", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, []);
+  const debugModeBadge = debugModeFlags.length ? (
+    <div className="debug-mode-badge" title={`Debug flags: ${debugModeFlags.join(", ")}`}>
+      <span>Debug mode</span>
+      <small>{debugModeFlags.join(", ")}</small>
+    </div>
+  ) : null;
   const [rxEnabled, setRxEnabled] = useState(true);
   const [txEnabled, setTxEnabled] = useState(false);
   const [audioListen, setAudioListen] = useState(false); // hear peers (RX audio) — off by default (autoplay)
@@ -15078,6 +15131,7 @@ function App(): React.ReactElement {
               <span>Tellus</span>
               <small>World Weaver</small>
             </div>
+            {debugModeBadge}
             {debugPanel}
             <div className="brand-hud-actions">
               <AuthControls />
@@ -15133,6 +15187,7 @@ function App(): React.ReactElement {
               <span>Tellus</span>
               <small>World Weaver</small>
             </div>
+            {debugModeBadge}
             {debugPanel}
           </div>
           <div
