@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { Reflector } from "three/examples/jsm/objects/Reflector.js";
 import { buildProceduralModel, sanitizeProceduralModelUrl } from "./tellus-procedural-assets";
 import { textureErrorSince, textureFailedModelUrls } from "./tellus-generation-client";
 import { MeshBasicNodeMaterial } from "three/webgpu";
@@ -8,6 +9,7 @@ import {
   linearDepth,
   mx_worley_noise_float,
   positionWorld,
+  reflector,
   screenUV,
   time,
   vec2,
@@ -354,6 +356,95 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
   return material;
 }
 
+function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflector {
+  const water = resolvedWaterSettings(settings);
+  const palette = WATER_STYLE_COLORS[water.style];
+  const tint = new THREE.Color(palette.shallow).lerp(new THREE.Color(0xffffff), 0.34);
+  const opacity = clamp(0.36 + water.opacity * 0.3, 0.46, 0.68);
+  const geometry = new THREE.CircleGeometry(OCEAN_RADIUS, 192);
+  const shader = {
+    name: "TellusOceanReflectionShader",
+    uniforms: {
+      color: { value: null },
+      tDiffuse: { value: null },
+      textureMatrix: { value: null },
+      opacity: { value: opacity },
+    },
+    vertexShader: /* glsl */`
+      uniform mat4 textureMatrix;
+      varying vec4 vUv;
+      varying vec3 vWorldPosition;
+
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        vUv = textureMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        #include <logdepthbuf_vertex>
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform vec3 color;
+      uniform sampler2D tDiffuse;
+      uniform float opacity;
+      varying vec4 vUv;
+      varying vec3 vWorldPosition;
+
+      #include <logdepthbuf_pars_fragment>
+
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        float a = hash(i);
+        float b = hash(i + vec2(1.0, 0.0));
+        float c = hash(i + vec2(0.0, 1.0));
+        float d = hash(i + vec2(1.0, 1.0));
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+      }
+
+      void main() {
+        #include <logdepthbuf_fragment>
+        vec4 reflected = texture2DProj(tDiffuse, vUv);
+        float rippleBreakup =
+          noise(vWorldPosition.xz * 0.065) * 0.55 +
+          noise(vWorldPosition.xz * 0.19 + 17.0) * 0.45;
+        float reflectionMask = smoothstep(0.08, 0.92, reflected.a) * mix(0.82, 1.0, rippleBreakup);
+        vec3 softened = mix(reflected.rgb, color, 0.08);
+        gl_FragColor = vec4(softened, opacity * reflectionMask);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  };
+  const reflection = new Reflector(geometry, {
+    clipBias: 0.006,
+    textureWidth: 1024,
+    textureHeight: 1024,
+    color: tint,
+    shader,
+    multisample: 0,
+  });
+  reflection.name = "tellus-ocean-reflection";
+  reflection.position.z = 0.018;
+  reflection.renderOrder = -3;
+  reflection.frustumCulled = false;
+  if (reflection.material instanceof THREE.ShaderMaterial) {
+    reflection.material.transparent = true;
+    reflection.material.depthWrite = false;
+    reflection.material.depthTest = true;
+    reflection.material.userData.tellusReflectionLayer = true;
+  }
+  return reflection;
+}
+
 export function createOceanSurface(
   useBackdropWater: boolean,
   settings?: Partial<WaterSettings>,
@@ -367,6 +458,14 @@ export function createOceanSurface(
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.y = SEA_LEVEL;
   ocean.renderOrder = -4;
+  if (!useBackdropWater) {
+    ocean.add(createOceanReflectionLayer(settings));
+  } else {
+    const reflectorTarget = material.userData.tellusReflectorTarget;
+    if (reflectorTarget instanceof THREE.Object3D) {
+      ocean.add(reflectorTarget);
+    }
+  }
   return ocean;
 }
 
@@ -672,9 +771,11 @@ export function createBackdropWaterMaterial(settings?: Partial<WaterSettings>): 
     waterUV.mul(0.95 + wave * 0.4).add(broadFlow.mul(0.28 + wave * 0.1)).add(t),
   );
   const surfaceIntensity = waveCells.mul(broadFlow).mul(0.86 + wave * 0.32);
-  const waterColor = surfaceIntensity.mix(color(palette.deep), color(palette.shallow));
+  const tropicalShallow = color(palette.shallow).mul(0.58).add(color(0x66f4ee).mul(0.42));
+  const reflectiveSky = color(0xb8e6ff);
+  const waterColor = surfaceIntensity.mix(color(palette.deep), tropicalShallow);
   const illuminatedColor = waterColor.add(
-    color(palette.foam).mul(surfaceIntensity.mul(0.12 * wave)),
+    color(palette.foam).mul(surfaceIntensity.mul(0.16 * wave)),
   );
 
   const depth = linearDepth();
@@ -692,18 +793,50 @@ export function createBackdropWaterMaterial(settings?: Partial<WaterSettings>): 
   const depthRefraction = depthTestForRefraction.remapClamp(0, 0.1);
   const finalUV = depthTestForRefraction.lessThan(0).select(screenUV, refractionUV);
   const viewportTexture = viewportSharedTexture(finalUV);
+  const shallowGlow = depthEffect.oneMinus().mul(0.42).add(surfaceIntensity.mul(0.16));
+  const cyanRefraction = shallowGlow.clamp(0, 0.62).mix(viewportTexture, tropicalShallow);
+  const refractedScene = surfaceIntensity
+    .mul(0.16)
+    .add(depthEffect.oneMinus().mul(0.12))
+    .clamp(0, 0.32)
+    .mix(cyanRefraction, reflectiveSky);
+  const tintedRefraction = depthRefraction.mix(
+    depthEffect.oneMinus().mul(0.36).clamp(0, 0.36).mix(illuminatedColor, tropicalShallow),
+    refractedScene.mul(0.66).add(illuminatedColor.mul(0.34)),
+  );
+  const reflectionSampler = reflector();
+  reflectionSampler.uvNode = (reflectionSampler.uvNode ?? screenUV).add(
+    vec2(
+      broadFlow.sub(0.5).mul(0.0025),
+      surfaceIntensity.sub(0.5).mul(0.006 + wave * 0.004),
+    ),
+  );
+  reflectionSampler.reflector.resolutionScale = 0.72;
+  const reflectionStrength = surfaceIntensity
+    .mul(0.18)
+    .add(depthEffect.oneMinus().mul(0.42))
+    .clamp(0.22, 0.72);
+  const reflectiveWater = reflectionStrength.mix(
+    tintedRefraction,
+    reflectionSampler.rgb.mul(0.96).add(reflectiveSky.mul(0.04)),
+  );
 
   const material = new MeshBasicNodeMaterial();
-  material.colorNode = illuminatedColor;
+  material.colorNode = surfaceIntensity.mul(0.12).clamp(0, 0.18).mix(illuminatedColor, reflectiveSky);
   material.backdropNode = depthEffect.mix(
     viewportSharedTexture(),
-    viewportTexture.mul(depthRefraction.mix(1, illuminatedColor)),
+    reflectiveWater,
   );
-  material.backdropAlphaNode = depthRefraction.oneMinus().mul(0.86);
+  material.backdropAlphaNode = depthEffect
+    .oneMinus()
+    .mul(0.42)
+    .add(surfaceIntensity.mul(0.18))
+    .clamp(0.24, 0.68);
   material.transparent = true;
-  material.opacity = water.opacity;
+  material.opacity = clamp(water.opacity + 0.08, 0.36, 0.88);
   material.depthWrite = false;
   material.side = THREE.DoubleSide;
+  material.userData.tellusReflectorTarget = reflectionSampler.target;
   return material;
 }
 
