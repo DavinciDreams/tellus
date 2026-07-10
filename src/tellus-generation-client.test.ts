@@ -27,6 +27,7 @@ describe("asset library browsing", () => {
           models: [
             {
               id: "asset-1",
+              model_id: "stable-store-asset-1",
               name: "Rustic Thatched Roof Cottage",
               file_format: "glb",
               has_thumbnail: true,
@@ -77,6 +78,7 @@ describe("asset library browsing", () => {
     expect(result.models).toEqual([
       expect.objectContaining({
         id: "asset-1",
+        assetStoreModelId: "stable-store-asset-1",
         name: "Rustic Thatched Roof Cottage",
         hasThumbnail: true,
         hasGameOptimized: true,

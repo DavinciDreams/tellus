@@ -294,7 +294,7 @@ export const ECOLOGY_TERRAIN_PAINT_MAP: Record<EcologyBiomeId, TerrainPaintKind>
   taiga: "dirt",
   estuary: "flowers",
   tundra: "gravel",
-  "arctic-alpine": "rock",
+  "arctic-alpine": "snow",
   savanna: "meadow",
 };
 

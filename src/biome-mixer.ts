@@ -15,16 +15,17 @@ import {
   isAssetMixEntry,
   labelForProcPlantId,
   makeEcologyBiomeMix,
-  makeTerrainPaintBiomeMix,
   normalizeBiomeMixDefinition,
   saveActiveBiomeMixForWorld,
   saveActiveBiomeMixRegistryToServer,
+  type TellusBiomeAssetLodPreference,
   type TellusBiomeAssetTemplate,
   type TellusBiomeMixDefinition,
   type TellusBiomeMixEntry,
 } from "./tellus-biome-mix";
 import {
   buildProcPlantObject,
+  GOLDEN_ANGLE_RADIANS,
   procPlantPresets,
   procPlantPresetIds,
   type ProcPlantGenome,
@@ -33,19 +34,9 @@ import { SPECIES, type SpeciesId } from "./vendor/proc-tree/index";
 import type { EcologyBiomeId } from "./tellus-ecology";
 import type { TerrainPaintKind } from "./tellus-types";
 import { loadRuntimeConfig } from "./tellus-runtime-config";
-
-const terrainPaints: TerrainPaintKind[] = [
-  "meadow",
-  "grass",
-  "flowers",
-  "forest-floor",
-  "jungle-moss",
-  "beach",
-  "dirt",
-  "desert-sand",
-  "rock",
-  "gravel",
-];
+import { browseAssetLibrary, type AssetBrowseSort } from "./tellus-generation-client";
+import type { AssetLibraryModel } from "./tellus-types";
+import { assetStoreGameOptimizedModelUrl, tellusAssetLibraryUrl } from "./tellus-urls-identity";
 
 const terrainSwatchColors: Record<TerrainPaintKind, [number, number]> = {
   meadow: [0x79a84a, 0x4f7c32],
@@ -71,6 +62,8 @@ let selectedEntryId = currentMix.entries[0]?.id ?? "";
 let selectedPresetId = "blueSpruce";
 let selectedWeberPennSpecies = "balsamFir";
 let selectedImportedAssetId = "";
+let selectedStoreAssetId = "";
+let selectedStoreAssetLod: TellusBiomeAssetLodPreference = "lod2";
 let jsonVisible = false;
 let statusText = "Ready.";
 const weberPennSpeciesIds = Object.keys(SPECIES).sort() as SpeciesId[];
@@ -79,7 +72,20 @@ const dracoLoader = new DRACOLoader();
 const ktx2Loader = new KTX2Loader();
 const importedAssets = new Map<string, THREE.Object3D>();
 const importedAssetTemplates = new Map<string, TellusBiomeAssetTemplate>();
-const importedAssetOptions: Array<{ id: string; label: string; name: string }> = [];
+const importedAssetOptions: Array<{
+  id: string;
+  libraryId?: string;
+  label: string;
+  name: string;
+  source: "local" | "store";
+  lodPreference?: TellusBiomeAssetLodPreference;
+}> = [];
+let storeAssetSearch = "";
+let storeAssetPage = 1;
+let storeAssetHasNext = false;
+let storeAssetTotal = 0;
+let storeAssetLoading = false;
+let storeAssetResults: AssetLibraryModel[] = [];
 const MAX_IMPORTED_ASSET_VERTICES = 12000;
 
 root.innerHTML = `
@@ -96,7 +102,6 @@ root.innerHTML = `
     </header>
     <section class="biome-toolbar" aria-label="Biome mixer controls">
       <select id="ecology-select" class="state-select" aria-hidden="true"></select>
-      <select id="terrain-select" class="state-select" aria-hidden="true"></select>
       <label>
         Density
         <input id="density-slider" type="range" min="0.05" max="1.8" value="0.72" step="0.01" />
@@ -125,14 +130,10 @@ root.innerHTML = `
         <input id="glb-input" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" multiple hidden />
       </div>
     </section>
-    <section class="swatch-board" aria-label="Biome and terrain swatches">
+    <section class="swatch-board" aria-label="Biome swatches">
       <div>
         <h2>Biome</h2>
         <div class="swatch-grid" id="ecology-swatch-grid"></div>
-      </div>
-      <div>
-        <h2>Terrain</h2>
-        <div class="swatch-grid" id="terrain-swatch-grid"></div>
       </div>
     </section>
     <section class="workspace json-hidden" id="workspace">
@@ -163,6 +164,32 @@ root.innerHTML = `
           </label>
           <button type="button" id="add-imported-asset-button">Import</button>
         </div>
+        <section class="store-picker" aria-label="Tellus asset store GLBs">
+          <div class="store-picker-head">
+            <h3>Tellus Store GLB</h3>
+            <span id="store-asset-count">Ready</span>
+          </div>
+          <div class="store-search-row">
+            <input id="store-asset-search" type="search" placeholder="Search flora or GLB assets" />
+            <button type="button" id="store-asset-search-button">Search</button>
+          </div>
+          <label>
+            LOD
+            <select id="store-asset-lod">
+              <option value="lod2" selected>LOD2 scatter</option>
+              <option value="lod3">LOD3 ultra-low</option>
+              <option value="lod1">LOD1 near scatter</option>
+              <option value="lod0">LOD0 near</option>
+              <option value="game-optimized">Game optimized</option>
+              <option value="impostor">Impostor</option>
+            </select>
+          </label>
+          <div class="store-result-list" id="store-asset-results"></div>
+          <div class="button-row store-actions">
+            <button type="button" id="store-asset-load-more">Load More</button>
+            <button type="button" id="store-asset-add-button">Add Selected</button>
+          </div>
+        </section>
         <div class="entry-editor" id="entry-editor"></div>
       </aside>
       <section class="stage-panel">
@@ -237,9 +264,6 @@ style.textContent = `
     background: rgba(255,255,255,0.78);
   }
   .swatch-board {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
     margin-bottom: 16px;
   }
   .swatch-board > div {
@@ -256,13 +280,13 @@ style.textContent = `
   }
   .swatch-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
     gap: 8px;
   }
   .swatch-button {
-    min-height: 62px;
+    min-height: 76px;
     display: grid;
-    grid-template-rows: 26px auto;
+    grid-template-rows: 26px auto auto;
     gap: 5px;
     padding: 7px;
     text-align: left;
@@ -284,6 +308,14 @@ style.textContent = `
     font-weight: 900;
     white-space: normal;
   }
+  .swatch-sub {
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+    white-space: normal;
+  }
+  .swatch-button.active .swatch-sub { color: #d7dba4; }
   .workspace {
     display: grid;
     grid-template-columns: 330px minmax(520px, 1fr) 360px;
@@ -334,6 +366,98 @@ style.textContent = `
   .add-row { padding: 12px; border-bottom: 1px solid #e6ebf0; }
   .add-row label { flex: 1; }
   .add-row select { width: 100%; }
+  .store-picker {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border-bottom: 1px solid #e6ebf0;
+  }
+  .store-picker-head, .store-search-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .store-picker h3 {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.15;
+  }
+  .store-picker-head span {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .store-search-row input {
+    min-width: 0;
+    flex: 1;
+    height: 38px;
+    border: 1px solid #c6d0dc;
+    border-radius: 8px;
+    padding: 0 10px;
+    font: inherit;
+    font-weight: 800;
+  }
+  .store-picker select { width: 100%; }
+  .store-result-list {
+    display: grid;
+    gap: 6px;
+    max-height: 178px;
+    overflow: auto;
+    padding-right: 3px;
+  }
+  .store-result {
+    display: grid;
+    grid-template-columns: 48px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #d6dee8;
+    border-radius: 8px;
+    background: #fff;
+    color: #07111f;
+    text-align: left;
+  }
+  .store-result.active {
+    border-color: #335f31;
+    background: #e8f2df;
+  }
+  .store-thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: 7px;
+    object-fit: cover;
+    background: #e2ead9;
+    border: 1px solid rgba(0,0,0,0.12);
+  }
+  .store-thumb.missing {
+    display: grid;
+    place-items: center;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+  .store-result strong, .store-result small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .store-result strong { font-size: 13px; }
+  .store-result small {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .store-result span {
+    color: #334155;
+    font-size: 11px;
+    font-weight: 900;
+  }
+  .store-actions { align-items: stretch; }
+  .store-actions button { flex: 1; }
   .entry-editor { padding: 14px; display: grid; gap: 12px; }
   .entry-editor .inline { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .entry-editor .danger { border-color: #e2b4aa; color: #7f1d1d; }
@@ -393,7 +517,6 @@ style.textContent = `
 document.head.appendChild(style);
 
 const ecologySelect = document.querySelector<HTMLSelectElement>("#ecology-select")!;
-const terrainSelect = document.querySelector<HTMLSelectElement>("#terrain-select")!;
 const densitySlider = document.querySelector<HTMLInputElement>("#density-slider")!;
 const diversitySlider = document.querySelector<HTMLInputElement>("#diversity-slider")!;
 const vertexTargetInput = document.querySelector<HTMLInputElement>("#vertex-target-input")!;
@@ -410,6 +533,13 @@ const fileInput = document.querySelector<HTMLInputElement>("#file-input")!;
 const glbInput = document.querySelector<HTMLInputElement>("#glb-input")!;
 const importedAssetSelect = document.querySelector<HTMLSelectElement>("#imported-asset-select")!;
 const importedAssetButton = document.querySelector<HTMLButtonElement>("#add-imported-asset-button")!;
+const storeAssetSearchInput = document.querySelector<HTMLInputElement>("#store-asset-search")!;
+const storeAssetSearchButton = document.querySelector<HTMLButtonElement>("#store-asset-search-button")!;
+const storeAssetLodSelect = document.querySelector<HTMLSelectElement>("#store-asset-lod")!;
+const storeAssetResultsEl = document.querySelector<HTMLDivElement>("#store-asset-results")!;
+const storeAssetCountEl = document.querySelector<HTMLSpanElement>("#store-asset-count")!;
+const storeAssetLoadMoreButton = document.querySelector<HTMLButtonElement>("#store-asset-load-more")!;
+const storeAssetAddButton = document.querySelector<HTMLButtonElement>("#store-asset-add-button")!;
 const jsonOutput = document.querySelector<HTMLTextAreaElement>("#json-output")!;
 const statusOutput = document.querySelector<HTMLSpanElement>("#status-output")!;
 const renderedOutput = document.querySelector<HTMLElement>("#rendered-output")!;
@@ -418,7 +548,6 @@ const vertexCurrentOutput = document.querySelector<HTMLElement>("#vertex-current
 const canvas = document.querySelector<HTMLCanvasElement>("#biome-canvas")!;
 const workspace = document.querySelector<HTMLElement>("#workspace")!;
 const ecologySwatchGrid = document.querySelector<HTMLDivElement>("#ecology-swatch-grid")!;
-const terrainSwatchGrid = document.querySelector<HTMLDivElement>("#terrain-swatch-grid")!;
 const jsonToggleButton = document.querySelector<HTMLButtonElement>("#json-toggle-button")!;
 const applyWorldButton = document.querySelector<HTMLButtonElement>("#apply-world-button")!;
 
@@ -433,9 +562,6 @@ worldIdInput.value = currentWorldId();
 ecologySelect.innerHTML = ECOLOGY_BIOME_OPTIONS.map(
   (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
 ).join("");
-terrainSelect.innerHTML = `<option value="">Load terrain...</option>${terrainPaints.map(
-  (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
-).join("")}`;
 presetSelect.innerHTML = procPlantPresetIds.map(
   (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
 ).join("");
@@ -594,9 +720,11 @@ const bakeImportedAssetTemplate = (object: THREE.Object3D, tintColor?: number): 
   const normal = new THREE.Vector3();
   const normalMatrix = new THREE.Matrix3();
   const tint = tintColor === undefined ? null : new THREE.Color(tintColor);
+  let sampledDown = false;
   object.traverse((child) => {
     const mesh = child as THREE.Mesh;
     if (!mesh.isMesh || !mesh.geometry) return;
+    if (positions.length / 3 >= MAX_IMPORTED_ASSET_VERTICES) return;
     const geometry = mesh.geometry;
     const positionAttr = geometry.getAttribute("position");
     if (!positionAttr) return;
@@ -605,7 +733,14 @@ const bakeImportedAssetTemplate = (object: THREE.Object3D, tintColor?: number): 
     const indexAttr = geometry.getIndex();
     normalMatrix.getNormalMatrix(mesh.matrixWorld);
     const triangleCount = indexAttr ? Math.floor(indexAttr.count / 3) : Math.floor(positionAttr.count / 3);
-    for (let triangle = 0; triangle < triangleCount; triangle++) {
+    const remainingTriangles = Math.max(1, Math.floor((MAX_IMPORTED_ASSET_VERTICES - positions.length / 3) / 3));
+    const stride = Math.max(1, Math.ceil(triangleCount / remainingTriangles));
+    if (stride > 1) sampledDown = true;
+    for (let triangle = 0; triangle < triangleCount; triangle += stride) {
+      if (positions.length / 3 + 3 > MAX_IMPORTED_ASSET_VERTICES) {
+        sampledDown = true;
+        break;
+      }
       const materialColor = tint ?? materialColorForMesh(mesh, triangle);
       for (let corner = 0; corner < 3; corner++) {
         const sourceIndex = indexAttr ? indexAttr.getX(triangle * 3 + corner) : triangle * 3 + corner;
@@ -626,14 +761,79 @@ const bakeImportedAssetTemplate = (object: THREE.Object3D, tintColor?: number): 
         }
         indices.push(vertexIndex);
       }
-      if (positions.length / 3 > MAX_IMPORTED_ASSET_VERTICES) {
-        throw new Error(`Imported GLB has more than ${MAX_IMPORTED_ASSET_VERTICES.toLocaleString()} baked vertices.`);
-      }
     }
   });
   const vertexCount = positions.length / 3;
   if (vertexCount === 0) throw new Error("Imported GLB did not contain mesh geometry.");
+  if (sampledDown) {
+    console.warn(`[biome-mixer] sampled GLB scatter template down to ${vertexCount.toLocaleString()} vertices`);
+  }
   return { version: 1, vertexCount, positions, normals, colors, indices };
+};
+
+const objectFromAssetTemplate = (
+  template: TellusBiomeAssetTemplate,
+  tintColor?: number,
+): THREE.Object3D => {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(template.positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(template.normals, 3));
+  const colors = [...template.colors];
+  if (tintColor !== undefined) {
+    const tint = new THREE.Color(tintColor);
+    for (let i = 0; i < colors.length; i += 3) {
+      colors[i] = (colors[i] ?? 1) * tint.r;
+      colors[i + 1] = (colors[i + 1] ?? 1) * tint.g;
+      colors[i + 2] = (colors[i + 2] ?? 1) * tint.b;
+    }
+  }
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(template.indices);
+  geometry.computeBoundingSphere();
+  const material = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  const group = new THREE.Group();
+  group.name = "Biome asset template";
+  group.add(mesh);
+  return group;
+};
+
+const assetPreviewObjectForEntry = (entry: TellusBiomeMixEntry): THREE.Object3D | null => {
+  if (!isAssetMixEntry(entry)) return null;
+  if (entry.asset.template) return objectFromAssetTemplate(entry.asset.template, entry.asset.color);
+  const assetKey = assetCacheKeyForEntry(entry);
+  const prototype = importedAssets.get(assetKey);
+  return prototype ? cloneImportedAssetInstance(prototype, entry.asset.color) : null;
+};
+
+const cacheAssetEntryTemplatePrototype = (entry: TellusBiomeMixEntry): boolean => {
+  if (!isAssetMixEntry(entry) || !entry.asset.template) return false;
+  const cacheKey = assetCacheKeyForEntry(entry);
+  importedAssetTemplates.set(cacheKey, entry.asset.template);
+  if (!importedAssets.has(cacheKey)) {
+    importedAssets.set(cacheKey, objectFromAssetTemplate(entry.asset.template, entry.asset.color));
+  }
+  if (!importedAssetOptions.some((option) => option.id === cacheKey)) {
+    importedAssetOptions.push({
+      id: cacheKey,
+      libraryId: entry.asset.libraryId,
+      label: `${entry.label}${entry.asset.lodPreference ? ` (${entry.asset.lodPreference})` : ""}`,
+      name: entry.asset.name,
+      source: entry.asset.runtimeOnly ? "local" : "store",
+      lodPreference: entry.asset.lodPreference,
+    });
+  }
+  return true;
+};
+
+const cacheAssetEntryTemplates = (mix: TellusBiomeMixDefinition): number => {
+  let cached = 0;
+  for (const entry of mix.entries) {
+    if (cacheAssetEntryTemplatePrototype(entry)) cached++;
+  }
+  return cached;
 };
 
 const colorForEntry = (entry: TellusBiomeMixEntry): number => {
@@ -676,6 +876,102 @@ const geometryVertexCount = (object: THREE.Object3D): number => {
   return total;
 };
 
+const createBiomeGrassTuftGeometry = (seed: number, bladeCount = 12): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < bladeCount; i++) {
+    const yaw = i * GOLDEN_ANGLE_RADIANS + (hash01(seed + i * 17) - 0.5) * 1.15;
+    const radial = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+    const side = new THREE.Vector3(-radial.z, 0, radial.x);
+    const height = 0.34 + hash01(seed + i * 31) * 0.5;
+    const width = 0.012 + hash01(seed + i * 43) * 0.014;
+    const baseSpread = Math.sqrt(hash01(seed + i * 59)) * 0.11;
+    const base = radial.clone().multiplyScalar(baseSpread);
+    const bend = radial.clone().multiplyScalar((0.08 + hash01(seed + i * 71) * 0.28) * height);
+    const mid = base.clone().add(up.clone().multiplyScalar(height * 0.55)).add(bend.clone().multiplyScalar(0.42));
+    const tip = base.clone().add(up.clone().multiplyScalar(height)).add(bend);
+    const normal = new THREE.Vector3().crossVectors(side, tip.clone().sub(base)).normalize();
+    const start = positions.length / 3;
+    const points = [
+      base.clone().add(side.clone().multiplyScalar(-width)),
+      base.clone().add(side.clone().multiplyScalar(width)),
+      mid.clone().add(side.clone().multiplyScalar(width * 0.58)),
+      mid.clone().add(side.clone().multiplyScalar(-width * 0.58)),
+      tip,
+    ];
+    for (const point of points) {
+      positions.push(point.x, point.y, point.z);
+      normals.push(normal.x, normal.y, normal.z);
+    }
+    indices.push(start, start + 1, start + 2, start, start + 2, start + 3, start + 3, start + 2, start + 4);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+const buildGrassWorldObject = (
+  entry: TellusBiomeMixEntry,
+  genome: ProcPlantGenome,
+  count: number,
+): THREE.Object3D => {
+  const bladeCount = Math.round(THREE.MathUtils.clamp(8 + (genome.foliage?.mass ?? 0.8) * 5, 7, 16));
+  const geometry = createBiomeGrassTuftGeometry(entry.seed ^ 0x61a55, bladeCount);
+  const material = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  const mesh = new THREE.InstancedMesh(geometry, material, count);
+  mesh.name = `grass-world-${entry.id}`;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  const baseColor = new THREE.Color(genome.leaf.colorA);
+  const tipColor = new THREE.Color(genome.leaf.colorB);
+  const matrix = new THREE.Matrix4();
+  const quat = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const color = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const n = entry.seed + i * 97;
+    const radius = 2 + Math.sqrt(hash01(n)) * 39;
+    const angle = i * GOLDEN_ANGLE_RADIANS + hash01(n + 31) * 0.45;
+    const x = Math.sin(angle) * radius;
+    const z = Math.cos(angle) * radius;
+    const y = Math.max(0, z + 40) * 0.035 + 0.012;
+    const moistureLift = THREE.MathUtils.lerp(0.74, 1.18, entry.environment.moisture);
+    const shadeStretch = THREE.MathUtils.lerp(0.86, 1.22, 1 - entry.environment.light);
+    const grassHeight = entry.grassHeight ?? entry.scale;
+    const grassSpread = entry.grassSpread ?? 1;
+    const grassLean = entry.grassLean ?? 0.42;
+    const widthScale = Math.max(0.55, grassSpread) * (0.17 + hash01(n + 71) * 0.19) * moistureLift;
+    const heightScale = grassHeight * (0.17 + hash01(n + 71) * 0.19) * moistureLift * shadeStretch;
+    const yaw = hash01(n + 131) * Math.PI * 2;
+    const leanDirection = yaw + (hash01(n + 101) - 0.5) * Math.PI;
+    const leanAngle = grassLean * THREE.MathUtils.lerp(0.2, 1, hash01(n + 151));
+    quat.setFromEuler(new THREE.Euler(
+      Math.cos(leanDirection) * leanAngle,
+      yaw,
+      Math.sin(leanDirection) * leanAngle,
+    ));
+    scale.set(widthScale, heightScale * (0.9 + (genome.foliage?.mass ?? 0.8) * 0.16), widthScale);
+    matrix.compose(new THREE.Vector3(x, y, z), quat, scale);
+    mesh.setMatrixAt(i, matrix);
+    color.copy(baseColor).lerp(tipColor, 0.25 + hash01(n + 191) * 0.62);
+    if (hash01(n + 211) < 0.2) color.lerp(new THREE.Color(0xd8cc76), 0.12 + hash01(n + 223) * 0.2);
+    mesh.setColorAt(i, color);
+  }
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.instanceMatrix.needsUpdate = true;
+  const group = new THREE.Group();
+  group.name = `grass-world-${entry.label}`;
+  group.userData.grassWorld = { count, bladeCount };
+  group.add(mesh);
+  return group;
+};
+
 const selectedEntry = () => currentMix.entries.find((entry) => entry.id === selectedEntryId) ?? currentMix.entries[0];
 
 const swatchStyle = (paint: TerrainPaintKind): string => {
@@ -702,20 +998,12 @@ const renderSwatches = () => {
       <button type="button" class="swatch-button ${currentMix.ecologyBiome === id ? "active" : ""}" data-ecology="${id}">
         <span class="swatch-preview" style="${swatchStyle(paint)}"></span>
         <span class="swatch-label">${labelForProcPlantId(id)}</span>
+        <span class="swatch-sub">${labelForProcPlantId(paint)}</span>
       </button>
     `;
   }).join("");
-  terrainSwatchGrid.innerHTML = terrainPaints.map((id) => `
-    <button type="button" class="swatch-button ${currentMix.terrainPaint === id ? "active" : ""}" data-terrain="${id}">
-      <span class="swatch-preview" style="${swatchStyle(id)}"></span>
-      <span class="swatch-label">${labelForProcPlantId(id)}</span>
-    </button>
-  `).join("");
   ecologySwatchGrid.querySelectorAll<HTMLButtonElement>("[data-ecology]").forEach((button) => {
     button.addEventListener("click", () => loadEcologyBiome(button.dataset.ecology as EcologyBiomeId));
-  });
-  terrainSwatchGrid.querySelectorAll<HTMLButtonElement>("[data-terrain]").forEach((button) => {
-    button.addEventListener("click", () => loadTerrainPaint(button.dataset.terrain as TerrainPaintKind));
   });
 };
 
@@ -866,6 +1154,15 @@ const slug = (value: string): string =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "asset";
 
+const escapeHtml = (value: string): string =>
+  value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  }[char] ?? char));
+
 const importErrorMessage = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
   if (/No DRACOLoader|draco/i.test(message)) return "Draco-compressed GLB could not be decoded.";
@@ -876,7 +1173,7 @@ const importErrorMessage = (error: unknown): string => {
 
 const renderImportedAssetOptions = () => {
   importedAssetSelect.innerHTML = importedAssetOptions.length
-    ? importedAssetOptions.map((asset) => `<option value="${asset.id}">${asset.label}</option>`).join("")
+    ? importedAssetOptions.map((asset) => `<option value="${asset.id}">${escapeHtml(asset.label)}</option>`).join("")
     : `<option value="">Import GLB first</option>`;
   if (!importedAssetOptions.some((asset) => asset.id === selectedImportedAssetId)) {
     selectedImportedAssetId = importedAssetOptions[0]?.id ?? "";
@@ -894,7 +1191,14 @@ const makeImportedAssetEntry = (assetId: string): TellusBiomeMixEntry | null => 
     id: `${assetId}-entry-${Date.now().toString(36)}-${currentMix.entries.length}`,
     label: option.label,
     source: "asset",
-    asset: { kind: "glb", name: option.name, libraryId: assetId, runtimeOnly: false, template },
+    asset: {
+      kind: "glb",
+      name: option.name,
+      libraryId: option.libraryId ?? assetId,
+      lodPreference: option.lodPreference,
+      runtimeOnly: option.source === "local",
+      template,
+    },
     weight: 1,
     density: 0.22,
     scale: 10,
@@ -902,6 +1206,266 @@ const makeImportedAssetEntry = (assetId: string): TellusBiomeMixEntry | null => 
     seed: currentMix.seed ^ ((currentMix.entries.length + 1) * 0x51ed),
     enabled: true,
   };
+};
+
+const assetCacheKey = (assetId: string, lodPreference?: TellusBiomeAssetLodPreference): string =>
+  `${assetId}:${lodPreference ?? "game-optimized"}`;
+
+const assetCacheKeyForEntry = (entry: TellusBiomeMixEntry): string =>
+  isAssetMixEntry(entry)
+    ? assetCacheKey(entry.asset.libraryId ?? entry.id, entry.asset.lodPreference)
+    : entry.id;
+
+const assetModelPathForLod = (assetId: string, lodPreference: TellusBiomeAssetLodPreference): string => {
+  if (lodPreference === "game-optimized") return assetStoreGameOptimizedModelUrl(assetId);
+  if (lodPreference === "impostor") return `/api/assets/model/${encodeURIComponent(assetId)}/impostor`;
+  return `/api/assets/model/${encodeURIComponent(assetId)}/lod/${lodPreference.slice(3)}`;
+};
+
+const assetModelCandidatePaths = (
+  assetId: string,
+  lodPreference: TellusBiomeAssetLodPreference,
+): string[] => {
+  const order: TellusBiomeAssetLodPreference[] =
+    lodPreference === "lod3"
+      ? ["lod3", "lod2", "lod1", "game-optimized"]
+      : lodPreference === "lod2"
+        ? ["lod2", "lod1", "game-optimized"]
+        : lodPreference === "lod1"
+          ? ["lod1", "game-optimized"]
+          : lodPreference === "lod0"
+            ? ["lod0", "game-optimized"]
+            : lodPreference === "impostor"
+              ? ["impostor", "lod3", "lod2", "game-optimized"]
+              : ["game-optimized"];
+  return [...new Set(order.map((candidate) => assetModelPathForLod(assetId, candidate)))];
+};
+
+const loadGlbUrl = async (url: string): Promise<THREE.Object3D> => {
+  const gltf = await gltfLoader.loadAsync(url);
+  return prepareImportedAsset(gltf.scene);
+};
+
+const loadStoreAssetObject = async (
+  assetId: string,
+  lodPreference: TellusBiomeAssetLodPreference,
+): Promise<{ object: THREE.Object3D; path: string }> => {
+  let lastError: unknown = null;
+  for (const path of assetModelCandidatePaths(assetId, lodPreference)) {
+    try {
+      const object = await loadGlbUrl(tellusAssetLibraryUrl(path));
+      return { object, path };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error(`Could not load asset ${assetId}`);
+};
+
+const biomeMixEntryRenderReport = (mix: TellusBiomeMixDefinition) => {
+  let renderable = 0;
+  let missingGlbTemplates = 0;
+  let disabled = 0;
+  for (const entry of mix.entries) {
+    if (entry.enabled === false || entry.weight <= 0 || entry.density <= 0) {
+      disabled++;
+      continue;
+    }
+    if (isAssetMixEntry(entry) && !entry.asset.template) {
+      missingGlbTemplates++;
+      continue;
+    }
+    renderable++;
+  }
+  return { renderable, missingGlbTemplates, disabled, total: mix.entries.length };
+};
+
+const biomeMixReportText = (mix: TellusBiomeMixDefinition): string => {
+  const report = biomeMixEntryRenderReport(mix);
+  const notes = [`${report.renderable}/${report.total} renderable`];
+  if (report.missingGlbTemplates) notes.push(`${report.missingGlbTemplates} GLB need store hydrate/re-import`);
+  if (report.disabled) notes.push(`${report.disabled} disabled/zero`);
+  return notes.join("; ");
+};
+
+const formatStoreAssetMeta = (asset: AssetLibraryModel): string => {
+  const vertices = asset.effectiveMeshStats?.vertices;
+  const sizeMb = asset.effective_file_size !== undefined
+    ? asset.effective_file_size / (1024 * 1024)
+    : asset.file_size !== undefined
+      ? asset.file_size / (1024 * 1024)
+      : undefined;
+  const bits = [
+    asset.file_format?.toUpperCase() ?? "GLB",
+    vertices !== undefined ? `${vertices.toLocaleString()}v` : "",
+    sizeMb !== undefined ? `${sizeMb.toFixed(sizeMb < 1 ? 2 : 1)} MB` : "",
+    asset.lodReady ? "LOD" : "",
+  ].filter(Boolean);
+  return bits.join(" · ");
+};
+
+const storeAssetStableId = (asset: AssetLibraryModel): string =>
+  asset.assetStoreModelId?.trim() || asset.id.replace(/^generated:/, "");
+
+const storeAssetThumbnailUrl = (assetId: string): string =>
+  tellusAssetLibraryUrl(`/api/assets/model/${encodeURIComponent(assetId)}/thumbnail`);
+
+const renderStoreAssetResults = () => {
+  storeAssetCountEl.textContent = storeAssetLoading
+    ? "Loading..."
+    : storeAssetResults.length
+      ? `${storeAssetResults.length}/${storeAssetTotal || storeAssetResults.length}`
+      : "No assets";
+  storeAssetResultsEl.innerHTML = storeAssetResults.length
+    ? storeAssetResults.map((asset) => {
+      const stableId = storeAssetStableId(asset);
+      return `
+      <button type="button" class="store-result ${stableId === selectedStoreAssetId ? "active" : ""}" data-store-asset-id="${escapeHtml(stableId)}">
+        ${asset.hasThumbnail !== false
+          ? `<img class="store-thumb" src="${escapeHtml(storeAssetThumbnailUrl(stableId))}" alt="" loading="lazy" />`
+          : `<span class="store-thumb missing">No img</span>`}
+        <span>
+          <strong>${escapeHtml(asset.name)}</strong>
+          <small>${escapeHtml(formatStoreAssetMeta(asset))}</small>
+        </span>
+        <span>${escapeHtml(stableId.slice(0, 8))}</span>
+      </button>
+    `;
+    }).join("")
+    : `<p>${storeAssetLoading ? "Loading store assets..." : "Search flora or GLB assets."}</p>`;
+  storeAssetResultsEl.querySelectorAll<HTMLButtonElement>(".store-result").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedStoreAssetId = button.dataset.storeAssetId ?? "";
+      renderStoreAssetResults();
+    });
+  });
+  storeAssetResultsEl.querySelectorAll<HTMLImageElement>(".store-thumb").forEach((image) => {
+    image.addEventListener("error", () => {
+      const fallback = document.createElement("span");
+      fallback.className = "store-thumb missing";
+      fallback.textContent = "No img";
+      image.replaceWith(fallback);
+    }, { once: true });
+  });
+  storeAssetLoadMoreButton.disabled = storeAssetLoading || !storeAssetHasNext;
+  storeAssetAddButton.disabled = storeAssetLoading || !selectedStoreAssetId;
+};
+
+const browseStoreAssets = async (options: { append?: boolean } = {}) => {
+  storeAssetLoading = true;
+  renderStoreAssetResults();
+  try {
+    const result = await browseAssetLibrary(
+      storeAssetSearch,
+      storeAssetPage,
+      "newest" satisfies AssetBrowseSort,
+      18,
+      storeAssetSearch.trim() ? "" : "flora",
+    );
+    const glbModels = result.models.filter((model) => {
+      const format = model.file_format?.toLowerCase();
+      return !format || format === "glb" || format === "gltf";
+    });
+    const merged = options.append ? [...storeAssetResults, ...glbModels] : glbModels;
+    const seen = new Set<string>();
+    storeAssetResults = merged.filter((model) => {
+      if (seen.has(model.id)) return false;
+      seen.add(model.id);
+      return true;
+    });
+    storeAssetTotal = result.total;
+    storeAssetHasNext = result.hasNext;
+    if (!storeAssetResults.some((asset) => storeAssetStableId(asset) === selectedStoreAssetId)) {
+      selectedStoreAssetId = storeAssetResults[0] ? storeAssetStableId(storeAssetResults[0]) : "";
+    }
+  } catch (error) {
+    console.error(error);
+    updateStatus(`Could not browse Tellus store: ${importErrorMessage(error)}`);
+  } finally {
+    storeAssetLoading = false;
+    renderStoreAssetResults();
+  }
+};
+
+const ensureStoreAssetImported = async (
+  asset: AssetLibraryModel,
+  lodPreference: TellusBiomeAssetLodPreference,
+): Promise<string> => {
+  const stableId = storeAssetStableId(asset);
+  const cacheKey = assetCacheKey(stableId, lodPreference);
+  if (importedAssets.has(cacheKey) && importedAssetTemplates.has(cacheKey)) return cacheKey;
+  const { object, path } = await loadStoreAssetObject(stableId, lodPreference);
+  importedAssets.set(cacheKey, object);
+  importedAssetTemplates.set(cacheKey, bakeImportedAssetTemplate(object));
+  if (!importedAssetOptions.some((option) => option.id === cacheKey)) {
+    importedAssetOptions.push({
+      id: cacheKey,
+      libraryId: stableId,
+      label: `${asset.name} (${lodPreference})`,
+      name: asset.name,
+      source: "store",
+      lodPreference,
+    });
+  }
+  selectedImportedAssetId = cacheKey;
+  updateStatus(`Loaded ${asset.name} from ${path}.`);
+  return cacheKey;
+};
+
+const addStoreAssetEntry = async () => {
+  const asset = storeAssetResults.find((item) => storeAssetStableId(item) === selectedStoreAssetId);
+  if (!asset) {
+    updateStatus("Choose a Tellus store GLB first.");
+    return;
+  }
+  storeAssetAddButton.disabled = true;
+  updateStatus(`Loading ${asset.name} as ${selectedStoreAssetLod}...`);
+  try {
+    const cacheKey = await ensureStoreAssetImported(asset, selectedStoreAssetLod);
+    const entry = makeImportedAssetEntry(cacheKey);
+    if (!entry) {
+      updateStatus(`Loaded ${asset.name}, but could not make a biome entry.`);
+      return;
+    }
+    currentMix.entries.push(entry);
+    selectedEntryId = entry.id;
+    updateStatus(`Added ${asset.name} as ${selectedStoreAssetLod}; ${biomeMixReportText(currentMix)}.`);
+    renderUi();
+    rebuildPreview();
+  } catch (error) {
+    console.error(error);
+    updateStatus(`Could not add ${asset.name}: ${importErrorMessage(error)}`);
+  } finally {
+    storeAssetAddButton.disabled = false;
+  }
+};
+
+const hydrateStoreBackedAssetEntries = async (mix: TellusBiomeMixDefinition): Promise<number> => {
+  let hydrated = 0;
+  for (const entry of mix.entries) {
+    if (!isAssetMixEntry(entry)) continue;
+    if (entry.asset.template || !entry.asset.libraryId || entry.asset.runtimeOnly === true) continue;
+    const lodPreference = entry.asset.lodPreference ?? "lod2";
+    try {
+      const cacheKey = await ensureStoreAssetImported(
+        {
+          id: entry.asset.libraryId,
+          name: entry.asset.name,
+          file_format: "glb",
+          source: "asset-library",
+        },
+        lodPreference,
+      );
+      entry.asset.template = importedAssetTemplates.get(cacheKey);
+      entry.asset.lodPreference = lodPreference;
+      entry.asset.runtimeOnly = false;
+      cacheAssetEntryTemplatePrototype(entry);
+      hydrated++;
+    } catch (error) {
+      console.warn("Could not hydrate store biome asset", entry.asset.libraryId, error);
+    }
+  }
+  return hydrated;
 };
 
 const addImportedAssetEntry = () => {
@@ -955,13 +1519,17 @@ const renderEntryEditor = () => {
     return;
   }
   const isAssetEntry = isAssetMixEntry(entry);
-  const previewGenome = genomeForMixEntry(entry);
-  const weberPenn = previewGenome.weberPenn;
-  const foliage = previewGenome.foliage;
-  const realism = previewGenome.treeRealism;
-  const foliageMode = weberFoliageMode(previewGenome);
+  const previewGenome = isAssetEntry ? null : genomeForMixEntry(entry);
+  const weberPenn = previewGenome?.weberPenn;
+  const foliage = previewGenome?.foliage;
+  const realism = previewGenome?.treeRealism;
+  const foliageMode = previewGenome ? weberFoliageMode(previewGenome) : "plain";
   const fillMass = foliageMode === "plain" ? 0 : foliage?.mass ?? 0;
-  const fillSize = foliage?.size ?? (previewGenome.habit === "conifer" ? 0.34 : 0.54);
+  const fillSize = foliage?.size ?? (previewGenome?.habit === "conifer" ? 0.34 : 0.54);
+  const isGrassEntry = previewGenome?.habit === "grass";
+  const grassHeight = entry.grassHeight ?? entry.scale;
+  const grassSpread = entry.grassSpread ?? 1;
+  const grassLean = entry.grassLean ?? 0.42;
   entryEditor.innerHTML = `
     <label>
       Label
@@ -993,6 +1561,28 @@ const renderEntryEditor = () => {
         </select>
       </label>
     </div>
+    ${isGrassEntry ? `
+      <section class="weber-editor">
+        <h3>Grass Carpet</h3>
+        <div class="inline">
+          <label>
+            Height
+            <input id="grass-height" type="range" min="0.12" max="3.2" value="${grassHeight}" step="0.02" />
+            <output>${grassHeight.toFixed(2)}</output>
+          </label>
+          <label>
+            Spread
+            <input id="grass-spread" type="range" min="0.55" max="2.4" value="${grassSpread}" step="0.02" />
+            <output>${grassSpread.toFixed(2)}</output>
+          </label>
+        </div>
+        <label>
+          Lean
+          <input id="grass-lean" type="range" min="0" max="1.1" value="${grassLean}" step="0.02" />
+          <output>${grassLean.toFixed(2)}</output>
+        </label>
+      </section>
+    ` : ""}
     ${isAssetEntry ? `
       <section class="weber-editor">
         <h3>Imported GLB</h3>
@@ -1171,6 +1761,25 @@ const renderEntryEditor = () => {
   bindNumber("#entry-weight", "weight");
   bindNumber("#entry-density", "density");
   bindNumber("#entry-scale", "scale");
+  const bindOptionalNumber = (
+    selector: string,
+    key: "grassHeight" | "grassSpread" | "grassLean",
+    format: (value: number) => string,
+  ) => {
+    const input = entryEditor.querySelector<HTMLInputElement>(selector);
+    if (!input) return;
+    const output = input.nextElementSibling as HTMLOutputElement;
+    input.addEventListener("input", () => {
+      entry[key] = Number(input.value);
+      output.textContent = format(entry[key] ?? 0);
+      renderJson();
+      renderEntryList();
+      rebuildPreview();
+    });
+  };
+  bindOptionalNumber("#grass-height", "grassHeight", (value) => value.toFixed(2));
+  bindOptionalNumber("#grass-spread", "grassSpread", (value) => value.toFixed(2));
+  bindOptionalNumber("#grass-lean", "grassLean", (value) => value.toFixed(2));
   entryEditor.querySelector<HTMLInputElement>("#entry-label")!.addEventListener("input", (event) => {
     entry.label = (event.currentTarget as HTMLInputElement).value || entry.label;
     renderJson();
@@ -1332,19 +1941,31 @@ const rebuildPreview = () => {
   let rendered = 0;
   let currentVertices = 0;
   enabled.forEach((entry, entryIndex) => {
-    const assetKey = isAssetMixEntry(entry) ? entry.asset.libraryId ?? entry.id : "";
-    const assetPrototype = isAssetMixEntry(entry) ? importedAssets.get(assetKey) : undefined;
-    if (isAssetMixEntry(entry) && !assetPrototype) return;
     const genome = isAssetMixEntry(entry) ? null : genomeForMixEntry(entry);
-    const prototype = assetPrototype ?? buildProcPlantObject(genome!, entry.seed, entry.environment);
-    const verticesPerPlant = geometryVertexCount(prototype);
     const share = Math.max(0.01, entry.weight) / weightTotal;
+    if (genome?.habit === "grass") {
+      const grassCount = Math.max(
+        80,
+        Math.min(2400, Math.round(720 * currentMix.density * entry.density * (0.6 + share * 1.6))),
+      );
+      const grassWorld = buildGrassWorldObject(entry, genome, grassCount);
+      const verticesPerTuft = geometryVertexCount(grassWorld);
+      currentVertices += verticesPerTuft * grassCount;
+      previewGroup.add(grassWorld);
+      rendered += grassCount;
+      return;
+    }
+    const prototype = isAssetMixEntry(entry)
+      ? assetPreviewObjectForEntry(entry)
+      : buildProcPlantObject(genome!, entry.seed, entry.environment);
+    if (!prototype) return;
+    const verticesPerPlant = geometryVertexCount(prototype);
     const habitCap = isAssetMixEntry(entry) || genome?.habit === "tree" || genome?.habit === "conifer" || genome?.habit === "palm" ? 12 : 36;
     const count = Math.max(1, Math.min(habitCap, Math.round(70 * currentMix.density * entry.density * share)));
     currentVertices += verticesPerPlant * count;
     for (let i = 0; i < count; i++) {
       const instance = isAssetMixEntry(entry)
-        ? cloneImportedAssetInstance(prototype, entry.asset.color)
+        ? i === 0 ? prototype : prototype.clone(true)
         : i === 0 ? prototype : prototype.clone(true);
       const n = rendered + i + entry.seed + entryIndex * 97;
       const radius = 7 + Math.sqrt(hash01(n)) * 46;
@@ -1368,16 +1989,6 @@ const rebuildPreview = () => {
 const loadEcologyBiome = (biome: EcologyBiomeId) => {
   currentMix = makeEcologyBiomeMix(biome, currentMix.seed);
   ecologySelect.value = biome;
-  terrainSelect.value = "";
-  selectedEntryId = currentMix.entries[0]?.id ?? "";
-  updateStatus(`Loaded ${currentMix.label}.`);
-  renderUi();
-  rebuildPreview();
-};
-
-const loadTerrainPaint = (paint: TerrainPaintKind) => {
-  currentMix = makeTerrainPaintBiomeMix(paint, currentMix.seed);
-  terrainSelect.value = paint;
   selectedEntryId = currentMix.entries[0]?.id ?? "";
   updateStatus(`Loaded ${currentMix.label}.`);
   renderUi();
@@ -1386,11 +1997,6 @@ const loadTerrainPaint = (paint: TerrainPaintKind) => {
 
 ecologySelect.addEventListener("change", () => {
   loadEcologyBiome(ecologySelect.value as EcologyBiomeId);
-});
-
-terrainSelect.addEventListener("change", () => {
-  if (!terrainSelect.value) return;
-  loadTerrainPaint(terrainSelect.value as TerrainPaintKind);
 });
 
 densitySlider.addEventListener("input", () => {
@@ -1427,6 +2033,34 @@ weberPennSelect.addEventListener("change", () => {
 
 importedAssetSelect.addEventListener("change", () => {
   selectedImportedAssetId = importedAssetSelect.value;
+});
+
+storeAssetSearchButton.addEventListener("click", () => {
+  storeAssetSearch = storeAssetSearchInput.value.trim();
+  storeAssetPage = 1;
+  void browseStoreAssets();
+});
+
+storeAssetSearchInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  storeAssetSearch = storeAssetSearchInput.value.trim();
+  storeAssetPage = 1;
+  void browseStoreAssets();
+});
+
+storeAssetLodSelect.addEventListener("change", () => {
+  selectedStoreAssetLod = storeAssetLodSelect.value as TellusBiomeAssetLodPreference;
+});
+
+storeAssetLoadMoreButton.addEventListener("click", () => {
+  if (!storeAssetHasNext || storeAssetLoading) return;
+  storeAssetPage++;
+  void browseStoreAssets({ append: true });
+});
+
+storeAssetAddButton.addEventListener("click", () => {
+  void addStoreAssetEntry();
 });
 
 document.querySelector<HTMLButtonElement>("#add-preset-button")!.addEventListener("click", () => {
@@ -1485,11 +2119,15 @@ document.querySelector<HTMLButtonElement>("#import-glb-button")!.addEventListene
 fileInput.addEventListener("change", async () => {
   const files = Array.from(fileInput.files ?? []);
   let imported = 0;
+  let cachedTemplates = 0;
+  let hydratedStoreAssets = 0;
   for (const file of files) {
     const raw = JSON.parse(await file.text()) as unknown;
     const mix = normalizeBiomeMixDefinition(raw);
     if (mix) {
       currentMix = mix;
+      cachedTemplates += cacheAssetEntryTemplates(currentMix);
+      hydratedStoreAssets += await hydrateStoreBackedAssetEntries(currentMix);
       selectedEntryId = currentMix.entries[0]?.id ?? "";
       imported++;
       continue;
@@ -1502,7 +2140,9 @@ fileInput.addEventListener("change", async () => {
     }
   }
   fileInput.value = "";
-  updateStatus(imported ? `Imported ${imported} JSON file${imported === 1 ? "" : "s"}.` : "No compatible JSON found.");
+  updateStatus(imported
+    ? `Imported ${imported} JSON file${imported === 1 ? "" : "s"}; ${biomeMixReportText(currentMix)}${hydratedStoreAssets ? `; hydrated ${hydratedStoreAssets} store GLB${hydratedStoreAssets === 1 ? "" : "s"}` : ""}${cachedTemplates ? `; cached ${cachedTemplates} baked template${cachedTemplates === 1 ? "" : "s"}` : ""}.`
+    : "No compatible JSON found.");
   renderUi();
   rebuildPreview();
 });
@@ -1519,7 +2159,7 @@ glbInput.addEventListener("change", async () => {
       const assetId = `asset-${slug(label)}-${Date.now().toString(36)}-${imported}`;
       importedAssets.set(assetId, object);
       importedAssetTemplates.set(assetId, bakeImportedAssetTemplate(object));
-      importedAssetOptions.push({ id: assetId, label, name: file.name });
+      importedAssetOptions.push({ id: assetId, label, name: file.name, source: "local" });
       selectedImportedAssetId = assetId;
       const entry = makeImportedAssetEntry(assetId);
       if (entry) {
@@ -1557,11 +2197,11 @@ applyWorldButton.addEventListener("click", () => {
     updateStatus("Could not save biome mix for this world.");
     return;
   }
-  updateStatus(`Applied ${currentMix.label} to ${labelForProcPlantId(targetPaint)} in ${registry.worldId}.`);
+  updateStatus(`Applied ${currentMix.label} to ${labelForProcPlantId(targetPaint)} in ${registry.worldId}; ${biomeMixReportText(currentMix)}.`);
   void saveActiveBiomeMixRegistryToServer(registry).then((saved) => {
     updateStatus(saved
-      ? `Applied ${currentMix.label} to ${labelForProcPlantId(targetPaint)} in ${registry.worldId} and saved to Hyades.`
-      : `Applied ${currentMix.label} locally; Hyades save is unavailable.`);
+      ? `Applied ${currentMix.label} to ${labelForProcPlantId(targetPaint)} in ${registry.worldId} and saved to Hyades; ${biomeMixReportText(currentMix)}.`
+      : `Applied ${currentMix.label} locally; Hyades save is unavailable; ${biomeMixReportText(currentMix)}.`);
   });
 });
 
@@ -1592,7 +2232,9 @@ const animate = () => {
 
 window.addEventListener("resize", resize);
 void loadRuntimeConfig().finally(() => {
+  storeAssetLodSelect.value = selectedStoreAssetLod;
   renderUi();
+  void browseStoreAssets();
   rebuildPreview();
   resize();
 });

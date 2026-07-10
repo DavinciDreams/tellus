@@ -38,6 +38,7 @@ import {
   type ProcPlantGenome,
   type ProcPlantInstance,
   type ProcPlantTemplate,
+  GOLDEN_ANGLE_RADIANS,
   procPlantPresets,
 } from "./tellus-procplants";
 
@@ -154,13 +155,24 @@ const PROC_TREE_MID_SCALE = 1.45;
 const PROC_TREE_FAR_SCALE = 1.15;
 const PROC_TREE_DETAIL_DISTANCE = 58;
 const PROC_TREE_DETAIL_DISTANCE_THIRD = 72;
-const PROCPLANT_RENDER_STYLE_REVISION = 3;
+const PROCPLANT_RENDER_STYLE_REVISION = 5;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
+const BIOME_MIX_SERVER_REFRESH_MS = 8_000;
 const LOW_FPS_BUILD_BUDGET = 1;
 const NORMAL_BUILD_BUDGET = 2;
 const LOW_FPS_BUILD_MS_BUDGET = 2.5;
 const NORMAL_BUILD_MS_BUDGET = 5;
 const MIN_PROCPLANT_GROUND_HEIGHT = SEA_LEVEL + 0.35;
+const GRASS_CARPET_TUFTS_LOD0 = 36;
+const GRASS_CARPET_TUFTS_LOD1 = 16;
+const GRASS_CARPET_TUFTS_LOD2 = 8;
+const GRASS_CARPET_RADIUS_LOD0 = 4.8;
+const GRASS_CARPET_RADIUS_LOD1 = 5.6;
+const GRASS_CARPET_RADIUS_LOD2 = 6.4;
+const GRASS_FIELD_SPACING_LOD0 = 0.34;
+const GRASS_FIELD_SPACING_LOD1 = 0.68;
+const GRASS_FIELD_SPACING_LOD2 = 1.18;
+const GRASS_FIELD_FULL_DENSITY_RING = 2;
 
 const foliageDefaultsForTreeSpecies = (
   species: string,
@@ -343,6 +355,11 @@ const hashString = (value: string): number => {
   return h >>> 0;
 };
 
+const hash01 = (value: number) => {
+  const x = Math.sin(value * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+};
+
 export const procPlantChunkSeed = (
   worldId: string,
   cx: number,
@@ -434,9 +451,50 @@ const geometryKeyFor = (genome: ProcPlantGenome, instance: ProcPlantInstance): s
   return instance.kind;
 };
 
+const createGrassCarpetGeometry = (bladeCount: number): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < bladeCount; i++) {
+    const yaw = i * GOLDEN_ANGLE_RADIANS + (hash01(i * 17) - 0.5) * 1.15;
+    const radial = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+    const side = new THREE.Vector3(-radial.z, 0, radial.x);
+    const height = 0.32 + hash01(i * 31 + 3) * 0.5;
+    const width = 0.011 + hash01(i * 43 + 5) * 0.012;
+    const baseSpread = Math.sqrt(hash01(i * 59 + 7)) * 0.11;
+    const base = radial.clone().multiplyScalar(baseSpread);
+    const bend = radial.clone().multiplyScalar((0.08 + hash01(i * 71 + 11) * 0.28) * height);
+    const mid = base.clone().add(up.clone().multiplyScalar(height * 0.55)).add(bend.clone().multiplyScalar(0.42));
+    const tip = base.clone().add(up.clone().multiplyScalar(height)).add(bend);
+    const normal = new THREE.Vector3().crossVectors(side, tip.clone().sub(base)).normalize();
+    const start = positions.length / 3;
+    const points = [
+      base.clone().add(side.clone().multiplyScalar(-width)),
+      base.clone().add(side.clone().multiplyScalar(width)),
+      mid.clone().add(side.clone().multiplyScalar(width * 0.58)),
+      mid.clone().add(side.clone().multiplyScalar(-width * 0.58)),
+      tip,
+    ];
+    for (const point of points) {
+      positions.push(point.x, point.y, point.z);
+      normals.push(normal.x, normal.y, normal.z);
+    }
+    indices.push(start, start + 1, start + 2, start, start + 2, start + 3, start + 3, start + 2, start + 4);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
 const geometryForKey = (key: string): THREE.BufferGeometry => {
   const [kind, shape, widthRatio, serration, curl] = key.split(":");
   switch (kind) {
+    case "grassCarpet":
+      return createGrassCarpetGeometry(Number(shape) || 12);
     case "leaf":
       return createProcPlantLeafGeometry(
         shape as ProcPlantGenome["leaf"]["shape"],
@@ -577,8 +635,13 @@ export function createProcPlantVegetation(
   let totalBuildMs = 0;
   let builtLastUpdate = 0;
   let buildDeferred = false;
+  let lastBiomeMixServerRefreshMs = 0;
+  let biomeMixServerRefreshInFlight = false;
+  let activeBiomeMixSignature = "";
   let lastPlayerX: number | null = null;
   let lastPlayerZ: number | null = null;
+  let lastMoveDirX = 0;
+  let lastMoveDirZ = 0;
   let lastPlayerMovedAt = Number.NEGATIVE_INFINITY;
   let buildPausedForMotion = false;
   let disposed = false;
@@ -594,6 +657,7 @@ export function createProcPlantVegetation(
   });
   let activeBiomeMixRegistry: TellusBiomeMixRegistry =
     options.biomeMixRegistry ?? loadActiveBiomeMixRegistryForWorld(options.worldId);
+  activeBiomeMixSignature = JSON.stringify(activeBiomeMixRegistry);
 
   const inBounds = (x: number, z: number) =>
     x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
@@ -641,8 +705,15 @@ export function createProcPlantVegetation(
     rebuildQueue.sort((a, b) => {
       const [ax, az] = a.split(",").map(Number);
       const [bx, bz] = b.split(",").map(Number);
-      return Math.max(Math.abs(ax - centerCx), Math.abs(az - centerCz)) -
-        Math.max(Math.abs(bx - centerCx), Math.abs(bz - centerCz));
+      const arx = ax - centerCx;
+      const arz = az - centerCz;
+      const brx = bx - centerCx;
+      const brz = bz - centerCz;
+      const ar = Math.max(Math.abs(arx), Math.abs(arz));
+      const br = Math.max(Math.abs(brx), Math.abs(brz));
+      const aheadA = arx * lastMoveDirX + arz * lastMoveDirZ;
+      const aheadB = brx * lastMoveDirX + brz * lastMoveDirZ;
+      return (ar * 10 - aheadA * 2) - (br * 10 - aheadB * 2);
     });
   };
 
@@ -660,9 +731,33 @@ export function createProcPlantVegetation(
     for (const key of active.keys()) enqueue(key);
   };
 
-  const reloadActiveBiomeMixes = () => {
-    activeBiomeMixRegistry = loadActiveBiomeMixRegistryForWorld(options.worldId);
+  const applyBiomeMixRegistry = (registry: TellusBiomeMixRegistry) => {
+    const signature = JSON.stringify(registry);
+    if (signature === activeBiomeMixSignature) return false;
+    activeBiomeMixRegistry = registry;
+    activeBiomeMixSignature = signature;
     enqueueAllActive();
+    return true;
+  };
+
+  const reloadActiveBiomeMixes = () => {
+    applyBiomeMixRegistry(loadActiveBiomeMixRegistryForWorld(options.worldId));
+  };
+
+  const refreshBiomeMixesFromServer = (force = false) => {
+    if (typeof window === "undefined" || disposed || biomeMixServerRefreshInFlight) return;
+    const now = performance.now();
+    if (!force && now - lastBiomeMixServerRefreshMs < BIOME_MIX_SERVER_REFRESH_MS) return;
+    lastBiomeMixServerRefreshMs = now;
+    biomeMixServerRefreshInFlight = true;
+    void loadActiveBiomeMixRegistryFromServer(options.worldId)
+      .then((registry) => {
+        if (!registry || disposed) return;
+        applyBiomeMixRegistry(registry);
+      })
+      .finally(() => {
+        biomeMixServerRefreshInFlight = false;
+      });
   };
 
   const onBiomeMixStorage = (event: StorageEvent) => {
@@ -673,15 +768,17 @@ export function createProcPlantVegetation(
     const detail = (event as CustomEvent<{ worldId?: string }>).detail;
     if (!detail?.worldId || detail.worldId === options.worldId) reloadActiveBiomeMixes();
   };
+  const onBiomeMixVisibility = () => {
+    if (document.visibilityState === "visible") refreshBiomeMixesFromServer(true);
+  };
+  const onBiomeMixFocus = () => refreshBiomeMixesFromServer(true);
 
   if (typeof window !== "undefined") {
     window.addEventListener("storage", onBiomeMixStorage);
     window.addEventListener(BIOME_MIX_STORAGE_EVENT, onBiomeMixCustomEvent);
-    void loadActiveBiomeMixRegistryFromServer(options.worldId).then((registry) => {
-      if (!registry || disposed) return;
-      activeBiomeMixRegistry = registry;
-      enqueueAllActive();
-    });
+    window.addEventListener("focus", onBiomeMixFocus);
+    document.addEventListener("visibilitychange", onBiomeMixVisibility);
+    refreshBiomeMixesFromServer(true);
   }
 
   const estimateSlope = (x: number, z: number, height: number): number => {
@@ -737,6 +834,100 @@ export function createProcPlantVegetation(
     const x0 = chunk.cx * chunkSize;
     const z0 = chunk.cz * chunkSize;
     const attempts = plantCap * 5;
+    const grassCarpetPaints = new Set<TerrainPaintKind>();
+
+    const grassRing = Math.max(
+      Math.abs(chunk.cx - chunk.styleCenterCx),
+      Math.abs(chunk.cz - chunk.styleCenterCz),
+    );
+    const grassLod = fullDetailLod || grassRing <= GRASS_FIELD_FULL_DENSITY_RING
+      ? 0
+      : chunk.lod === 1
+        ? 1
+        : 2;
+    const grassSpacing = grassLod === 0
+      ? GRASS_FIELD_SPACING_LOD0
+      : grassLod === 1
+        ? GRASS_FIELD_SPACING_LOD1
+        : GRASS_FIELD_SPACING_LOD2;
+    const grassStartX = Math.floor(x0 / grassSpacing) * grassSpacing + grassSpacing * 0.5;
+    const grassStartZ = Math.floor(z0 / grassSpacing) * grassSpacing + grassSpacing * 0.5;
+    for (let gx = grassStartX; gx < x0 + chunkSize; gx += grassSpacing) {
+      for (let gz = grassStartZ; gz < z0 + chunkSize; gz += grassSpacing) {
+        if (gx < x0 || gz < z0) continue;
+        const cellSeed = seed ^ Math.imul(Math.floor(gx / grassSpacing) + 4099, 0x45d9f3b) ^
+          Math.imul(Math.floor(gz / grassSpacing) - 8191, 0x119de1f3);
+        const cellRand = mulberry32(cellSeed >>> 0);
+        const jitter = grassSpacing * 0.42;
+        const x = gx + (cellRand() - 0.5) * jitter;
+        const z = gz + (cellRand() - 0.5) * jitter;
+        if (!inBounds(x, z)) continue;
+        const height = options.sampleHeight(x, z);
+        if (height === null || height < MIN_PROCPLANT_GROUND_HEIGHT) continue;
+        if (options.isExcluded?.(x, z, height)) continue;
+        const paint = options.samplePaint(x, z);
+        if (!paint || paint === "stone" || paint === "brick") continue;
+        const mix = activeBiomeMixRegistry.mixesByTerrainPaint[paint];
+        if (!mix) continue;
+        const grassEntries = mix.entries
+          .filter((entry) => entry.enabled && !isAssetMixEntry(entry))
+          .map((entry) => ({ entry, genome: genomeForMixEntry(entry) }))
+          .filter((item) => item.genome.habit === "grass");
+        if (grassEntries.length === 0) continue;
+        const mixDensity = THREE.MathUtils.clamp(mix.density * densityMultiplier, 0, 1.65);
+        const densityRoll = cellRand();
+        const densityThreshold = THREE.MathUtils.clamp(0.22 + mixDensity * 0.56, 0.18, 0.92);
+        if (densityRoll > densityThreshold) continue;
+        const totalWeight = grassEntries.reduce((sum, item) => sum + Math.max(0.01, item.entry.weight * item.entry.density), 0);
+        let pick = cellRand() * totalWeight;
+        let selected = grassEntries[0]!;
+        for (const item of grassEntries) {
+          pick -= Math.max(0.01, item.entry.weight * item.entry.density);
+          if (pick <= 0) {
+            selected = item;
+            break;
+          }
+        }
+        grassCarpetPaints.add(paint);
+        const { entry, genome } = selected;
+        const environment = entry.environment;
+        const bladeCount = Math.round(THREE.MathUtils.clamp((genome.grass?.blades ?? 32) * 0.36, 8, 18));
+        const key = `grassCarpet:${bladeCount}`;
+        let bucket = organBuckets.get(key);
+        if (!bucket) {
+          bucket = { key, geometry: geometryForKey(key), instances: [] };
+          organBuckets.set(key, bucket);
+        }
+        const baseColor = new THREE.Color(genome.leaf.colorA);
+        const tipColor = new THREE.Color(genome.leaf.colorB);
+        const color = baseColor.clone().lerp(tipColor, 0.28 + cellRand() * 0.56);
+        if (cellRand() < 0.18) color.lerp(new THREE.Color(0xd8cc76), 0.08 + cellRand() * 0.18);
+        const moistureLift = THREE.MathUtils.lerp(0.82, 1.18, environment.moisture);
+        const shadeStretch = THREE.MathUtils.lerp(0.92, 1.18, 1 - environment.light);
+        const heightControl = entry.grassHeight ?? entry.scale;
+        const spreadControl = entry.grassSpread ?? 1;
+        const leanControl = entry.grassLean ?? 0.42;
+        const scaleJitter = THREE.MathUtils.lerp(0.82, 1.22, cellRand());
+        const widthScale = Math.max(0.55, spreadControl) * scaleJitter * moistureLift;
+        const heightScale = heightControl * THREE.MathUtils.lerp(0.82, 1.32, cellRand()) * moistureLift * shadeStretch;
+        const yaw = cellRand() * Math.PI * 2;
+        const leanAngle = leanControl * THREE.MathUtils.lerp(0.2, 1, cellRand());
+        const leanDirection = yaw + (cellRand() - 0.5) * Math.PI;
+        const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+            Math.cos(leanDirection) * leanAngle,
+            yaw,
+            Math.sin(leanDirection) * leanAngle,
+        ));
+        const matrix = new THREE.Matrix4().compose(
+          new THREE.Vector3(x, height + 0.015, z),
+          rotation,
+          new THREE.Vector3(widthScale, heightScale, widthScale),
+        );
+        bucket.instances.push({ kind: "grassBlade", matrix, color, sway: 0.48 + cellRand() * 0.42 });
+        chunk.stats.instances++;
+      }
+    }
+    if (grassCarpetPaints.size > 0) chunk.stats.plants += grassCarpetPaints.size;
 
     for (let i = 0; i < attempts && chunk.stats.plants < plantCap; i++) {
       const x = x0 + rand() * chunkSize;
@@ -792,6 +983,72 @@ export function createProcPlantVegetation(
         : chunk.lod === 1
           ? PROC_TREE_MID_SCALE
           : PROC_TREE_FAR_SCALE;
+      if (genome.habit === "grass" && paint && grassCarpetPaints.has(paint)) continue;
+      if (genome.habit === "grass") {
+        const baseTuftCount = chunk.lod === 0
+          ? GRASS_CARPET_TUFTS_LOD0
+          : chunk.lod === 1
+            ? GRASS_CARPET_TUFTS_LOD1
+            : GRASS_CARPET_TUFTS_LOD2;
+        const carpetRadius = chunk.lod === 0
+          ? GRASS_CARPET_RADIUS_LOD0
+          : chunk.lod === 1
+            ? GRASS_CARPET_RADIUS_LOD1
+            : GRASS_CARPET_RADIUS_LOD2;
+        const density = customEntry ? customEntry.density : patch!.density;
+        const tuftCount = Math.max(2, Math.round(baseTuftCount * THREE.MathUtils.clamp(densityMultiplier * density, 0.25, 1.8)));
+        const bladeCount = Math.round(THREE.MathUtils.clamp((genome.grass?.blades ?? 32) * 0.36, 8, 18));
+        const key = `grassCarpet:${bladeCount}`;
+        let bucket = organBuckets.get(key);
+        if (!bucket) {
+          bucket = { key, geometry: geometryForKey(key), instances: [] };
+          organBuckets.set(key, bucket);
+        }
+        const baseColor = new THREE.Color(genome.leaf.colorA);
+        const tipColor = new THREE.Color(genome.leaf.colorB);
+        const color = new THREE.Color();
+        let placedTufts = 0;
+        for (let tuft = 0; tuft < tuftCount; tuft++) {
+          const angle = tuft * GOLDEN_ANGLE_RADIANS + rand() * 0.7;
+          const radius = carpetRadius * Math.sqrt(rand());
+          const tx = x + Math.cos(angle) * radius;
+          const tz = z + Math.sin(angle) * radius;
+          if (!inBounds(tx, tz)) continue;
+          const tuftHeight = options.sampleHeight(tx, tz);
+          if (tuftHeight === null || tuftHeight < MIN_PROCPLANT_GROUND_HEIGHT) continue;
+          if (options.isExcluded?.(tx, tz, tuftHeight)) continue;
+          const tuftPaint = options.samplePaint(tx, tz);
+          if (tuftPaint === "stone" || tuftPaint === "brick") continue;
+          if (paint && tuftPaint && tuftPaint !== paint) continue;
+          const moistureLift = THREE.MathUtils.lerp(0.8, 1.18, environment.moisture);
+          const shadeStretch = THREE.MathUtils.lerp(0.9, 1.16, 1 - environment.light);
+          const heightControl = customEntry ? customEntry.grassHeight ?? baseScale : baseScale;
+          const spreadControl = customEntry ? customEntry.grassSpread ?? 1 : baseScale;
+          const leanControl = customEntry ? customEntry.grassLean ?? 0.42 : 0.28;
+          const widthScale = Math.max(0.55, spreadControl) * THREE.MathUtils.lerp(0.56, 0.92, rand()) * moistureLift;
+          const heightScale = heightControl * THREE.MathUtils.lerp(0.72, 1.18, rand()) * moistureLift * shadeStretch;
+          const yaw = rand() * Math.PI * 2;
+          const leanAngle = leanControl * THREE.MathUtils.lerp(0.2, 1, rand());
+          const leanDirection = yaw + (rand() - 0.5) * Math.PI;
+          const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+              Math.cos(leanDirection) * leanAngle,
+              yaw,
+              Math.sin(leanDirection) * leanAngle,
+          ));
+          const matrix = new THREE.Matrix4().compose(
+            new THREE.Vector3(tx, tuftHeight + 0.015, tz),
+            rotation,
+            new THREE.Vector3(widthScale, heightScale, widthScale),
+          );
+          color.copy(baseColor).lerp(tipColor, 0.26 + rand() * 0.58);
+          if (rand() < 0.18) color.lerp(new THREE.Color(0xd8cc76), 0.08 + rand() * 0.18);
+          bucket.instances.push({ kind: "grassBlade", matrix, color: color.clone(), sway: 0.5 + rand() * 0.4 });
+          chunk.stats.instances++;
+          placedTufts++;
+        }
+        if (placedTufts > 0) chunk.stats.plants++;
+        continue;
+      }
       if (treeBackend?.kind === "lsystem") {
         const template = useDetailedTree
           ? buildBiomeTreeTemplate(treeBackend.species, patch!.seed ^ i, {
@@ -916,12 +1173,22 @@ export function createProcPlantVegetation(
     if (disposed) return;
     const updateStartedAt = performance.now();
     builtLastUpdate = 0;
+    refreshBiomeMixesFromServer();
     buildDeferred = options.shouldDeferBuild?.() ?? false;
     if (
       lastPlayerX === null ||
       lastPlayerZ === null ||
       Math.hypot(px - lastPlayerX, pz - lastPlayerZ) > 0.15
     ) {
+      if (lastPlayerX !== null && lastPlayerZ !== null) {
+        const dx = px - lastPlayerX;
+        const dz = pz - lastPlayerZ;
+        const distance = Math.hypot(dx, dz);
+        if (distance > 0.001) {
+          lastMoveDirX = dx / distance;
+          lastMoveDirZ = dz / distance;
+        }
+      }
       lastPlayerMovedAt = nowMs;
       lastPlayerX = px;
       lastPlayerZ = pz;
@@ -999,17 +1266,12 @@ export function createProcPlantVegetation(
     const movementIntentActive = options.shouldPauseBuild?.() ?? false;
     const stationary = !movementIntentActive && (chunksBuilt === 0 || nowMs - lastPlayerMovedAt > 650);
     buildPausedForMotion = !stationary && rebuildQueue.length > 0;
-    if (buildPausedForMotion) {
-      lastUpdateMs = performance.now() - updateStartedAt;
-      maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
-      return;
-    }
     const maxBuilds = stationary
       ? (fps < 28 ? LOW_FPS_BUILD_BUDGET + 1 : NORMAL_BUILD_BUDGET + 2)
-      : (fps < 28 ? LOW_FPS_BUILD_BUDGET : NORMAL_BUILD_BUDGET);
+      : (fps < 28 ? 1 : 2);
     const buildMsBudget = stationary
       ? (fps < 28 ? LOW_FPS_BUILD_MS_BUDGET + 1.5 : NORMAL_BUILD_MS_BUDGET + 3)
-      : (fps < 28 ? LOW_FPS_BUILD_MS_BUDGET : NORMAL_BUILD_MS_BUDGET);
+      : (fps < 28 ? 1.8 : 3.4);
     const buildStartedAt = performance.now();
     let budget = maxBuilds;
     while (budget > 0 && rebuildQueue.length > 0) {
@@ -1105,6 +1367,8 @@ export function createProcPlantVegetation(
       if (typeof window !== "undefined") {
         window.removeEventListener("storage", onBiomeMixStorage);
         window.removeEventListener(BIOME_MIX_STORAGE_EVENT, onBiomeMixCustomEvent);
+        window.removeEventListener("focus", onBiomeMixFocus);
+        document.removeEventListener("visibilitychange", onBiomeMixVisibility);
       }
       for (const chunk of active.values()) disposeGroup(chunk.group);
       active.clear();

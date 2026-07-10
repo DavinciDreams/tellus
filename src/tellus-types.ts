@@ -31,6 +31,7 @@ export type WorldTemplateId =
   | "fantasy-garden"
   | "realistic-cove"
   | "flight-range"
+  | "grassland-field"
   | "low-poly-meadow"
   | "cartoon-hills"
   | "interior-studio"
