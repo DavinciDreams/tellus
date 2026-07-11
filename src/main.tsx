@@ -983,6 +983,11 @@ function createTellusWorld(
   if (chunkedCenterForWorld) {
     ocean.position.x = chunkedCenterForWorld.x;
     ocean.position.z = chunkedCenterForWorld.z;
+    if (!isContinentalChunkedWorld && chunkedDims) {
+      const mapRadius = Math.hypot(chunkedDims.w * CHUNK_SPAN, chunkedDims.h * CHUNK_SPAN) / 2 + CHUNK_SPAN;
+      const oceanScale = Math.max(1, mapRadius / OCEAN_RADIUS);
+      ocean.scale.set(oceanScale, oceanScale, oceanScale);
+    }
     if (ocean.material instanceof THREE.ShaderMaterial && ocean.material.userData.tellusWaterShader) {
       const shoreCenter = ocean.material.uniforms.uShoreCenter?.value;
       if (shoreCenter && typeof shoreCenter.set === "function") {
@@ -1025,6 +1030,90 @@ function createTellusWorld(
       terrainHeight(waterFeatureCenter.x, waterFeatureCenter.z);
     return ground + 0.55;
   };
+  const chunkedWorldBounds = chunkedDims
+    ? {
+        minX: 0,
+        maxX: chunkedDims.w * CHUNK_SPAN,
+        minZ: 0,
+        maxZ: chunkedDims.h * CHUNK_SPAN,
+      }
+    : null;
+  const clampChunkedPoint = (x: number, z: number): { x: number; z: number } => {
+    if (!chunkedWorldBounds) return { x, z };
+    return {
+      x: clamp(x, chunkedWorldBounds.minX + 1, chunkedWorldBounds.maxX - 1),
+      z: clamp(z, chunkedWorldBounds.minZ + 1, chunkedWorldBounds.maxZ - 1),
+    };
+  };
+  const isChunkedWaterPoint = (x: number, z: number): boolean => {
+    if (!isChunked || isContinentalChunkedWorld) return false;
+    if (waterFeatureContains(x, z, 0.5)) return true;
+    const height = chunkRenderer?.sampleHeight(x, z) ?? largeWorldBaseHeight(x, z);
+    if (!Number.isFinite(height)) return false;
+    return height <= SEA_LEVEL + 0.45 || largeWorldTerrainKind(x, z, height) === "water";
+  };
+  const chunkedWaterSurfaceY = (x: number, z: number): number =>
+    waterFeatureContains(x, z, 0.5) ? waterFeatureLevel() + 0.12 : SEA_LEVEL + 0.14;
+  const preserveWaterVehicleYOffset = (position: Vec3, fallback?: Vec3): Vec3 => {
+    if (!fallback) return position;
+    const previousSurface = chunkedWaterSurfaceY(fallback.x, fallback.z);
+    const manualOffset = fallback.y - previousSurface;
+    if (!Number.isFinite(manualOffset) || manualOffset <= 0.05) return position;
+    return { ...position, y: position.y + clamp(manualOffset, 0, 40) };
+  };
+  const chunkedWaterVehiclePosition = (x: number, z: number, fallback?: Vec3): Vec3 => {
+    const clamped = clampChunkedPoint(x, z);
+    if (waterFeatureContains(clamped.x, clamped.z, 0.5)) {
+      return preserveWaterVehicleYOffset(
+        { x: clamped.x, y: chunkedWaterSurfaceY(clamped.x, clamped.z), z: clamped.z },
+        fallback,
+      );
+    }
+    if (isChunkedWaterPoint(clamped.x, clamped.z)) {
+      return preserveWaterVehicleYOffset(
+        { x: clamped.x, y: chunkedWaterSurfaceY(clamped.x, clamped.z), z: clamped.z },
+        fallback,
+      );
+    }
+    const searchOrigin = fallback ?? visitorPosition;
+    const origin = clampChunkedPoint(searchOrigin.x, searchOrigin.z);
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (let ring = 0; ring < 18; ring++) {
+      const radius = 8 + ring * 10;
+      const samples = 18 + ring * 2;
+      for (let i = 0; i < samples; i++) {
+        const angle = i * golden + ring * 0.37;
+        const candidate = clampChunkedPoint(
+          origin.x + Math.cos(angle) * radius,
+          origin.z + Math.sin(angle) * radius,
+        );
+        if (isChunkedWaterPoint(candidate.x, candidate.z)) {
+          return preserveWaterVehicleYOffset(
+            { x: candidate.x, y: chunkedWaterSurfaceY(candidate.x, candidate.z), z: candidate.z },
+            fallback,
+          );
+        }
+      }
+    }
+    return fallback ? { ...fallback } : { x: clamped.x, y: chunkedWaterSurfaceY(clamped.x, clamped.z), z: clamped.z };
+  };
+  const waterVehiclePositionForCurrentWorld = (x: number, z: number, fallback?: Vec3): Vec3 =>
+    isChunked && !isContinentalChunkedWorld
+      ? chunkedWaterVehiclePosition(x, z, fallback)
+      : waterVehiclePosition(x, z, fallback);
+  const movedVehiclePositionForCurrentWorld = (
+    thing: GeneratedThing,
+    x: number,
+    z: number,
+    fallback?: Vec3,
+  ): Vec3 =>
+    isChunked && vehicleMode(thing) === "water"
+      ? chunkedWaterVehiclePosition(x, z, fallback)
+      : movedVehiclePosition(thing, x, z, fallback);
+  const waterVehicleNeedsRelocation = (position: Vec3): boolean =>
+    isChunked && !isContinentalChunkedWorld
+      ? !isChunkedWaterPoint(position.x, position.z)
+      : waterBlockedByLand(position);
   const procPlantPreference = (() => {
     try {
       return window.localStorage.getItem("tellus.procplants");
@@ -6422,7 +6511,7 @@ function createTellusWorld(
       return false;
     }
     const arrival = clearVisitorSpawnPosition(x, z);
-    mount.position = movedVehiclePosition(mount, arrival.x, arrival.z, mount.position);
+    mount.position = movedVehiclePositionForCurrentWorld(mount, arrival.x, arrival.z, mount.position);
     updateThingMeshPosition(mount);
     visitorPosition = riderPositionForThing(mount);
     publishGeneratedThing(mount);
@@ -6449,7 +6538,7 @@ function createTellusWorld(
     const z = visitorPosition.z + behindZ + rightZ;
     const mode = vehicleMode(thing);
     if (mode === "air" || mode === "water") {
-      return movedVehiclePosition(thing, x, z, thing.position);
+      return movedVehiclePositionForCurrentWorld(thing, x, z, thing.position);
     }
     const liveGround = footprintGroundYAt(thing, x, z, visitorPosition.y);
     return liveGround !== null && Number.isFinite(liveGround)
@@ -6694,7 +6783,7 @@ function createTellusWorld(
         : 0;
     const position =
       isVehicleThing(thing) || sailingThingId === id
-        ? movedVehiclePosition(
+        ? movedVehiclePositionForCurrentWorld(
             thing,
             thing.position.x + dx,
             thing.position.z + dz,
@@ -6952,7 +7041,7 @@ function createTellusWorld(
     if (!thing) return;
     const angle = Math.atan2(visitorPosition.z, visitorPosition.x) || 0.2;
     const radius = Math.max(WORLD_RADIUS + 5, Math.hypot(thing.position.x, thing.position.z));
-    thing.position = waterVehiclePosition(
+    thing.position = waterVehiclePositionForCurrentWorld(
       Math.cos(angle) * radius,
       Math.sin(angle) * radius,
       thing.position,
@@ -6979,7 +7068,7 @@ function createTellusWorld(
     reevaluateInstancingForSelection(previousSelectedId, selectedThingId);
     updateSelectionIndicator();
     syncTransformControls();
-    if (mode === "water" && waterBlockedByLand(thing.position)) {
+    if (mode === "water" && waterVehicleNeedsRelocation(thing.position)) {
       moveGeneratedToWater(id);
     } else if (mode === "air") {
       thing.position = airPosition(thing.position.x, thing.position.z);
@@ -7000,6 +7089,49 @@ function createTellusWorld(
       text: `boarded ${thing.kind}: ${thing.prompt}`,
     });
     publish();
+  };
+
+  const chunkedWaterVehicleDisembarkPosition = (boat: GeneratedThing): Vec3 | null => {
+    if (!isChunked || isContinentalChunkedWorld || vehicleMode(boat) !== "water") return null;
+    const footprint = thingFootprint(boat);
+    const startRadius = Math.max(3.2, (footprint?.radius ?? boat.scale * 1.8) + 1.4);
+    const preferredAngles = [
+      boat.rotationY + Math.PI / 2,
+      boat.rotationY - Math.PI / 2,
+      boat.rotationY + Math.PI,
+      boat.rotationY,
+    ].filter(Number.isFinite);
+    const tryCandidate = (x: number, z: number): Vec3 | null => {
+      const candidate = clampChunkedPoint(x, z);
+      if (isChunkedWaterPoint(candidate.x, candidate.z)) return null;
+      const height = groundHeightAt(candidate.x, candidate.z) ?? largeWorldBaseHeight(candidate.x, candidate.z);
+      if (!Number.isFinite(height)) return null;
+      return clearVisitorSpawnPosition(candidate.x, candidate.z);
+    };
+
+    // Chunked worlds do not have the classic origin-centered island shore. Dismount near the boat by
+    // sampling local land first, so parking by a beach exits to that beach instead of to world center.
+    for (const angle of preferredAngles) {
+      for (const radius of [startRadius, startRadius + 3, startRadius + 7, startRadius + 12]) {
+        const found = tryCandidate(
+          boat.position.x + Math.sin(angle) * radius,
+          boat.position.z + Math.cos(angle) * radius,
+        );
+        if (found) return found;
+      }
+    }
+
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < 220; i++) {
+      const radius = startRadius + Math.floor(i / 18) * 4.5;
+      const angle = i * golden;
+      const found = tryCandidate(
+        boat.position.x + Math.cos(angle) * radius,
+        boat.position.z + Math.sin(angle) * radius,
+      );
+      if (found) return found;
+    }
+    return null;
   };
 
   const disembark = () => {
@@ -7027,7 +7159,10 @@ function createTellusWorld(
         0,
         boat.position.z,
       );
-      if (mode === "water" && nearbyIsland) {
+      const chunkedShore = chunkedWaterVehicleDisembarkPosition(boat);
+      if (chunkedShore) {
+        visitorPosition = chunkedShore;
+      } else if (mode === "water" && nearbyIsland) {
         visitorPosition = distantIslandShorePosition(
           nearbyIsland,
           boat.position.x,
@@ -8233,7 +8368,7 @@ function createTellusWorld(
         boat.position = { x: horiz.x, y: clamp(y, floor, MAX_ALTITUDE), z: horiz.z };
       } else {
         if (!hasInput) return;
-        boat.position = movedVehiclePosition(
+        boat.position = movedVehiclePositionForCurrentWorld(
           boat,
           boat.position.x + movement.x,
           boat.position.z + movement.z,
