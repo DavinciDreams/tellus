@@ -5,6 +5,8 @@ import {
   parseWorldTemplateId,
   resolveLandShapeConfig,
   shouldIgnoreDefaultTellusTemplate,
+  templateSuppressesAutoVegetation,
+  templateUsesRealisticTerrainSurface,
   templateForWorldId,
 } from "./tellus-world-templates";
 import { WORLD_CREATION_TEMPLATES } from "./tellus-world-options";
@@ -40,6 +42,11 @@ describe("world terrain templates", () => {
     expect(templateForWorldId("chunked-64-storm-basalt")).toBe("evoflow-basalt-teeth");
     expect(templateForWorldId("pokemon-lowpoly-town")).toBe("low-poly-meadow");
     expect(templateForWorldId("cartoon-hills-playground")).toBe("cartoon-hills");
+    expect(templateForWorldId("chunked-20-yosemite-valley")).toBe("yosemite-terrain");
+    expect(templateForWorldId("chunked-24-grand-canyon")).toBe("grand-canyon-terrain");
+    expect(templateForWorldId("chunked-64-chaco-canyon")).toBe("chaco-canyon");
+    expect(templateForWorldId("chunked-64-cahokia-mounds")).toBe("cahokia-mounds");
+    expect(templateForWorldId("temple-portara-reconstruction")).toBe("temple-portara");
     expect(templateForWorldId("interior-main-room")).toBe("interior-studio");
     expect(templateForWorldId("grand-hall-gallery")).toBe("grand-hall-shell");
     expect(templateForWorldId("interior-lisa-tavern")).toBe("grand-hall-shell");
@@ -60,5 +67,14 @@ describe("world terrain templates", () => {
     expect(shouldIgnoreDefaultTellusTemplate("tellus", inferred)).toBe(true);
     expect(shouldIgnoreDefaultTellusTemplate("lowlands", inferred)).toBe(false);
     expect(shouldIgnoreDefaultTellusTemplate("tellus", "tellus")).toBe(false);
+  });
+
+  it("marks real-place terrain templates as terrain-led worlds", () => {
+    expect(templateUsesRealisticTerrainSurface("yosemite-terrain")).toBe(true);
+    expect(templateUsesRealisticTerrainSurface("grand-canyon-terrain")).toBe(true);
+    expect(templateSuppressesAutoVegetation("chaco-canyon")).toBe(true);
+    expect(templateSuppressesAutoVegetation("cahokia-mounds")).toBe(true);
+    expect(templateSuppressesAutoVegetation("tellus")).toBe(false);
+    expect(templateUsesRealisticTerrainSurface("grassland-field")).toBe(false);
   });
 });

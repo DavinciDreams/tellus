@@ -131,6 +131,45 @@ describe("createChunkTerrainGeometry", () => {
     copper.dispose();
     basalt.dispose();
   });
+
+  it("applies historical terrain stamps to chunk geometry", () => {
+    setChunkedWorldChunks({ w: 64, h: 64 });
+    const chunk = makeChunk({ cx: 32, cz: 31, heightMode: "absolute" });
+
+    runtimeConfig.worldId = "chunked-64-genesis";
+    runtimeConfig.worldTemplate = "tellus";
+    const plain = createChunkTerrainGeometry(chunk);
+
+    runtimeConfig.worldId = "chunked-64-cahokia";
+    const cahokia = createChunkTerrainGeometry(chunk);
+
+    const plainPos = plain.getAttribute("position") as THREE.BufferAttribute;
+    const cahokiaPos = cahokia.getAttribute("position") as THREE.BufferAttribute;
+    let maxDelta = -Infinity;
+    for (let i = 0; i < Math.min(plainPos.count, cahokiaPos.count); i++) {
+      maxDelta = Math.max(maxDelta, cahokiaPos.getY(i) - plainPos.getY(i));
+    }
+
+    expect(maxDelta).toBeGreaterThan(12);
+    plain.dispose();
+    cahokia.dispose();
+  });
+
+  it("keeps real terrain chunks out of Tellus procedural paint patterns", () => {
+    const paint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(terrainPaintCode("rock"));
+    runtimeConfig.worldId = "chunked-24-grand-canyon";
+    runtimeConfig.worldTemplate = "grand-canyon-terrain";
+
+    const geometry = createChunkTerrainGeometry(makeChunk({ paint, heightMode: "absolute" }), 16);
+    const paintCodes = geometry.getAttribute("tellusPaintCode") as THREE.BufferAttribute;
+    let maxPaintCode = 0;
+    for (let i = 0; i < paintCodes.count; i++) {
+      maxPaintCode = Math.max(maxPaintCode, paintCodes.getX(i));
+    }
+
+    expect(maxPaintCode).toBe(0);
+    geometry.dispose();
+  });
 });
 
 describe("createChunkRenderer lifecycle", () => {

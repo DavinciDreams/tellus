@@ -1,5 +1,7 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import fs from "node:fs";
+import path from "node:path";
 import generate3DHandler from "./api/generate-3d";
 import generatedAssetsHandler from "./api/generated-assets";
 import gradioFileHandler from "./api/gradio-file";
@@ -30,6 +32,21 @@ async function sendWebResponse(
     response.write(Buffer.from(next.value));
   }
   response.end();
+}
+
+function cesiumBuildPath() {
+  return path.resolve(process.cwd(), "node_modules/cesium/Build/Cesium");
+}
+
+function contentTypeFor(file: string) {
+  if (file.endsWith(".js")) return "text/javascript";
+  if (file.endsWith(".css")) return "text/css";
+  if (file.endsWith(".json")) return "application/json";
+  if (file.endsWith(".wasm")) return "application/wasm";
+  if (file.endsWith(".png")) return "image/png";
+  if (file.endsWith(".jpg") || file.endsWith(".jpeg")) return "image/jpeg";
+  if (file.endsWith(".svg")) return "image/svg+xml";
+  return "application/octet-stream";
 }
 
 export default defineConfig(({ mode }) => {
@@ -121,6 +138,9 @@ export default defineConfig(({ mode }) => {
           agentView: "agent-view.html",
           treeLodGallery: "tree-lod-gallery.html",
           biomeMixer: "biome-mixer.html",
+          yosemiteTerrainViewer: "yosemite-terrain-viewer.html",
+          cesiumTerrainViewer: "cesium-terrain-viewer.html",
+          dragonFlight: "dragon-flight.html",
         },
         output: {
           manualChunks(id) {
@@ -178,6 +198,32 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
+      {
+        name: "tellus-cesium-assets",
+        configureServer(server) {
+          server.middlewares.use((request, response, next) => {
+            if (!request.url?.startsWith("/cesium/")) {
+              next();
+              return;
+            }
+            const relative = decodeURIComponent(request.url.replace(/^\/cesium\/?/, ""));
+            const file = path.resolve(cesiumBuildPath(), relative);
+            if (!file.startsWith(cesiumBuildPath()) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+              next();
+              return;
+            }
+            response.setHeader("Content-Type", contentTypeFor(file));
+            fs.createReadStream(file).pipe(response);
+          });
+        },
+        closeBundle() {
+          const source = cesiumBuildPath();
+          const target = path.resolve(process.cwd(), "dist/cesium");
+          if (!fs.existsSync(source)) return;
+          fs.rmSync(target, { recursive: true, force: true });
+          fs.cpSync(source, target, { recursive: true });
+        },
+      },
       {
         name: "tellus-api-dev",
         configureServer(server) {

@@ -15,6 +15,11 @@ const TEMPLATE_IDS = new Set<WorldTemplateId>([
   "grassland-field",
   "low-poly-meadow",
   "cartoon-hills",
+  "yosemite-terrain",
+  "grand-canyon-terrain",
+  "chaco-canyon",
+  "cahokia-mounds",
+  "temple-portara",
   "interior-studio",
   "grand-hall-shell",
   "evoflow-coral-canyon",
@@ -25,6 +30,14 @@ const TEMPLATE_IDS = new Set<WorldTemplateId>([
   "evoflow-copper-terraces",
   "evoflow-basalt-teeth",
   "evoflow-coral-fold",
+]);
+
+const REAL_TERRAIN_SURFACE_TEMPLATES = new Set<WorldTemplateId>([
+  "yosemite-terrain",
+  "grand-canyon-terrain",
+  "chaco-canyon",
+  "cahokia-mounds",
+  "temple-portara",
 ]);
 
 const TEMPLATE_PRESETS: Record<
@@ -229,6 +242,106 @@ const TEMPLATE_PRESETS: Record<
         terraceFrequency: 0.3,
       },
       baseOffset: -0.9,
+    },
+  },
+  "yosemite-terrain": {
+    defaultSkyboxUrl: "/skybox/free_-_skybox_basic_sky.glb",
+    landShape: {
+      mountain: { height: 28, radius: 48, exponent: 1.45 },
+      shoulder: { x: -24, z: 10, radius: 520, height: 5.2 },
+      southernRise: { x: 28, z: -18, radius: 470, height: 4.8 },
+      ridge: { sinScale: 0.72, cosScale: 0.58, diagonalScale: 0.36 },
+      shore: { startRatio: 1, widthRatio: 0.01, drop: 0 },
+      pond: { x: 0, z: 0, radius: 0.1, depth: 0, falloff: 1 },
+      detail: {
+        amplitude: 2.2,
+        scale: 0.022,
+        warp: 8,
+        ridgeAmplitude: 2.4,
+        terraceAmplitude: 0.12,
+        terraceFrequency: 0.34,
+      },
+      baseOffset: 0,
+    },
+  },
+  "grand-canyon-terrain": {
+    defaultSkyboxUrl: "/skybox/tellus-desert-sunset/scene.gltf",
+    landShape: {
+      mountain: { height: 18, radius: 58, exponent: 1.3 },
+      shoulder: { x: -32, z: 12, radius: 620, height: 3.8 },
+      southernRise: { x: 36, z: -24, radius: 580, height: 3.1 },
+      ridge: { sinScale: 0.95, cosScale: 0.78, diagonalScale: 0.62 },
+      shore: { startRatio: 1, widthRatio: 0.01, drop: 0 },
+      pond: { x: 0, z: 0, radius: 0.1, depth: 0, falloff: 1 },
+      detail: {
+        amplitude: 2.6,
+        scale: 0.028,
+        warp: 12,
+        ridgeAmplitude: 3.1,
+        terraceAmplitude: 0.75,
+        terraceFrequency: 1.4,
+      },
+      baseOffset: 0,
+    },
+  },
+  "chaco-canyon": {
+    defaultSkyboxUrl: "/skybox/tellus-desert-sunset/scene.gltf",
+    landShape: {
+      mountain: { height: 5.2, radius: 72, exponent: 1.18 },
+      shoulder: { x: -38, z: 18, radius: 680, height: 2.2 },
+      southernRise: { x: 42, z: -26, radius: 640, height: 1.8 },
+      ridge: { sinScale: 0.18, cosScale: 0.13, diagonalScale: 0.1 },
+      shore: { startRatio: 1, widthRatio: 0.01, drop: 0 },
+      pond: { x: 0, z: 0, radius: 0.1, depth: 0, falloff: 1 },
+      detail: {
+        amplitude: 0.72,
+        scale: 0.018,
+        warp: 5,
+        ridgeAmplitude: 0.24,
+        terraceAmplitude: 0.06,
+        terraceFrequency: 0.32,
+      },
+      baseOffset: 0.4,
+    },
+  },
+  "cahokia-mounds": {
+    defaultSkyboxUrl: "/skybox/free_-_skybox_basic_sky.glb",
+    landShape: {
+      mountain: { height: 2, radius: 96, exponent: 1.12 },
+      shoulder: { x: -20, z: 14, radius: 780, height: 1.1 },
+      southernRise: { x: 36, z: -24, radius: 720, height: 0.9 },
+      ridge: { sinScale: 0.06, cosScale: 0.05, diagonalScale: 0.03 },
+      shore: { startRatio: 1, widthRatio: 0.01, drop: 0 },
+      pond: { x: 0, z: 0, radius: 0.1, depth: 0, falloff: 1 },
+      detail: {
+        amplitude: 0.42,
+        scale: 0.014,
+        warp: 3.2,
+        ridgeAmplitude: 0.08,
+        terraceAmplitude: 0.02,
+        terraceFrequency: 0.18,
+      },
+      baseOffset: 0.8,
+    },
+  },
+  "temple-portara": {
+    defaultSkyboxUrl: "/skybox/tellus-blue-clouds/scene.gltf",
+    landShape: {
+      mountain: { height: 4.8, radius: 54, exponent: 1.28 },
+      shoulder: { x: -20, z: 12, radius: 420, height: 1.8 },
+      southernRise: { x: 24, z: -20, radius: 380, height: 1.5 },
+      ridge: { sinScale: 0.18, cosScale: 0.16, diagonalScale: 0.08 },
+      shore: { startRatio: 0.8, widthRatio: 0.2, drop: 3.8 },
+      pond: { x: 0, z: 0, radius: 0.1, depth: 0, falloff: 1 },
+      detail: {
+        amplitude: 0.55,
+        scale: 0.02,
+        warp: 3.8,
+        ridgeAmplitude: 0.14,
+        terraceAmplitude: 0.04,
+        terraceFrequency: 0.25,
+      },
+      baseOffset: -0.6,
     },
   },
   "interior-studio": {
@@ -459,6 +572,11 @@ export function templateForWorldId(
   if (id.includes("ridge") || id.includes("mountain")) return "ridge";
   if (id.includes("fantasy") || id.includes("garden")) return "fantasy-garden";
   if (id.includes("realistic") || id.includes("cove")) return "realistic-cove";
+  if (id.includes("yosemite") || id.includes("half-dome")) return "yosemite-terrain";
+  if (id.includes("grand-canyon") || id.includes("grandcanyon")) return "grand-canyon-terrain";
+  if (id.includes("chaco")) return "chaco-canyon";
+  if (id.includes("cahokia") || id.includes("mound")) return "cahokia-mounds";
+  if (id.includes("portara") || id.includes("temple")) return "temple-portara";
   if (id.includes("grassland") || id.includes("prairie") || id.includes("field")) return "grassland-field";
   if (id.includes("flight") || id.includes("simulator") || id.includes("range")) return "flight-range";
   if (id.includes("low-poly") || id.includes("lowpoly")) return "low-poly-meadow";
@@ -480,6 +598,14 @@ export function shouldIgnoreDefaultTellusTemplate(
   fallback: WorldTemplateId,
 ): boolean {
   return template === "tellus" && fallback !== "tellus";
+}
+
+export function templateUsesRealisticTerrainSurface(template: WorldTemplateId): boolean {
+  return REAL_TERRAIN_SURFACE_TEMPLATES.has(template);
+}
+
+export function templateSuppressesAutoVegetation(template: WorldTemplateId): boolean {
+  return REAL_TERRAIN_SURFACE_TEMPLATES.has(template);
 }
 
 export function parseLandShapeOverrides(value: unknown): LandShapeOverrides | undefined {

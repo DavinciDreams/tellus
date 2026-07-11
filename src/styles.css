@@ -598,6 +598,28 @@ textarea::placeholder {
     linear-gradient(135deg, #79c7ff 0%, #89c858 42%, #f3b1d1 70%, #4f9e6e 100%);
 }
 
+.world-template-swatch.template-yosemite-terrain {
+  background: linear-gradient(135deg, #d8ddd6 0%, #8f9a8f 28%, #465247 48%, #a9b76b 72%, #5f7c4e 100%);
+}
+
+.world-template-swatch.template-grand-canyon-terrain {
+  background: linear-gradient(135deg, #e4b06b 0%, #9c5d36 34%, #49382f 58%, #d6a264 78%, #232735 100%);
+}
+
+.world-template-swatch.template-chaco-canyon {
+  background: linear-gradient(135deg, #d1a15f 0%, #7f6040 36%, #b9834d 58%, #e4c07b 78%, #3c5162 100%);
+}
+
+.world-template-swatch.template-cahokia-mounds {
+  background: radial-gradient(ellipse at 52% 50%, #8eaa56 0 17%, transparent 18%),
+    radial-gradient(ellipse at 40% 60%, #78944b 0 9%, transparent 10%),
+    linear-gradient(135deg, #c9e59a 0%, #7fb15b 38%, #597c43 62%, #c1d989 100%);
+}
+
+.world-template-swatch.template-temple-portara {
+  background: linear-gradient(135deg, #73bfe0 0%, #d9c987 36%, #8f8c78 55%, #f2efe1 68%, #286f9b 100%);
+}
+
 .world-template-swatch.template-interior-studio {
   background: linear-gradient(135deg, #20252a 0%, #8b8f93 34%, #d7d1bf 64%, #f4efe4 100%);
 }

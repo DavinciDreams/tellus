@@ -19,12 +19,14 @@ import {
   largeWorldTerrainKind,
 } from "./tellus-large-world-terrain";
 import { runtimeConfig } from "./tellus-runtime-config";
-import { parseWorldTemplateId } from "./tellus-world-templates";
+import { parseWorldTemplateId, templateUsesRealisticTerrainSurface } from "./tellus-world-templates";
 import {
   tellusWorldChunkUrl,
 } from "./tellus-urls-identity";
+import { staticTerrainChunkUrl, staticTerrainUsesBakedSurface } from "./tellus-static-terrain";
+import { historicalTerrainStampOffsetAt } from "./tellus-historical-terrain-stamps";
 import type { ChunkData } from "./world-protocol";
-import type { TerrainPaintKind, WorldTemplateId } from "./tellus-types";
+import type { TerrainKind, TerrainPaintKind, WorldTemplateId } from "./tellus-types";
 import { terrainKindCode } from "./tellus-terrain-material";
 
 const key = (cx: number, cz: number) => `${cx},${cz}`;
@@ -38,10 +40,78 @@ function sculptAt(offsets: number[], xi: number, zi: number): number {
   return offsets[zi * CHUNK_VERTEX_COUNT + xi] ?? 0;
 }
 
+function chunkHeightBase(chunk: ChunkData, wx: number, wz: number): number {
+  return chunk.heightMode === "absolute" ? 0 : largeWorldBaseHeight(wx, wz);
+}
+
+function chunkedWorldSpan(): { width: number; depth: number } | null {
+  const bounds = getChunkedWorldChunks();
+  return bounds ? { width: bounds.w * CHUNK_SPAN, depth: bounds.h * CHUNK_SPAN } : null;
+}
+
+function historicalTerrainOffset(wx: number, wz: number): number {
+  const span = chunkedWorldSpan();
+  return historicalTerrainStampOffsetAt(
+    wx,
+    wz,
+    runtimeConfig.worldId,
+    span?.width,
+    span?.depth,
+  );
+}
+
 function shouldApplyChunkPaint(_template: WorldTemplateId, kind: TerrainPaintKind | null): kind is TerrainPaintKind {
   // Explicit user paint stored in a chunk wins over the procedural biome. Otherwise strokes like
   // meadow/beach/dirt/rock can appear to do nothing when a non-Tellus template owns the base biome.
   return kind !== null;
+}
+
+function realisticTerrainNoise(x: number, z: number, seed: number): number {
+  const value = Math.sin(x * 0.071 + z * 0.113 + seed * 0.019) * 43758.5453123;
+  return value - Math.floor(value);
+}
+
+function realisticTerrainColor(
+  template: WorldTemplateId,
+  kind: TerrainKind,
+  paintKind: TerrainPaintKind | null,
+  y: number,
+  wx: number,
+  wz: number,
+  seed: number,
+): THREE.Color {
+  const noise = realisticTerrainNoise(wx, wz, seed);
+  const fineNoise = realisticTerrainNoise(wx * 2.7 + 13.1, wz * 2.7 - 8.7, seed + 17);
+  let color: THREE.Color;
+
+  if (template === "grand-canyon-terrain" || template === "chaco-canyon" || template === "temple-portara") {
+    const band = Math.sin(y * 0.22 + noise * 2.4);
+    const sand = new THREE.Color(0x9a7048);
+    const rust = new THREE.Color(0x6f3f2c);
+    const pale = new THREE.Color(0xc1a06e);
+    color = sand.lerp(rust, THREE.MathUtils.clamp((band + 1) * 0.38, 0, 1));
+    color.lerp(pale, THREE.MathUtils.clamp(fineNoise * 0.35 + (paintKind === "desert-sand" ? 0.2 : 0), 0, 0.45));
+    if (kind === "rock" || kind === "gravel" || kind === "stone") color.lerp(new THREE.Color(0x6b6258), 0.25);
+  } else if (template === "cahokia-mounds") {
+    color = new THREE.Color(0x7f9654);
+    color.lerp(new THREE.Color(0x5f6f3b), THREE.MathUtils.clamp(noise * 0.45, 0, 0.45));
+    if (kind === "dirt" || kind === "desert-sand") color.lerp(new THREE.Color(0x9b7a4c), 0.35);
+  } else {
+    const elevation = THREE.MathUtils.clamp((y + 12) / 120, 0, 1);
+    color = new THREE.Color(0x7b7f73);
+    if (kind === "snow") {
+      color = new THREE.Color(0xc9c8bd);
+    } else if (kind === "forest-floor" || kind === "grass" || kind === "meadow" || kind === "jungle-moss") {
+      color = new THREE.Color(0x5f7046).lerp(new THREE.Color(0x37462f), THREE.MathUtils.clamp(noise * 0.45, 0, 0.45));
+    } else if (kind === "dirt" || kind === "beach" || kind === "desert-sand") {
+      color = new THREE.Color(0x9a8562);
+    }
+    color.lerp(new THREE.Color(0xa7a8a0), THREE.MathUtils.clamp(elevation * 0.34, 0, 0.34));
+  }
+
+  const shade = 0.82 + noise * 0.18 + fineNoise * 0.08;
+  color.multiplyScalar(THREE.MathUtils.clamp(shade, 0.72, 1.08));
+  return color;
 }
 
 // Build a per-chunk square BufferGeometry in LOCAL coords [0,SPAN]; the Mesh is positioned
@@ -53,6 +123,10 @@ export function createChunkTerrainGeometry(
   lodSegments: number = CHUNK_SEGMENTS,
 ): THREE.BufferGeometry {
   const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
+  const useRealisticSurface =
+    staticTerrainUsesBakedSurface(runtimeConfig.worldId) ||
+    templateUsesRealisticTerrainSurface(template);
+  const historicalSpan = chunkedWorldSpan();
   const seg = Math.max(1, Math.min(lodSegments, CHUNK_SEGMENTS));
   const stride = CHUNK_SEGMENTS / seg; // 64/seg; integer for 64,32,16,8
   const worldX0 = chunk.cx * CHUNK_SPAN;
@@ -73,20 +147,32 @@ export function createChunkTerrainGeometry(
       const lx = (i / seg) * CHUNK_SPAN; // local x in [0,96]
       const wx = worldX0 + lx;
       const wz = worldZ0 + lz;
-      const py = largeWorldBaseHeight(wx, wz) + sculptAt(chunk.sculptOffsets, xi, zi);
+      const py =
+        chunkHeightBase(chunk, wx, wz) +
+        sculptAt(chunk.sculptOffsets, xi, zi) +
+        historicalTerrainStampOffsetAt(
+          wx,
+          wz,
+          runtimeConfig.worldId,
+          historicalSpan?.width,
+          historicalSpan?.depth,
+        );
       const paintCode = chunk.paint.length
         ? (chunk.paint[zi * CHUNK_VERTEX_COUNT + xi] ?? 0)
         : 0;
       const paintKind = paintCode ? terrainPaintKindFromCode(paintCode) : null;
       const kind = shouldApplyChunkPaint(template, paintKind) ? paintKind : null;
       const resolvedKind = kind ?? largeWorldTerrainKind(wx, wz, py) ?? terrainKind(wx, wz, py);
-      const color = terrainVertexColor(resolvedKind, wx, wz, xi * 1009 + zi * 9176);
+      const colorSeed = xi * 1009 + zi * 9176;
+      const color = useRealisticSurface
+        ? realisticTerrainColor(template, resolvedKind, paintKind, py, wx, wz, colorSeed)
+        : terrainVertexColor(resolvedKind, wx, wz, colorSeed);
       positions.push(lx, py, lz);
       colors.push(color.r, color.g, color.b);
       uvs.push(wx / CHUNK_SPAN, wz / CHUNK_SPAN);
       // Carry the code of the APPLIED paint (0 when the biome owns the vertex), so the material's
       // per-kind pattern matches the vertex color and biome terrain stays pattern-free.
-      paintCodes.push(kind ? terrainPaintCode(kind) : 0);
+      paintCodes.push(useRealisticSurface ? 0 : kind ? terrainPaintCode(kind) : 0);
       terrainKindCodes.push(terrainKindCode(resolvedKind));
     }
   }
@@ -175,6 +261,7 @@ interface ActiveChunk {
   cz: number;
   sculptOffsets: number[];
   paint: number[];
+  heightMode: ChunkData["heightMode"];
 }
 
 export interface ChunkRenderer {
@@ -279,7 +366,8 @@ export function createChunkRenderer(
     const ctrl = new AbortController();
     inflight.set(k, ctrl);
     lodOf.set(k, lodSegments);
-    fetch(tellusWorldChunkUrl(cx, cz), { cache: "no-store", signal: ctrl.signal })
+    const chunkUrl = staticTerrainChunkUrl(cx, cz) ?? tellusWorldChunkUrl(cx, cz);
+    fetch(chunkUrl, { cache: "no-store", signal: ctrl.signal })
       .then((r) => {
         if (r.ok) return r.json() as Promise<ChunkData>;
         failedFetches++;
@@ -434,6 +522,7 @@ export function createChunkRenderer(
         segments: CHUNK_SEGMENTS,
         sculptOffsets: [],
         paint: [],
+        heightMode: "offset",
       },
       CHUNK_PROVISIONAL_SEGMENTS,
     );
@@ -478,6 +567,7 @@ export function createChunkRenderer(
       existing.template = template;
       existing.sculptOffsets = mergedData.sculptOffsets;
       existing.paint = mergedData.paint;
+      existing.heightMode = mergedData.heightMode;
       return;
     }
     const mesh = new THREE.Mesh(geometry, material);
@@ -494,6 +584,7 @@ export function createChunkRenderer(
       cz: mergedData.cz,
       sculptOffsets: mergedData.sculptOffsets,
       paint: mergedData.paint,
+      heightMode: mergedData.heightMode,
     });
   };
 
@@ -509,6 +600,7 @@ export function createChunkRenderer(
           segments: CHUNK_SEGMENTS,
           sculptOffsets: a.sculptOffsets,
           paint: a.paint,
+          heightMode: a.heightMode,
         },
         a.lodSegments,
       );
@@ -631,6 +723,7 @@ export function createChunkRenderer(
           segments: CHUNK_SEGMENTS,
           sculptOffsets: a.sculptOffsets,
           paint,
+          heightMode: a.heightMode,
         },
         a.lodSegments,
       );
@@ -643,7 +736,10 @@ export function createChunkRenderer(
     const cz = Math.floor(worldZ / CHUNK_SPAN);
     const a = active.get(key(cx, cz));
     if (!a) return null; // chunk not loaded -> grounding falls back to the flat base
-    if (a.sculptOffsets.length === 0) return largeWorldBaseHeight(worldX, worldZ);
+    const moduleOffset = historicalTerrainOffset(worldX, worldZ);
+    if (a.sculptOffsets.length === 0) {
+      return (a.heightMode === "absolute" ? 0 : largeWorldBaseHeight(worldX, worldZ)) + moduleOffset;
+    }
     // Local coords within the chunk, in [0, CHUNK_SPAN]; convert to the 65-grid index space.
     const lx = worldX - cx * CHUNK_SPAN;
     const lz = worldZ - cz * CHUNK_SPAN;
@@ -665,7 +761,7 @@ export function createChunkRenderer(
       h01 * (1 - tx) * tz +
       h11 * tx * tz
     );
-    return largeWorldBaseHeight(worldX, worldZ) + sculptOffset;
+    return (a.heightMode === "absolute" ? 0 : largeWorldBaseHeight(worldX, worldZ)) + sculptOffset + moduleOffset;
   };
 
   const samplePaint = (worldX: number, worldZ: number): TerrainPaintKind | null => {

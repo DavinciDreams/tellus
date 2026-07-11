@@ -40,8 +40,13 @@ import {
 import * as THREE from "three";
 import { TilesRenderer } from "3d-tiles-renderer";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
-import { PROCPLANT_PLACEABLE_CATALOG, procPlantPlaceableById } from "./tellus-procplant-biomes";
+import {
+  ASSET_BACKED_PROCPLANT_MODEL_ID_SET,
+  PROCPLANT_PLACEABLE_CATALOG,
+  procPlantPlaceableById,
+} from "./tellus-procplant-biomes";
 import { createProcPlantVegetation } from "./tellus-procplant-vegetation";
+import { staticTerrainAutoVegetationEnabled } from "./tellus-static-terrain";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
 import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, resetLiveMirrors } from "./tellus-procedural-assets";
 import {
@@ -161,7 +166,7 @@ import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
 import { buildAgentMapLocation, resolveAgentMoveTarget } from "./tellus-agent-location";
-import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, shouldIgnoreDefaultTellusTemplate, templateForWorldId } from "./tellus-world-templates";
+import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, shouldIgnoreDefaultTellusTemplate, templateForWorldId, templateSuppressesAutoVegetation } from "./tellus-world-templates";
 import { evoflowTerrainSourceFor } from "./tellus-evoflow-terrains";
 import {
   ASSET_SURFACE_CONTEXTS,
@@ -1219,7 +1224,14 @@ function createTellusWorld(
     stats: () => ({ tier: 0, chunks: 0, grassIndices: 0, trees: 0, sectors: 0 }),
     dispose: () => undefined,
   };
-  const procplantsEnabled = !terrainOnlyDebug() && procPlantPreference !== "0" && (isChunked || procPlantPreference === "1");
+  const staticTerrainAllowsAutoVegetation = staticTerrainAutoVegetationEnabled(runtimeConfig.worldId);
+  const templateAllowsAutoVegetation = !templateSuppressesAutoVegetation(activeWorldTemplate);
+  const procplantsEnabled =
+    !terrainOnlyDebug() &&
+    procPlantPreference !== "0" &&
+    staticTerrainAllowsAutoVegetation &&
+    templateAllowsAutoVegetation &&
+    (isChunked || procPlantPreference === "1");
   const procplants = procplantsEnabled
     ? createProcPlantVegetation({
         scene,
@@ -4356,6 +4368,32 @@ function createTellusWorld(
   const thingById = (id: string): GeneratedThing | undefined =>
     generated.find((thing) => thing.id === id);
 
+  const staticTerrainSuppressesGeneratedVegetation = (thing: GeneratedThing): boolean => {
+    if (staticTerrainAllowsAutoVegetation) return false;
+    if (thing.kind === "tree" || thing.kind === "flower") return true;
+    const parsed = parseProceduralModelUrl(thing.modelUrl ?? "");
+    if (parsed?.procPlant) return true;
+    if (
+      thing.assetStoreModelId &&
+      ASSET_BACKED_PROCPLANT_MODEL_ID_SET.has(thing.assetStoreModelId)
+    ) {
+      return true;
+    }
+    const label = `${thing.prompt} ${thing.modelUrl ?? ""}`.toLowerCase();
+    return /\b(grass|tree|pine|spruce|fir|cedar|redwood|birch|oak|maple|cherry|palm|fern|flower|flora|shrub|bush|reed|sedge|agave|plant)\b/.test(label);
+  };
+
+  const removeGeneratedMeshOnly = (thingId: string) => {
+    const mesh = generatedMeshes.get(thingId);
+    if (!mesh) return;
+    uninstanceThing(thingId);
+    stopGeneratedAnimation(thingId);
+    scene.remove(mesh);
+    disposeObject(mesh);
+    generatedMeshes.delete(thingId);
+    syncTransformControls();
+  };
+
   // ── Static-duplicate GPU instancing ──────────────────────────────────────────────────────────────────
   // All of this is a no-op unless runtimeConfig.instanceStaticDuplicates is on. Correctness rule (per design):
   // we NEVER hand-derive instance matrices — we reuse the regular mesh's already-correct matrixWorld and copy
@@ -5850,6 +5888,10 @@ function createTellusWorld(
       worldModelLoadEnqueuedAt.delete(id);
       const thing = thingById(id);
       if (!thing?.modelUrl || thing.generationStatus !== "ready") continue;
+      if (staticTerrainSuppressesGeneratedVegetation(thing)) {
+        removeGeneratedMeshOnly(thing.id);
+        continue;
+      }
       const modelUrl = thing.modelUrl;
       if (isDeadLegacyHyadesContentUrl(modelUrl)) {
         thing.modelUrl = undefined;
@@ -5881,6 +5923,11 @@ function createTellusWorld(
           const current = thingById(id);
           if (destroyed || !current || current.modelUrl !== modelUrl) {
             disposeObject(model);
+            return;
+          }
+          if (staticTerrainSuppressesGeneratedVegetation(current)) {
+            disposeObject(model);
+            removeGeneratedMeshOnly(current.id);
             return;
           }
           transientModelLoadFailures.delete(id);
@@ -5946,6 +5993,12 @@ function createTellusWorld(
 
   const loadRemoteGeneratedModel = (thing: GeneratedThing) => {
     if (terrainOnlyDebug()) return;
+    if (staticTerrainSuppressesGeneratedVegetation(thing)) {
+      removeGeneratedMeshOnly(thing.id);
+      queuedWorldModelLoads.delete(thing.id);
+      worldModelLoadEnqueuedAt.delete(thing.id);
+      return;
+    }
     if (!thing.modelUrl || thing.generationStatus !== "ready") return;
     const currentMesh = generatedMeshes.get(thing.id);
     if (currentMesh?.userData.loadedModelUrl === thing.modelUrl) {
@@ -5960,6 +6013,10 @@ function createTellusWorld(
   };
 
   const ensureGeneratedVisual = (thing: GeneratedThing) => {
+    if (staticTerrainSuppressesGeneratedVegetation(thing)) {
+      removeGeneratedMeshOnly(thing.id);
+      return;
+    }
     const wantsSwirl = shouldShowGenerationSwirl(thing);
     const currentMesh = generatedMeshes.get(thing.id);
     // If the correct GLB is already mounted, never tear it down. Without this, every move/scale/rotate/mount
@@ -6143,12 +6200,7 @@ function createTellusWorld(
     };
     generated.push(thing);
     const repairedInteriorPosition = repairInteriorThingPosition(thing);
-    const mesh = shouldShowGenerationSwirl(thing)
-      ? createGenerationSwirl(thing)
-      : createGeneratedMesh(thing);
-    generatedMeshes.set(thing.id, mesh);
-    scene.add(mesh);
-    syncTransformControls();
+    ensureGeneratedVisual(thing);
     updateThingMeshPosition(thing);
     refreshVegetationForGeneratedThing(thing);
     loadRemoteGeneratedModel(thing);

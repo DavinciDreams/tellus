@@ -284,6 +284,8 @@ export interface ChunkData {
   segments: number; // 64
   sculptOffsets: number[]; // 4225, row-major (z-outer/x-inner); [] when revision 0 (flat)
   paint: number[]; // 4225 ints; code 0 = unpainted
+  /** Omitted/offset = sculptOffsets are added to the procedural base. absolute = sculptOffsets are world Y. */
+  heightMode?: "offset" | "absolute";
 }
 
 export interface ChunkManifestEntry {

@@ -37,6 +37,7 @@ import {
   tellusWorldChunksManifestUrl,
   tellusVisitorId,
 } from "./tellus-urls-identity";
+import { loadStaticTerrainManifest } from "./tellus-static-terrain";
 import {
   type TellusTerrainState,
   type WorldGeneratedThing,
@@ -136,6 +137,12 @@ export async function loadChunkedWorldBounds(): Promise<void> {
   const fallbackSize = idSize ? Math.max(1, Math.min(256, Math.round(Number(idSize)))) : 64;
   setChunkedWorldChunks({ w: fallbackSize, h: fallbackSize });
   try {
+    const staticManifest = await loadStaticTerrainManifest();
+    if (staticManifest && typeof staticManifest.width === "number" && typeof staticManifest.height === "number") {
+      setChunkedWorldChunks({ w: staticManifest.width, h: staticManifest.height });
+      setChunkedFlatGround(0);
+      return;
+    }
     const res = await fetch(tellusWorldChunksManifestUrl(0, 0, 0), { cache: "no-store" });
     if (res.ok) {
       const m = await res.json();
