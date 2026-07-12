@@ -139,7 +139,6 @@ interface TextImageResult {
     | "automatic1111"
     | "comfyui"
     | "gradio"
-    | "hyades-zimage"
     | "procedural";
   imagePrompt: string;
   storedImageUrl?: string;
@@ -1521,18 +1520,6 @@ function hyadesBackendFor(provider: Generation3DProvider): "instantmesh" | "pixa
   return null;
 }
 
-function assetStoreModelIdFromUrl(url: string): string | undefined {
-  try {
-    const parsed = new URL(url, "https://tellus.local");
-    const match =
-      /^\/api\/(?:view|download|model)\/([^/?#/]+)/i.exec(parsed.pathname) ??
-      /^\/api\/assets\/(?:model|download)\/([^/?#/]+)/i.exec(parsed.pathname);
-    return match?.[1] ? decodeURIComponent(match[1]) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 interface HyadesJobBody {
   jobId?: string;
   status?: string; // submitted | working | completed | failed | cancelled
@@ -1558,7 +1545,7 @@ async function executeHyadesGeneration(params: {
   const submitBody: Record<string, unknown> = {
     prompt,
     provider: backend,
-    share_to_store: true, // Ask Hyades to share, then enforce the Tellus asset-store contract below.
+    share_to_store: true, // Tellus generations belong in the shared game asset library
     // Tag the shared asset as player-made so it's filterable/findable alongside agent-made content
     // (Hyades adds `tellus,generated,<creator_kind>` tags + names it from the prompt). This is the
     // client/player generation path; in-world agents generate server-side via the world grain.
@@ -1610,59 +1597,14 @@ async function executeHyadesGeneration(params: {
     throw new Error(`Hyades 3D generation did not finish (last status: ${lastStatus})`);
   }
 
-  const existingAssetStoreModelId = assetStoreModelIdFromUrl(modelUrl);
-  if (existingAssetStoreModelId) {
-    return {
-      jobId: generationId,
-      status: "completed",
-      modelUrl,
-      provider,
-      rawModelUrl: modelUrl,
-      assetStoreModelId: existingAssetStoreModelId,
-      assetStoreModelUrl: modelUrl,
-      assetStoreDownloadUrl: modelUrl,
-      sourceImageUrl: imageUrl,
-      textImageProvider: imageUrl ? "request" : "hyades-zimage",
-      manifestUrl: "/generated-assets/manifest.json",
-    };
-  }
-
-  const kind = payload.kind?.trim() || "object";
-  const sampleSteps =
-    typeof payload.sampleSteps === "number" && Number.isFinite(payload.sampleSteps)
-      ? payload.sampleSteps
-      : 0;
-  const seed =
-    typeof payload.seed === "number" && Number.isFinite(payload.seed)
-      ? payload.seed
-      : 0;
-  const stored = await persistGeneratedModel({
-    id: generationId,
-    prompt,
-    kind,
-    rawModelUrl: modelUrl,
-    sourceImage: {
-      imageUrl: imageUrl || "",
-      provider: imageUrl ? "request" : "hyades-zimage",
-      imagePrompt: prompt,
-    },
-    createdAt: new Date().toISOString(),
-    sampleSteps,
-    seed,
-    provider,
-  });
-
   return {
     jobId: generationId,
     status: "completed",
-    modelUrl: stored.assetStoreModelUrl ?? stored.modelUrl,
+    modelUrl,
     provider,
     rawModelUrl: modelUrl,
-    storedModelUrl: stored.modelUrl,
-    storedModelPath: stored.storedModelPath,
-    assetStoreModelId: stored.assetStoreModelId,
-    assetStoreModelUrl: stored.assetStoreModelUrl,
-    assetStoreDownloadUrl: stored.assetStoreDownloadUrl,
+    assetStoreModelUrl: modelUrl,
+    assetStoreDownloadUrl: modelUrl,
     sourceImageUrl: imageUrl,
     textImageProvider: imageUrl ? "request" : "hyades-zimage",
     manifestUrl: "/generated-assets/manifest.json",
