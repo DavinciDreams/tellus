@@ -1,7 +1,7 @@
 /* src/styleguide.css
    Page-level layout for the Tellus design-system styleguide (/styleguide).
    Component styling lives in src/design-system/components.css — this file only
-   lays out the documentation shell. All colors reference the same --ds-*/--hud-* tokens. */
+   lays out the documentation shell. All colors reference the same --ds-* and --hud-* tokens. */
 
 :root { color-scheme: dark; }
 

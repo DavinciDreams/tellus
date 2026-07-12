@@ -1,0 +1,41 @@
+# Tellus
+
+> Tellus is a browser-based 3D world and AI terrarium backed by Hyades. Humans,
+agents, and MCP clients can share worlds, move around, shape terrain, place
+assets, chat, and use portals.
+
+## Primary Docs
+
+- README: https://github.com/DavinciDreams/tellus/blob/main/README.md
+- Contributing: https://github.com/DavinciDreams/tellus/blob/main/CONTRIBUTING.md
+- Agent guide: https://github.com/DavinciDreams/tellus/blob/main/AGENTS.md
+- MCP skill doc: https://tellus.gnostr.cloud/tellus-mcp-skill.md
+
+## Live Surfaces
+
+- App: https://tellus.gnostr.cloud/
+- MCP skill doc: https://tellus.gnostr.cloud/tellus-mcp-skill.md
+- Hyades world API: https://hyades.gnostr.cloud/
+- MCP endpoint shape: POST https://hyades.gnostr.cloud/api/tellus/mcp/{worldId}
+
+## Developer Notes
+
+- Local dev: `bun install`, then `bun run dev`, open http://localhost:3344/.
+- Checks: `bun run typecheck`, `bun run test`, `bun run build`.
+- Public docs do not imply access. Hyades enforces premium/auth for protected
+  MCP endpoint use and bearer-token minting.
+- Browser `GET` on an MCP endpoint returns 405; MCP clients use JSON-RPC over
+  HTTP POST.
+- Passkeys are WebAuthn origin-sensitive; localhost RP-ID errors usually mean
+  the origin allow-list needs to match the relying-party domain.
+
+## Code Map
+
+- UI and account panel: `src/main.tsx`, `src/styles.css`,
+  `src/tellus-auth-ui.tsx`
+- Navigation and collisions: `src/main.tsx`, `src/tellus-rapier-physics.ts`,
+  `src/tellus-terrain.ts`
+- Rendering and performance: `src/main.tsx`, `src/tellus-terrain.ts`,
+  `src/tellus-scene-builders.ts`, `src/tellus-vegetation*.ts`
+- Hyades/world clients: `src/tellus-world-client.ts`, `src/tellus-auth.ts`,
+  `src/tellus-runtime-config.ts`, `src/tellus-urls-identity.ts`

@@ -1,0 +1,18 @@
+---
+description: Tellus repository guidance
+alwaysApply: true
+---
+
+Read `AGENTS.md` before editing. Tellus uses Bun, React, Three.js/WebGPU, and
+Hyades as the authoritative backend.
+
+- Run relevant checks before handing back work: `bun run typecheck`,
+  `bun run test`, and for frontend/runtime changes `bun run build`.
+- Keep MCP docs public; keep bearer token minting and endpoint use premium
+  gated server-side.
+- Do not expose secrets, bearer tokens, cookies, or Nostr private keys.
+- UI/account work usually starts in `src/main.tsx`, `src/styles.css`, and
+  `src/tellus-auth-ui.tsx`.
+- Movement/performance work usually starts in `src/main.tsx`,
+  `src/tellus-rapier-physics.ts`, `src/tellus-terrain.ts`, and
+  `src/tellus-scene-builders.ts`.

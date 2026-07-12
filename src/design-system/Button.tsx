@@ -44,7 +44,7 @@ export function Button({
       className={classes}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      aria-pressed={selected}
+      aria-pressed={selected ? true : undefined}
     >
       {leadingIcon ? (
         <span className="ds-btn__icon" aria-hidden="true">

@@ -39,7 +39,9 @@ export function openTellusAccountPanel(): void {
 
 /** Live account state: the cached account, refreshed from /auth/status on mount + on every auth change. */
 export function useTellusAuth(): TellusAccount | null {
-  const [account, setAccount] = useState<TellusAccount | null>(() => getSession()?.account ?? null);
+  const [account, setAccount] = useState<TellusAccount | null>(
+    () => getSession()?.account ?? null,
+  );
   useEffect(() => onAuthChange(setAccount), []);
   useEffect(() => {
     if (getSession()) void authStatus().catch(() => undefined);
@@ -84,15 +86,24 @@ function npubFromHex(pubkeyHex: string): string {
   }
   if (bits > 0) data.push((acc << (5 - bits)) & 31);
   const hrp = "npub";
-  const hrpExpanded = [...[...hrp].map((c) => c.charCodeAt(0) >> 5), 0, ...[...hrp].map((c) => c.charCodeAt(0) & 31)];
-  const polymod = bech32Polymod([...hrpExpanded, ...data, 0, 0, 0, 0, 0, 0]) ^ 1;
-  const checksum = Array.from({ length: 6 }, (_, i) => (polymod >> (5 * (5 - i))) & 31);
+  const hrpExpanded = [
+    ...[...hrp].map((c) => c.charCodeAt(0) >> 5),
+    0,
+    ...[...hrp].map((c) => c.charCodeAt(0) & 31),
+  ];
+  const polymod =
+    bech32Polymod([...hrpExpanded, ...data, 0, 0, 0, 0, 0, 0]) ^ 1;
+  const checksum = Array.from(
+    { length: 6 },
+    (_, i) => (polymod >> (5 * (5 - i))) & 31,
+  );
   return `${hrp}1${[...data, ...checksum].map((d) => BECH32_CHARSET[d]).join("")}`;
 }
 
 function accountButtonLabel(account: TellusAccount): string {
   if (account.nip05) return nip05Display(account.nip05).slice(0, 24);
-  if (account.label && account.label.trim()) return account.label.trim().slice(0, 18);
+  if (account.label && account.label.trim())
+    return account.label.trim().slice(0, 18);
   if (account.npub) return shortNpub(npubFromHex(account.npub));
   return account.accountId.slice(0, 8);
 }
@@ -102,21 +113,28 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 function isPaymentsUnavailable(err: unknown): boolean {
-  return err instanceof TellusApiError && (err.status === 404 || err.status === 501);
+  return (
+    err instanceof TellusApiError && (err.status === 404 || err.status === 501)
+  );
 }
 
 function premiumLabel(account: TellusAccount): string {
   if (!account.premium) return "Free";
   if (account.premiumUntil) {
     const until = new Date(account.premiumUntil);
-    if (!Number.isNaN(until.getTime())) return `Premium until ${until.toLocaleDateString()}`;
+    if (!Number.isNaN(until.getTime()))
+      return `Premium until ${until.toLocaleDateString()}`;
   }
   return "Premium";
 }
 
 // ── Premium checkout block (inside the account panel) ────────────────────────
 
-function PremiumCheckout({ account }: { account: TellusAccount }): React.ReactElement | null {
+function PremiumCheckout({
+  account,
+}: {
+  account: TellusAccount;
+}): React.ReactElement | null {
   const [checkout, setCheckout] = useState<PayCheckout | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -129,7 +147,11 @@ function PremiumCheckout({ account }: { account: TellusAccount }): React.ReactEl
       .then((products) => {
         if (cancelled) return;
         const premium = products.find((p) => p.id === "premium") ?? products[0];
-        if (premium && typeof premium.priceSat === "number" && premium.priceSat > 0) {
+        if (
+          premium &&
+          typeof premium.priceSat === "number" &&
+          premium.priceSat > 0
+        ) {
           setPriceLabel(`${premium.priceSat} sat`);
         }
       })
@@ -191,45 +213,91 @@ function PremiumCheckout({ account }: { account: TellusAccount }): React.ReactEl
     <div className="auth-section">
       <span className="auth-section-title">Premium</span>
       {celebrate || checkout?.status === "paid" ? (
-        <span className="auth-celebrate">✨ Premium is active — your agent stays awake while you're away.</span>
+        <span className="auth-celebrate">
+          ✨ Premium is active — your agent stays awake while you're away.
+        </span>
       ) : checkout?.status === "pending" && checkout.invoice ? (
         <>
-          <span className="auth-muted">Pay this Lightning invoice to activate Premium:</span>
+          <span className="auth-muted">
+            Pay this Lightning invoice to activate Premium:
+          </span>
           <pre className="auth-invoice">{checkout.invoice}</pre>
           <div className="auth-row">
-            <button type="button" className="auth-small-button" onClick={copyInvoice}>
+            <button
+              type="button"
+              className="auth-small-button"
+              onClick={copyInvoice}
+            >
               Copy
             </button>
-            <a className="auth-small-button" href={`lightning:${checkout.invoice}`}>
+            <a
+              className="auth-small-button"
+              href={`lightning:${checkout.invoice}`}
+            >
               Open wallet
             </a>
           </div>
           <span className="auth-muted">Waiting for payment…</span>
         </>
-      ) : checkout && (checkout.status === "expired" || checkout.status === "failed" || checkout.status === "canceled") ? (
+      ) : checkout &&
+        (checkout.status === "expired" ||
+          checkout.status === "failed" ||
+          checkout.status === "canceled") ? (
         <>
           <span className="auth-error">
             Checkout {checkout.status}
             {checkout.error ? ` — ${checkout.error}` : ""}.
           </span>
-          <button type="button" className="auth-premium-button" disabled={busy} onClick={() => void begin()}>
+          <button
+            type="button"
+            className="auth-premium-button"
+            disabled={busy}
+            onClick={() => void begin()}
+          >
             Try again
           </button>
         </>
       ) : (
-        <button type="button" className="auth-premium-button" disabled={busy} onClick={() => void begin()}>
+        <button
+          type="button"
+          className="auth-premium-button"
+          disabled={busy}
+          onClick={() => void begin()}
+        >
           {busy ? "Starting checkout…" : `Get Premium — ${priceLabel}`}
         </button>
       )}
       {note && <span className="auth-muted">{note}</span>}
-      <span className="auth-muted">Premium keeps your agent alive while you're away.</span>
+      <span className="auth-muted">
+        Premium keeps your agent alive while you're away.
+      </span>
     </div>
   );
 }
 
-/** Premium-only: surface the MCP endpoint + a personal Bearer token so a user can drive their avatar
- * programmatically (any MCP client / their own automation) with the same tools the in-world agents use. */
-function McpAccessSection({ account }: { account: TellusAccount }): React.ReactElement | null {
+function McpGuideLink(): React.ReactElement {
+  return (
+    <span className="auth-kv">
+      <span className="auth-muted">guide</span>
+      <a
+        className="auth-small-button"
+        href="/tellus-mcp-skill.md"
+        download
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Download the LLM skill doc
+      </a>
+    </span>
+  );
+}
+
+/** Surface the MCP guide to every user; premium gates only endpoint/token management. */
+function McpAccessSection({
+  account,
+}: {
+  account: TellusAccount;
+}): React.ReactElement | null {
   const [status, setStatus] = useState<McpTokenStatus | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -250,8 +318,6 @@ function McpAccessSection({ account }: { account: TellusAccount }): React.ReactE
       alive = false;
     };
   }, [account.premium]);
-
-  if (!account.premium) return null;
 
   const copy = (text: string, what: string) => {
     void navigator.clipboard?.writeText(text).then(
@@ -295,51 +361,78 @@ function McpAccessSection({ account }: { account: TellusAccount }): React.ReactE
     <div className="auth-section">
       <span className="auth-section-title">Play programmatically (MCP)</span>
       <span className="auth-muted">
-        Drive your avatar from any MCP client or your own automation — same tools the in-world agents use.
+        Drive your avatar from any MCP client or your own automation — same
+        tools the in-world agents use.
       </span>
-      <span className="auth-kv">
-        <span className="auth-muted">guide</span>
-        <a className="auth-small-button" href="/tellus-mcp-skill.md" download target="_blank" rel="noopener noreferrer">
-          Download the LLM skill doc
-        </a>
-      </span>
-      <span className="auth-kv">
-        <span className="auth-muted">endpoint</span>
-        <code style={{ wordBreak: "break-all" }}>{endpoint}</code>
-        <button type="button" className="auth-small-button" onClick={() => copy(endpoint, "endpoint")}>
-          {copied === "endpoint" ? "Copied" : "Copy"}
-        </button>
-      </span>
-      {token ? (
+      <McpGuideLink />
+      {account.premium ? (
         <>
           <span className="auth-kv">
-            <span className="auth-muted">token</span>
-            <code style={{ wordBreak: "break-all" }}>{token}</code>
-            <button type="button" className="auth-small-button" onClick={() => copy(token, "token")}>
-              {copied === "token" ? "Copied" : "Copy"}
+            <span className="auth-muted">endpoint</span>
+            <code style={{ wordBreak: "break-all" }}>{endpoint}</code>
+            <button
+              type="button"
+              className="auth-small-button"
+              onClick={() => copy(endpoint, "endpoint")}
+            >
+              {copied === "endpoint" ? "Copied" : "Copy"}
             </button>
           </span>
-          <span className="auth-muted">
-            Shown once — store it now. Send it as <code>Authorization: Bearer &lt;token&gt;</code>.
-          </span>
+          {token ? (
+            <>
+              <span className="auth-kv">
+                <span className="auth-muted">token</span>
+                <code style={{ wordBreak: "break-all" }}>{token}</code>
+                <button
+                  type="button"
+                  className="auth-small-button"
+                  onClick={() => copy(token, "token")}
+                >
+                  {copied === "token" ? "Copied" : "Copy"}
+                </button>
+              </span>
+              <span className="auth-muted">
+                Shown once — store it now. Send it as{" "}
+                <code>Authorization: Bearer &lt;token&gt;</code>.
+              </span>
+            </>
+          ) : (
+            <span className="auth-muted">
+              {status?.hasToken
+                ? "A token is active (the secret is shown only when created). Regenerate to get a new one."
+                : "No token yet — generate one to get your Bearer token."}
+            </span>
+          )}
+          <div className="auth-row">
+            <button
+              type="button"
+              className="auth-small-button"
+              disabled={busy}
+              onClick={() => void mint()}
+            >
+              {busy
+                ? "Working…"
+                : status?.hasToken
+                  ? "Regenerate token"
+                  : "Generate token"}
+            </button>
+            {status?.hasToken && (
+              <button
+                type="button"
+                className="auth-small-button"
+                disabled={busy}
+                onClick={() => void revoke()}
+              >
+                Revoke
+              </button>
+            )}
+          </div>
         </>
       ) : (
         <span className="auth-muted">
-          {status?.hasToken
-            ? "A token is active (the secret is shown only when created). Regenerate to get a new one."
-            : "No token yet — generate one to get your Bearer token."}
+          Premium is required to generate a Bearer token for MCP access.
         </span>
       )}
-      <div className="auth-row">
-        <button type="button" className="auth-small-button" disabled={busy} onClick={() => void mint()}>
-          {busy ? "Working…" : status?.hasToken ? "Regenerate token" : "Generate token"}
-        </button>
-        {status?.hasToken && (
-          <button type="button" className="auth-small-button" disabled={busy} onClick={() => void revoke()}>
-            Revoke
-          </button>
-        )}
-      </div>
     </div>
   );
 }
@@ -370,7 +463,11 @@ export function AuthControls(): React.ReactElement {
     // First successful login: offer to claim the anonymous identity so pre-login worlds stay
     // reachable. The reload (either way) rebinds world list + agent state to the new identity.
     const anon = anonymousUserId();
-    if (anon && anon !== loggedIn.accountId && !(loggedIn.claimedUserIds ?? []).includes(anon)) {
+    if (
+      anon &&
+      anon !== loggedIn.accountId &&
+      !(loggedIn.claimedUserIds ?? []).includes(anon)
+    ) {
       setBusyText(null);
       setClaimAccount(loggedIn);
       return;
@@ -405,7 +502,11 @@ export function AuthControls(): React.ReactElement {
   }, []);
 
   const runLink = useCallback(async (viaBunkerUri?: string) => {
-    setBusyText(viaBunkerUri ? "Waiting for signer approval…" : "Waiting for your Nostr extension…");
+    setBusyText(
+      viaBunkerUri
+        ? "Waiting for signer approval…"
+        : "Waiting for your Nostr extension…",
+    );
     setError(null);
     try {
       await linkNostr(viaBunkerUri);
@@ -454,7 +555,9 @@ export function AuthControls(): React.ReactElement {
     <>
       <button
         type="button"
-        className={account ? "auth-login-button auth-logged-in" : "auth-login-button"}
+        className={
+          account ? "auth-login-button auth-logged-in" : "auth-login-button"
+        }
         title={account ? "Your account" : "Log in"}
         onClick={() => setView(account ? "account" : "login")}
       >
@@ -465,10 +568,20 @@ export function AuthControls(): React.ReactElement {
           and the claim confirm must still render before the reload. */}
       {view === "login" && (claimAccount || !account) && (
         <div className="auth-overlay" onClick={close}>
-          <div className="auth-dialog" role="dialog" aria-label="Log in" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="auth-dialog"
+            role="dialog"
+            aria-label="Log in"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="auth-title-row">
               <span className="auth-title">Log in to Tellus</span>
-              <button type="button" className="auth-close" onClick={close} aria-label="Close">
+              <button
+                type="button"
+                className="auth-close"
+                onClick={close}
+                aria-label="Close"
+              >
                 ✕
               </button>
             </div>
@@ -476,25 +589,44 @@ export function AuthControls(): React.ReactElement {
               <div className="auth-section">
                 <span className="auth-section-title">You're in!</span>
                 <span className="auth-muted">
-                  You also played here before logging in. Keep the worlds and agent tied to this browser's
-                  anonymous identity by claiming it onto your account.
+                  You also played here before logging in. Keep the worlds and
+                  agent tied to this browser's anonymous identity by claiming it
+                  onto your account.
                 </span>
                 <div className="auth-row">
-                  <button type="button" className="auth-premium-button" onClick={() => void resolveClaim(true)}>
+                  <button
+                    type="button"
+                    className="auth-premium-button"
+                    onClick={() => void resolveClaim(true)}
+                  >
                     Keep my existing worlds
                   </button>
-                  <button type="button" className="auth-small-button" onClick={() => void resolveClaim(false)}>
+                  <button
+                    type="button"
+                    className="auth-small-button"
+                    onClick={() => void resolveClaim(false)}
+                  >
                     Skip
                   </button>
                 </div>
               </div>
             ) : (
               <>
+                <div className="auth-section">
+                  <span className="auth-section-title">Developer docs</span>
+                  <span className="auth-muted">
+                    The MCP guide is public; sign in and activate Premium only
+                    when you need a personal token.
+                  </span>
+                  <McpGuideLink />
+                </div>
                 <button
                   type="button"
                   className="auth-option"
                   disabled={Boolean(busyText)}
-                  onClick={() => void runLogin("Touch your authenticator…", passkeyLogin)}
+                  onClick={() =>
+                    void runLogin("Touch your authenticator…", passkeyLogin)
+                  }
                 >
                   <strong>Passkey</strong>
                   <small>Sign in with a passkey you already created here</small>
@@ -504,7 +636,12 @@ export function AuthControls(): React.ReactElement {
                     type="button"
                     className="auth-option"
                     disabled={Boolean(busyText)}
-                    onClick={() => void runLogin("Waiting for your Nostr extension…", loginNostrNip07)}
+                    onClick={() =>
+                      void runLogin(
+                        "Waiting for your Nostr extension…",
+                        loginNostrNip07,
+                      )
+                    }
                   >
                     <strong>Nostr extension (NIP-07)</strong>
                     <small>Sign a one-time nonce with window.nostr</small>
@@ -525,7 +662,9 @@ export function AuthControls(): React.ReactElement {
                     className="auth-small-button"
                     disabled={Boolean(busyText) || !bunkerUri.trim()}
                     onClick={() =>
-                      void runLogin("Waiting for signer approval…", () => loginNostrBunker(bunkerUri))
+                      void runLogin("Waiting for signer approval…", () =>
+                        loginNostrBunker(bunkerUri),
+                      )
                     }
                   >
                     Connect
@@ -564,32 +703,51 @@ export function AuthControls(): React.ReactElement {
 
       {view === "account" && account && (
         <div className="auth-overlay" onClick={close}>
-          <div className="auth-dialog" role="dialog" aria-label="Your account" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="auth-dialog"
+            role="dialog"
+            aria-label="Your account"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="auth-title-row">
-              <span className="auth-title">{account.label?.trim() || "Your account"}</span>
-              <button type="button" className="auth-close" onClick={close} aria-label="Close">
+              <span className="auth-title">
+                {account.label?.trim() || "Your account"}
+              </span>
+              <button
+                type="button"
+                className="auth-close"
+                onClick={close}
+                aria-label="Close"
+              >
                 ✕
               </button>
             </div>
             {pendingApproval && (
-              <span className="auth-status">Awaiting approval — you can play, but premium purchase is locked.</span>
+              <span className="auth-status">
+                Awaiting approval — you can play, but premium purchase is
+                locked.
+              </span>
             )}
             <div className="auth-section">
               <span className="auth-section-title">Identity</span>
               <span className="auth-kv">
-                <span className="auth-muted">id</span> <code>{account.accountId.slice(0, 13)}…</code>
+                <span className="auth-muted">id</span>{" "}
+                <code>{account.accountId.slice(0, 13)}…</code>
               </span>
               <span className="auth-kv">
-                <span className="auth-muted">status</span> {premiumLabel(account)}
+                <span className="auth-muted">status</span>{" "}
+                {premiumLabel(account)}
               </span>
               {account.nip05 && (
                 <span className="auth-kv" title="NIP-05 verified by its domain">
-                  <span className="auth-muted">nip-05</span> <code>✓ {nip05Display(account.nip05)}</code>
+                  <span className="auth-muted">nip-05</span>{" "}
+                  <code>✓ {nip05Display(account.nip05)}</code>
                 </span>
               )}
               {account.npub ? (
                 <span className="auth-kv" title={npubFromHex(account.npub)}>
-                  <span className="auth-muted">npub</span> <code>{shortNpub(npubFromHex(account.npub))}</code>
+                  <span className="auth-muted">npub</span>{" "}
+                  <code>{shortNpub(npubFromHex(account.npub))}</code>
                 </span>
               ) : (
                 <div className="auth-row" style={{ flexWrap: "wrap" }}>
@@ -640,7 +798,8 @@ export function AuthControls(): React.ReactElement {
               ) : (
                 (account.passkeys ?? []).map((pk) => (
                   <span key={pk.credentialId} className="auth-kv">
-                    <span className="auth-muted">🔑</span> {pk.label?.trim() || `${pk.credentialId.slice(0, 10)}…`}
+                    <span className="auth-muted">🔑</span>{" "}
+                    {pk.label?.trim() || `${pk.credentialId.slice(0, 10)}…`}
                   </span>
                 ))
               )}
@@ -677,7 +836,11 @@ export function AuthControls(): React.ReactElement {
             )}
             {busyText && <span className="auth-status">{busyText}</span>}
             {error && <span className="auth-error">{error}</span>}
-            <button type="button" className="auth-small-button auth-logout" onClick={() => void onLogout()}>
+            <button
+              type="button"
+              className="auth-small-button auth-logout"
+              onClick={() => void onLogout()}
+            >
               Log out
             </button>
           </div>

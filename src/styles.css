@@ -5699,3 +5699,51 @@ button.terrain-scatter-tile {
     flex-basis: 100%;
   }
 }
+
+/* Entry loading screen — covers the 3D view while the spawn chunk, procedural plants, and their
+   shaders finish their one-time build/compile on world entry (see createTellusWorld). Sits above every
+   HUD layer (--z-modal is 80) and fades out once the world signals ready. */
+.tellus-entry-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background:
+    radial-gradient(120% 120% at 50% 40%, rgb(24 40 30 / 100%) 0%, rgb(16 22 16 / 100%) 60%, #0b0f0b 100%);
+  color: var(--hud-muted);
+  opacity: 1;
+  transition: opacity 0.6s ease;
+  pointer-events: all;
+}
+
+.tellus-entry-loading--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tellus-entry-loading__spinner {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 3px solid rgb(222 188 86 / 22%);
+  border-top-color: var(--hud-gold);
+  animation: tellus-entry-spin 0.9s linear infinite;
+}
+
+.tellus-entry-loading__label {
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--hud-gold-bright);
+  opacity: 0.85;
+}
+
+@keyframes tellus-entry-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

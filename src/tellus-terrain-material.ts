@@ -853,41 +853,63 @@ float tellusGritDetail(vec3 sampleColor, float strength){
     brickMask += unpainted * tellusKindBand(${KIND_BRICK.toFixed(1)});
     mossMask += jungleMossMask;
     float paintMask = clamp(mossMask + sandMask + dirtMask + forestFloorMask + desertSandMask + rockMask + gravelMask + snowMask + stoneMask + brickMask, 0.0, 1.0);
+    // Texture samples stay UNCONDITIONAL: sampling inside branches would break the implicit-LOD
+    // (mipmap) derivatives at triangle edges where a 2x2 quad straddles two paint codes. Cheap anyway.
     vec3 mossSample = texture2D(tellusMossAlbedoMap, tellusPaintUv).rgb;
     vec3 gritSample = texture2D(tellusGritAlbedoMap, tellusPaintUv * 1.65).rgb;
     vec3 cobbleSample = texture2D(tellusCobbleAlbedoMap, tellusPaintUv * 0.92).rgb;
-    vec3 meadowAlbedo = mossSample * vec3(0.96, 1.03, 0.96);
-    vec3 flowersAlbedo = mossSample * vec3(1.04, 1.08, 1.08);
-    vec3 grassAlbedo = mossSample * vec3(1.08, 1.12, 0.82);
-    vec3 jungleMossAlbedo = mix(vec3(0.08, 0.24, 0.10), mossSample * vec3(0.58, 0.9, 0.52), 0.72);
-    vec3 sandAlbedo = mix(tellusSandSurface(vTellusWorldPos.xz) * vec3(0.9, 0.84, 0.68), gritSample * vec3(1.18, 1.08, 0.88), 0.62);
-    vec3 dirtBase = tellusDirtSurface(vTellusWorldPos.xz) * vec3(0.68, 0.5, 0.32);
-    vec3 dirtGrain = mix(gritSample * vec3(0.5, 0.34, 0.2), gritSample * gritSample * vec3(0.42, 0.25, 0.13), 0.48);
-    vec3 dirtAlbedo = mix(dirtBase, dirtGrain, 0.72);
-    vec3 forestFloorAlbedo = mix(tellusForestFloorSurface(vTellusWorldPos.xz) * vec3(1.12, 0.72, 0.42), gritSample * vec3(0.34, 0.22, 0.13), 0.58);
-    vec3 desertSandAlbedo = mix(tellusDesertSandSurface(vTellusWorldPos.xz), gritSample * vec3(1.36, 0.76, 0.34), 0.4);
-    vec3 pebbleAlbedo = gritSample * vec3(0.68, 0.7, 0.66);
-    vec3 gravelAlbedo = gritSample * vec3(0.62, 0.59, 0.51);
-    float mountainRock = smoothstep(0.22, 0.58, 1.0 - clamp(vTellusWorldNormal.y, 0.0, 1.0));
-    vec3 rockAlbedo = mix(pebbleAlbedo, tellusRockSurface(vTellusWorldPos.xz, pebbleAlbedo), mountainRock);
-    vec3 snowAlbedo = mix(tellusSnowSurface(vTellusWorldPos.xz), gritSample * vec3(1.2, 1.24, 1.26), 0.34);
-    vec3 cobblestoneAlbedo = mix(cobbleSample * vec3(1.04, 1.0, 0.92), tellusStoneSlabs(vTellusWorldPos.xz) * cobbleSample, 0.34);
-    vec3 brickAlbedo = tellusRunningBondBrick(vTellusWorldPos.xz);
-    vec3 biomeAlbedo =
-      meadowAlbedo * meadowMask +
-      flowersAlbedo * flowersMask +
-      grassAlbedo * grassMask +
-      jungleMossAlbedo * jungleMossMask +
-      sandAlbedo * sandMask +
-      dirtAlbedo * dirtMask +
-      forestFloorAlbedo * forestFloorMask +
-      desertSandAlbedo * desertSandMask +
-      rockAlbedo * rockMask +
-      gravelAlbedo * gravelMask +
-      snowAlbedo * snowMask +
-      cobblestoneAlbedo * stoneMask +
-      brickAlbedo * brickMask +
-      vec3(1.0) * (1.0 - paintMask);
+    // Each triangle carries ONE flat paint/kind code, so exactly one mask below is non-zero and the
+    // branches are coherent across the whole triangle (no warp divergence). Guarding each biome's
+    // sin-heavy surface function lets the GPU skip the ~7 inactive biomes per pixel. Output is
+    // identical — the skipped terms were multiplied by a zero mask anyway. Only pure-ALU surface
+    // functions live inside the branches (texture reads stay above).
+    vec3 biomeAlbedo = vec3(1.0) * (1.0 - paintMask);
+    if (mossMask > 0.0) {
+      vec3 meadowAlbedo = mossSample * vec3(0.96, 1.03, 0.96);
+      vec3 flowersAlbedo = mossSample * vec3(1.04, 1.08, 1.08);
+      vec3 grassAlbedo = mossSample * vec3(1.08, 1.12, 0.82);
+      vec3 jungleMossAlbedo = mix(vec3(0.08, 0.24, 0.10), mossSample * vec3(0.58, 0.9, 0.52), 0.72);
+      biomeAlbedo +=
+        meadowAlbedo * meadowMask +
+        flowersAlbedo * flowersMask +
+        grassAlbedo * grassMask +
+        jungleMossAlbedo * jungleMossMask;
+    }
+    if (sandMask > 0.0) {
+      vec3 sandAlbedo = mix(tellusSandSurface(vTellusWorldPos.xz) * vec3(0.9, 0.84, 0.68), gritSample * vec3(1.18, 1.08, 0.88), 0.62);
+      biomeAlbedo += sandAlbedo * sandMask;
+    }
+    if (dirtMask > 0.0) {
+      vec3 dirtBase = tellusDirtSurface(vTellusWorldPos.xz) * vec3(0.68, 0.5, 0.32);
+      vec3 dirtGrain = mix(gritSample * vec3(0.5, 0.34, 0.2), gritSample * gritSample * vec3(0.42, 0.25, 0.13), 0.48);
+      biomeAlbedo += mix(dirtBase, dirtGrain, 0.72) * dirtMask;
+    }
+    if (forestFloorMask > 0.0) {
+      vec3 forestFloorAlbedo = mix(tellusForestFloorSurface(vTellusWorldPos.xz) * vec3(1.12, 0.72, 0.42), gritSample * vec3(0.34, 0.22, 0.13), 0.58);
+      biomeAlbedo += forestFloorAlbedo * forestFloorMask;
+    }
+    if (desertSandMask > 0.0) {
+      vec3 desertSandAlbedo = mix(tellusDesertSandSurface(vTellusWorldPos.xz), gritSample * vec3(1.36, 0.76, 0.34), 0.4);
+      biomeAlbedo += desertSandAlbedo * desertSandMask;
+    }
+    if (rockMask > 0.0 || gravelMask > 0.0) {
+      vec3 pebbleAlbedo = gritSample * vec3(0.68, 0.7, 0.66);
+      vec3 gravelAlbedo = gritSample * vec3(0.62, 0.59, 0.51);
+      float mountainRock = smoothstep(0.22, 0.58, 1.0 - clamp(vTellusWorldNormal.y, 0.0, 1.0));
+      vec3 rockAlbedo = mix(pebbleAlbedo, tellusRockSurface(vTellusWorldPos.xz, pebbleAlbedo), mountainRock);
+      biomeAlbedo += rockAlbedo * rockMask + gravelAlbedo * gravelMask;
+    }
+    if (snowMask > 0.0) {
+      vec3 snowAlbedo = mix(tellusSnowSurface(vTellusWorldPos.xz), gritSample * vec3(1.2, 1.24, 1.26), 0.34);
+      biomeAlbedo += snowAlbedo * snowMask;
+    }
+    if (stoneMask > 0.0) {
+      vec3 cobblestoneAlbedo = mix(cobbleSample * vec3(1.04, 1.0, 0.92), tellusStoneSlabs(vTellusWorldPos.xz) * cobbleSample, 0.34);
+      biomeAlbedo += cobblestoneAlbedo * stoneMask;
+    }
+    if (brickMask > 0.0) {
+      biomeAlbedo += tellusRunningBondBrick(vTellusWorldPos.xz) * brickMask;
+    }
     diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb, biomeAlbedo, 0.68), paintMask);
   }`,
       );
