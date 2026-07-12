@@ -60,6 +60,16 @@ import {
   Sheet,
   Popover,
   InlineAlert,
+  CommandPalette,
+  SearchField,
+  NumberStepper,
+  Accordion,
+  Breadcrumb,
+  ChipInput,
+  VoiceButton,
+  Compass,
+  MinimapFrame,
+  LogFeed,
 } from "./design-system";
 import type { BadgeTone, PresenceStatus, PresenceBeing, ChatMessage, GenerationCardStatus } from "./design-system";
 import { FirstRunCoach } from "./onboarding/FirstRunCoach";
@@ -205,6 +215,8 @@ const NAV = [
   ["feedback", "Feedback"],
   ["fieldkit", "Field Kit"],
   ["world", "World layer"],
+  ["command", "Command & inputs"],
+  ["instruments", "Instruments"],
   ["onboarding", "Onboarding"],
   ["principles", "Principles"],
 ] as const;
@@ -255,6 +267,11 @@ function StyleGuide() {
     { id: "m3", author: "You", kind: "you", text: "on my way", time: "14:03" },
   ]);
   const chatSeq = useRef(3);
+  const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [searchVal, setSearchVal] = useState("");
+  const [numVal, setNumVal] = useState(4);
+  const [chips, setChips] = useState<string[]>(["moss", "birch", "lantern"]);
+  const [voiceState, setVoiceState] = useState<"idle" | "listening" | "muted">("idle");
 
   const beings: PresenceBeing[] = [
     { id: "b1", name: "Willow", kind: "human", status: "online", activity: "exploring the north ridge" },
@@ -1010,6 +1027,115 @@ function StyleGuide() {
                   }}
                 />
               </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* ---------------- COMMAND & INPUTS ---------------- */}
+        <Section
+          id="command"
+          title="Command &amp; inputs"
+          note="A ⌘K palette to reach any action by name, plus the remaining input vocabulary — search, steppers, tags, disclosure, trails, voice."
+        >
+          <div className="sg-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Command palette (⌘K)</span>
+              <span className="sg-section__note">Type to filter every action; arrows choose, Enter runs, Esc closes.</span>
+              <div className="sg-row">
+                <Button variant="secondary" onClick={() => setCmdkOpen(true)}>Open the command palette</Button>
+              </div>
+              <CommandPalette
+                open={cmdkOpen}
+                onClose={() => setCmdkOpen(false)}
+                commands={[
+                  { id: "create", label: "Create something", icon: <Sparkles size={16} />, hint: "C", group: "Create", keywords: "generate make new", onRun: () => toast({ message: "Create", tone: "info" }) },
+                  { id: "shape", label: "Shape terrain", icon: <Mountain size={16} />, group: "Create", onRun: () => toast({ message: "Shape", tone: "info" }) },
+                  { id: "build", label: "Place a building", icon: <Building2 size={16} />, group: "Create", onRun: () => toast({ message: "Build", tone: "info" }) },
+                  { id: "travel", label: "Travel to another world", icon: <Plane size={16} />, group: "Navigate", keywords: "portal go", onRun: () => toast({ message: "Travel", tone: "info" }) },
+                  { id: "map", label: "Open the map", icon: <MapIcon size={16} />, hint: "M", group: "Navigate", onRun: () => toast({ message: "Map", tone: "info" }) },
+                  { id: "invite", label: "Invite someone", icon: <MessageCircle size={16} />, group: "Connect", onRun: () => toast({ message: "Invite", tone: "info" }) },
+                ]}
+              />
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Search &middot; number stepper</span>
+              <SearchField value={searchVal} onChange={setSearchVal} label="Search worlds" placeholder="Search worlds…" />
+              <div style={{ marginTop: 12 }}>
+                <NumberStepper value={numVal} onChange={setNumVal} min={0} max={12} label="Portals allowed" suffix="max" />
+              </div>
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Chip input &middot; voice</span>
+              <ChipInput value={chips} onChange={setChips} label="Tags" placeholder="Add a tag…" />
+              <div className="sg-row" style={{ alignItems: "center", marginTop: 12 }}>
+                <VoiceButton
+                  state={voiceState}
+                  label
+                  onToggle={() => setVoiceState((s) => (s === "idle" ? "listening" : s === "listening" ? "muted" : "idle"))}
+                />
+                <span className="sg-section__note">Tap to cycle idle → listening → muted.</span>
+              </div>
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Accordion &middot; breadcrumb</span>
+              <Breadcrumb
+                items={[
+                  { id: "worlds", label: "Worlds", onClick: () => undefined },
+                  { id: "stars", label: "Stars at Night", onClick: () => undefined },
+                  { id: "ridge", label: "North ridge" },
+                ]}
+              />
+              <div style={{ marginTop: 12 }}>
+                <Accordion
+                  items={[
+                    { id: "a1", title: "What is this world?", content: "A shared, living place you can shape by describing what you want.", defaultOpen: true },
+                    { id: "a2", title: "Who else is here?", content: "Other people and resident AI agents. You'll see them in the presence roster." },
+                    { id: "a3", title: "Can I undo things?", content: "Yes — creation is never final. Every change can be reversed." },
+                  ]}
+                />
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* ---------------- WORLD INSTRUMENTS ---------------- */}
+        <Section
+          id="instruments"
+          title="World instruments"
+          note="The read-outs that keep you oriented — a compass for facing, a framed minimap for place, and a live activity feed of what humans and agents are doing."
+        >
+          <div className="sg-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Compass</span>
+              <div className="sg-row" style={{ alignItems: "center", gap: 16 }}>
+                <Compass heading={0} />
+                <Compass heading={45} />
+                <Compass heading={200} />
+              </div>
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Minimap frame</span>
+              <MinimapFrame
+                title="North ridge"
+                stageLabel="Minimap of the north ridge"
+                onZoomIn={() => undefined}
+                onZoomOut={() => undefined}
+                footer={<span style={{ fontFamily: "var(--ds-font-mono)" }}>64, 0, -128</span>}
+              />
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Activity feed</span>
+              <LogFeed
+                entries={[
+                  { id: "l1", kind: "agent", actor: "Omega", text: "placed a birch grove", time: "14:04" },
+                  { id: "l2", kind: "you", actor: "You", text: "arrived at the north ridge", time: "14:03" },
+                  { id: "l3", kind: "world", text: "dusk is falling", time: "14:01" },
+                  { id: "l4", kind: "system", text: "world saved", time: "14:00" },
+                ]}
+              />
             </div>
           </div>
         </Section>

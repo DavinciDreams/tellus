@@ -1,0 +1,110 @@
+/* VoiceButton — push-to-talk / mic control, gold-on-forest-green.
+   Every selector is .ds-scope-prefixed; only design tokens (no raw hex). */
+
+.ds-scope .ds-voice {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-space-4);
+  /* round diameter from spacing tokens: 24 + 20 = 44px */
+  inline-size: calc(var(--ds-space-12) + var(--ds-space-10));
+  block-size: calc(var(--ds-space-12) + var(--ds-space-10));
+  padding: 0;
+  border: 1.5px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-bg-strong);
+  color: var(--ds-gold);
+  font-family: var(--ds-font-sans);
+  cursor: pointer;
+  transition: var(--ds-transition);
+}
+
+/* With a caption, relax to a pill so the label sits beside the icon. */
+.ds-scope .ds-voice:has(.ds-voice__label) {
+  inline-size: auto;
+  padding-inline: var(--ds-space-6) var(--ds-space-8);
+}
+
+.ds-scope .ds-voice:hover {
+  border-color: var(--ds-gold);
+}
+
+.ds-scope .ds-voice:active {
+  transform: scale(0.96);
+}
+
+.ds-scope .ds-voice__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ds-scope .ds-voice__icon > svg {
+  inline-size: var(--ds-text-2xl);
+  block-size: var(--ds-text-2xl);
+}
+
+.ds-scope .ds-voice__label {
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text);
+  line-height: var(--ds-leading-tight);
+  white-space: nowrap;
+}
+
+/* ---- IDLE: gold outline, forest fill ---- */
+.ds-scope .ds-voice--idle {
+  border-color: var(--ds-gold);
+  background: var(--ds-forest-800);
+  color: var(--ds-gold);
+}
+
+.ds-scope .ds-voice--idle:hover {
+  border-color: var(--ds-gold-bright);
+  color: var(--ds-gold-bright);
+}
+
+/* ---- LISTENING: gold-filled, dark icon, pulsing ring ---- */
+.ds-scope .ds-voice--listening {
+  border-color: var(--ds-gold-bright);
+  background: linear-gradient(160deg, var(--ds-gold-bright), var(--ds-gold));
+  color: var(--ds-forest-900);
+}
+
+.ds-scope .ds-voice--listening:hover {
+  border-color: var(--ds-gold-bright);
+}
+
+.ds-scope .ds-voice__ring {
+  position: absolute;
+  inset: calc(-1 * var(--ds-space-2));
+  border: 2px solid var(--ds-gold-bright);
+  border-radius: var(--ds-radius-pill);
+  box-shadow: 0 0 var(--ds-space-5) var(--ds-space-1) var(--ds-gold);
+  pointer-events: none;
+  animation: ds-pulse 1.4s ease-in-out infinite;
+}
+
+/* ---- MUTED: danger-tinted MicOff ---- */
+.ds-scope .ds-voice--muted {
+  border-color: var(--ds-danger-border);
+  background: var(--ds-danger-bg);
+  color: var(--ds-danger);
+}
+
+.ds-scope .ds-voice--muted:hover {
+  border-color: var(--ds-danger);
+  color: var(--ds-danger-text);
+}
+
+.ds-scope .ds-voice--muted .ds-voice__label {
+  color: var(--ds-muted);
+}
+
+/* Reduced-motion: the pulse ring stills (tokens.css also neutralizes globally). */
+@media (prefers-reduced-motion: reduce) {
+  .ds-scope .ds-voice__ring {
+    animation: none;
+  }
+}

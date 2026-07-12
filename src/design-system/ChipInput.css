@@ -1,0 +1,142 @@
+/* src/design-system/ChipInput.css
+   Tellus HUD design system — ChipInput (tag / token input).
+   Gold-on-forest-green; chips are gold-tinted pills with full borders.
+   Every selector is scoped under .ds-scope and uses ONLY documented tokens. */
+
+.ds-scope .ds-chipinput {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  font-family: var(--ds-font-sans);
+  color: var(--ds-text);
+}
+
+/* Label — sentence-case, muted gold. */
+.ds-scope .ds-chipinput .ds-chipinput__label {
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-medium);
+  line-height: var(--ds-leading-tight);
+  color: var(--ds-text);
+}
+
+/* The full-bordered field box; wraps its chips + the draft input. */
+.ds-scope .ds-chipinput .ds-chipinput__field {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-height: var(--ds-control-h);
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-input-bg);
+  box-shadow: var(--ds-inset);
+  transition:
+    border-color var(--ds-transition),
+    box-shadow var(--ds-transition),
+    background var(--ds-transition);
+}
+
+.ds-scope .ds-chipinput .ds-chipinput__field:hover {
+  border-color: var(--ds-border);
+}
+
+/* The field turns gold + shows the focus ring while the draft input is focused. */
+.ds-scope .ds-chipinput .ds-chipinput__field:focus-within {
+  border-color: var(--ds-gold);
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* Each tag — a gold-tinted pill with a full border. */
+.ds-scope .ds-chipinput .ds-chipinput__chip {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  max-width: 100%;
+  padding: var(--ds-space-1) var(--ds-space-2) var(--ds-space-1) var(--ds-space-3);
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-warn-bg);
+  color: var(--ds-gold-bright);
+}
+
+.ds-scope .ds-chipinput .ds-chipinput__chip-label {
+  overflow: hidden;
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  line-height: var(--ds-leading-tight);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Remove button — a real, focusable button. */
+.ds-scope .ds-chipinput .ds-chipinput__chip-remove {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--ds-radius-pill);
+  background: transparent;
+  color: var(--ds-gold);
+  cursor: pointer;
+  transition:
+    background var(--ds-transition),
+    color var(--ds-transition);
+}
+
+.ds-scope .ds-chipinput .ds-chipinput__chip-remove:hover {
+  background: var(--ds-gold-700);
+  color: var(--ds-gold-bright);
+}
+
+.ds-scope .ds-chipinput .ds-chipinput__chip-remove:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* The draft text input — borderless, grows to fill the row. */
+.ds-scope .ds-chipinput .ds-chipinput__input {
+  flex: 1 1 80px;
+  min-width: 80px;
+  margin: 0;
+  padding: var(--ds-space-1) var(--ds-space-1);
+  border: none;
+  background: transparent;
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-normal);
+}
+
+.ds-scope .ds-chipinput .ds-chipinput__input::placeholder {
+  color: var(--ds-input-placeholder);
+}
+
+.ds-scope .ds-chipinput .ds-chipinput__input:focus,
+.ds-scope .ds-chipinput .ds-chipinput__input:focus-visible {
+  outline: none;
+}
+
+/* Disabled — dim + not-allowed, no color-only meaning. */
+.ds-scope .ds-chipinput--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ds-scope .ds-chipinput--disabled .ds-chipinput__field,
+.ds-scope .ds-chipinput--disabled .ds-chipinput__field:hover {
+  border-color: var(--ds-border-soft);
+}
+
+.ds-scope .ds-chipinput--disabled .ds-chipinput__chip-remove,
+.ds-scope .ds-chipinput--disabled .ds-chipinput__input {
+  cursor: not-allowed;
+}

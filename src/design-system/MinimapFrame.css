@@ -1,0 +1,149 @@
+/* src/design-system/MinimapFrame.css
+   Gold-on-forest-green chrome around a minimap canvas.
+   Every selector is .ds-scope-prefixed; tokens only, no raw hex. */
+
+.ds-scope .ds-minimap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-4);
+  background: linear-gradient(
+    160deg,
+    var(--ds-bg-soft),
+    var(--ds-bg-strong)
+  );
+  backdrop-filter: var(--ds-glass-blur);
+  -webkit-backdrop-filter: var(--ds-glass-blur);
+  border: 1px solid var(--ds-gold);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-elevation-2);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+}
+
+.ds-scope .ds-minimap__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-4);
+  min-height: var(--ds-control-h-sm);
+}
+
+.ds-scope .ds-minimap__title {
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-bold);
+  color: var(--ds-gold-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-scope .ds-minimap__zoom {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+
+.ds-scope .ds-minimap__stage {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  border-radius: var(--ds-radius-md);
+  border: 1px solid var(--ds-border-soft);
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      var(--ds-forest-700),
+      var(--ds-forest-800) 62%,
+      var(--ds-forest-900)
+    );
+  box-shadow: var(--ds-inset);
+  overflow: hidden;
+}
+
+.ds-scope .ds-minimap__stage > * {
+  max-width: 100%;
+}
+
+/* Gold corner ticks */
+.ds-scope .ds-minimap__tick {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--ds-gold);
+  pointer-events: none;
+}
+
+.ds-scope .ds-minimap__tick--tl {
+  top: var(--ds-space-2);
+  left: var(--ds-space-2);
+  border-right: 0;
+  border-bottom: 0;
+  border-top-left-radius: var(--ds-radius-sm);
+}
+
+.ds-scope .ds-minimap__tick--tr {
+  top: var(--ds-space-2);
+  right: var(--ds-space-2);
+  border-left: 0;
+  border-bottom: 0;
+  border-top-right-radius: var(--ds-radius-sm);
+}
+
+.ds-scope .ds-minimap__tick--bl {
+  bottom: var(--ds-space-2);
+  left: var(--ds-space-2);
+  border-right: 0;
+  border-top: 0;
+  border-bottom-left-radius: var(--ds-radius-sm);
+}
+
+.ds-scope .ds-minimap__tick--br {
+  bottom: var(--ds-space-2);
+  right: var(--ds-space-2);
+  border-left: 0;
+  border-top: 0;
+  border-bottom-right-radius: var(--ds-radius-sm);
+}
+
+/* Gold "you are here" marker with a soft pulsing halo */
+.ds-scope .ds-minimap__here {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-gold-bright);
+  border: 1px solid var(--ds-forest-900);
+  box-shadow: 0 0 8px 1px var(--ds-gold);
+  pointer-events: none;
+}
+
+.ds-scope .ds-minimap__here::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  border-radius: var(--ds-radius-pill);
+  border: 1px solid var(--ds-gold);
+  box-shadow: 0 0 10px 1px var(--ds-leaf);
+  animation: ds-pulse 2.4s ease-in-out infinite;
+}
+
+.ds-scope .ds-minimap__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  padding: 0 var(--ds-space-1);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-muted);
+  letter-spacing: 0.02em;
+}
