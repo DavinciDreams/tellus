@@ -1,0 +1,105 @@
+.ds-scope .ds-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-normal);
+  color: var(--ds-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ds-scope .ds-toggle--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ds-scope .ds-toggle__label {
+  color: var(--ds-text);
+  font-weight: var(--ds-weight-medium);
+}
+
+/* The control wraps the hidden input + visible track */
+.ds-scope .ds-toggle__control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+/* Visually hidden but focusable/screen-reader accessible, sized over the track */
+.ds-scope .ds-toggle__input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.ds-scope .ds-toggle__track {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 40px;
+  height: 22px;
+  padding: 2px;
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-input-bg);
+  box-shadow: var(--ds-inset);
+  transition: var(--ds-transition);
+}
+
+.ds-scope .ds-toggle__thumb {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-bg-strong);
+  box-shadow: var(--ds-elevation-1);
+  transform: translateX(0);
+  transition:
+    transform var(--ds-duration-base) var(--ds-ease-out),
+    background var(--ds-duration-base) var(--ds-ease-out);
+}
+
+/* Hover on the track when interactive */
+.ds-scope .ds-toggle:not(.ds-toggle--disabled):hover .ds-toggle__track {
+  background: var(--ds-input-bg-hover);
+}
+
+/* Checked: gold gradient fill, thumb slides right */
+.ds-scope .ds-toggle__input:checked + .ds-toggle__track {
+  border-color: var(--ds-gold);
+  background: linear-gradient(180deg, var(--ds-gold-bright), var(--ds-gold));
+}
+
+.ds-scope .ds-toggle__input:checked + .ds-toggle__track .ds-toggle__thumb {
+  background: var(--ds-green);
+  transform: translateX(18px);
+}
+
+/* Focus ring on the visible control */
+.ds-scope .ds-toggle__input:focus-visible + .ds-toggle__track {
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* Size: sm */
+.ds-scope .ds-toggle--sm .ds-toggle__track {
+  width: 34px;
+  height: 18px;
+}
+
+.ds-scope .ds-toggle--sm .ds-toggle__thumb {
+  width: 13px;
+  height: 13px;
+}
+
+.ds-scope .ds-toggle--sm .ds-toggle__input:checked + .ds-toggle__track .ds-toggle__thumb {
+  transform: translateX(15px);
+}

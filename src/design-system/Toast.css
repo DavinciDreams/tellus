@@ -1,0 +1,141 @@
+/* src/design-system/Toast.css
+   Dark glass toast notifications. Stacks top-right; each card is a glass panel
+   with a leading tone dot and a ghost close button. Every selector is scoped to
+   .ds-scope and uses tokens only (no raw hex). */
+
+.ds-scope .ds-toast-viewport {
+  position: fixed;
+  top: var(--ds-space-8);
+  right: var(--ds-space-8);
+  z-index: var(--z-modal);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+  width: min(360px, calc(100vw - var(--ds-space-12)));
+  max-height: 100vh;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ds-scope .ds-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-5);
+  padding: var(--ds-space-6) var(--ds-space-6) var(--ds-space-6) var(--ds-space-7);
+  background: var(--ds-bg-strong);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-elevation-3);
+  backdrop-filter: var(--ds-glass-strong);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  pointer-events: auto;
+  animation: ds-rise var(--ds-duration-base) var(--ds-ease-out);
+}
+
+/* ---- Leading tone dot ---- */
+.ds-scope .ds-toast__icon {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-gold);
+  box-shadow: 0 0 0 3px var(--ds-border-soft);
+}
+
+.ds-scope .ds-toast--success .ds-toast__icon {
+  background: var(--ds-success);
+  box-shadow: 0 0 0 3px var(--ds-success-bg);
+}
+
+.ds-scope .ds-toast--warn .ds-toast__icon {
+  background: var(--ds-warn);
+  box-shadow: 0 0 0 3px var(--ds-warn-bg);
+}
+
+.ds-scope .ds-toast--danger .ds-toast__icon {
+  background: var(--ds-danger);
+  box-shadow: 0 0 0 3px var(--ds-danger-bg);
+}
+
+.ds-scope .ds-toast--info .ds-toast__icon {
+  background: var(--ds-info);
+  box-shadow: 0 0 0 3px var(--ds-info-bg);
+}
+
+/* Tone-tinted left border for a stronger, redundant status cue */
+.ds-scope .ds-toast--success { border-color: var(--ds-success-border); }
+.ds-scope .ds-toast--warn { border-color: var(--ds-warn-border); }
+.ds-scope .ds-toast--danger { border-color: var(--ds-danger-border); }
+.ds-scope .ds-toast--info { border-color: var(--ds-info-border); }
+
+/* ---- Body ---- */
+.ds-scope .ds-toast__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+
+.ds-scope .ds-toast__title {
+  color: var(--ds-text);
+  font-size: var(--ds-text-md);
+  font-weight: var(--ds-weight-medium);
+  line-height: var(--ds-leading-tight);
+}
+
+.ds-scope .ds-toast__msg {
+  color: var(--ds-muted);
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-normal);
+  overflow-wrap: anywhere;
+}
+
+/* When there is a title, danger/warn keep their message readable but calm */
+.ds-scope .ds-toast--danger .ds-toast__title { color: var(--ds-danger-text); }
+
+/* ---- Ghost close button ---- */
+.ds-scope .ds-toast__close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: -2px -2px 0 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-muted);
+  cursor: pointer;
+  transition: var(--ds-transition);
+  transition-property: color, background-color;
+}
+
+.ds-scope .ds-toast__close:hover {
+  color: var(--ds-text);
+  background: var(--ds-bg-soft);
+}
+
+.ds-scope .ds-toast__close:focus-visible {
+  outline: none;
+  color: var(--ds-text);
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* ---- Screen-reader-only tone word (redundant status cue, not color-only) ---- */
+.ds-scope .ds-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

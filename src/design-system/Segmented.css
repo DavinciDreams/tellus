@@ -1,0 +1,76 @@
+/* Segmented — mutually-exclusive toggle group.
+   Pill container, gold-gradient active segment, transparent inactive.
+   All values are tokens; selectors scoped under .ds-scope. */
+
+.ds-scope .ds-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+  box-sizing: border-box;
+  padding: var(--ds-space-1);
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-input-bg);
+  box-shadow: var(--ds-inset);
+  font-family: var(--ds-font-sans);
+}
+
+.ds-scope .ds-segmented__option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-space-3);
+  box-sizing: border-box;
+  height: var(--ds-control-h);
+  padding: 0 var(--ds-space-6);
+  border: 0;
+  border-radius: var(--ds-radius-md);
+  background: transparent;
+  color: var(--ds-muted);
+  font-family: inherit;
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-medium);
+  line-height: var(--ds-leading-tight);
+  text-transform: none; /* sentence-case, as authored */
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--ds-duration-base) var(--ds-ease-out),
+    color var(--ds-duration-base) var(--ds-ease-out);
+}
+
+.ds-scope .ds-segmented__option:not(:disabled):hover {
+  color: var(--ds-text);
+  background: var(--ds-input-bg-hover);
+}
+
+.ds-scope .ds-segmented__option:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Active segment: gold gradient fill + dark ink text */
+.ds-scope .ds-segmented__option--active,
+.ds-scope .ds-segmented__option--active:not(:disabled):hover {
+  color: var(--ds-forest-900);
+  background: linear-gradient(180deg, var(--ds-gold-bright), var(--ds-gold));
+  box-shadow: var(--ds-elevation-1);
+}
+
+.ds-scope .ds-segmented__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ds-scope .ds-segmented__label {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Size: sm */
+.ds-scope .ds-segmented--sm .ds-segmented__option {
+  height: var(--ds-control-h-sm);
+  padding: 0 var(--ds-space-5);
+  font-size: var(--ds-text-xs);
+}

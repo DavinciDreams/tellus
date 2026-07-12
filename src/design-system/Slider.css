@@ -1,0 +1,135 @@
+.ds-scope .ds-slider {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-normal);
+  color: var(--ds-text);
+}
+
+.ds-scope .ds-slider--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Header row: label left, current value right */
+.ds-scope .ds-slider__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ds-space-4);
+}
+
+.ds-scope .ds-slider__label {
+  color: var(--ds-text);
+  font-weight: var(--ds-weight-medium);
+}
+
+.ds-scope .ds-slider__value {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ds-muted);
+}
+
+/* The native range input, styled cross-browser.
+   --ds-pct is set inline from the component (0%..100%). */
+.ds-scope .ds-slider__input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--ds-radius-pill);
+  background: linear-gradient(
+    90deg,
+    var(--ds-gold) 0 var(--ds-pct, 0%),
+    var(--ds-input-bg) var(--ds-pct, 0%)
+  );
+  box-shadow: var(--ds-inset);
+  cursor: pointer;
+  transition:
+    background var(--ds-duration-base) var(--ds-ease-out),
+    box-shadow var(--ds-duration-base) var(--ds-ease-out);
+}
+
+.ds-scope .ds-slider__input:hover {
+  background: linear-gradient(
+    90deg,
+    var(--ds-gold-bright) 0 var(--ds-pct, 0%),
+    var(--ds-input-bg-hover) var(--ds-pct, 0%)
+  );
+}
+
+/* Focus ring on the native input directly */
+.ds-scope .ds-slider__input:focus-visible {
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* WebKit track — transparent so the input's gradient shows through */
+.ds-scope .ds-slider__input::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: var(--ds-radius-pill);
+  background: transparent;
+}
+
+/* Firefox track */
+.ds-scope .ds-slider__input::-moz-range-track {
+  height: 6px;
+  border-radius: var(--ds-radius-pill);
+  background: transparent;
+}
+
+/* WebKit thumb — gold gradient circle */
+.ds-scope .ds-slider__input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px; /* centers the 16px thumb on the 6px track */
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-pill);
+  background: linear-gradient(180deg, var(--ds-gold-bright), var(--ds-gold));
+  box-shadow: var(--ds-elevation-1);
+  cursor: pointer;
+  transition:
+    transform var(--ds-duration-base) var(--ds-ease-out),
+    background var(--ds-duration-base) var(--ds-ease-out);
+}
+
+/* Firefox thumb */
+.ds-scope .ds-slider__input::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-pill);
+  background: linear-gradient(180deg, var(--ds-gold-bright), var(--ds-gold));
+  box-shadow: var(--ds-elevation-1);
+  cursor: pointer;
+  transition:
+    transform var(--ds-duration-base) var(--ds-ease-out),
+    background var(--ds-duration-base) var(--ds-ease-out);
+}
+
+.ds-scope .ds-slider__input:not(:disabled):hover::-webkit-slider-thumb {
+  transform: scale(1.08);
+}
+
+.ds-scope .ds-slider__input:not(:disabled):hover::-moz-range-thumb {
+  transform: scale(1.08);
+}
+
+/* Disabled */
+.ds-scope .ds-slider__input:disabled {
+  cursor: not-allowed;
+}
+
+.ds-scope .ds-slider__input:disabled::-webkit-slider-thumb {
+  cursor: not-allowed;
+}
+
+.ds-scope .ds-slider__input:disabled::-moz-range-thumb {
+  cursor: not-allowed;
+}

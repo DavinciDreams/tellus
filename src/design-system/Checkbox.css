@@ -1,0 +1,134 @@
+/* src/design-system/Checkbox.css
+   Tellus HUD design system — Checkbox.
+   Gold-on-forest-green, full borders, sentence-case, 160ms ease-out.
+   Every selector is scoped under .ds-scope and uses ONLY documented tokens. */
+
+.ds-scope .ds-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  position: relative;
+  cursor: pointer;
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-normal);
+  color: var(--ds-text);
+  user-select: none;
+}
+
+/* Real input: visually hidden but focusable + hit-testable. */
+.ds-scope .ds-checkbox .ds-checkbox__input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* The styled box. */
+.ds-scope .ds-checkbox .ds-checkbox__box {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-input-bg);
+  box-shadow: var(--ds-inset);
+  transition:
+    background var(--ds-transition),
+    border-color var(--ds-transition),
+    box-shadow var(--ds-transition);
+}
+
+.ds-scope .ds-checkbox:hover .ds-checkbox__box {
+  background: var(--ds-input-bg-hover);
+  border-color: var(--ds-border);
+}
+
+/* The mark: hidden by default, dark ink so it reads on gold. */
+.ds-scope .ds-checkbox .ds-checkbox__check {
+  color: var(--ds-forest-900);
+}
+
+.ds-scope .ds-checkbox .ds-checkbox__check-mark,
+.ds-scope .ds-checkbox .ds-checkbox__dash-mark {
+  opacity: 0;
+  transition: opacity var(--ds-transition);
+}
+
+/* Checked + indeterminate: gold gradient fill, full border. */
+.ds-scope .ds-checkbox--checked .ds-checkbox__box,
+.ds-scope .ds-checkbox--indeterminate .ds-checkbox__box {
+  background: linear-gradient(
+    180deg,
+    var(--ds-gold-bright),
+    var(--ds-gold)
+  );
+  border-color: var(--ds-gold);
+}
+
+.ds-scope .ds-checkbox--checked:hover .ds-checkbox__box,
+.ds-scope .ds-checkbox--indeterminate:hover .ds-checkbox__box {
+  border-color: var(--ds-gold-bright);
+}
+
+/* Show the check when checked (but not when indeterminate). */
+.ds-scope .ds-checkbox--checked:not(.ds-checkbox--indeterminate)
+  .ds-checkbox__check-mark {
+  opacity: 1;
+}
+
+/* Indeterminate wins visually: dash instead of check. */
+.ds-scope .ds-checkbox--indeterminate .ds-checkbox__check-mark {
+  opacity: 0;
+}
+
+.ds-scope .ds-checkbox--indeterminate .ds-checkbox__dash-mark {
+  opacity: 1;
+}
+
+/* Label text. */
+.ds-scope .ds-checkbox .ds-checkbox__label {
+  font-size: var(--ds-text-md);
+  font-weight: var(--ds-weight-regular);
+  color: var(--ds-text);
+}
+
+/* Visible focus on the visible box. */
+.ds-scope .ds-checkbox input:focus-visible + .ds-checkbox__box {
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* Disabled: dim + not-allowed, no color-only meaning. */
+.ds-scope .ds-checkbox--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ds-scope .ds-checkbox--disabled .ds-checkbox__input {
+  cursor: not-allowed;
+}
+
+.ds-scope .ds-checkbox--disabled:hover .ds-checkbox__box {
+  background: var(--ds-input-bg);
+  border-color: var(--ds-border-soft);
+}
+
+.ds-scope .ds-checkbox--disabled.ds-checkbox--checked:hover .ds-checkbox__box,
+.ds-scope
+  .ds-checkbox--disabled.ds-checkbox--indeterminate:hover
+  .ds-checkbox__box {
+  background: linear-gradient(
+    180deg,
+    var(--ds-gold-bright),
+    var(--ds-gold)
+  );
+  border-color: var(--ds-gold);
+}

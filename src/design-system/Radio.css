@@ -1,0 +1,109 @@
+/* src/design-system/Radio.css
+   RadioGroup + Radio for the Tellus HUD design system.
+   Every selector is scoped under .ds-scope; tokens only, no raw values. */
+
+/* ---- GROUP: layout container ---- */
+.ds-scope .ds-radiogroup {
+  display: flex;
+  gap: var(--ds-space-4);
+  font-family: var(--ds-font-sans);
+}
+
+.ds-scope .ds-radiogroup--vertical {
+  flex-direction: column;
+}
+
+.ds-scope .ds-radiogroup--horizontal {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-8);
+}
+
+/* ---- RADIO: label row wrapping the hidden input + visible dot ---- */
+.ds-scope .ds-radio {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-normal);
+  color: var(--ds-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ds-scope .ds-radio--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ds-scope .ds-radio__label {
+  color: var(--ds-text);
+  font-weight: var(--ds-weight-medium);
+}
+
+/* Visually hidden but focusable/screen-reader accessible, sized over the dot */
+.ds-scope .ds-radio__input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+/* The visible circle */
+.ds-scope .ds-radio__dot {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-input-bg);
+  box-shadow: var(--ds-inset);
+  transition: var(--ds-transition);
+}
+
+/* Inner selected dot — hidden until checked, blooms in on selection */
+.ds-scope .ds-radio__dot::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--ds-radius-pill);
+  background: linear-gradient(180deg, var(--ds-gold-bright), var(--ds-gold));
+  transform: translate(-50%, -50%) scale(0);
+  transition:
+    transform var(--ds-duration-base) var(--ds-ease-out),
+    opacity var(--ds-duration-base) var(--ds-ease-out);
+  opacity: 0;
+}
+
+/* Hover on the dot when interactive */
+.ds-scope .ds-radio:not(.ds-radio--disabled):hover .ds-radio__dot {
+  background: var(--ds-input-bg-hover);
+}
+
+/* Selected: gold-rimmed circle with the inner gold dot revealed */
+.ds-scope .ds-radio__input:checked + .ds-radio__dot {
+  border-color: var(--ds-gold);
+}
+
+.ds-scope .ds-radio__input:checked + .ds-radio__dot::after {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+
+/* Focus ring on the visible dot */
+.ds-scope .ds-radio__input:focus-visible + .ds-radio__dot {
+  box-shadow: var(--ds-focus-ring);
+}
