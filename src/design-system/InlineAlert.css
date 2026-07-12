@@ -1,0 +1,135 @@
+/* src/design-system/InlineAlert.css
+   Inline message banner. Tone is carried by a leading shape ICON plus a FULL
+   1px border and a subtle tone-tinted background fill — NEVER a side-stripe
+   accent border. Every selector is scoped to .ds-scope and uses tokens only
+   (no raw hex). */
+
+.ds-scope .ds-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-5);
+  padding: var(--ds-space-6) var(--ds-space-7);
+  background: var(--ds-bg);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-md);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-normal);
+}
+
+/* ---- Leading tone icon (shape carries meaning, not color alone) ---- */
+.ds-scope .ds-alert__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  color: var(--ds-gold);
+}
+
+/* ---- Content ---- */
+.ds-scope .ds-alert__content {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+
+.ds-scope .ds-alert__title {
+  color: var(--ds-text);
+  font-size: var(--ds-text-md);
+  font-weight: var(--ds-weight-heavy);
+  line-height: var(--ds-leading-normal);
+}
+
+.ds-scope .ds-alert__body {
+  color: var(--ds-text);
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-normal);
+  overflow-wrap: anywhere;
+}
+
+/* ---- Ghost dismiss button ---- */
+.ds-scope .ds-alert__dismiss {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: -2px -4px 0 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--ds-radius-md);
+  color: var(--ds-muted);
+  cursor: pointer;
+  transition: var(--ds-transition);
+  transition-property: color, background-color;
+}
+
+.ds-scope .ds-alert__dismiss:hover {
+  color: var(--ds-text);
+  background: var(--ds-bg-strong);
+}
+
+.ds-scope .ds-alert__dismiss:focus-visible {
+  outline: none;
+  color: var(--ds-text);
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* ================= Tones ================= */
+/* Each tone: FULL 1px border in the tone border token + a subtle tone tint
+   fill; icon + title in the tone color; body stays --ds-text. */
+
+/* Neutral — soft border + soft fill + gold icon */
+.ds-scope .ds-alert--neutral {
+  border-color: var(--ds-border-soft);
+  background: var(--ds-bg-soft);
+}
+.ds-scope .ds-alert--neutral .ds-alert__icon {
+  color: var(--ds-gold);
+}
+
+/* Info */
+.ds-scope .ds-alert--info {
+  border-color: var(--ds-info-border);
+  background: var(--ds-info-bg);
+}
+.ds-scope .ds-alert--info .ds-alert__icon,
+.ds-scope .ds-alert--info .ds-alert__title {
+  color: var(--ds-info);
+}
+
+/* Success */
+.ds-scope .ds-alert--success {
+  border-color: var(--ds-success-border);
+  background: var(--ds-success-bg);
+}
+.ds-scope .ds-alert--success .ds-alert__icon,
+.ds-scope .ds-alert--success .ds-alert__title {
+  color: var(--ds-success);
+}
+
+/* Warn */
+.ds-scope .ds-alert--warn {
+  border-color: var(--ds-warn-border);
+  background: var(--ds-warn-bg);
+}
+.ds-scope .ds-alert--warn .ds-alert__icon,
+.ds-scope .ds-alert--warn .ds-alert__title {
+  color: var(--ds-warn);
+}
+
+/* Danger */
+.ds-scope .ds-alert--danger {
+  border-color: var(--ds-danger-border);
+  background: var(--ds-danger-bg);
+}
+.ds-scope .ds-alert--danger .ds-alert__icon,
+.ds-scope .ds-alert--danger .ds-alert__title {
+  color: var(--ds-danger-text);
+}

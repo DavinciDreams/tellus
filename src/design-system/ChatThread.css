@@ -1,0 +1,175 @@
+/* ChatThread — a message list + composer for world/agent chat.
+   House feel: gold-on-forest-green, full borders, sentence-case bubbles.
+   "you" messages align right with a gold-tinted bubble; "agent" messages carry
+   an inline ✦ gold marker + "· agent" (never a side-stripe); "human" are plain.
+   Every selector is .ds-scope-prefixed; only tokens, no raw hex. */
+
+.ds-scope .ds-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--ds-space-4);
+  font-family: var(--ds-font-sans);
+  color: var(--ds-text);
+}
+
+/* Message list — scrollable, forest well, generous gap. */
+.ds-scope .ds-chat__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ds-space-4);
+  background: var(--ds-bg);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-inset);
+}
+
+/* A single message — a small stack: author, bubble, time. */
+.ds-scope .ds-chat__msg {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ds-space-1);
+  max-width: 82%;
+  animation: ds-rise var(--ds-duration-base) var(--ds-ease-out) both;
+}
+
+.ds-scope .ds-chat__msg--you {
+  align-self: flex-end;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.ds-scope .ds-chat__msg--agent,
+.ds-scope .ds-chat__msg--human {
+  align-self: flex-start;
+}
+
+/* Author line — always shown (no color-only signalling). */
+.ds-scope .ds-chat__author {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ds-space-1);
+  padding: 0 var(--ds-space-1);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-muted);
+  line-height: var(--ds-leading-tight);
+}
+
+.ds-scope .ds-chat__marker {
+  color: var(--ds-gold-bright);
+  font-size: var(--ds-text-sm);
+  line-height: 1;
+}
+
+.ds-scope .ds-chat__msg--agent .ds-chat__name {
+  color: var(--ds-gold);
+  font-weight: var(--ds-weight-bold);
+}
+
+.ds-scope .ds-chat__role {
+  color: var(--ds-gold);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+}
+
+/* Bubble — full border, forest fill, sentence-case text. */
+.ds-scope .ds-chat__bubble {
+  margin: 0;
+  padding: var(--ds-space-3) var(--ds-space-4);
+  background: var(--ds-bg-soft);
+  color: var(--ds-text);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-md);
+  box-shadow: var(--ds-elevation-1);
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-normal);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.ds-scope .ds-chat__msg--you .ds-chat__bubble {
+  background: var(--ds-bg-strong);
+  border-color: var(--ds-gold-700);
+  color: var(--ds-gold-bright);
+}
+
+.ds-scope .ds-chat__msg--agent .ds-chat__bubble {
+  background: var(--ds-forest-800);
+  border-color: var(--ds-border);
+}
+
+/* Time — mono, muted, tiny. */
+.ds-scope .ds-chat__time {
+  padding: 0 var(--ds-space-1);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-muted);
+  line-height: var(--ds-leading-tight);
+}
+
+/* Composer — bordered row, input + send. */
+.ds-scope .ds-chat__composer {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-2);
+  background: var(--ds-bg-soft);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-elevation-1);
+}
+
+/* Visually-hidden label for the input. */
+.ds-scope .ds-chat__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ds-scope .ds-chat__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--ds-control-h);
+  padding: 0 var(--ds-space-3);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text);
+  background: var(--ds-input-bg);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-md);
+  box-shadow: var(--ds-inset);
+  transition: var(--ds-transition);
+}
+
+.ds-scope .ds-chat__input::placeholder {
+  color: var(--ds-input-placeholder);
+}
+
+.ds-scope .ds-chat__input:hover {
+  background: var(--ds-input-bg-hover);
+  border-color: var(--ds-border-soft);
+}
+
+.ds-scope .ds-chat__input:focus-visible {
+  outline: none;
+  border-color: var(--ds-gold);
+  box-shadow: var(--ds-focus-ring);
+}
+
+.ds-scope .ds-chat__send {
+  display: inline-flex;
+  flex: 0 0 auto;
+}

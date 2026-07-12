@@ -1,0 +1,111 @@
+.ds-scope .ds-portalcard {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-8);
+  padding: var(--ds-space-8);
+  background: linear-gradient(
+    160deg,
+    var(--ds-bg-soft),
+    var(--ds-bg-strong)
+  );
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-elevation-1), inset 0 1px 0 var(--ds-inset);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  transition: var(--ds-transition);
+}
+
+.ds-scope .ds-portalcard:hover {
+  border-color: var(--ds-gold);
+  box-shadow: var(--ds-elevation-2), inset 0 1px 0 var(--ds-inset);
+}
+
+.ds-scope .ds-portalcard__ring {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--ds-radius-md);
+  overflow: hidden;
+}
+
+.ds-scope .ds-portalcard__ring > img,
+.ds-scope .ds-portalcard__ring > svg,
+.ds-scope .ds-portalcard__ring > * {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--ds-radius-md);
+}
+
+.ds-scope .ds-portalcard__ring-graphic {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--ds-radius-pill);
+}
+
+.ds-scope .ds-portalcard__ring-outer {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--ds-radius-pill);
+  border: 2px solid var(--ds-gold);
+  box-shadow: 0 0 10px 1px var(--ds-leaf);
+}
+
+.ds-scope .ds-portalcard__ring-inner {
+  position: absolute;
+  inset: 12px;
+  border-radius: var(--ds-radius-pill);
+  border: 2px solid var(--ds-gold-bright);
+  box-shadow: inset 0 0 8px var(--ds-leaf);
+  animation: ds-pulse 2.4s ease-in-out infinite;
+}
+
+.ds-scope .ds-portalcard__body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  min-width: 0;
+}
+
+.ds-scope .ds-portalcard__label {
+  font-family: var(--ds-font-serif);
+  font-size: var(--ds-text-lg);
+  font-weight: var(--ds-weight-bold);
+  color: var(--ds-gold-bright);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-scope .ds-portalcard__target {
+  font-size: var(--ds-text-sm);
+  color: var(--ds-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-scope .ds-portalcard__coords {
+  margin-top: var(--ds-space-2);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-muted);
+  letter-spacing: 0.02em;
+}
+
+.ds-scope .ds-portalcard__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-6);
+}

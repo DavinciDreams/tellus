@@ -1,0 +1,143 @@
+/* src/design-system/Sheet.css
+   Edge drawer (side panel / bottom sheet). A gold-on-forest-green glass panel
+   slides in from the chosen edge over a dark scrim. Every selector is scoped to
+   .ds-scope and uses tokens only (no raw hex). The overlay self-scopes so tokens
+   resolve from any host tree. */
+
+/* ---- Overlay root (fixed, full viewport) ---- */
+.ds-scope.ds-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  font-family: var(--ds-font-sans);
+}
+
+/* ---- Scrim ---- */
+.ds-scope .ds-sheet__scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--ds-scrim-strong);
+  cursor: pointer;
+  animation: ds-sheet-scrim-in var(--ds-duration-base) var(--ds-ease-out);
+}
+
+/* ---- Panel (glass drawer) ---- */
+.ds-scope .ds-sheet__panel {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--ds-bg-strong);
+  border: 1px solid var(--ds-border);
+  color: var(--ds-text);
+  box-shadow: var(--ds-elevation-4);
+  backdrop-filter: var(--ds-glass-strong);
+  -webkit-backdrop-filter: var(--ds-glass-strong);
+  transition: var(--ds-transition);
+  transition-property: transform;
+}
+
+/* ---- Side placement + slide-in ---- */
+.ds-scope .ds-sheet__panel--right {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  max-width: 100vw;
+  border-radius: var(--ds-radius-lg) 0 0 var(--ds-radius-lg);
+  animation: ds-sheet-in-right var(--ds-duration-slow) var(--ds-ease-emphasis);
+}
+
+.ds-scope .ds-sheet__panel--left {
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 380px;
+  max-width: 100vw;
+  border-radius: 0 var(--ds-radius-lg) var(--ds-radius-lg) 0;
+  animation: ds-sheet-in-left var(--ds-duration-slow) var(--ds-ease-emphasis);
+}
+
+.ds-scope .ds-sheet__panel--bottom {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 60vh;
+  max-height: 100vh;
+  border-radius: var(--ds-radius-lg) var(--ds-radius-lg) 0 0;
+  animation: ds-sheet-in-bottom var(--ds-duration-slow) var(--ds-ease-emphasis);
+}
+
+/* ---- Header ---- */
+.ds-scope .ds-sheet__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-6);
+  padding: var(--ds-space-7) var(--ds-space-8);
+  border-bottom: 1px solid var(--ds-border-soft);
+}
+
+.ds-scope .ds-sheet__title {
+  margin: 0;
+  color: var(--ds-gold-bright);
+  font-family: var(--ds-font-serif);
+  font-size: var(--ds-text-xl);
+  font-weight: var(--ds-weight-medium);
+  line-height: var(--ds-leading-tight);
+}
+
+/* Explicit close slot (kept for layout hooks; the close control itself is an
+   IconButton with its own ghost styling + visible focus). */
+.ds-scope .ds-sheet__close {
+  flex: 0 0 auto;
+}
+
+/* ---- Body (scrollable) ---- */
+.ds-scope .ds-sheet__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ds-space-8);
+  color: var(--ds-text);
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-normal);
+}
+
+/* ---- Footer ---- */
+.ds-scope .ds-sheet__footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ds-space-5);
+  padding: var(--ds-space-7) var(--ds-space-8);
+  border-top: 1px solid var(--ds-border-soft);
+}
+
+/* ---- Visible focus (global rule) ---- */
+.ds-scope .ds-sheet__panel :focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* ---- Enter keyframes ---- */
+@keyframes ds-sheet-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ds-sheet-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes ds-sheet-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes ds-sheet-in-bottom {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
