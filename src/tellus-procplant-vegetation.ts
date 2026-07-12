@@ -35,8 +35,10 @@ import {
   createProcPlantLeafGeometry,
   createProcPlantPalmFrondGeometry,
   createProcPlantPetalGeometry,
+  type ProcPlantEnvironment,
   type ProcPlantGenome,
   type ProcPlantInstance,
+  type ProcPlantInstancedParts,
   type ProcPlantTemplate,
   GOLDEN_ANGLE_RADIANS,
   procPlantPresets,
@@ -212,6 +214,65 @@ const buildBiomeTreeTemplate = (
     foliageSpread: options.foliageSpread,
     swayFrom: 0.3,
   });
+
+// Detailed L-system trees are the single most expensive thing built during chunk streaming — a full
+// genome→graph→geometry pass per tree. The old call site seeded every instance uniquely
+// (`patch.seed ^ i`), so NOTHING was ever reused and each tree paid full cost; that was the main
+// source of the multi-hundred-ms (up to ~1.5s) procplants build stalls seen in the perf readout.
+// Memoize by species + option-signature + a small seed bucket. Templates are immutable read-only data
+// (templateToGeometry only reads them, exactly like buildCheapTreeTemplate already shares one template
+// per species), so a handful of variants per species keeps visual variety at a fraction of the cost.
+const DETAILED_TREE_SEED_BUCKETS = 8;
+const detailedTreeTemplateCache = new Map<string, ProcPlantTemplate>();
+const buildBiomeTreeTemplateCached = (
+  species: string,
+  seed: number,
+  options: BiomeTreeTemplateOptions = {},
+): ProcPlantTemplate => {
+  const bucket =
+    ((Math.trunc(seed) % DETAILED_TREE_SEED_BUCKETS) + DETAILED_TREE_SEED_BUCKETS) %
+    DETAILED_TREE_SEED_BUCKETS;
+  // Only the fields buildBiomeTreeTemplate actually reads affect the output, so keying on them is
+  // complete — different biomes/backends with distinct foliage still get distinct cached templates.
+  const key =
+    `${species}|${bucket}|${options.maxBranchDepth ?? ""}|${options.maxStems ?? ""}|` +
+    `${options.maxLeaves ?? ""}|${options.leafScaleMultiplier ?? ""}|${options.foliageMass ?? ""}|` +
+    `${options.foliageClusterDensity ?? ""}|${options.foliageTipBias ?? ""}|${options.foliageSpread ?? ""}`;
+  let template = detailedTreeTemplateCache.get(key);
+  if (!template) {
+    // Use the bucket as the seed so the cached variant is deterministic (0..N-1 distinct shapes).
+    template = buildBiomeTreeTemplate(species, bucket, options);
+    detailedTreeTemplateCache.set(key, template);
+  }
+  return template;
+};
+
+// Same story as the detailed trees: buildProcPlantInstancedParts (flowers/shrubs/ferns/succulents)
+// ran the full genome→graph→geometry pipeline per instance with a unique seed, so nothing was reused.
+// After caching trees this was the remaining procplants build spike (~800ms). The output is read-only
+// downstream (stems merged read-only, instances spread-copied), so memoize it by genome + a small seed
+// bucket + coarsely quantized environment (light/moisture/crowding/warmth only shift the shape a
+// little, so 0.25-steps are visually indistinguishable while collapsing the cache key space).
+const PLANT_SEED_BUCKETS = 12;
+const procPlantPartsCache = new Map<string, ProcPlantInstancedParts>();
+const buildProcPlantInstancedPartsCached = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+): ProcPlantInstancedParts => {
+  const bucket =
+    ((Math.trunc(seed) % PLANT_SEED_BUCKETS) + PLANT_SEED_BUCKETS) % PLANT_SEED_BUCKETS;
+  const q = (v: number) => Math.round(v * 4) / 4;
+  const key =
+    `${genome.id}|${bucket}|${q(env.light)}|${q(env.moisture)}|${q(env.crowding)}|${q(env.biomeWarmth)}`;
+  let built = procPlantPartsCache.get(key);
+  if (!built) {
+    // Derive a well-spread but deterministic seed from the bucket so each bucket is a distinct shape.
+    built = buildProcPlantInstancedParts(genome, ((bucket + 1) * 0x9e3779b1) >>> 0, env);
+    procPlantPartsCache.set(key, built);
+  }
+  return built;
+};
 
 const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color): ProcPlantTemplate => {
   const source = geometry.index ? geometry.toNonIndexed() : geometry;
@@ -1051,7 +1112,7 @@ export function createProcPlantVegetation(
       }
       if (treeBackend?.kind === "lsystem") {
         const template = useDetailedTree
-          ? buildBiomeTreeTemplate(treeBackend.species, patch!.seed ^ i, {
+          ? buildBiomeTreeTemplateCached(treeBackend.species, patch!.seed ^ i, {
               ...foliageDefaultsForTreeSpecies(treeBackend.species),
               ...treeBackend,
             })
@@ -1080,7 +1141,7 @@ export function createProcPlantVegetation(
         chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
-      const built = buildProcPlantInstancedParts(genome, renderSeed, environment);
+      const built = buildProcPlantInstancedPartsCached(genome, renderSeed, environment);
       const scaleBase = baseScale >= 1.2 ? baseScale * treeScaleMultiplier : baseScale;
       const scale = scaleBase * THREE.MathUtils.lerp(0.82, 1.22, rand());
       const matrix = new THREE.Matrix4()
@@ -1114,7 +1175,7 @@ export function createProcPlantVegetation(
       if (options.isExcluded?.(placement.x, placement.z, height)) continue;
       const genome = procPlantPresets[placement.presetId];
       if (!genome) continue;
-      const built = buildProcPlantInstancedParts(
+      const built = buildProcPlantInstancedPartsCached(
         genome,
         placement.seed,
         defaultPlantEnvironment(),

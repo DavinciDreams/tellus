@@ -1,0 +1,176 @@
+/* src/design-system/components.css
+   Single shared stylesheet for ALL Tellus HUD design-system component rules.
+   Every component .tsx emits `ds-` class names only; all structural styling lives here.
+   References only --ds-* / --hud-* tokens (owned by tokens.css). No raw hex/hsl. */
+
+/* ---- GLOBAL FOCUS / RESET (§2) ---- */
+.ds-scope :where(button, [role="tab"], a, input, textarea, select, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+.ds-scope :where(button, [role="tab"]):focus:not(:focus-visible) { outline: none; }
+.ds-scope { color: var(--ds-text); font-family: var(--ds-font-sans); }
+
+/* ---- 3.1 Button ---- */
+.ds-scope .ds-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--ds-space-3);
+  font-family: var(--ds-font-sans); font-size: var(--ds-text-md);
+  font-weight: var(--ds-weight-bold); line-height: var(--ds-leading-tight);
+  text-transform: none; letter-spacing: 0;
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-soft); color: var(--ds-text);
+  padding: 0 var(--ds-space-6); min-height: 36px; cursor: pointer;
+  transition: background var(--ds-transition), border-color var(--ds-transition), transform var(--ds-transition);
+}
+.ds-scope .ds-btn:hover:not(:disabled) { border-color: var(--ds-border); transform: translateY(-1px); }
+.ds-scope .ds-btn:active:not(:disabled) { transform: translateY(0); }
+.ds-scope .ds-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ds-scope .ds-btn--sm { min-height: 30px; font-size: var(--ds-text-xs); padding: 0 var(--ds-space-5); }
+
+.ds-scope .ds-btn--primary {
+  background: linear-gradient(180deg, var(--ds-gold-bright), var(--ds-gold));
+  border-color: var(--ds-border); color: #22331e; font-weight: var(--ds-weight-heavy);
+}
+.ds-scope .ds-btn--primary:hover:not(:disabled) { filter: brightness(1.05); }
+.ds-scope .ds-btn--secondary { background: var(--ds-bg-soft); }
+.ds-scope .ds-btn--ghost { background: transparent; border-color: transparent; }
+.ds-scope .ds-btn--ghost:hover:not(:disabled) { border-color: var(--ds-border-soft); background: var(--ds-bg); }
+.ds-scope .ds-btn--danger {
+  background: var(--ds-danger-bg); border-color: var(--ds-danger-border); color: var(--ds-danger-text);
+}
+.ds-scope .ds-btn--selected { border-color: var(--ds-gold); background: var(--ds-bg-strong); }
+
+.ds-scope .ds-btn__icon { display: inline-flex; width: 16px; height: 16px; }
+.ds-scope .ds-btn__spinner {
+  width: 14px; height: 14px; border-radius: 999px;
+  border: 2px solid rgb(255 242 196 / 30%); border-top-color: currentColor;
+  animation: ds-spin 0.7s linear infinite;
+}
+.ds-scope .ds-btn--loading .ds-btn__label { opacity: 0.6; }
+@keyframes ds-spin { to { transform: rotate(360deg); } }
+
+/* ---- 3.2 IconButton ---- */
+.ds-scope .ds-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 40px; min-height: 40px; width: 40px; height: 40px;
+  border: 1px solid var(--ds-border-soft); border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-soft); color: var(--ds-text); cursor: pointer;
+  transition: background var(--ds-transition), border-color var(--ds-transition), transform var(--ds-transition);
+}
+.ds-scope .ds-iconbtn--sm { min-width: 36px; min-height: 36px; width: 36px; height: 36px; }
+.ds-scope .ds-iconbtn--round { border-radius: var(--ds-radius-pill); }
+.ds-scope .ds-iconbtn:hover:not(:disabled) { border-color: var(--ds-border); transform: translateY(-1px); }
+.ds-scope .ds-iconbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ds-scope .ds-iconbtn--primary { background: linear-gradient(180deg,var(--ds-gold-bright),var(--ds-gold)); border-color: var(--ds-border); color: #22331e; }
+.ds-scope .ds-iconbtn--ghost { background: transparent; border-color: transparent; }
+.ds-scope .ds-iconbtn--ghost:hover:not(:disabled) { border-color: var(--ds-border-soft); background: var(--ds-bg); }
+.ds-scope .ds-iconbtn--danger { background: var(--ds-danger-bg); border-color: var(--ds-danger-border); color: var(--ds-danger-text); }
+.ds-scope .ds-iconbtn--selected { border-color: var(--ds-gold); background: var(--ds-bg-strong); }
+.ds-scope .ds-iconbtn__icon { display: inline-flex; width: 18px; height: 18px; }
+
+/* ---- 3.3 Panel ---- */
+.ds-scope .ds-panel {
+  border: 1px solid var(--ds-border-soft); border-radius: var(--ds-radius-lg);
+  background: var(--ds-bg); box-shadow: var(--ds-elevation-2);
+  color: var(--ds-text); display: flex; flex-direction: column; gap: var(--ds-space-4);
+  padding: var(--ds-space-7);
+}
+.ds-scope .ds-panel--canvas { box-shadow: var(--ds-elevation-1); }
+.ds-scope .ds-panel--raised { background: var(--ds-bg-strong); box-shadow: var(--ds-elevation-3); border-color: var(--ds-border); }
+.ds-scope .ds-panel--glass { -webkit-backdrop-filter: var(--ds-glass-blur); backdrop-filter: var(--ds-glass-blur); }
+.ds-scope .ds-panel--flush { padding: 0; }
+.ds-scope .ds-panel__header { display: flex; align-items: center; justify-content: space-between; gap: var(--ds-space-4); }
+.ds-scope .ds-panel__title { margin: 0; font-size: var(--ds-text-lg); font-weight: var(--ds-weight-heavy); color: var(--ds-text); text-transform: none; letter-spacing: 0; }
+.ds-scope .ds-panel__actions { display: inline-flex; align-items: center; gap: var(--ds-space-3); }
+.ds-scope .ds-panel__body { display: flex; flex-direction: column; gap: var(--ds-space-4); }
+
+/* ---- 3.4 Dialog ---- */
+.ds-scope .ds-dialog, dialog.ds-dialog {
+  border: 1px solid var(--ds-border); border-radius: var(--ds-radius-xl);
+  background: var(--ds-bg-strong); box-shadow: var(--ds-elevation-3);
+  color: var(--ds-text); padding: 0; width: min(560px, calc(100vw - var(--ds-space-8)));
+  max-height: calc(100dvh - 44px); overflow: auto;
+}
+.ds-scope .ds-dialog--sm { width: min(420px, calc(100vw - var(--ds-space-8))); }
+.ds-scope .ds-dialog--lg { width: min(760px, calc(100vw - var(--ds-space-8))); }
+dialog.ds-dialog::backdrop { background: var(--ds-scrim); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+.ds-scope .ds-dialog__header { display: flex; align-items: center; justify-content: space-between; gap: var(--ds-space-4); padding: var(--ds-space-7) var(--ds-space-7) var(--ds-space-4); }
+.ds-scope .ds-dialog__title { margin: 0; font-size: var(--ds-text-xl); font-weight: var(--ds-weight-heavy); font-family: var(--ds-font-serif); }
+.ds-scope .ds-dialog__body { padding: 0 var(--ds-space-7); }
+.ds-scope .ds-dialog__message { font-size: var(--ds-text-md); line-height: var(--ds-leading-normal); color: var(--ds-text); }
+.ds-scope .ds-dialog__footer { display: flex; justify-content: flex-end; gap: var(--ds-space-4); padding: var(--ds-space-7); }
+
+/* ---- 3.5 Field ---- */
+.ds-scope .ds-field { display: grid; gap: var(--ds-space-3); }
+.ds-scope .ds-field__label { font-size: var(--ds-text-xs); font-weight: var(--ds-weight-bold); color: var(--ds-text); text-transform: none; letter-spacing: 0; }
+.ds-scope .ds-field__label--hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.ds-scope .ds-input, .ds-scope .ds-textarea, .ds-scope .ds-select {
+  font-family: var(--ds-font-sans); font-size: var(--ds-text-md); color: var(--ds-text);
+  background: var(--ds-input-bg); border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-md); padding: var(--ds-space-4) var(--ds-space-5); width: 100%;
+  transition: border-color var(--ds-transition), background var(--ds-transition);
+}
+.ds-scope .ds-field--sm .ds-input, .ds-scope .ds-field--sm .ds-select { padding: var(--ds-space-3) var(--ds-space-4); font-size: var(--ds-text-sm); }
+.ds-scope .ds-input:hover, .ds-scope .ds-textarea:hover, .ds-scope .ds-select:hover { background: var(--ds-input-bg-hover); }
+.ds-scope .ds-input::placeholder, .ds-scope .ds-textarea::placeholder { color: var(--ds-input-placeholder); }
+.ds-scope .ds-textarea { resize: vertical; min-height: 76px; line-height: var(--ds-leading-normal); }
+.ds-scope .ds-input--invalid { border-color: var(--ds-danger-border); }
+.ds-scope .ds-field__hint { font-size: var(--ds-text-xs); color: var(--ds-muted); }
+.ds-scope .ds-field__error { font-size: var(--ds-text-xs); color: var(--ds-danger); font-weight: var(--ds-weight-bold); }
+
+/* ---- 3.6 Tabs ---- */
+.ds-scope .ds-tabs__list { display: flex; gap: var(--ds-space-2); border-bottom: 1px solid var(--ds-border-soft); }
+.ds-scope .ds-tabs--equal .ds-tabs__list { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.ds-scope .ds-tabs__tab {
+  appearance: none; background: transparent; border: 0; border-bottom: 2px solid transparent;
+  color: var(--ds-muted); font-size: var(--ds-text-sm); font-weight: var(--ds-weight-bold);
+  padding: var(--ds-space-4) var(--ds-space-5); cursor: pointer; text-transform: none;
+  transition: color var(--ds-transition), border-color var(--ds-transition);
+}
+.ds-scope .ds-tabs__tab:hover:not(:disabled) { color: var(--ds-text); }
+.ds-scope .ds-tabs__tab--active { color: var(--ds-text); border-bottom-color: var(--ds-gold); }
+.ds-scope .ds-tabs__tab:disabled { opacity: 0.4; cursor: not-allowed; }
+.ds-scope .ds-tabpanel { padding-top: var(--ds-space-5); }
+
+/* ---- 3.7 Badge ---- */
+.ds-scope .ds-badge {
+  display: inline-flex; align-items: center; gap: var(--ds-space-2);
+  font-size: var(--ds-text-xs); font-weight: var(--ds-weight-bold); line-height: 1;
+  text-transform: none; letter-spacing: 0;
+  padding: var(--ds-space-2) var(--ds-space-4); border-radius: var(--ds-radius-sm);
+  border: 1px solid var(--ds-border-soft); background: var(--ds-bg-soft); color: var(--ds-text);
+}
+.ds-scope .ds-badge--gold { color: var(--ds-gold-bright); border-color: var(--ds-border); background: rgb(222 188 86 / 12%); }
+.ds-scope .ds-badge--success { color: var(--ds-success); border-color: rgb(101 239 143 / 42%); background: var(--ds-success-bg); }
+.ds-scope .ds-badge--warn { color: var(--ds-warn); border-color: rgb(242 217 139 / 42%); background: var(--ds-warn-bg); }
+.ds-scope .ds-badge--danger { color: var(--ds-danger-text); border-color: var(--ds-danger-border); background: var(--ds-danger-bg); }
+
+/* ---- 3.8 PresenceDot ---- */
+.ds-scope .ds-presence { display: inline-flex; align-items: center; gap: var(--ds-space-3); }
+.ds-scope .ds-presence__dot { width: 8px; height: 8px; border-radius: 999px; box-sizing: border-box; position: relative; }
+.ds-scope .ds-presence--md .ds-presence__dot { width: 12px; height: 12px; }
+.ds-scope .ds-presence--online .ds-presence__dot  { background: var(--ds-success); box-shadow: 0 0 8px var(--ds-success); }
+.ds-scope .ds-presence--idle .ds-presence__dot    { background: transparent; border: 2px solid var(--ds-gold); }
+.ds-scope .ds-presence--busy .ds-presence__dot    { background: var(--ds-warn); box-shadow: 0 0 0 2px rgb(242 217 139 / 45%); animation: ds-pulse 1.2s ease-in-out infinite; }
+.ds-scope .ds-presence--offline .ds-presence__dot { background: transparent; border: 2px solid var(--ds-muted); opacity: 0.7; }
+.ds-scope .ds-presence--error .ds-presence__dot   { background: var(--ds-danger); box-shadow: 0 0 0 3px var(--ds-danger-border); animation: ds-pulse 1.2s ease-in-out infinite; }
+.ds-scope .ds-presence__label { font-size: var(--ds-text-xs); color: var(--ds-muted); text-transform: none; }
+@keyframes ds-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* ---- 3.9 Toolbar / ActionGroup ---- */
+.ds-scope .ds-toolbar { display: flex; align-items: center; gap: var(--ds-space-4); }
+.ds-scope .ds-toolbar--vertical { flex-direction: column; align-items: stretch; }
+.ds-scope .ds-toolbar--align-center { justify-content: center; }
+.ds-scope .ds-toolbar--align-end { justify-content: flex-end; }
+.ds-scope .ds-toolbar--align-between { justify-content: space-between; }
+.ds-scope .ds-toolbar__primary { flex: 0 0 auto; }
+.ds-scope .ds-toolbar__group { display: inline-flex; align-items: center; gap: var(--ds-space-3); }
+.ds-scope .ds-toolbar--vertical .ds-toolbar__group { flex-direction: column; align-items: stretch; }
+.ds-scope .ds-toolbar__overflow { margin-inline-start: auto; }
+.ds-scope .ds-actiongroup { display: flex; align-items: center; gap: var(--ds-space-4); }
+.ds-scope .ds-actiongroup--gap-sm { gap: var(--ds-space-2); }
+.ds-scope .ds-actiongroup--align-center { justify-content: center; }
+.ds-scope .ds-actiongroup--align-end { justify-content: flex-end; }
+.ds-scope .ds-actiongroup--align-between { justify-content: space-between; width: 100%; }

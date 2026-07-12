@@ -1,0 +1,210 @@
+/* src/styleguide.css
+   Page-level layout for the Tellus design-system styleguide (/styleguide).
+   Component styling lives in src/design-system/components.css — this file only
+   lays out the documentation shell. All colors reference the same --ds-* and --hud-* tokens. */
+
+:root { color-scheme: dark; }
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+.sg-root {
+  min-height: 100dvh;
+  /* Deep forest backdrop with the world's golden light glowing through the top —
+     the same atmosphere the HUD floats over in-game. */
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgb(58 96 66 / 55%) 0%, rgb(12 40 32 / 0%) 60%),
+    linear-gradient(180deg, #0f2c23 0%, #0a2019 100%);
+  background-attachment: fixed;
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-normal);
+  -webkit-font-smoothing: antialiased;
+}
+
+.sg-shell {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: clamp(24px, 5vw, 56px) clamp(16px, 4vw, 40px) 96px;
+}
+
+/* ---- Header ---- */
+.sg-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-7);
+  padding-bottom: var(--ds-space-8);
+  margin-bottom: var(--ds-space-12);
+  border-bottom: 1px solid var(--ds-border-soft);
+}
+.sg-monogram {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--ds-radius-pill);
+  border: 1.5px solid var(--ds-border);
+  background: var(--ds-bg-strong);
+  color: var(--ds-gold-bright);
+  font-family: var(--ds-font-serif);
+  font-size: 26px;
+  font-weight: 700;
+  box-shadow: var(--ds-elevation-1);
+}
+.sg-title {
+  margin: 0;
+  font-family: var(--ds-font-serif);
+  font-size: var(--ds-text-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ds-text);
+}
+.sg-subtitle {
+  margin: 2px 0 0;
+  color: var(--ds-muted);
+  font-size: var(--ds-text-md);
+}
+.sg-header__meta {
+  margin-left: auto;
+  display: flex;
+  gap: var(--ds-space-3);
+  align-items: center;
+}
+
+/* ---- Section rhythm ---- */
+.sg-section { margin-bottom: var(--ds-space-12); scroll-margin-top: 24px; }
+.sg-section__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ds-space-5);
+  margin-bottom: var(--ds-space-7);
+}
+.sg-section__title {
+  margin: 0;
+  font-size: var(--ds-text-2xl);
+  font-weight: var(--ds-weight-heavy);
+  color: var(--ds-text);
+}
+.sg-section__note { margin: 0; color: var(--ds-muted); font-size: var(--ds-text-sm); }
+
+/* Small nav */
+.sg-nav {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-toolbar);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-4) 0;
+  margin-bottom: var(--ds-space-8);
+  background: linear-gradient(180deg, #0f2c23 70%, rgb(15 44 35 / 0%));
+}
+.sg-nav a {
+  color: var(--ds-muted);
+  text-decoration: none;
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-bold);
+  padding: var(--ds-space-2) var(--ds-space-4);
+  border-radius: var(--ds-radius-pill);
+  border: 1px solid transparent;
+  transition: color var(--ds-transition), border-color var(--ds-transition), background var(--ds-transition);
+}
+.sg-nav a:hover { color: var(--ds-text); border-color: var(--ds-border-soft); background: var(--ds-bg); }
+.sg-nav a:focus-visible { outline: none; box-shadow: var(--ds-focus-ring); }
+
+/* ---- Generic grids ---- */
+.sg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--ds-space-6);
+}
+.sg-row { display: flex; flex-wrap: wrap; gap: var(--ds-space-5); align-items: center; }
+.sg-stack { display: flex; flex-direction: column; gap: var(--ds-space-5); }
+
+/* ---- Color swatch ---- */
+.sg-swatch {
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-md);
+  overflow: hidden;
+  background: var(--ds-bg);
+}
+.sg-swatch__chip { height: 64px; border-bottom: 1px solid var(--ds-border-soft); }
+.sg-swatch__meta { padding: var(--ds-space-4) var(--ds-space-5); display: grid; gap: 3px; }
+.sg-swatch__name { font-size: var(--ds-text-sm); font-weight: var(--ds-weight-bold); color: var(--ds-text); }
+.sg-swatch__value { font-family: var(--ds-font-mono); font-size: var(--ds-text-xs); color: var(--ds-muted); }
+
+/* ---- Contrast table ---- */
+.sg-table { width: 100%; border-collapse: collapse; font-size: var(--ds-text-sm); }
+.sg-table th,
+.sg-table td {
+  text-align: left;
+  padding: var(--ds-space-4) var(--ds-space-5);
+  border-bottom: 1px solid var(--ds-border-soft);
+}
+.sg-table th { color: var(--ds-muted); font-weight: var(--ds-weight-bold); font-size: var(--ds-text-xs); }
+.sg-table td { color: var(--ds-text); }
+.sg-sample { padding: 2px 8px; border-radius: var(--ds-radius-sm); font-weight: var(--ds-weight-bold); }
+.sg-mono { font-family: var(--ds-font-mono); font-size: var(--ds-text-xs); color: var(--ds-muted); }
+
+/* ---- Spacing / radius / type specimens ---- */
+.sg-spec { display: flex; align-items: center; gap: var(--ds-space-6); }
+.sg-spec__label { min-width: 132px; font-size: var(--ds-text-xs); font-family: var(--ds-font-mono); color: var(--ds-muted); }
+.sg-spacing-bar { height: 16px; border-radius: var(--ds-radius-xs); background: linear-gradient(90deg, var(--ds-gold-bright), var(--ds-gold)); }
+.sg-radius-box {
+  width: 72px; height: 72px;
+  border: 1px solid var(--ds-border);
+  background: var(--ds-bg-soft);
+}
+.sg-type-row { display: flex; align-items: baseline; gap: var(--ds-space-6); }
+.sg-type-row span:first-child { min-width: 132px; }
+
+/* ---- Component demo cell ---- */
+.sg-demo {
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-bg);
+  padding: var(--ds-space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-6);
+}
+.sg-demo__label { font-size: var(--ds-text-xs); color: var(--ds-muted); font-family: var(--ds-font-mono); }
+.sg-demo__stage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-5);
+  align-items: center;
+}
+.sg-props {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-muted);
+  line-height: 1.7;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sg-props b { color: var(--ds-gold-bright); font-weight: var(--ds-weight-bold); }
+
+/* ---- Checklist ---- */
+.sg-check { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--ds-space-4); }
+.sg-check li { display: flex; gap: var(--ds-space-4); align-items: flex-start; color: var(--ds-text); font-size: var(--ds-text-sm); }
+.sg-check svg { flex: 0 0 auto; margin-top: 1px; color: var(--ds-success); }
+
+/* ---- Toolbelt demo backdrop (echoes the in-game bottom toolbelt) ---- */
+.sg-worldstrip {
+  border-radius: var(--ds-radius-lg);
+  padding: var(--ds-space-10);
+  background:
+    radial-gradient(90% 120% at 20% 0%, rgb(140 200 235 / 45%), rgb(140 200 235 / 0%) 55%),
+    linear-gradient(180deg, #8fc6e6 0%, #9fd08a 55%, #d8c199 100%);
+  display: flex;
+  justify-content: center;
+}
+
+.sg-foot { margin-top: var(--ds-space-12); padding-top: var(--ds-space-7); border-top: 1px solid var(--ds-border-soft); color: var(--ds-muted); font-size: var(--ds-text-xs); }

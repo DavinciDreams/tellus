@@ -141,6 +141,7 @@ export default defineConfig(({ mode }) => {
           yosemiteTerrainViewer: "yosemite-terrain-viewer.html",
           cesiumTerrainViewer: "cesium-terrain-viewer.html",
           dragonFlight: "dragon-flight.html",
+          styleguide: "styleguide.html",
         },
         output: {
           manualChunks(id) {
