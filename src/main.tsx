@@ -21,6 +21,7 @@ import {
   PawPrint,
   Pencil,
   PersonStanding,
+  Plane,
   Plus,
   RotateCcw,
   RotateCw,
@@ -2817,7 +2818,14 @@ function createTellusWorld(
     let visibleMeshes = 0;
     let visibleShadowCasters = 0;
     let visibleShadowReceivers = 0;
+    let reflectionCaptures = 0;
+    let reflectionSkips = 0;
     scene.traverse((object) => {
+      const reflectionState = object.userData.tellusReflectionState as
+        | { captures?: number; skipped?: number }
+        | undefined;
+      reflectionCaptures += reflectionState?.captures ?? 0;
+      reflectionSkips += reflectionState?.skipped ?? 0;
       if (!(object instanceof THREE.Mesh) && !(object instanceof THREE.InstancedMesh)) return;
       let effectivelyVisible = object.visible;
       for (let parent = object.parent; effectivelyVisible && parent; parent = parent.parent) {
@@ -2852,6 +2860,8 @@ function createTellusWorld(
         triangles: info.render.triangles,
         points: info.render.points,
         lines: info.render.lines,
+        reflectionCaptures,
+        reflectionSkips,
       },
       programs: info.programs?.length ?? 0,
       scene: {
@@ -12924,6 +12934,26 @@ function App(): React.ReactElement {
     return label === worldId ? label : `${label} (${worldId})`;
   };
 
+  const worldDestinationDetails = (worldId: string) => {
+    const profile = loadLocalWorldProfiles()[canonicalWorldId(worldId)] ?? {};
+    const template = profile.worldTemplate ?? templateForWorldId(worldId, "tellus");
+    const interior = Boolean(profile.sceneUrl) || isInteriorWorldTemplate(template) || worldId.startsWith("interior-");
+    const home = template === "tellus" || /(^|-)main$|tellus/i.test(worldId);
+    const previewCandidate = templatePreviewUrl(template) || profile.skyboxUrl;
+    const previewImageUrl = previewCandidate && /\.(?:avif|gif|jpe?g|png|webp)(?:[?#]|$)/i.test(previewCandidate)
+      ? previewCandidate
+      : undefined;
+    return {
+      previewImageUrl,
+      eyebrow: home ? "Home" : interior ? "Interior" : "World",
+      description: home
+        ? "Your island lobby and gathering place"
+        : interior
+          ? "A focused destination beyond the outdoor worlds"
+          : "An explorable world shaped by its visitors",
+    };
+  };
+
   const canDeleteWorld = (worldId: string): boolean => {
     const profile = loadLocalWorldProfiles()[canonicalWorldId(worldId)] ?? {};
     return Boolean(profile.canDelete || isAdmin);
@@ -14066,6 +14096,7 @@ function App(): React.ReactElement {
   const [openToolMenus, setOpenToolMenus] = useState<ToolMenu[]>([]);
   const [createPromptFocused, setCreatePromptFocused] = useState(false);
   const [worldMenuOpen, setWorldMenuOpen] = useState(false);
+  const [travelMenuOpen, setTravelMenuOpen] = useState(false);
   const [worldMapOpen, setWorldMapOpen] = useState(true);
   // Portals card: foldable + dismissable (was always-on with no close — the worst right-side offender).
   const [portalsPanelOpen, setPortalsPanelOpen] = useState(false);
@@ -15350,6 +15381,87 @@ function App(): React.ReactElement {
             </div>
           </div>
         </div>
+        {travelMenuOpen && (
+          <aside className="travel-menu-panel" aria-label="Travel menu">
+            <div className="world-menu-head">
+              <span>Travel</span>
+              <button
+                type="button"
+                className="icon-button"
+                title="Close travel menu"
+                aria-label="Close travel menu"
+                onClick={() => setTravelMenuOpen(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="travel-menu-intro">
+              <strong>Choose a destination</strong>
+              <span>Step into a world or launch an expedition.</span>
+            </div>
+            <div className="world-destination-grid" role="list" aria-label="Destinations">
+              <article className="world-destination-card earth" role="listitem">
+                <button
+                  type="button"
+                  className="world-destination-main"
+                  onClick={() => window.location.assign("/dragon-flight.html")}
+                  aria-label="Launch Earth Flight"
+                >
+                  <span className="world-destination-art"><Globe2 size={34} /></span>
+                  <span className="world-destination-copy">
+                    <small>Expedition</small>
+                    <strong>Earth Flight</strong>
+                    <span>Fly your dragon over ancient landscapes and align with celestial rings</span>
+                  </span>
+                  <ArrowRight size={18} className="world-destination-arrow" />
+                </button>
+              </article>
+              {worlds.map((worldId) => {
+                const active = worldId === (activeWorldId ?? runtimeConfig.worldId);
+                const details = worldDestinationDetails(worldId);
+                return (
+                  <article key={worldId} className={`world-destination-card${active ? " active" : ""}`} role="listitem">
+                    <button
+                      type="button"
+                      className="world-destination-main"
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => {
+                        setTravelMenuOpen(false);
+                        switchWorld(worldId);
+                      }}
+                    >
+                      <span
+                        className="world-destination-art"
+                        style={details.previewImageUrl ? { backgroundImage: `url(${details.previewImageUrl})` } : undefined}
+                      >
+                        {!details.previewImageUrl && (details.eyebrow === "Interior" ? <Building2 size={30} /> : <Mountain size={30} />)}
+                      </span>
+                      <span className="world-destination-copy">
+                        <small>{active ? "You are here" : details.eyebrow}</small>
+                        <strong>{worldDisplayName(worldId)}</strong>
+                        <span>{details.description}</span>
+                      </span>
+                      <ArrowRight size={18} className="world-destination-arrow" />
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+            <div className="travel-menu-actions">
+              <button
+                type="button"
+                className="world-action-button"
+                onClick={() => {
+                  setTravelMenuOpen(false);
+                  setNewWorldPanelOpen(true);
+                }}
+              >
+                <Plus size={14} />
+                <span>Create a world</span>
+              </button>
+            </div>
+          </aside>
+        )}
         {worldMenuOpen && (
         <aside className="world-menu-panel" aria-label="World menu">
           <div className="world-menu-head">
@@ -15979,9 +16091,24 @@ function App(): React.ReactElement {
           </button>
           <button
             type="button"
+            className={travelMenuOpen ? "toolbelt-button active" : "toolbelt-button"}
+            title="Travel"
+            onClick={() => {
+              setTravelMenuOpen((open) => !open);
+              setWorldMenuOpen(false);
+            }}
+          >
+            <Plane size={18} />
+            <span>Travel</span>
+          </button>
+          <button
+            type="button"
             className={worldMenuOpen ? "toolbelt-button active" : "toolbelt-button"}
             title="World menu"
-            onClick={() => setWorldMenuOpen((open) => !open)}
+            onClick={() => {
+              setWorldMenuOpen((open) => !open);
+              setTravelMenuOpen(false);
+            }}
           >
             <Globe2 size={18} />
             <span>World</span>

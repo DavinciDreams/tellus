@@ -433,6 +433,24 @@ function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflecto
     multisample: 0,
   });
   reflection.name = "tellus-ocean-reflection";
+  const reflectionState = {
+    captures: 0,
+    skipped: 0,
+    lastCaptureMs: Number.NEGATIVE_INFINITY,
+    minIntervalMs: 1000 / 30,
+  };
+  const renderReflection = reflection.onBeforeRender;
+  reflection.onBeforeRender = function (...args) {
+    const now = performance.now();
+    if (now - reflectionState.lastCaptureMs < reflectionState.minIntervalMs) {
+      reflectionState.skipped++;
+      return;
+    }
+    reflectionState.lastCaptureMs = now;
+    reflectionState.captures++;
+    renderReflection.apply(this, args);
+  };
+  reflection.userData.tellusReflectionState = reflectionState;
   reflection.position.z = 0.018;
   reflection.renderOrder = -3;
   reflection.frustumCulled = false;
@@ -812,6 +830,24 @@ export function createBackdropWaterMaterial(settings?: Partial<WaterSettings>): 
     ),
   );
   reflectionSampler.reflector.resolutionScale = 0.72;
+  const reflectionState = {
+    captures: 0,
+    skipped: 0,
+    lastCaptureMs: Number.NEGATIVE_INFINITY,
+    minIntervalMs: 1000 / 30,
+  };
+  const updateReflection = reflectionSampler.reflector.updateBefore.bind(reflectionSampler.reflector);
+  reflectionSampler.reflector.updateBefore = (frame) => {
+    const now = performance.now();
+    if (now - reflectionState.lastCaptureMs < reflectionState.minIntervalMs) {
+      reflectionState.skipped++;
+      return;
+    }
+    reflectionState.lastCaptureMs = now;
+    reflectionState.captures++;
+    return updateReflection(frame);
+  };
+  reflectionSampler.target.userData.tellusReflectionState = reflectionState;
   const reflectionStrength = surfaceIntensity
     .mul(0.18)
     .add(depthEffect.oneMinus().mul(0.42))

@@ -437,6 +437,18 @@ style.textContent = `
     margin: 0;
     overflow: hidden;
     background: #06080d;
+    --hud-bg: rgb(17 47 38 / 84%);
+    --hud-bg-strong: rgb(9 34 30 / 94%);
+    --hud-bg-soft: rgb(38 76 48 / 86%);
+    --hud-border: rgb(222 188 86 / 72%);
+    --hud-border-soft: rgb(222 188 86 / 38%);
+    --hud-gold: #dcbc60;
+    --hud-gold-bright: #f2d98b;
+    --hud-green: #b8d37a;
+    --hud-text: #fff2c4;
+    --hud-muted: #c5c58d;
+    --hud-shadow: 0 18px 54px rgb(0 0 0 / 42%);
+    --hud-inset: inset 0 0 0 1px rgb(255 244 185 / 7%);
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
@@ -444,23 +456,23 @@ style.textContent = `
     position: fixed;
     inset: 18px auto auto 18px;
     z-index: 4;
-    width: min(390px, calc(100vw - 36px));
-    color: #fff7d6;
+    width: min(320px, calc(100vw - 36px));
+    color: var(--hud-text);
     pointer-events: none;
     text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7);
   }
 
   .df-title {
-    font-size: 26px;
+    font-size: 17px;
     line-height: 1.05;
     font-weight: 900;
   }
 
   .df-subtitle {
-    margin-top: 5px;
-    color: rgba(255, 247, 214, 0.78);
-    font-size: 13px;
-    font-weight: 700;
+    margin-top: 3px;
+    color: var(--hud-muted);
+    font-size: 10px;
+    font-weight: 650;
   }
 
   .df-panel {
@@ -468,59 +480,108 @@ style.textContent = `
     left: 18px;
     bottom: 18px;
     z-index: 5;
-    width: min(520px, calc(100vw - 36px));
-    display: grid;
+    width: min(340px, calc(100vw - 36px));
+    background: var(--hud-bg-strong);
+    border: 1px solid var(--hud-border-soft);
+    border-radius: 10px;
+    color: var(--hud-text);
+    backdrop-filter: blur(16px);
+    box-shadow: var(--hud-shadow), var(--hud-inset);
+  }
+
+  .df-telemetry {
+    position: fixed;
+    right: 18px;
+    top: 18px;
+    z-index: 5;
+    width: min(286px, calc(100vw - 36px));
+    padding: 10px;
+    color: var(--hud-text);
+    background: var(--hud-bg-strong);
+    border: 1px solid var(--hud-border-soft);
+    border-radius: 10px;
+    backdrop-filter: blur(16px);
+    box-shadow: var(--hud-shadow), var(--hud-inset);
+    pointer-events: none;
+  }
+
+  .df-telemetry .df-grid { gap: 5px; }
+
+  .df-telemetry .df-stat {
+    border-color: rgb(255 255 255 / 14%);
+    background: rgb(0 0 0 / 24%);
+  }
+
+  .df-panel summary {
+    min-height: 34px;
+    padding: 7px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 10px;
-    padding: 14px;
-    background: rgba(9, 12, 18, 0.78);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 8px;
-    color: #fff7d6;
-    backdrop-filter: blur(12px);
-    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.42);
+    color: var(--hud-gold-bright);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .df-panel summary::-webkit-details-marker { display: none; }
+  .df-panel summary::after { content: "+"; font-size: 15px; }
+  .df-panel[open] summary::after { content: "-"; }
+
+  .df-panel-body {
+    display: grid;
+    gap: 8px;
+    padding: 0 10px 10px;
+    border-top: 1px solid var(--hud-border-soft);
   }
 
   .df-vehicles {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 5px;
   }
 
   .df-vehicles button {
     border: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.08);
-    color: #fff7d6;
-    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgb(0 0 0 / 24%);
+    color: var(--hud-text);
+    padding: 5px 7px;
+    font-size: 10px;
     font-weight: 850;
     cursor: pointer;
   }
 
   .df-vehicles button.active {
-    background: #facc15;
-    border-color: #fde047;
-    color: #111827;
+    background: var(--hud-bg-soft);
+    border-color: var(--hud-border);
+    color: var(--hud-gold-bright);
   }
 
   .df-search {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
+    gap: 5px;
   }
 
   .df-search input,
   .df-search button {
     min-width: 0;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.08);
-    color: #fff7d6;
-    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgb(0 0 0 / 24%);
+    color: var(--hud-text);
+    padding: 6px 8px;
+    font-size: 10px;
     font-weight: 800;
   }
 
   .df-search input::placeholder {
-    color: rgba(255, 247, 214, 0.58);
+    color: rgb(255 243 199 / 58%);
   }
 
   .df-search button {
@@ -530,20 +591,20 @@ style.textContent = `
   .df-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
+    gap: 5px;
   }
 
   .df-stat {
     min-width: 0;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.07);
-    padding: 8px;
+    border: 1px solid var(--hud-border-soft);
+    border-radius: 8px;
+    background: var(--hud-bg);
+    padding: 5px;
   }
 
   .df-stat span {
     display: block;
-    color: rgba(255, 247, 214, 0.62);
+    color: var(--hud-muted);
     font-size: 10px;
     font-weight: 850;
     text-transform: uppercase;
@@ -552,15 +613,15 @@ style.textContent = `
   .df-stat strong {
     display: block;
     margin-top: 3px;
-    color: #fff7d6;
-    font-size: 15px;
+    color: var(--hud-text);
+    font-size: 11px;
     font-variant-numeric: tabular-nums;
   }
 
   .df-tip {
-    color: rgba(255, 247, 214, 0.72);
-    font-size: 12px;
-    line-height: 1.45;
+    color: var(--hud-muted);
+    font-size: 9px;
+    line-height: 1.35;
     font-weight: 650;
   }
 
@@ -569,15 +630,16 @@ style.textContent = `
     right: 18px;
     bottom: 18px;
     z-index: 5;
-    max-width: 330px;
-    color: rgba(255, 247, 214, 0.9);
-    background: rgba(9, 12, 18, 0.68);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 8px;
-    padding: 10px 12px;
-    font-size: 12px;
-    line-height: 1.55;
-    backdrop-filter: blur(10px);
+    max-width: 270px;
+    color: var(--hud-text);
+    background: var(--hud-bg-strong);
+    border: 1px solid var(--hud-border-soft);
+    border-radius: 10px;
+    padding: 10px;
+    font-size: 10px;
+    line-height: 1.4;
+    backdrop-filter: blur(16px);
+    box-shadow: var(--hud-shadow), var(--hud-inset);
   }
 
   .cesium-viewer-bottom,
@@ -595,29 +657,34 @@ root.innerHTML = `
     <div class="df-subtitle" data-route-subtitle>${activeRoute.subtitle}</div>
   </div>
   <div id="dragon-flight-container" style="width: 100%; height: 100%;"></div>
-  <div class="df-panel">
-    <div class="df-vehicles">
-      ${vehicles.map((vehicle) => `<button type="button" data-vehicle="${vehicle.id}">${vehicle.label}</button>`).join("")}
-      <button type="button" data-reset-flight>Reset Route</button>
-    </div>
-    <div class="df-vehicles">
-      ${routes.map((route) => `<button type="button" data-route="${route.id}">${route.label}</button>`).join("")}
-    </div>
-    <form class="df-search" data-location-form>
-      <input type="search" list="flight-location-options" data-location-search placeholder="Search city or site" autocomplete="off" />
-      <button type="submit">Go</button>
-      <datalist id="flight-location-options">
-        ${flightLocations.map((location) => `<option value="${location.label}"></option>`).join("")}
-      </datalist>
-    </form>
+  <div class="df-telemetry" aria-label="Flight telemetry">
     <div class="df-grid">
       <div class="df-stat"><span>Speed</span><strong data-stat="speed">--</strong></div>
       <div class="df-stat"><span>Altitude</span><strong data-stat="altitude">--</strong></div>
       <div class="df-stat"><span>Rings</span><strong data-stat="rings">0/${activeRoute.rings.length}</strong></div>
       <div class="df-stat"><span>Mode</span><strong data-stat="mode">Glide</strong></div>
     </div>
-    <div class="df-tip">W/S pitch · A/D turn · Q/E descend/climb · Shift flap boost · fly through the colored rings in any order.</div>
   </div>
+  <details class="df-panel">
+    <summary>Flight plan</summary>
+    <div class="df-panel-body">
+      <div class="df-vehicles">
+        ${vehicles.map((vehicle) => `<button type="button" data-vehicle="${vehicle.id}">${vehicle.label}</button>`).join("")}
+        <button type="button" data-reset-flight>Reset</button>
+      </div>
+      <div class="df-vehicles">
+        ${routes.map((route) => `<button type="button" data-route="${route.id}">${route.label}</button>`).join("")}
+      </div>
+      <form class="df-search" data-location-form>
+        <input type="search" list="flight-location-options" data-location-search placeholder="Search city or site" autocomplete="off" />
+        <button type="submit">Go</button>
+        <datalist id="flight-location-options">
+          ${flightLocations.map((location) => `<option value="${location.label}"></option>`).join("")}
+        </datalist>
+      </form>
+      <div class="df-tip">Drag to look · scroll to zoom · V view · hold W/S to climb or dive · Space brake</div>
+    </div>
+  </details>
   <div class="df-status" data-status>${token ? "Loading Cesium terrain and flyer..." : "Missing VITE_CESIUM_ION_TOKEN in .env.local"}</div>
 `;
 
@@ -652,7 +719,12 @@ let flyerMarker: Entity | null = null;
 let flyerModel: Model | null = null;
 let flyerModelToken = 0;
 let activeFlyerAnimation = "";
-let visualYawTrimDeg = 0;
+let visualYawTrimDeg = 180;
+let surveyCamera = false;
+let cameraOrbitYawDeg = 0;
+let cameraElevationDeg = 20;
+let cameraZoom = 1;
+let pitchHoldSeconds = 0;
 let smoothedFlyerTerrainM = activeRoute.terrainFallbackM;
 const ringEntities = new Map<string, Entity>();
 const state: FlightState = {
@@ -963,10 +1035,13 @@ function updateFlyerTransform() {
 }
 
 function updateCamera() {
-  const heading = CesiumMath.toRadians(state.headingDeg);
+  const cameraHeadingDeg = state.headingDeg + cameraOrbitYawDeg;
+  const heading = CesiumMath.toRadians(cameraHeadingDeg);
   const inspectionBlend = clamp01(1 - state.altitudeM / INSPECTION_ALTITUDE_M);
-  const behind = lerp(selectedVehicle.cameraRange, INSPECTION_CAMERA_RANGE_M, inspectionBlend);
-  const cameraHeight = lerp(selectedVehicle.cameraHeight, INSPECTION_CAMERA_HEIGHT_M, inspectionBlend);
+  const chaseBehind = lerp(selectedVehicle.cameraRange, INSPECTION_CAMERA_RANGE_M, inspectionBlend);
+  const behind = Math.max(18, (surveyCamera ? Math.max(54, chaseBehind * 0.38) : chaseBehind) * cameraZoom);
+  const elevationDeg = surveyCamera ? 72 : cameraElevationDeg;
+  const cameraHeight = Math.tan(CesiumMath.toRadians(elevationDeg)) * behind;
   const [cameraLon, cameraLat] = offsetLonLat(
     state.lon,
     state.lat,
@@ -976,8 +1051,8 @@ function updateCamera() {
   viewer.camera.setView({
     destination: flightPositionFor(cameraLon, cameraLat, state.altitudeM + cameraHeight),
     orientation: {
-      heading: CesiumMath.toRadians(state.headingDeg),
-      pitch: CesiumMath.toRadians(-7 - inspectionBlend * 5 - Math.max(0, state.pitchDeg) * 0.18),
+      heading: CesiumMath.toRadians(cameraHeadingDeg),
+      pitch: CesiumMath.toRadians(-elevationDeg - Math.max(0, state.pitchDeg) * 0.08),
       roll: CesiumMath.toRadians(state.rollDeg * 0.28),
     },
   });
@@ -1017,25 +1092,28 @@ function tick() {
   const dt = Math.min(0.05, Math.max(0.001, (now - lastTick) / 1000));
   lastTick = now;
 
-  const boost = keys.has("ShiftLeft") || keys.has("ShiftRight");
-  const targetSpeed = selectedVehicle.speedMps * (boost ? 1.45 : 1);
-  state.speedMps += (targetSpeed - state.speedMps) * Math.min(1, dt * 2.5);
+  const shift = keys.has("ShiftLeft") || keys.has("ShiftRight");
+  const braking = keys.has("Space");
+  const boost = shift && !braking;
+  const targetSpeed = selectedVehicle.speedMps * (braking ? 0.12 : boost ? 1.45 : 1);
+  state.speedMps += (targetSpeed - state.speedMps) * Math.min(1, dt * (braking ? 5.5 : 2.5));
 
   const turn = (keys.has("KeyA") ? -1 : 0) + (keys.has("KeyD") ? 1 : 0);
   const pitchInput = (keys.has("KeyW") ? 1 : 0) + (keys.has("KeyS") ? -1 : 0);
-  const climbInput = (keys.has("KeyE") ? 1 : 0) + (keys.has("KeyQ") ? -1 : 0);
+  pitchHoldSeconds = pitchInput === 0 ? 0 : Math.min(2.4, pitchHoldSeconds + dt);
+  const pitchMagnitude = pitchInput === 0
+    ? 0
+    : Math.min(48, 7 + (Math.exp(pitchHoldSeconds * 0.9) - 1) * 10);
 
   state.headingDeg = (state.headingDeg + turn * selectedVehicle.turnRate * dt + 360) % 360;
-  state.pitchDeg += ((pitchInput * 11) - state.pitchDeg) * Math.min(1, dt * 3.4);
+  state.pitchDeg += ((pitchInput * pitchMagnitude) - state.pitchDeg) * Math.min(1, dt * 3.4);
   state.rollDeg += ((turn * -28) - state.rollDeg) * Math.min(1, dt * 5.5);
 
   const targetTerrainM = terrainHeightAt(state.lon, state.lat);
   smoothedFlyerTerrainM += (targetTerrainM - smoothedFlyerTerrainM) * Math.min(1, dt * 0.8);
 
-  const pitchLiftMps = Math.sin(CesiumMath.toRadians(state.pitchDeg)) * state.speedMps * 0.32;
-  const altitudeEase = lerp(1, 0.55, clamp01(1 - state.altitudeM / 80));
-  const climbMps = climbInput * selectedVehicle.climbRate * (climbInput < 0 ? 1.35 : 0.82) * altitudeEase;
-  const targetAltitudeVelocityMps = pitchLiftMps + climbMps;
+  const pitchLiftMps = Math.sin(CesiumMath.toRadians(state.pitchDeg)) * state.speedMps * 0.9;
+  const targetAltitudeVelocityMps = pitchLiftMps;
   state.altitudeVelocityMps += (targetAltitudeVelocityMps - state.altitudeVelocityMps) * Math.min(1, dt * 2.6);
   state.altitudeM += state.altitudeVelocityMps * dt;
   state.altitudeM = Math.max(MIN_FLIGHT_ALTITUDE_M, Math.min(MAX_FLIGHT_ALTITUDE_M, state.altitudeM));
@@ -1051,10 +1129,25 @@ function tick() {
   setFlyerAnimation(boost || pitchInput > 0 ? "flap" : "glide");
   updateCamera();
   checkRings();
-  updateHud(boost || pitchInput > 0 ? "Flap" : "Glide");
+  updateHud(surveyCamera ? "Survey" : braking ? "Brake" : boost || pitchInput > 0 ? "Flap" : "Glide");
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable);
 }
 
 document.addEventListener("keydown", (event) => {
+  if (isTextEditingTarget(event.target)) return;
+  if ((event.code === "KeyV" || event.code === "KeyC") && !event.repeat) {
+    surveyCamera = !surveyCamera;
+    updateCamera();
+    setStatus(surveyCamera ? "Survey view" : "Chase view");
+    event.preventDefault();
+    return;
+  }
   if (event.code === "KeyJ" || event.code === "KeyL") {
     visualYawTrimDeg += event.code === "KeyJ" ? -15 : 15;
     visualYawTrimDeg = ((visualYawTrimDeg + 180) % 360) - 180;
@@ -1064,11 +1157,38 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   keys.add(event.code);
-  if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyJ", "KeyL", "ShiftLeft", "ShiftRight", "Space"].includes(event.code)) {
+  if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyV", "KeyC", "KeyJ", "KeyL", "ShiftLeft", "ShiftRight", "Space"].includes(event.code)) {
     event.preventDefault();
   }
 });
 document.addEventListener("keyup", (event) => keys.delete(event.code));
+
+let cameraDragging = false;
+viewer.canvas.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  cameraDragging = true;
+  viewer.canvas.setPointerCapture(event.pointerId);
+});
+viewer.canvas.addEventListener("pointermove", (event) => {
+  if (!cameraDragging) return;
+  cameraOrbitYawDeg = ((cameraOrbitYawDeg - event.movementX * 0.24 + 540) % 360) - 180;
+  cameraElevationDeg = Math.max(6, Math.min(68, cameraElevationDeg + event.movementY * 0.18));
+});
+const stopCameraDrag = (event: PointerEvent) => {
+  cameraDragging = false;
+  if (viewer.canvas.hasPointerCapture(event.pointerId)) viewer.canvas.releasePointerCapture(event.pointerId);
+};
+viewer.canvas.addEventListener("pointerup", stopCameraDrag);
+viewer.canvas.addEventListener("pointercancel", stopCameraDrag);
+viewer.canvas.addEventListener("wheel", (event) => {
+  cameraZoom = Math.max(0.28, Math.min(2.6, cameraZoom * Math.exp(event.deltaY * 0.0012)));
+  event.preventDefault();
+}, { passive: false });
+viewer.canvas.addEventListener("dblclick", () => {
+  cameraOrbitYawDeg = 0;
+  cameraElevationDeg = 20;
+  cameraZoom = 1;
+});
 document.querySelectorAll<HTMLButtonElement>("[data-vehicle]").forEach((button) => {
   button.addEventListener("click", () => selectVehicle(button.dataset.vehicle as VehicleId));
 });

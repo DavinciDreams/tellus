@@ -1155,7 +1155,10 @@ export function createProcPlantVegetation(
 
     for (const bucket of organBuckets.values()) {
       const mesh = new THREE.InstancedMesh(bucket.geometry, organMaterial.clone(), bucket.instances.length);
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      // Chunk vegetation is rebuilt when its contents change; its instance buffer is otherwise immutable.
+      // Static usage lets the backend keep it in GPU-optimal storage instead of treating every plant organ
+      // as a per-frame streaming buffer.
+      mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
       bucket.instances.forEach((instance, index) => {
         mesh.setMatrixAt(index, instance.matrix);
         mesh.setColorAt(index, instance.color);

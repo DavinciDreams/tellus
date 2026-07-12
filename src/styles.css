@@ -598,6 +598,151 @@ textarea::placeholder {
     linear-gradient(135deg, #79c7ff 0%, #89c858 42%, #f3b1d1 70%, #4f9e6e 100%);
 }
 
+.travel-menu-panel {
+  position: absolute;
+  left: 20px;
+  top: 18px;
+  z-index: 36;
+  width: min(760px, calc(100vw - 40px));
+  max-height: min(78dvh, calc(100dvh - 40px));
+  overflow: auto;
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 12px;
+  background: var(--hud-bg-strong);
+  box-shadow: var(--hud-shadow), var(--hud-inset);
+  padding: 12px;
+  pointer-events: auto;
+}
+
+/* Travel owns destination selection; World is reserved for settings for the current place. */
+.world-menu-panel .world-picker-group,
+.world-menu-panel .world-list-group {
+  display: none;
+}
+
+.travel-menu-intro {
+  display: grid;
+  gap: 3px;
+  margin: 2px 0 10px;
+}
+
+.travel-menu-intro strong {
+  color: #fff3c9;
+  font: 800 15px/1.15 ui-sans-serif, system-ui;
+}
+
+.travel-menu-intro span {
+  color: rgb(223 231 216 / 66%);
+  font: 600 11px/1.3 ui-sans-serif, system-ui;
+}
+
+.world-destination-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  gap: 9px;
+}
+
+.world-destination-card {
+  min-width: 0;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 12px;
+  overflow: hidden;
+  background: linear-gradient(145deg, rgb(18 26 23 / 96%), rgb(5 8 7 / 96%));
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.world-destination-card:hover,
+.world-destination-card:focus-within {
+  border-color: rgb(230 192 95 / 58%);
+  transform: translateY(-1px);
+}
+
+.world-destination-card.active {
+  border-color: rgb(230 192 95 / 74%);
+  background: linear-gradient(145deg, rgb(64 52 25 / 94%), rgb(16 18 12 / 96%));
+}
+
+.world-destination-card.earth {
+  background: radial-gradient(circle at 18% 12%, rgb(54 153 190 / 62%), transparent 48%),
+    linear-gradient(145deg, #102b35, #071013 72%);
+}
+
+.world-destination-main {
+  width: 100%;
+  min-width: 0;
+  min-height: 92px;
+  border: 0;
+  background: transparent;
+  color: #f7f1dc;
+  padding: 9px;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.world-destination-art {
+  width: 88px;
+  height: 72px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: #d9e8d2;
+  background-color: rgb(93 121 85 / 34%);
+  background-size: cover;
+  background-position: center;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 12%);
+}
+
+.earth .world-destination-art {
+  color: #bfeeff;
+  background: radial-gradient(circle, rgb(65 174 211 / 48%), rgb(9 36 48 / 84%));
+}
+
+.world-destination-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.world-destination-copy small {
+  color: #e6c05f;
+  font: 800 9px/1 ui-sans-serif, system-ui;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.world-destination-copy strong {
+  overflow: hidden;
+  color: #fff8de;
+  font: 800 14px/1.15 ui-sans-serif, system-ui;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-destination-copy span {
+  color: rgb(223 231 216 / 66%);
+  font: 600 10px/1.3 ui-sans-serif, system-ui;
+}
+
+.world-destination-arrow {
+  color: rgb(230 192 95 / 72%);
+}
+
+.travel-menu-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+@media (max-width: 620px) {
+  .world-destination-grid { grid-template-columns: 1fr; }
+  .world-destination-main { grid-template-columns: 68px minmax(0, 1fr) auto; }
+  .world-destination-art { width: 68px; height: 60px; }
+}
+
 .world-template-swatch.template-yosemite-terrain {
   background: linear-gradient(135deg, #d8ddd6 0%, #8f9a8f 28%, #465247 48%, #a9b76b 72%, #5f7c4e 100%);
 }
