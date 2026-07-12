@@ -965,7 +965,7 @@ function createTellusWorld(
   // known AND nearby chunks have had a moment to build, then snap the player down and fade it out.
   // worldEntryGrounded starts true for non-chunked worlds (they spawn on analytic terrain already).
   let worldEntryGrounded = !isChunked;
-  let worldEntryGroundedAt = 0;
+  let worldEntryGroundedAt = worldEntryGrounded ? performance.now() : 0;
   let worldReadyFired = false;
   const loadingOverlay = document.createElement("div");
   loadingOverlay.className = "tellus-entry-loading";
@@ -9543,7 +9543,9 @@ function createTellusWorld(
             chunkStats.pending + chunkStats.queued + chunkStats.inflight === 0
           : true);
       const plantStats = procplants.stats();
-      const plantsSettled = plantStats.chunksBuilt > 0 && plantStats.queuedRebuilds === 0;
+      const plantsSettled =
+        !procplantsEnabled ||
+        (plantStats.chunksBuilt > 0 && plantStats.queuedRebuilds === 0);
       // Wait for the chosen VRM avatar to finish mounting so the default robot isn't seen first.
       // "" (deterministic robot) and "classic" stay procedural by design — nothing to wait for there.
       const localAvatarPending =
