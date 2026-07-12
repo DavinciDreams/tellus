@@ -10608,10 +10608,18 @@ function createTellusWorld(
       const a = args ?? {};
       switch (verb) {
         case "moveSelf": {
+          type BlockedAgentMove = { x: number; z: number; kind: string; reason: string };
+          const blockedMove: { current: BlockedAgentMove | null } = { current: null };
           const groundAgentMove = (x: number, z: number) => {
             const target = isChunked ? clampChunkedPoint(x, z) : { x, z };
             const sample = sampleMapPoint(target.x, target.z);
             if (sample.kind === "water" && !isContinentalChunkedWorld) {
+              blockedMove.current = {
+                x: target.x,
+                z: target.z,
+                kind: sample.kind,
+                reason: "moveSelf target is water/ocean in this world",
+              };
               return groundedPositionForCurrentSurface(
                 visitorPosition.x,
                 visitorPosition.z,
@@ -10626,6 +10634,17 @@ function createTellusWorld(
             8,
             groundAgentMove,
           );
+          const blocked = blockedMove.current;
+          if (blocked) {
+            return {
+              ok: false,
+              error: blocked.reason,
+              worldId: runtimeConfig.worldId,
+              position: { ...visitorPosition },
+              target: moved.target ?? { x: blocked.x, z: blocked.z },
+              blocked,
+            };
+          }
           visitorPosition = moved.position;
           sendPresenceUpdate(true);
           return {
