@@ -9,11 +9,15 @@ export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 
 export function Badge({
   tone = "neutral",
+  className,
   children,
   ...rest
 }: BadgeProps) {
+  const classes = ["ds-badge", `ds-badge--${tone}`, className]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <span className={`ds-badge ds-badge--${tone}`} {...rest}>
+    <span className={classes} {...rest}>
       {children}
     </span>
   );

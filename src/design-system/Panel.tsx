@@ -19,6 +19,7 @@ export function Panel({
   header,
   headerActions,
   padded = true,
+  className,
   children,
   ...rest
 }: PanelProps) {
@@ -27,6 +28,7 @@ export function Panel({
     `ds-panel--${level}`,
     glass ? "ds-panel--glass" : null,
     !padded ? "ds-panel--flush" : null,
+    className,
   ]
     .filter(Boolean)
     .join(" ");

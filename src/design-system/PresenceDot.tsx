@@ -29,10 +29,18 @@ export function PresenceDot({
   size = "sm",
   label,
   showLabel = false,
+  className,
   ...rest
 }: PresenceDotProps) {
   const accessibleName = label ?? humanize(status);
-  const rootClassName = `ds-presence ds-presence--${status} ds-presence--${size}`;
+  const rootClassName = [
+    "ds-presence",
+    `ds-presence--${status}`,
+    `ds-presence--${size}`,
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   // When the label is not rendered visibly, the status must still carry an
   // accessible text name (never color-only). role="img" + aria-label supplies it.
