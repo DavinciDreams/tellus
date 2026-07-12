@@ -7344,18 +7344,23 @@ function createTellusWorld(
     announceWorldChat(`${displayNameForVisitor(String(request.creatorId))} started building ${thing.kind}: ${request.prompt}`, thing.position);
     publishGeneratedThing(thing);
 
-    const showLocalFallbackMesh = () => {
+    const replaceGeneratedMesh = (nextThing: GeneratedThing) => {
       const oldMesh = generatedMeshes.get(thing.id);
       if (oldMesh) {
+        uninstanceThing(thing.id);
         stopGeneratedAnimation(thing.id);
         scene.remove(oldMesh);
         disposeObject(oldMesh);
       }
-      const fallbackMesh = createGeneratedMesh(thing);
+      const fallbackMesh = createGeneratedMesh(nextThing);
       generatedMeshes.set(thing.id, fallbackMesh);
       scene.add(fallbackMesh);
       syncTransformControls();
+      updateThingMeshPosition(nextThing);
     };
+    const showLocalFallbackMesh = () => replaceGeneratedMesh(thing);
+    const showFailedGenerationMesh = () =>
+      replaceGeneratedMesh({ ...thing, generationStatus: "failed" });
 
     if (
       generationProvider === "asset-forge" &&
@@ -7431,12 +7436,13 @@ function createTellusWorld(
             return;
           }
           thing.generationStatus = "failed";
+          showFailedGenerationMesh();
           publishGeneratedThing(thing);
           addLog({
             agentId: "world",
             agentName: "Pixel3D",
             tool: "interact",
-            text: `Pixel3D generation fell back to local mesh: ${
+            text: `Pixel3D generation failed: ${
               error instanceof Error ? sanitizeLogText(error.message) : "unknown error"
             }`,
           });
@@ -7546,8 +7552,6 @@ function createTellusWorld(
             publish();
             return;
           }
-          thing.generationStatus = "failed";
-          publishGeneratedThing(thing);
           if (isMissingApiRouteError(error)) {
             directGenerationAvailable = false;
             thing.generationStatus = "local";
@@ -7562,6 +7566,9 @@ function createTellusWorld(
             publish();
             return;
           }
+          thing.generationStatus = "failed";
+          showFailedGenerationMesh();
+          publishGeneratedThing(thing);
           addLog({
             agentId: "world",
             agentName: providerName,
@@ -10377,11 +10384,23 @@ function createTellusWorld(
       const a = args ?? {};
       switch (verb) {
         case "moveSelf": {
+          const groundAgentMove = (x: number, z: number) => {
+            const target = isChunked ? clampChunkedPoint(x, z) : { x, z };
+            const sample = sampleMapPoint(target.x, target.z);
+            if (sample.kind === "water" && !isContinentalChunkedWorld) {
+              return groundedPositionForCurrentSurface(
+                visitorPosition.x,
+                visitorPosition.z,
+                visitorPosition,
+              );
+            }
+            return groundedPositionForCurrentSurface(target.x, target.z, visitorPosition);
+          };
           const moved = resolveAgentMoveTarget(
             a,
             visitorPosition,
             8,
-            (x, z) => groundedPosition(x, z, visitorPosition),
+            groundAgentMove,
           );
           visitorPosition = moved.position;
           sendPresenceUpdate(true);
@@ -12018,15 +12037,21 @@ function App(): React.ReactElement {
       ((agentStatus?.ownerPresent ?? false) || (agentStatus?.offlinePersistence ?? false)) &&
       (agentStatus?.enabled ?? false);
     const thinking = optedIn && (agentStatus?.processing ?? false);
-    const willWake = optedIn && !(agentStatus?.enabled ?? false) && (agentStatus?.ownerPresent ?? false);
+    const presentOnly =
+      optedIn &&
+      (agentStatus?.ownerPresent ?? false) &&
+      !(agentStatus?.offlinePersistence ?? false);
+    const willWake = presentOnly && !(agentStatus?.enabled ?? false);
     const statusLabel = !optedIn
       ? "Stopped"
       : thinking
         ? "Thinking…"
         : running
-          ? "Running"
+          ? presentOnly
+            ? "Running while you are here"
+            : "Running"
           : willWake
-            ? "Sleeping (will wake)"
+            ? "Waking while you are here"
             : "Sleeping";
     const dot = !optedIn ? "#7a8597" : thinking ? "#9ec8ff" : running ? "#6fae46" : "#d8a64a";
     return (
@@ -14846,15 +14871,18 @@ function App(): React.ReactElement {
       const agentWorldId = canonicalWorldId(agentStatus.worldId || currentWorldId);
       const key = `agent:${agentStatus.visitorId}`;
       const existing = byKey.get(key);
+      const existingMatchesAgentWorld =
+        existing ? canonicalWorldId(existing.worldId) === agentWorldId : false;
+      const existingInAgentWorld = existingMatchesAgentWorld ? existing : undefined;
       byKey.set(key, {
         visitorId: agentStatus.visitorId,
-        name: existing?.name || actorName({ visitorId: agentStatus.visitorId, name: "Your agent" }),
+        name: existingInAgentWorld?.name || actorName({ visitorId: agentStatus.visitorId, name: "Your agent" }),
         kind: "agent",
-        worldId: existing?.worldId || agentWorldId,
-        position: existing?.position,
-        online: existing?.online ?? Boolean(agentStatus.enabled || agentStatus.ownerPresent || agentStatus.offlinePersistence),
-        currentWorld: existing?.currentWorld ?? agentWorldId === currentWorldId,
-        lastSeenAt: existing?.lastSeenAt || agentStatus.lastTickAt || undefined,
+        worldId: existingInAgentWorld?.worldId || agentWorldId,
+        position: existingInAgentWorld?.position,
+        online: existingInAgentWorld?.online ?? Boolean(agentStatus.enabled || agentStatus.ownerPresent || agentStatus.offlinePersistence),
+        currentWorld: existingInAgentWorld?.currentWorld ?? agentWorldId === currentWorldId,
+        lastSeenAt: existingInAgentWorld?.lastSeenAt || agentStatus.lastTickAt || undefined,
       });
     }
 
@@ -14895,6 +14923,7 @@ function App(): React.ReactElement {
   };
   const goToOnlineContact = (contact: OnlineContact) => {
     if (!contact.position) return;
+    if (!Number.isFinite(contact.position.x) || !Number.isFinite(contact.position.z)) return;
     if (contact.worldId === currentWorldId) {
       worldRef.current?.warpTo(contact.position.x, contact.position.z);
       return;
@@ -15215,7 +15244,11 @@ function App(): React.ReactElement {
                           <button
                             type="button"
                             className="mini-chat-contact-go"
-                            disabled={!target.position}
+                            disabled={
+                              !target.position ||
+                              !Number.isFinite(target.position.x) ||
+                              !Number.isFinite(target.position.z)
+                            }
                             onClick={(event) => {
                               event.stopPropagation();
                               goToOnlineContact(target);
