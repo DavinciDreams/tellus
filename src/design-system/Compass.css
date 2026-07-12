@@ -1,0 +1,106 @@
+/* src/design-system/Compass.css
+   Compass — a world-heading indicator for the Tellus HUD design system.
+   Token-only; every selector is scoped under .ds-scope. Gold-on-forest rose,
+   N marked in gold. The rose carries the cardinals and rotates by -heading
+   under a fixed top needle. */
+
+/* ---- ROOT (the circular dial; size set inline) ---- */
+.ds-scope .ds-compass {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--ds-radius-pill);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+}
+
+/* ---- RING (static outer border + inset well) ---- */
+.ds-scope .ds-compass__ring {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-pill);
+  background:
+    radial-gradient(circle at 50% 38%, var(--ds-forest-700), var(--ds-forest-800));
+  box-shadow: var(--ds-elevation-1);
+}
+
+/* ---- ROSE (rotating layer, carries the cardinal letters) ----
+   The inline transform sets rotate(-heading); the transition animates heading
+   changes and is neutralized globally under prefers-reduced-motion. */
+.ds-scope .ds-compass__rose {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--ds-radius-pill);
+  transform-origin: center;
+  transition: transform var(--ds-transition);
+}
+
+/* ---- CARDINALS (letters pinned to the rose, spin with it) ---- */
+.ds-scope .ds-compass__cardinal {
+  position: absolute;
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-bold);
+  line-height: 1;
+  color: var(--ds-muted);
+}
+
+.ds-scope .ds-compass__cardinal--n {
+  top: var(--ds-space-2);
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--ds-gold-bright);
+  font-weight: var(--ds-weight-heavy);
+}
+
+.ds-scope .ds-compass__cardinal--e {
+  top: 50%;
+  right: var(--ds-space-2);
+  transform: translateY(-50%);
+}
+
+.ds-scope .ds-compass__cardinal--s {
+  bottom: var(--ds-space-2);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ds-scope .ds-compass__cardinal--w {
+  top: 50%;
+  left: var(--ds-space-2);
+  transform: translateY(-50%);
+}
+
+/* ---- NEEDLE (fixed top pointer, marks current facing) ---- */
+.ds-scope .ds-compass__needle {
+  position: absolute;
+  top: calc(-1 * var(--ds-space-1));
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-left: var(--ds-space-2) solid transparent;
+  border-right: var(--ds-space-2) solid transparent;
+  border-top: var(--ds-space-4) solid var(--ds-gold-bright);
+  transform: translateX(-50%);
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 45%));
+}
+
+/* ---- READOUT (centered; states the heading in text, not color-only) ---- */
+.ds-scope .ds-compass__readout {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: var(--ds-space-1) var(--ds-space-2);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-scrim-soft);
+  color: var(--ds-text);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-bold);
+  line-height: 1;
+  white-space: nowrap;
+  text-align: center;
+}

@@ -1,0 +1,102 @@
+/* src/design-system/Accordion.css
+   Collapsible sections for the Tellus HUD design system.
+   Gold-on-forest-green, full borders (no side-stripe), 8px radius.
+   Token-only; every selector is scoped under .ds-scope. */
+
+.ds-scope .ds-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+  font-family: var(--ds-font-sans);
+}
+
+/* ---- ITEM ---- */
+.ds-scope .ds-accordion__item {
+  background: var(--ds-bg);
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-md);
+  box-shadow: var(--ds-inset);
+  overflow: hidden;
+  transition: var(--ds-transition);
+  transition-property: border-color, background-color;
+}
+
+.ds-scope .ds-accordion__item--open {
+  border-color: var(--ds-border);
+  background: var(--ds-bg-soft);
+}
+
+/* ---- HEADER ---- */
+.ds-scope .ds-accordion__header {
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+/* ---- TRIGGER ---- */
+.ds-scope .ds-accordion__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-6);
+  width: 100%;
+  padding: var(--ds-space-6) var(--ds-space-8);
+  background: transparent;
+  border: none;
+  border-radius: var(--ds-radius-md);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-md);
+  font-weight: var(--ds-weight-medium);
+  line-height: var(--ds-leading-normal);
+  text-align: left;
+  cursor: pointer;
+  transition: var(--ds-transition);
+  transition-property: background-color, color;
+}
+
+.ds-scope .ds-accordion__trigger:hover {
+  color: var(--ds-gold-bright);
+}
+
+.ds-scope .ds-accordion__trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+.ds-scope .ds-accordion__item--open .ds-accordion__trigger {
+  color: var(--ds-gold);
+}
+
+/* ---- TITLE ---- */
+.ds-scope .ds-accordion__title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ---- CHEVRON ---- */
+.ds-scope .ds-accordion__chevron {
+  flex: none;
+  color: var(--ds-muted);
+  transition: var(--ds-transition);
+  transition-property: transform, color;
+}
+
+.ds-scope .ds-accordion__item--open .ds-accordion__chevron {
+  transform: rotate(180deg);
+  color: var(--ds-gold);
+}
+
+/* ---- PANEL ---- */
+.ds-scope .ds-accordion__panel {
+  padding: 0 var(--ds-space-8) var(--ds-space-6);
+  color: var(--ds-text);
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-normal);
+}
+
+.ds-scope .ds-accordion__panel[hidden] {
+  display: none;
+}

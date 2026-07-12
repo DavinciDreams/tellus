@@ -1,0 +1,85 @@
+/* src/design-system/Breadcrumb.css
+   Path trail for the Tellus HUD design system (World > Region > Portal).
+   Token-only; every selector is scoped under .ds-scope. */
+
+.ds-scope .ds-breadcrumb {
+  display: block;
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-tight);
+}
+
+/* ---- LIST ---- */
+.ds-scope .ds-breadcrumb__list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ---- ITEM ---- */
+.ds-scope .ds-breadcrumb__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+  min-width: 0;
+}
+
+/* ---- LINK (muted trail; button or plain span) ---- */
+.ds-scope .ds-breadcrumb__link {
+  display: inline-flex;
+  align-items: center;
+  max-width: 22ch;
+  padding: var(--ds-space-1) var(--ds-space-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-muted);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: var(--ds-weight-regular);
+  line-height: inherit;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: var(--ds-transition);
+  transition-property: background-color, color;
+}
+
+/* Only the interactive variant (button) gets the pointer + hover affordance. */
+.ds-scope button.ds-breadcrumb__link {
+  cursor: pointer;
+}
+
+.ds-scope button.ds-breadcrumb__link:hover {
+  color: var(--ds-gold);
+  background: var(--ds-bg-soft);
+}
+
+.ds-scope .ds-breadcrumb__link:focus-visible {
+  outline: none;
+  color: var(--ds-gold-bright);
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* ---- SEPARATOR ---- */
+.ds-scope .ds-breadcrumb__sep {
+  flex: none;
+  color: var(--ds-border-soft);
+}
+
+/* ---- CURRENT (gold, the leaf of the trail) ---- */
+.ds-scope .ds-breadcrumb__current {
+  display: inline-flex;
+  align-items: center;
+  max-width: 26ch;
+  padding: var(--ds-space-1) var(--ds-space-2);
+  color: var(--ds-gold);
+  font-weight: var(--ds-weight-medium);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}

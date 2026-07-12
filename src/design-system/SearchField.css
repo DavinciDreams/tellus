@@ -1,0 +1,127 @@
+/* SearchField — search input with leading icon, clear affordance, loading spinner.
+   House feel: gold-on-forest-green, full border, sentence-case.
+   Loading spinner reuses the GLOBAL ds-spin keyframe (components.css). */
+
+.ds-scope .ds-search {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--ds-control-h);
+  padding: 0 var(--ds-space-4);
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-input-bg);
+  box-shadow: var(--ds-inset);
+  font-family: var(--ds-font-sans);
+  color: var(--ds-text);
+  transition:
+    border-color var(--ds-transition),
+    box-shadow var(--ds-transition),
+    background var(--ds-transition);
+}
+
+.ds-scope .ds-search:not(.ds-search--disabled):hover {
+  background: var(--ds-input-bg-hover);
+}
+
+/* Visible focus ring on the WRAPPER when the input inside is focused */
+.ds-scope .ds-search:focus-within {
+  border-color: var(--ds-gold);
+  box-shadow: var(--ds-focus-ring);
+}
+
+.ds-scope .ds-search--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Leading search icon — muted, non-interactive */
+.ds-scope .ds-search__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--ds-muted);
+}
+
+/* The controlled text input — transparent, borderless, fills the row */
+.ds-scope .ds-search__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: var(--ds-space-2) 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-normal);
+  color: var(--ds-text);
+  outline: none;
+}
+
+.ds-scope .ds-search__input::placeholder {
+  color: var(--ds-input-placeholder);
+}
+
+.ds-scope .ds-search__input:disabled {
+  cursor: not-allowed;
+}
+
+/* Hide the native search decorations — we render our own clear affordance */
+.ds-scope .ds-search__input::-webkit-search-decoration,
+.ds-scope .ds-search__input::-webkit-search-cancel-button,
+.ds-scope .ds-search__input::-webkit-search-results-button,
+.ds-scope .ds-search__input::-webkit-search-results-decoration {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* Trailing clear button — becomes gold on hover/focus */
+.ds-scope .ds-search__clear {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ds-radius-pill);
+  background: transparent;
+  color: var(--ds-muted);
+  cursor: pointer;
+  transition:
+    color var(--ds-transition),
+    background var(--ds-transition);
+}
+
+.ds-scope .ds-search__clear:hover {
+  color: var(--ds-gold-bright);
+  background: var(--ds-input-bg-hover);
+}
+
+.ds-scope .ds-search__clear:focus-visible {
+  outline: none;
+  color: var(--ds-gold-bright);
+  box-shadow: var(--ds-focus-ring);
+}
+
+.ds-scope .ds-search__clear:disabled {
+  cursor: not-allowed;
+}
+
+/* Trailing loading spinner — global ds-spin keyframe, gold ring on faint track */
+.ds-scope .ds-search__spinner {
+  display: inline-block;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--ds-border-soft);
+  border-top-color: var(--ds-gold);
+  border-radius: var(--ds-radius-pill);
+  animation: ds-spin var(--ds-duration-slow) linear infinite;
+}

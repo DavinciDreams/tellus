@@ -30,6 +30,16 @@ import "./ChatThread.css";
 import "./Sheet.css";
 import "./Popover.css";
 import "./InlineAlert.css";
+import "./CommandPalette.css";
+import "./SearchField.css";
+import "./NumberStepper.css";
+import "./Accordion.css";
+import "./Breadcrumb.css";
+import "./ChipInput.css";
+import "./VoiceButton.css";
+import "./Compass.css";
+import "./MinimapFrame.css";
+import "./LogFeed.css";
 
 export { Button } from "./Button";
 export type { ButtonProps, ButtonVariant, ButtonSize } from "./Button";
@@ -150,3 +160,34 @@ export type { PopoverProps, PopoverAlign, PopoverPlacement } from "./Popover";
 
 export { InlineAlert } from "./InlineAlert";
 export type { InlineAlertProps, InlineAlertTone } from "./InlineAlert";
+
+/* ── Wave 4: command surface, remaining inputs & world instruments ── */
+export { CommandPalette } from "./CommandPalette";
+export type { CommandPaletteProps, CommandItem } from "./CommandPalette";
+
+export { SearchField } from "./SearchField";
+export type { SearchFieldProps } from "./SearchField";
+
+export { NumberStepper } from "./NumberStepper";
+export type { NumberStepperProps } from "./NumberStepper";
+
+export { Accordion } from "./Accordion";
+export type { AccordionProps, AccordionItem } from "./Accordion";
+
+export { Breadcrumb } from "./Breadcrumb";
+export type { BreadcrumbProps, BreadcrumbItem } from "./Breadcrumb";
+
+export { ChipInput } from "./ChipInput";
+export type { ChipInputProps } from "./ChipInput";
+
+export { VoiceButton } from "./VoiceButton";
+export type { VoiceButtonProps, VoiceButtonState } from "./VoiceButton";
+
+export { Compass } from "./Compass";
+export type { CompassProps } from "./Compass";
+
+export { MinimapFrame } from "./MinimapFrame";
+export type { MinimapFrameProps } from "./MinimapFrame";
+
+export { LogFeed } from "./LogFeed";
+export type { LogFeedProps, LogEntry, LogKind } from "./LogFeed";
