@@ -41,6 +41,8 @@ Tellus is intentionally friendly to small, focused contributions:
   `src/tellus-auth-ui.tsx`.
 - Navigation, camera, player movement, collision, and interaction feel:
   `src/main.tsx`, `src/tellus-rapier-physics.ts`, `src/tellus-terrain.ts`.
+  Current player controls are click/tap-to-move first, drag-to-look, with
+  WASD/arrows as keyboard support.
 - Rendering/performance tuning: `src/main.tsx`, `src/tellus-terrain.ts`,
   `src/tellus-scene-builders.ts`, `src/tellus-vegetation*.ts`.
 - Backend wire clients and Hyades URL handling:

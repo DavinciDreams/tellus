@@ -202,6 +202,7 @@ import {
   worldTemplateLabel,
 } from "./tellus-world-options";
 import { AssetTile, AvatarTile } from "./tellus-picker-tiles";
+import { FirstRunCoach } from "./onboarding/FirstRunCoach";
 import {
   animationMetadataHasBlockingIssue,
   inferAnimationIntentFromText,
@@ -18441,6 +18442,7 @@ function App(): React.ReactElement {
       </aside>
       )}
 
+      <FirstRunCoach />
     </main>
   );
 }

@@ -33,6 +33,7 @@ import {
   Toolbar,
 } from "./design-system";
 import type { BadgeTone, PresenceStatus } from "./design-system";
+import { FirstRunCoach } from "./onboarding/FirstRunCoach";
 import "./styleguide.css";
 
 /* ------------------------------------------------------------------ *
@@ -169,6 +170,7 @@ const NAV = [
   ["status", "Status"],
   ["toolbar", "Toolbar"],
   ["overlays", "Overlays"],
+  ["onboarding", "Onboarding"],
   ["principles", "Principles"],
 ] as const;
 
@@ -197,6 +199,7 @@ function StyleGuide() {
   const [tab, setTab] = useState("stated");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [coachOpen, setCoachOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState("create");
 
   const inkContrast = useMemo(
@@ -589,6 +592,24 @@ function StyleGuide() {
             onConfirm={() => setConfirmOpen(false)}
             onCancel={() => setConfirmOpen(false)}
           />
+        </Section>
+
+        {/* ---------------- ONBOARDING ---------------- */}
+        <Section
+          id="onboarding"
+          title="Onboarding"
+          note="First-run coach (P0 fix): teaches movement + points at Create. Shows once, gated on a localStorage flag."
+        >
+          <div className="sg-row">
+            <Button variant="primary" onClick={() => setCoachOpen(true)}>
+              Preview the first-run coach
+            </Button>
+            <span className="sg-section__note">
+              In the app it appears once on a new visitor&rsquo;s first world, dismissible with the
+              button or Esc.
+            </span>
+          </div>
+          {coachOpen ? <FirstRunCoach forceOpen onDismiss={() => setCoachOpen(false)} /> : null}
         </Section>
 
         {/* ---------------- PRINCIPLES ---------------- */}

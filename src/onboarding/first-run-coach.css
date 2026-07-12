@@ -1,0 +1,145 @@
+/* src/onboarding/first-run-coach.css
+   Styling for the first-run onboarding coach. All colors reference the design-system
+   --ds-* tokens (scoped under .ds-scope). The fade/rise entrance is neutralized by the
+   design system's prefers-reduced-motion block (it targets .ds-scope *). */
+
+.frc-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: end center;
+  padding: 0 var(--ds-space-6) clamp(24px, 8vh, 96px);
+  /* A whisper of scrim so the card reads, but the world stays visible behind it. */
+  background: linear-gradient(180deg, rgb(6 20 15 / 0%) 40%, rgb(6 20 15 / 34%) 100%);
+  pointer-events: none;
+}
+
+.frc-card {
+  pointer-events: auto;
+  width: min(440px, 100%);
+  animation: frc-rise var(--ds-duration-slow) var(--ds-ease-out) both;
+}
+
+@keyframes frc-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---- Header ---- */
+.frc-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-5);
+}
+.frc-monogram {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--ds-radius-pill);
+  border: 1.5px solid var(--ds-border);
+  background: var(--ds-bg-strong);
+  color: var(--ds-gold-bright);
+  font-family: var(--ds-font-serif);
+  font-size: 20px;
+  font-weight: 700;
+}
+.frc-title {
+  margin: 0;
+  font-family: var(--ds-font-serif);
+  font-size: var(--ds-text-xl);
+  font-weight: var(--ds-weight-heavy);
+  color: var(--ds-text);
+}
+.frc-subtitle {
+  margin: 3px 0 0;
+  font-size: var(--ds-text-sm);
+  color: var(--ds-muted);
+  line-height: var(--ds-leading-normal);
+}
+
+/* ---- Steps ---- */
+.frc-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--ds-space-5);
+}
+.frc-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-5);
+}
+.frc-step__icon {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--ds-radius-md);
+  border: 1px solid var(--ds-border-soft);
+  background: var(--ds-bg-soft);
+  color: var(--ds-text);
+}
+.frc-step__icon--gold {
+  color: #22331e;
+  background: linear-gradient(180deg, var(--ds-gold-bright), var(--ds-gold));
+  border-color: var(--ds-border);
+}
+.frc-step > div {
+  display: grid;
+  gap: 2px;
+}
+.frc-step__title {
+  font-size: var(--ds-text-md);
+  font-weight: var(--ds-weight-heavy);
+  color: var(--ds-text);
+}
+.frc-step__body {
+  font-size: var(--ds-text-sm);
+  color: var(--ds-muted);
+  line-height: var(--ds-leading-normal);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.frc-step__body b {
+  color: var(--ds-text);
+  font-weight: var(--ds-weight-bold);
+}
+
+/* Keycaps */
+.frc-key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--ds-radius-xs);
+  border: 1px solid var(--ds-border-soft);
+  border-bottom-width: 2px;
+  background: var(--ds-bg-strong);
+  color: var(--ds-text);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-bold);
+  line-height: 1;
+}
+
+/* ---- Actions ---- */
+.frc-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ds-space-4);
+  margin-top: var(--ds-space-2);
+}
