@@ -5752,31 +5752,21 @@ function createTellusWorld(
   const failedPromptRelinkAttempts = new Set<string>();
   const normalizedAssetName = (value: string): string =>
     value.trim().replace(/\s+/g, " ").toLowerCase();
-  const promptRelinkScore = (model: AssetLibraryModel, prompt: string): number => {
-    const normalizedPrompt = normalizedAssetName(prompt);
-    const haystack = normalizedAssetName([model.name, model.description, ...(model.tags ?? [])].join(" "));
-    if (normalizedAssetName(model.name) === normalizedPrompt) return 100;
-    if ((model.tags ?? []).some((tag) => normalizedAssetName(tag) === normalizedPrompt)) return 90;
-    if (haystack.includes(normalizedPrompt)) return 80;
-    const words = normalizedPrompt.split(" ").filter((word) => word.length > 2);
-    if (words.length && words.every((word) => haystack.includes(word))) return 70;
-    return 0;
-  };
   const reconcileFailedAssetStorePrompt = (thing: GeneratedThing) => {
     if (thing.modelUrl || thing.generationStatus !== "failed") return;
     const prompt = thing.prompt.trim();
     if (!prompt || failedPromptRelinkAttempts.has(thing.id)) return;
     failedPromptRelinkAttempts.add(thing.id);
-    void browseAssetLibrary(prompt, 1, "newest", 8)
+    void browseAssetLibrary(prompt, 1, "name", 8)
       .then((result) => {
         if (destroyed) return;
         const current = thingById(thing.id);
         if (!current || current.modelUrl || current.generationStatus !== "failed") return;
-        const match = result.models
-          .map((model) => ({ model, score: promptRelinkScore(model, prompt) }))
-          .filter((candidate) => candidate.score > 0)
-          .sort((a, b) => b.score - a.score)[0]?.model;
-        if (!match) return;
+        const exact = result.models.filter(
+          (model) => normalizedAssetName(model.name) === normalizedAssetName(prompt),
+        );
+        if (exact.length !== 1) return;
+        const match = exact[0];
         const assetStoreModelId = match.assetStoreModelId ?? match.id;
         current.assetStoreModelId = assetStoreModelId;
         current.modelUrl = assetStoreGameOptimizedModelUrl(assetStoreModelId);
