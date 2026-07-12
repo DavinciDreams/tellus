@@ -35,9 +35,10 @@ function safeDistUrl(pathname: string): URL {
 }
 
 async function serveStatic(pathname: string): Promise<Response> {
-  const fileUrl = safeDistUrl(pathname);
+  const routePathname = pathname === "/styleguide" ? "/styleguide.html" : pathname;
+  const fileUrl = safeDistUrl(routePathname);
   let file = Bun.file(fileUrl);
-  let servedPathname = pathname === "/" ? "/index.html" : pathname;
+  let servedPathname = routePathname === "/" ? "/index.html" : routePathname;
   if (!(await file.exists())) {
     file = Bun.file(new URL("index.html", distRoot));
     servedPathname = "/index.html";
