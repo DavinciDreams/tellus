@@ -49,3 +49,6 @@ export type {
   ToolbarOrientation,
   ToolbarAlign,
 } from "./Toolbar";
+
+export { useDialogs } from "./useDialogs";
+export type { UseDialogs, AskConfirmOptions, AskPromptOptions } from "./useDialogs";

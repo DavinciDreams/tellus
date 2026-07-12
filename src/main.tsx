@@ -203,6 +203,7 @@ import {
 } from "./tellus-world-options";
 import { AssetTile, AvatarTile } from "./tellus-picker-tiles";
 import { FirstRunCoach } from "./onboarding/FirstRunCoach";
+import { useDialogs } from "./design-system";
 import {
   animationMetadataHasBlockingIssue,
   inferAnimationIntentFromText,
@@ -11377,6 +11378,7 @@ function BuildingMaterialTile({
 // One avatar-picker grid tile: store thumbnail when it loads, else a colored-initial fallback
 // ("classic" has no store thumbnail and always renders the initial tile). Click = select.
 function App(): React.ReactElement {
+  const { askConfirm, askPrompt, dialogs } = useDialogs();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const worldRef = useRef<TellusWorldApi | null>(null);
   const pendingPortalTransfersRef = useRef<Record<string, PendingPortalTransfer>>({});
@@ -13118,11 +13120,17 @@ function App(): React.ReactElement {
     }
   };
 
-  const renameActiveWorld = () => {
+  const renameActiveWorld = async () => {
     const id = activeWorldId ?? runtimeConfig.worldId;
     if (!id) return;
     const currentName = worldDisplayName(id);
-    const next = window.prompt("World name:", currentName === id ? "" : currentName);
+    const next = await askPrompt({
+      title: "Rename world",
+      label: "World name",
+      defaultValue: currentName === id ? "" : currentName,
+      confirmLabel: "Save",
+      maxLength: 64,
+    });
     if (next === null) return;
     const displayName = next.trim().slice(0, 64);
     const requestedProfile = currentWorldMetadataProfile({ displayName: displayName || undefined });
@@ -13541,10 +13549,21 @@ function App(): React.ReactElement {
     // Second click: confirmed.
     disarmDeleteWorld();
     const label = worldDisplayName(id);
-    const confirmed = window.confirm(
+    const confirmed = await askConfirm(
       canAttemptServerDelete
-        ? `Permanently delete "${label}"?\n\nThis removes the saved world from the template/world picker and cannot be undone.`
-        : `Remove "${label}" from your local world picker?\n\nYou are not authorized to delete it from the server, but you can hide this local/test entry.`,
+        ? {
+            title: `Permanently delete "${label}"?`,
+            message:
+              "This removes the saved world from the template/world picker and cannot be undone.",
+            confirmLabel: "Delete world",
+            danger: true,
+          }
+        : {
+            title: `Remove "${label}" from your local picker?`,
+            message:
+              "You are not authorized to delete it from the server, but you can hide this local/test entry.",
+            confirmLabel: "Remove",
+          },
     );
     if (!confirmed) return;
     const moveAwayFromRemovedWorld = async () => {
@@ -14069,9 +14088,12 @@ function App(): React.ReactElement {
         return;
       }
       const preview = dead.slice(0, 6).map((d) => d.name.slice(0, 28)).join(", ");
-      const ok = window.confirm(
-        `Remove ${dead.length} broken object${dead.length === 1 ? "" : "s"}?\n${preview}${dead.length > 6 ? ", …" : ""}`,
-      );
+      const ok = await askConfirm({
+        title: `Remove ${dead.length} broken object${dead.length === 1 ? "" : "s"}?`,
+        message: `${preview}${dead.length > 6 ? ", …" : ""}`,
+        confirmLabel: "Remove",
+        danger: true,
+      });
       if (!ok) {
         setCleanupNote(null);
         return;
@@ -16813,8 +16835,13 @@ function App(): React.ReactElement {
                         type="button"
                         title="Delete portal"
                         aria-label={`Delete ${p.label || p.id}`}
-                        onClick={() => {
-                          const ok = window.confirm(`Delete portal ${p.label || worldDisplayName(p.target.worldId)}?`);
+                        onClick={async () => {
+                          const ok = await askConfirm({
+                            title: "Delete portal?",
+                            message: `Delete portal ${p.label || worldDisplayName(p.target.worldId)}?`,
+                            confirmLabel: "Delete",
+                            danger: true,
+                          });
                           if (ok) worldRef.current?.deletePortal(p.id);
                         }}
                       >
@@ -17019,10 +17046,13 @@ function App(): React.ReactElement {
                   type="button"
                   className="selected-name-action selected-name-delete"
                   title="Delete portal"
-                  onClick={() => {
-                    const ok = window.confirm(
-                      `Delete portal ${activeSelectedPortal.label || worldDisplayName(activeSelectedPortal.target.worldId)}?`,
-                    );
+                  onClick={async () => {
+                    const ok = await askConfirm({
+                      title: "Delete portal?",
+                      message: `Delete portal ${activeSelectedPortal.label || worldDisplayName(activeSelectedPortal.target.worldId)}?`,
+                      confirmLabel: "Delete",
+                      danger: true,
+                    });
                     if (ok) worldRef.current?.deletePortal(activeSelectedPortal.id);
                   }}
                 >
@@ -18218,6 +18248,7 @@ function App(): React.ReactElement {
       )}
 
       <FirstRunCoach />
+      {dialogs}
     </main>
   );
 }
