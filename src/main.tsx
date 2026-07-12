@@ -956,15 +956,47 @@ function createTellusWorld(
   );
   const isChunked = isChunkedWorldId(runtimeConfig.worldId);
   const isContinentalChunkedWorld = isChunked && usesContinentalChunkedTerrain();
+
+  // ── Entry loading screen + spawn grounding ────────────────────────────────────────────────────
+  // The first couple seconds after entering a world pay one-time costs: the spawn chunk builds, the
+  // procedural-plant template variants generate, and WebGL compiles/uploads their shaders. Chunked
+  // worlds also don't know the real ground height until the spawn chunk streams in, so the player
+  // would briefly hang in the air and drop. Cover the view with a loading overlay until the ground is
+  // known AND nearby chunks have had a moment to build, then snap the player down and fade it out.
+  // worldEntryGrounded starts true for non-chunked worlds (they spawn on analytic terrain already).
+  let worldEntryGrounded = !isChunked;
+  let worldEntryGroundedAt = worldEntryGrounded ? performance.now() : 0;
+  let worldReadyFired = false;
+  const loadingOverlay = document.createElement("div");
+  loadingOverlay.className = "tellus-entry-loading";
+  loadingOverlay.setAttribute("role", "status");
+  loadingOverlay.innerHTML =
+    '<div class="tellus-entry-loading__spinner"></div>' +
+    '<div class="tellus-entry-loading__label">Entering world…</div>';
+  container.appendChild(loadingOverlay);
+  let loadingOverlayRemoved = false;
+  const removeLoadingOverlay = () => {
+    if (loadingOverlayRemoved) return;
+    loadingOverlayRemoved = true;
+    // Single source of truth: the moment the overlay goes (including via the safety timer), the scene
+    // MUST start rendering again — the render loop skips drawing while the overlay is up.
+    worldReadyFired = true;
+    loadingOverlay.classList.add("tellus-entry-loading--hidden");
+    // Remove after the CSS fade so it doesn't linger in the DOM.
+    window.setTimeout(() => loadingOverlay.remove(), 700);
+    window.dispatchEvent(new CustomEvent("tellus:world-ready"));
+  };
+  // Safety net: never let the overlay stick, even if the ready signal is somehow missed.
+  const loadingOverlaySafetyTimer = window.setTimeout(removeLoadingOverlay, 9000);
   const prefersOriginalTellusIslandRenderer =
     activeWorldTemplate === "tellus" && !isContinentalChunkedWorld;
-  // The classic Tellus island's ocean/fog look was tuned on WebGPU backdrop water before the
-  // terrain texture experiments made WebGL the safer default for larger continental worlds.
-  const useWebGPU =
-    rendererPreference === "webgpu" ||
-    (rendererPreference !== "webgl" && prefersOriginalTellusIslandRenderer)
-      ? "gpu" in navigator
-      : false;
+  // WebGL is now the HARD DEFAULT. three.js's WebGPU backend is currently both slower for this app's
+  // workload (many non-instanced meshes + custom terrain material) AND actively broken here (framebuffer
+  // format + multisample/bindgroup errors on the agent-viewport / portal copies), so we only use WebGPU
+  // when a developer EXPLICITLY opts in via localStorage `tellus.renderer = "webgpu"`. The classic Tellus
+  // island's WebGPU-tuned water/fog now falls back to the WebGL look — strictly better than a broken
+  // WebGPU render. Revisit the auto-selection once the WebGPU path is fixed and the backend matures.
+  const useWebGPU = rendererPreference === "webgpu" && "gpu" in navigator;
   // Visual terrain density (decoupled from the synced 97² sculpt grid). FIXED vertex budget no
   // matter the world scale — bigger worlds stretch the same ~50K-vertex mesh instead of multiplying
   // it (operator: range over thickness; worlds get larger for less).
@@ -1153,6 +1185,16 @@ function createTellusWorld(
       return 1;
     }
   };
+  // How often (in frames) the shadow map regenerates. Default 3 → ~66% fewer shadow passes than the
+  // old every-frame behaviour. Override via localStorage `tellus.shadowEvery` (1 = every frame).
+  const shadowEveryDebug = (): number => {
+    try {
+      const value = Number(window.localStorage.getItem("tellus.shadowEvery"));
+      return Number.isFinite(value) ? Math.max(1, Math.min(10, Math.round(value))) : 3;
+    } catch {
+      return 3;
+    }
+  };
   const frameDriverDebug = (): "raf" | "timeout" => {
     try {
       return window.localStorage.getItem("tellus.frameDriver") === "timeout" ? "timeout" : "raf";
@@ -1175,6 +1217,9 @@ function createTellusWorld(
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatioCap));
     renderer.shadowMap.enabled = !lowGpuDebug();
+    // Force a shadow refresh next frame whenever this runs (e.g. toggling low-GPU mode back on).
+    // The per-frame interval throttle lives in the animate loop via sun.shadow.needsUpdate.
+    sun.shadow.needsUpdate = true;
   };
   const sampleVegetationHeight = isChunked
     ? (x: number, z: number) => chunkRenderer?.sampleHeight(x, z) ?? largeWorldBaseHeight(x, z)
@@ -2575,19 +2620,63 @@ function createTellusWorld(
   const sun = new THREE.DirectionalLight(0xffdfb7, 4.1);
   sun.position.set(-55, 58, 42);
   sun.castShadow = true;
+  // Manual shadow-map refresh: the day/night cycle nudges the sun every frame, which would otherwise
+  // force a full shadow re-render every frame on both backends (WebGL WebGLShadowMap + WebGPU
+  // ShadowNode both honour LightShadow.autoUpdate/needsUpdate per-light). The animate loop instead
+  // flags needsUpdate every `shadowEveryDebug()` frames — big GPU saving, no visible motion lag.
+  sun.shadow.autoUpdate = false;
+  sun.shadow.needsUpdate = true;
   const moon = new THREE.DirectionalLight(0x9fb7ff, 0.55);
   moon.position.set(55, 42, -42);
-  moon.castShadow = true;
-  moon.shadow.mapSize.set(1024, 1024);
+  // Moon does NOT cast shadows: a second full shadow pass every frame for a 0.55-intensity fill light
+  // was pure GPU cost with almost no visible shadow contribution. The sun shadow carries the scene.
+  moon.castShadow = false;
   const hemisphere = new THREE.HemisphereLight(0xb6ccff, 0x3d5332, 2.25);
   scene.add(sun, moon, hemisphere);
 
   const visitor = createVisitorMesh(useWebGPU);
   // Chunked worlds place origin at a CORNER, so spawn at the world centre (from the manifest bounds)
   // to land in the middle of the tiled plane; non-chunked special worlds use the compatibility spawn.
+  // The raw centre can land on a tiny hill surrounded by sea — search outward from it for solid, roomy
+  // land first. Uses analytic large-world height (deterministic, available before any chunk streams in).
+  const spawnGroundHeight = (x: number, z: number): number => {
+    const h = largeWorldBaseHeight(x, z);
+    return Number.isFinite(h) ? h : SEA_LEVEL - 10;
+  };
+  const isSpawnableLand = (x: number, z: number): boolean => {
+    const h = spawnGroundHeight(x, z);
+    return h > SEA_LEVEL + 1.2 && largeWorldTerrainKind(x, z, h) !== "water";
+  };
+  // Roomy = the point AND its neighbours a chunk away are all land, so we don't spawn on a one-tile islet.
+  const isRoomySpawnLand = (x: number, z: number): boolean =>
+    isSpawnableLand(x, z) &&
+    isSpawnableLand(x + CHUNK_SPAN, z) &&
+    isSpawnableLand(x - CHUNK_SPAN, z) &&
+    isSpawnableLand(x, z + CHUNK_SPAN) &&
+    isSpawnableLand(x, z - CHUNK_SPAN);
+  const findSpawnLand = (cx: number, cz: number): { x: number; z: number } => {
+    if (isRoomySpawnLand(cx, cz)) return { x: cx, z: cz };
+    // Two passes over expanding rings: prefer roomy land, then accept any solid land.
+    for (const wantRoomy of [true, false]) {
+      for (let ring = 1; ring <= 24; ring++) {
+        const radius = ring * CHUNK_SPAN;
+        const samples = Math.max(8, ring * 6);
+        for (let s = 0; s < samples; s++) {
+          const angle = (s / samples) * Math.PI * 2;
+          const x = cx + Math.cos(angle) * radius;
+          const z = cz + Math.sin(angle) * radius;
+          if (wantRoomy ? isRoomySpawnLand(x, z) : isSpawnableLand(x, z)) return { x, z };
+        }
+      }
+    }
+    return { x: cx, z: cz }; // all-water fallback: keep the centre
+  };
   const chunkedCenter = chunkedWorldCenter();
   let visitorPosition = chunkedCenter
-    ? groundedPosition(chunkedCenter.x, chunkedCenter.z)
+    ? (() => {
+        const spawn = isChunked ? findSpawnLand(chunkedCenter.x, chunkedCenter.z) : chunkedCenter;
+        return groundedPosition(spawn.x, spawn.z);
+      })()
     : normalizedDiscPosition(-20, 20);
   scene.add(visitor);
   // ── Avatar selection (the toolbelt picker) ────────────────────────────────
@@ -3034,7 +3123,8 @@ function createTellusWorld(
     });
   };
 
-  let yaw = 0.72;
+  let yaw = 0.72; // CAMERA orbit direction — changed only by right-drag look (and WASD's frame of reference)
+  let avatarFacing = 0.72; // CHARACTER visual facing — turns toward actual movement, independent of camera
   let pitch = -0.28;
   let zoom = 33;
   // ── Camera mode: presentation-only (physics/movement untouched). "first" parks the main camera
@@ -3163,6 +3253,13 @@ function createTellusWorld(
   };
   applyCameraModeVisibility(); // honor a persisted "first" from the very first frame
   let isDragging = false;
+  // Control scheme: click-to-move primary + right-drag to look (chosen by the operator).
+  //  • orbitEligible  = this press may turn the camera (RIGHT mouse button, or any touch — mobile has
+  //    no right button). Plain LEFT-drag is intentionally inert (reserved for future box-select).
+  //  • tapEligible    = a short press may walk-to/select (LEFT button, or touch). Right-clicks never
+  //    walk or select; they only look.
+  let orbitEligible = false;
+  let tapEligible = false;
   let pointerX = 0;
   let pointerY = 0;
   let pointerTravel = 0;
@@ -8272,10 +8369,16 @@ function createTellusWorld(
     }
   }, 12_000);
 
+  // Reused scratch vectors for moveVisitor — hoisted out of the per-frame body so a moving player
+  // doesn't allocate 3-4 Vector3s every frame (was a steady GC pressure source in the movement phase).
+  const _mvForward = new THREE.Vector3();
+  const _mvRight = new THREE.Vector3();
+  const _mvMovement = new THREE.Vector3();
+  const _mvDirection = new THREE.Vector3();
   const moveVisitor = (delta: number) => {
-    const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-    const movement = new THREE.Vector3();
+    const forward = _mvForward.set(Math.sin(yaw), 0, Math.cos(yaw));
+    const right = _mvRight.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    const movement = _mvMovement.set(0, 0, 0);
     const hasKeyboardMove =
       keys.has("w") ||
       keys.has("arrowup") ||
@@ -8300,7 +8403,8 @@ function createTellusWorld(
       } else {
         movement.set(dx / distance, 0, dz / distance);
         pointWalkStep = distance;
-        yaw = Math.atan2(movement.x, movement.z);
+        // NOTE: do NOT touch `yaw` here — that would rotate the CAMERA toward the walk direction.
+        // The character's facing is updated from the movement vector below (avatarFacing).
       }
     }
     const hasInput = movement.lengthSq() > 0;
@@ -8336,7 +8440,11 @@ function createTellusWorld(
     const speedMultiplier = runSpeedMultiplier(nowMs);
     const chunkSpeedScale = chunkMovementSpeedScale();
     if (hasInput) {
-      const movementDirection = movement.clone().normalize();
+      const movementDirection = _mvDirection.copy(movement).normalize();
+      // Character turns to face its ACTUAL movement direction (click-to-move or WASD) — the camera
+      // (yaw) is left alone so walking never yanks the view around. This is what makes click-to-move
+      // feel right instead of snapping the camera behind the character.
+      avatarFacing = Math.atan2(movementDirection.x, movementDirection.z);
       const speed = scaledPlayerSpeed() *
         speedMultiplier *
         (sailingThingId ? MOUNT_SPEED_MULT : 1) *
@@ -8595,7 +8703,7 @@ function createTellusWorld(
       visitorPosition.y,
       visitorPosition.z,
     );
-    visitor.rotation.y = yaw;
+    visitor.rotation.y = avatarFacing;
     sendPresenceUpdate();
 
     for (const thing of generated) {
@@ -8907,6 +9015,16 @@ function createTellusWorld(
     }
   };
 
+  // Reused scratch vectors for updateCamera's third-person path (runs every frame). Avoids 3 Vector3
+  // allocations per frame.
+  const _camTarget = new THREE.Vector3();
+  const _camLookTarget = new THREE.Vector3();
+  const _camOffset = new THREE.Vector3();
+  // Spring-arm camera collision scratch: pull the third-person camera in front of solid objects so they
+  // never block the view of the character.
+  const _camCollideDir = new THREE.Vector3();
+  const _camRaycaster = new THREE.Raycaster();
+  const _camCollisionTargets: THREE.Object3D[] = [];
   const updateCamera = () => {
     if (cameraMode === "first") {
       // First person: eye at the local avatar's head (the same POV math the agent viewport uses,
@@ -8935,15 +9053,15 @@ function createTellusWorld(
         : pilotedMode === "air"
           ? visitorPosition.y + 1.8
           : visitorPosition.y + 2.7;
-    const target = new THREE.Vector3(
+    const target = _camTarget.set(
       visitorPosition.x,
       targetY,
       visitorPosition.z,
     );
     const skyLookAmount = Math.max(0, pitch + 0.08);
     const cameraPitch = Math.min(pitch, -0.08);
-    const lookTarget = target.clone();
-    const offset = new THREE.Vector3(
+    const lookTarget = _camLookTarget.copy(target);
+    const offset = _camOffset.set(
       Math.sin(yaw) * Math.cos(cameraPitch) * -zoom,
       Math.sin(-cameraPitch) * zoom + 2.2,
       Math.cos(yaw) * Math.cos(cameraPitch) * -zoom,
@@ -8951,7 +9069,34 @@ function createTellusWorld(
     if (skyLookAmount > 0) {
       lookTarget.y += skyLookAmount * zoom * 2.6;
     }
-    camera.position.copy(target).add(offset);
+    // Spring-arm collision: cast one short ray from the character out to where the camera wants to sit.
+    // If a placed object (building/prop) is in the way, pull the camera IN FRONT of it so the character
+    // stays visible. Grass/trees (instanced) are intentionally NOT collided with — the camera would
+    // jitter through foliage. The player's own mount is skipped too.
+    const desiredDist = offset.length();
+    let camDist = desiredDist;
+    if (desiredDist > 0.001) {
+      const camDir = _camCollideDir.copy(offset).multiplyScalar(1 / desiredDist);
+      _camCollisionTargets.length = 0;
+      for (const [id, mesh] of generatedMeshes) {
+        if (id === sailingThingId) continue; // don't collide with the thing you're riding
+        _camCollisionTargets.push(mesh);
+      }
+      _camRaycaster.set(target, camDir);
+      _camRaycaster.far = desiredDist;
+      const camHit = _camRaycaster.intersectObjects(_camCollisionTargets, true)[0];
+      if (camHit) {
+        // 0.45 keeps the lens just off the surface; never closer than 3 units so we don't clip into
+        // the character.
+        camDist = Math.max(3, Math.min(desiredDist, camHit.distance - 0.45));
+      }
+    }
+    camera.position.copy(target).addScaledVector(offset, camDist / (desiredDist || 1));
+    // Terrain floor: never let the camera sink below the ground beneath it (analytic, cheap).
+    const camGroundY = groundHeightAt(camera.position.x, camera.position.z);
+    if (camGroundY !== null && camera.position.y < camGroundY + 1.1) {
+      camera.position.y = camGroundY + 1.1;
+    }
     camera.lookAt(lookTarget);
     syncExternalSkyboxToCamera(camera.position);
   };
@@ -9364,6 +9509,57 @@ function createTellusWorld(
       perfDiagnostics.phases.maxChunkTerrainMs,
       perfDiagnostics.phases.chunkTerrainMs,
     );
+    // Entry grounding + loading-screen reveal (runs only until the world is revealed).
+    if (!worldReadyFired) {
+      // Pin the player to the best-known ground EVERY frame while the world builds. This uses the
+      // analytic ground height (available as soon as the chunk height provider is wired, independent of
+      // whether the chunk mesh has been built), so the player can never spawn floating and never
+      // accumulates a fall as chunks stream in. The overlay hides all of this from view.
+      visitorPosition = groundedPositionForCurrentSurface(
+        visitorPosition.x,
+        visitorPosition.z,
+        visitorPosition,
+      );
+      playerVy = 0;
+      playerAirborne = false;
+      // Ground is "built" once the actual spawn chunk mesh resolves (non-chunked worlds are always
+      // ready). Start the settle clock from that point.
+      const groundBuilt =
+        !isChunked ||
+        (chunkRenderer?.sampleHeight(visitorPosition.x, visitorPosition.z) ?? null) !== null;
+      if (groundBuilt && !worldEntryGrounded) {
+        worldEntryGrounded = true;
+        worldEntryGroundedAt = performance.now();
+      }
+      // Reveal once the nearby TERRAIN chunks have drained (nothing pending/queued/inflight) AND the
+      // procedural plants around the spawn have finished their first build pass (queue empty, at least
+      // one chunk built) — plus a short settle — or after a 3.5s cap so a slow far-ring never blocks
+      // entry. Gating on the plant queue is what stops the "things still spawning in" after reveal.
+      const chunkStats = chunkRenderer?.stats();
+      const terrainDrained =
+        !isChunked ||
+        (chunkStats
+          ? chunkStats.active > 0 &&
+            chunkStats.pending + chunkStats.queued + chunkStats.inflight === 0
+          : true);
+      const plantStats = procplants.stats();
+      const plantsSettled =
+        !procplantsEnabled ||
+        (plantStats.chunksBuilt > 0 && plantStats.queuedRebuilds === 0);
+      // Wait for the chosen VRM avatar to finish mounting so the default robot isn't seen first.
+      // "" (deterministic robot) and "classic" stay procedural by design — nothing to wait for there.
+      const localAvatarPending =
+        localAvatarId !== "" && localAvatarId !== "classic" && !avatarRigs.has(visitorId);
+      const nearbyStreamingDrained = terrainDrained && plantsSettled && !localAvatarPending;
+      const settledMs = worldEntryGroundedAt > 0 ? performance.now() - worldEntryGroundedAt : 0;
+      if (
+        worldEntryGrounded &&
+        ((nearbyStreamingDrained && settledMs > 600) || settledMs > 4500)
+      ) {
+        window.clearTimeout(loadingOverlaySafetyTimer);
+        removeLoadingOverlay(); // sets worldReadyFired
+      }
+    }
     if (sailingThingId) {
       const mounted = thingById(sailingThingId);
       if (mounted && !isFreeMovingVehicle(mounted)) {
@@ -9434,7 +9630,16 @@ function createTellusWorld(
       phaseStartedAt = performance.now();
       const renderEvery = renderEveryDebug();
       const shouldRenderThisFrame = renderEvery <= 1 || perfDiagnostics.frames % renderEvery === 0;
+      // Render every frame, including while the entry overlay is up: this lets WebGL compile each new
+      // material's shader incrementally as chunks/plants stream in (small per-frame costs, hidden behind
+      // the overlay), instead of deferring them into one catastrophic multi-second first-frame compile.
       if (shouldRenderThisFrame) {
+        // Manual shadow-map refresh on an interval (sun.shadow.autoUpdate is off — see sun setup).
+        // Flag needsUpdate BEFORE render so this frame regenerates the shadow map; three clears the
+        // flag itself after the pass. Skipped when shadows are globally disabled (low-GPU mode).
+        if (renderer.shadowMap.enabled && perfDiagnostics.frames % shadowEveryDebug() === 0) {
+          sun.shadow.needsUpdate = true;
+        }
         renderPortalPreview();
         renderer.render(scene, camera);
       }
@@ -9709,6 +9914,12 @@ function createTellusWorld(
         return; // grabbing an object — not a camera orbit
       }
     }
+    // Classify the press for the click-to-move + right-drag-look scheme. Touch has no right button, so
+    // a touch press is BOTH orbit-eligible (one-finger drag looks) and tap-eligible (tap walks/selects).
+    const isTouch = event.pointerType === "touch";
+    orbitEligible = isTouch || event.button === 2;
+    tapEligible = isTouch || event.button === 0;
+    if (!orbitEligible && !tapEligible) return; // e.g. middle mouse — ignore
     isDragging = true;
     pointerTravel = 0;
     pointerX = event.clientX;
@@ -9743,6 +9954,9 @@ function createTellusWorld(
     pointerTravel += Math.hypot(dx, dy);
     pointerX = event.clientX;
     pointerY = event.clientY;
+    // Only orbit-eligible presses (right mouse / touch) turn the camera. A plain left-drag accumulates
+    // travel (so it won't be mistaken for a tap-walk) but does NOT move the camera.
+    if (!orbitEligible) return;
     yaw -= dx * 0.006;
     pitch = clamp(pitch - dy * 0.003, -1.05, 1.05);
   };
@@ -10013,7 +10227,9 @@ function createTellusWorld(
       isDragging = false;
       return;
     }
-    if (isDragging && pointerTravel < 6) {
+    // A short press that's tap-eligible (left button / touch) selects an object or walks to the ground.
+    // Right-button releases fall through (they only look), so they never walk or change selection.
+    if (isDragging && tapEligible && pointerTravel < 6) {
       const pickedThingId = pickThingIdAtPointer(event);
       selectGenerated(pickedThingId ?? undefined);
       if (
@@ -10051,6 +10267,12 @@ function createTellusWorld(
   window.addEventListener("pointercancel", handlePointerCancel);
   window.addEventListener("blur", handlePointerCancel);
   container.addEventListener("wheel", handleWheel, { passive: true });
+  // Right-drag turns the camera, so suppress the browser context menu over the world canvas.
+  const handleContextMenu = (event: MouseEvent) => {
+    if (isPointerFromUi(event.target)) return; // let real UI (inputs, panels) keep their menu
+    event.preventDefault();
+  };
+  container.addEventListener("contextmenu", handleContextMenu);
 
   const init = async () => {
     try {
@@ -11076,6 +11298,8 @@ function createTellusWorld(
     }),
     destroy: () => {
       destroyed = true;
+      window.clearTimeout(loadingOverlaySafetyTimer);
+      loadingOverlay.remove();
       window.clearInterval(textureRetryTimer);
       if (worldChatPollTimer !== undefined) {
         window.clearInterval(worldChatPollTimer);
@@ -11137,6 +11361,7 @@ function createTellusWorld(
       window.removeEventListener("pointercancel", handlePointerCancel);
       window.removeEventListener("blur", handlePointerCancel);
       container.removeEventListener("wheel", handleWheel);
+      container.removeEventListener("contextmenu", handleContextMenu);
       worldSocketClosedByDestroy = true;
       if (worldSocketReconnectTimer !== undefined) {
         window.clearTimeout(worldSocketReconnectTimer);
