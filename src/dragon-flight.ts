@@ -19,6 +19,7 @@ import {
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { tellusAssetLibraryUrl } from "./tellus-urls-identity";
+import { loadRuntimeConfig } from "./tellus-runtime-config";
 
 declare global {
   interface Window {
@@ -100,6 +101,11 @@ if (!root) throw new Error("Missing #dragon-flight-root");
 window.CESIUM_BASE_URL = "/cesium";
 const token = import.meta.env.VITE_CESIUM_ION_TOKEN as string | undefined;
 if (token) Ion.defaultAccessToken = token;
+
+// Dragon Flight is a standalone entry point, so it must bootstrap the same runtime config as the
+// React app before resolving Hyades-backed creature URLs. Without this, production falls back to
+// `/api/assets/*` on the Tellus origin even though /tellus-config.json names the Hyades API base.
+await loadRuntimeConfig();
 
 const CHACO_TERRAIN_FALLBACK_M = 1900;
 const MOSSMAN_TERRAIN_FALLBACK_M = 24;
