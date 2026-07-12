@@ -90,7 +90,8 @@ Bun.serve({
     // iff listed here (content-type MUST be application/json). Keep in sync with the hyades silo's
     // Tellus__WebAuthnOrigins (the server-side origin allow-list).
     if (url.pathname === "/.well-known/webauthn") {
-      const origins = (process.env.TELLUS_WEBAUTHN_ORIGINS ?? "https://tellus.gnostr.cloud,https://tellus.garden")
+      const origins = (process.env.TELLUS_WEBAUTHN_ORIGINS ??
+        "https://tellus.gnostr.cloud,https://tellus.garden,http://localhost:3344,http://127.0.0.1:3344,http://localhost:4344,http://127.0.0.1:4344")
         .split(",").map((o) => o.trim()).filter(Boolean);
       return withCors(Response.json({ origins }));
     }

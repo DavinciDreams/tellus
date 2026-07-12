@@ -18,6 +18,64 @@ bun run dev
 
 Open <http://localhost:3344/>.
 
+For quick validation before a PR:
+
+```bash
+bun run typecheck
+bun run test
+bun run build
+```
+
+The Vite dev server talks to the live Hyades backend by default through
+`public/tellus-config.json`. You can explore worlds locally without logging in,
+but passkey sign-in is origin-sensitive: production passkeys are bound to the
+Tellus relying-party domain. If a local dev URL reports that the RP ID does not
+match the current origin, test auth on the deployed Tellus URL or update the
+Hyades/Tellus WebAuthn origin allow-lists together.
+
+## Contributor map
+
+Tellus is intentionally friendly to small, focused contributions:
+
+- UI, HUD, account panel, world drawers: `src/main.tsx`, `src/styles.css`,
+  `src/tellus-auth-ui.tsx`.
+- Navigation, camera, player movement, collision, and interaction feel:
+  `src/main.tsx`, `src/tellus-rapier-physics.ts`, `src/tellus-terrain.ts`.
+- Rendering/performance tuning: `src/main.tsx`, `src/tellus-terrain.ts`,
+  `src/tellus-scene-builders.ts`, `src/tellus-vegetation*.ts`.
+- Backend wire clients and Hyades URL handling:
+  `src/tellus-world-client.ts`, `src/tellus-auth.ts`,
+  `src/tellus-runtime-config.ts`, `src/tellus-urls-identity.ts`.
+- Public MCP skill doc for LLMs and automation:
+  `public/tellus-mcp-skill.md`.
+
+Good starter areas right now are UI polish, camera/navigation feel, lag
+reduction, and clearer MCP/client setup docs. Keep changes scoped and include a
+short note about what you manually tested. See `CONTRIBUTING.md` for the short
+outside-contributor checklist. Coding agents should start with `AGENTS.md`;
+tool-specific entry points such as `CLAUDE.md`, `GEMINI.md`, Copilot
+instructions, and Cursor rules point back to that canonical guide.
+
+## Programmatic play (MCP)
+
+The MCP docs are public so contributors can inspect the automation surface
+without needing a premium account:
+
+<https://tellus.gnostr.cloud/tellus-mcp-skill.md>
+
+LLM-oriented discovery is also available at `/llms.txt`.
+
+The live endpoint is:
+
+```text
+POST https://hyades.gnostr.cloud/api/tellus/mcp/{worldId}
+```
+
+Opening that endpoint in a browser with `GET` returns `405 Method Not Allowed`;
+that is expected. MCP clients must use JSON-RPC over HTTP `POST`. Premium is
+required only for minting a personal bearer token and using the protected MCP
+endpoint.
+
 ## World backend (Hyades)
 
 The authoritative shared world now lives in **Hyades** (Orleans virtual-actor
@@ -36,7 +94,7 @@ or the matching `VITE_*` build vars:
 ```json
 {
   "worldApiBase": "https://hyades.gnostr.cloud",
-  "worldId": "main",
+  "worldId": "chunked-64-genesis",
   "apiBase": ""
 }
 ```
@@ -50,7 +108,6 @@ Everything heavy routes through Hyades now: **3D generation** (`/3d/jobs` →
 concept image → image-to-3D → asset store), **LLM** chat and **vision**
 (`/v1/chat/completions`), and the **asset library** (`/api/assets/*`, proxied
 server-side to the 3D Asset Manager store). Deploy assets live under `deploy/`.
-
 
 ## Coolify
 
@@ -275,7 +332,7 @@ committed config:
 {
   "assetForgeApiBase": "https://your-asset-forge.example.com",
   "worldApiBase": "https://hyades.gnostr.cloud",
-  "worldId": "main",
+  "worldId": "your-world-id",
   "skyboxUrl": "https://cdn.example.com/tellus/sky.glb",
   "worldTemplate": "tellus",
   "enabledAgents": ["johnny"],
