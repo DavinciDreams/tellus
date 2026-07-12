@@ -31,6 +31,7 @@ import {
   PresenceDot,
   Tabs,
   Toolbar,
+  useDialogs,
 } from "./design-system";
 import type { BadgeTone, PresenceStatus } from "./design-system";
 import { FirstRunCoach } from "./onboarding/FirstRunCoach";
@@ -201,6 +202,8 @@ function StyleGuide() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState("create");
+  const [dialogResult, setDialogResult] = useState<string>("");
+  const { askConfirm, askPrompt, dialogs } = useDialogs();
 
   const inkContrast = useMemo(
     () => INK.map((c) => ({ ...c, ratio: contrast(c.value, "rgb(17 47 38 / 84%)") })),
@@ -592,6 +595,46 @@ function StyleGuide() {
             onConfirm={() => setConfirmOpen(false)}
             onCancel={() => setConfirmOpen(false)}
           />
+
+          <Panel level="panel" title="Promise-based dialogs (useDialogs)" style={{ marginTop: 20 }}>
+            <p className="sg-section__note">
+              <code className="sg-mono">await askConfirm()</code> /{" "}
+              <code className="sg-mono">askPrompt()</code> replace native{" "}
+              <code className="sg-mono">window.confirm</code> /{" "}
+              <code className="sg-mono">window.prompt</code> with styled in-HUD dialogs.
+            </p>
+            <div className="sg-row">
+              <Button
+                variant="danger"
+                onClick={async () => {
+                  const ok = await askConfirm({
+                    title: "Delete portal?",
+                    message: "Delete portal Starfall Gate?",
+                    confirmLabel: "Delete",
+                    danger: true,
+                  });
+                  setDialogResult(`askConfirm → ${ok}`);
+                }}
+              >
+                askConfirm
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={async () => {
+                  const name = await askPrompt({
+                    title: "Rename world",
+                    label: "World name",
+                    defaultValue: "Stars at Night",
+                    maxLength: 64,
+                  });
+                  setDialogResult(name === null ? "askPrompt → cancelled" : `askPrompt → ${name}`);
+                }}
+              >
+                askPrompt
+              </Button>
+              {dialogResult ? <Badge tone="gold">{dialogResult}</Badge> : null}
+            </div>
+          </Panel>
         </Section>
 
         {/* ---------------- ONBOARDING ---------------- */}
@@ -639,6 +682,7 @@ function StyleGuide() {
           Tellus Design System · src/design-system · rendered live at /styleguide
         </footer>
       </div>
+      {dialogs}
     </div>
   );
 }
