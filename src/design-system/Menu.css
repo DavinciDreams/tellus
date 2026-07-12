@@ -1,0 +1,147 @@
+/* src/design-system/Menu.css
+   Dark popover menu for the Tellus HUD design system.
+   Token-only; every selector is scoped under .ds-scope. */
+
+.ds-scope .ds-menu {
+  position: relative;
+  display: inline-block;
+}
+
+/* ---- TRIGGER ---- */
+.ds-scope .ds-menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-height: var(--ds-control-h-sm);
+  padding: var(--ds-space-2) var(--ds-space-4);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-md);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-md);
+  font-weight: var(--ds-weight-regular);
+  line-height: var(--ds-leading-tight);
+  cursor: pointer;
+  transition: var(--ds-transition);
+  transition-property: background-color, border-color, color;
+}
+
+.ds-scope .ds-menu__trigger:hover {
+  background: var(--ds-bg-soft);
+}
+
+.ds-scope .ds-menu__trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+.ds-scope .ds-menu--open .ds-menu__trigger {
+  background: var(--ds-bg-soft);
+  border-color: var(--ds-border-soft);
+}
+
+/* ---- LIST (popover) ---- */
+.ds-scope .ds-menu__list {
+  position: absolute;
+  top: calc(100% + var(--ds-space-2));
+  z-index: var(--z-overlay);
+  min-width: 180px;
+  margin: 0;
+  padding: var(--ds-space-2);
+  list-style: none;
+  background: var(--ds-bg-strong);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-elevation-3);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-tight);
+  animation: ds-rise var(--ds-duration-fast) var(--ds-ease-out);
+}
+
+.ds-scope .ds-menu__list--start {
+  left: 0;
+}
+
+.ds-scope .ds-menu__list--end {
+  right: 0;
+}
+
+/* ---- ITEM ---- */
+.ds-scope .ds-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  min-height: var(--ds-control-h-sm);
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-text);
+  font-weight: var(--ds-weight-regular);
+  cursor: pointer;
+  user-select: none;
+  transition: var(--ds-transition);
+  transition-property: background-color, color;
+}
+
+.ds-scope .ds-menu__item:hover {
+  background: var(--ds-bg-soft);
+}
+
+.ds-scope .ds-menu__item:focus-visible {
+  outline: none;
+  background: var(--ds-bg-soft);
+  box-shadow: var(--ds-focus-ring);
+}
+
+.ds-scope .ds-menu__item-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--ds-space-8);
+  height: var(--ds-space-8);
+  color: var(--ds-muted);
+}
+
+.ds-scope .ds-menu__item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ---- DANGER ITEM ---- */
+.ds-scope .ds-menu__item--danger {
+  color: var(--ds-danger-text);
+}
+
+.ds-scope .ds-menu__item--danger .ds-menu__item-icon {
+  color: var(--ds-danger-text);
+}
+
+.ds-scope .ds-menu__item--danger:hover,
+.ds-scope .ds-menu__item--danger:focus-visible {
+  background: var(--ds-danger-bg);
+}
+
+/* ---- DISABLED ITEM ---- */
+.ds-scope .ds-menu__item--disabled,
+.ds-scope .ds-menu__item[aria-disabled="true"] {
+  color: var(--ds-muted);
+  cursor: default;
+  opacity: 0.55;
+}
+
+.ds-scope .ds-menu__item--disabled:hover,
+.ds-scope .ds-menu__item[aria-disabled="true"]:hover {
+  background: transparent;
+}
+
+/* ---- SEPARATOR ---- */
+.ds-scope .ds-menu__sep {
+  height: 1px;
+  margin: var(--ds-space-2) 0;
+  padding: 0;
+  background: var(--ds-border-soft);
+  list-style: none;
+}

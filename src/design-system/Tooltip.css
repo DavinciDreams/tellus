@@ -1,0 +1,111 @@
+.ds-scope .ds-tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.ds-scope .ds-tooltip__bubble {
+  position: absolute;
+  z-index: var(--z-overlay);
+  pointer-events: none;
+  opacity: 0;
+  white-space: nowrap;
+  max-width: 220px;
+  padding: var(--ds-space-2) var(--ds-space-4);
+  background: var(--ds-bg-strong);
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-sm);
+  box-shadow: var(--ds-elevation-2);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-xs);
+  line-height: var(--ds-leading-tight);
+  transition:
+    opacity var(--ds-duration-fast) var(--ds-ease-out),
+    transform var(--ds-duration-fast) var(--ds-ease-out);
+}
+
+/* Placement: base position + hidden-state offset (rises/slides toward trigger) */
+.ds-scope .ds-tooltip__bubble--top {
+  bottom: 100%;
+  left: 50%;
+  transform: translate(-50%, 4px);
+  margin-bottom: var(--ds-space-3);
+}
+
+.ds-scope .ds-tooltip__bubble--bottom {
+  top: 100%;
+  left: 50%;
+  transform: translate(-50%, -4px);
+  margin-top: var(--ds-space-3);
+}
+
+.ds-scope .ds-tooltip__bubble--left {
+  right: 100%;
+  top: 50%;
+  transform: translate(4px, -50%);
+  margin-right: var(--ds-space-3);
+}
+
+.ds-scope .ds-tooltip__bubble--right {
+  left: 100%;
+  top: 50%;
+  transform: translate(-4px, -50%);
+  margin-left: var(--ds-space-3);
+}
+
+/* Open state: fade + settle into resting position */
+.ds-scope .ds-tooltip--open .ds-tooltip__bubble {
+  opacity: 1;
+}
+
+.ds-scope .ds-tooltip--open .ds-tooltip__bubble--top,
+.ds-scope .ds-tooltip--open .ds-tooltip__bubble--bottom {
+  transform: translate(-50%, 0);
+}
+
+.ds-scope .ds-tooltip--open .ds-tooltip__bubble--left,
+.ds-scope .ds-tooltip--open .ds-tooltip__bubble--right {
+  transform: translate(0, -50%);
+}
+
+/* Arrow */
+.ds-scope .ds-tooltip__bubble::after {
+  content: "";
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: var(--ds-bg-strong);
+  border: 1px solid var(--ds-border-soft);
+}
+
+.ds-scope .ds-tooltip__bubble--top::after {
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  border-top: none;
+  border-left: none;
+}
+
+.ds-scope .ds-tooltip__bubble--bottom::after {
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  border-bottom: none;
+  border-right: none;
+}
+
+.ds-scope .ds-tooltip__bubble--left::after {
+  right: -4px;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+  border-bottom: none;
+  border-left: none;
+}
+
+.ds-scope .ds-tooltip__bubble--right::after {
+  left: -4px;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+  border-top: none;
+  border-right: none;
+}

@@ -32,6 +32,22 @@ import {
   Tabs,
   Toolbar,
   useDialogs,
+  Toggle,
+  Checkbox,
+  RadioGroup,
+  Radio,
+  Slider,
+  Segmented,
+  Card,
+  Tooltip,
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  useToasts,
+  Progress,
+  Spinner,
+  Skeleton,
+  EmptyState,
 } from "./design-system";
 import type { BadgeTone, PresenceStatus } from "./design-system";
 import { FirstRunCoach } from "./onboarding/FirstRunCoach";
@@ -171,6 +187,10 @@ const NAV = [
   ["status", "Status"],
   ["toolbar", "Toolbar"],
   ["overlays", "Overlays"],
+  ["controls", "Controls"],
+  ["cards", "Cards"],
+  ["menus", "Menus & tips"],
+  ["feedback", "Feedback"],
   ["onboarding", "Onboarding"],
   ["principles", "Principles"],
 ] as const;
@@ -204,6 +224,12 @@ function StyleGuide() {
   const [selectedTool, setSelectedTool] = useState("create");
   const [dialogResult, setDialogResult] = useState<string>("");
   const { askConfirm, askPrompt, dialogs } = useDialogs();
+  const { toast, viewport: toastViewport } = useToasts();
+  const [toggleOn, setToggleOn] = useState(true);
+  const [checkboxOn, setCheckboxOn] = useState(true);
+  const [radioVal, setRadioVal] = useState("meadow");
+  const [sliderVal, setSliderVal] = useState(48);
+  const [segVal, setSegVal] = useState("stated");
 
   const inkContrast = useMemo(
     () => INK.map((c) => ({ ...c, ratio: contrast(c.value, "rgb(17 47 38 / 84%)") })),
@@ -637,6 +663,137 @@ function StyleGuide() {
           </Panel>
         </Section>
 
+        {/* ---------------- CONTROLS ---------------- */}
+        <Section id="controls" title="Controls" note="Form controls — every one keyboard-operable, focus-visible, and label-associated.">
+          <div className="sg-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Toggle · Checkbox</span>
+              <div className="sg-stack">
+                <Toggle checked={toggleOn} onChange={setToggleOn} label="Keep my agent active while I'm away" />
+                <Toggle checked={!toggleOn} onChange={(v) => setToggleOn(!v)} label="Ambient world sounds" size="sm" />
+                <Checkbox checked={checkboxOn} onChange={setCheckboxOn} label="Show contradictions inline" />
+                <Checkbox checked={false} onChange={() => {}} indeterminate label="Include archived worlds" />
+                <Checkbox checked={false} onChange={() => {}} disabled label="Disabled option" />
+              </div>
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Radio group</span>
+              <RadioGroup aria-label="Starting biome" value={radioVal} onChange={setRadioVal}>
+                <Radio value="meadow" label="Meadow" />
+                <Radio value="dunes" label="Dunes" />
+                <Radio value="alpine" label="Alpine" />
+                <Radio value="wetland" label="Wetland (coming soon)" disabled />
+              </RadioGroup>
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Slider</span>
+              <Slider label="Terrain roughness" value={sliderVal} onChange={setSliderVal} showValue formatValue={(v) => `${v}%`} />
+              <Slider label="Time of day" value={100 - sliderVal} onChange={(v) => setSliderVal(100 - v)} min={0} max={100} showValue />
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Segmented</span>
+              <Segmented
+                aria-label="Evidence view"
+                value={segVal}
+                onChange={setSegVal}
+                options={[
+                  { value: "stated", label: "Stated" },
+                  { value: "interpreted", label: "Interpreted" },
+                  { value: "all", label: "All" },
+                ]}
+              />
+              <span className="sg-section__note">Selected: <b style={{ color: "var(--ds-text)" }}>{segVal}</b> — arrow keys move between segments.</span>
+            </div>
+          </div>
+        </Section>
+
+        {/* ---------------- CARDS ---------------- */}
+        <Section id="cards" title="Cards" note="Content surfaces (a world, an asset, a being) — distinct from Panel, which is chrome.">
+          <div className="sg-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+            <Card
+              title="Stars at Night"
+              headerActions={<Badge tone="success">live</Badge>}
+              footer={<span className="sg-section__note">3 here · 128 assets</span>}
+            >
+              <p className="sg-section__note">A chunked world at golden hour. Two agents currently weaving.</p>
+            </Card>
+            <Card interactive title="+ New world" onClick={() => toast({ message: "Would open the world creator.", tone: "neutral" })}>
+              <p className="sg-section__note">An interactive card — hover, then click (fires a toast).</p>
+            </Card>
+            <Card title="Crooked apple tree" footer={<Button size="sm" variant="ghost">Place</Button>}>
+              <p className="sg-section__note">Generated asset · golden moss · 4.2k tris.</p>
+            </Card>
+          </div>
+        </Section>
+
+        {/* ---------------- MENUS & TIPS ---------------- */}
+        <Section id="menus" title="Menus &amp; tips" note="Dropdown menu (roving-focus, Esc, click-outside) and hover/focus tooltips.">
+          <div className="sg-row">
+            <Menu
+              aria-label="World actions"
+              trigger="World actions ▾"
+            >
+              <MenuItem icon={<Sparkles size={15} />} onSelect={() => toast({ message: "Renaming…", tone: "neutral" })}>Rename world</MenuItem>
+              <MenuItem icon={<MapIcon size={15} />} onSelect={() => toast({ message: "Sharing…", tone: "info" })}>Share link</MenuItem>
+              <MenuSeparator />
+              <MenuItem danger onSelect={() => toast({ message: "Deleted.", tone: "danger" })}>Delete world</MenuItem>
+            </Menu>
+            <Tooltip content="Speak an object into being">
+              <Button variant="primary" leadingIcon={<Sparkles size={16} />}>Create</Button>
+            </Tooltip>
+            <Tooltip content="Map (M)" placement="bottom">
+              <IconButton aria-label="Map" icon={<MapIcon size={18} />} />
+            </Tooltip>
+            <Tooltip content="Move (V)" placement="right">
+              <IconButton aria-label="Move" icon={<MoreHorizontal size={18} />} />
+            </Tooltip>
+          </div>
+        </Section>
+
+        {/* ---------------- FEEDBACK ---------------- */}
+        <Section id="feedback" title="Feedback" note="Toasts, progress, spinners, skeletons, and empty states.">
+          <div className="sg-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Toast — fire a notification</span>
+              <div className="sg-row">
+                <Button variant="secondary" onClick={() => toast({ title: "Saved", message: "Your world was saved.", tone: "success" })}>Success</Button>
+                <Button variant="secondary" onClick={() => toast({ title: "Heads up", message: "You're near the portal limit.", tone: "warn" })}>Warn</Button>
+                <Button variant="secondary" onClick={() => toast({ title: "Couldn't reach the world", message: "Retrying…", tone: "danger" })}>Danger</Button>
+                <Button variant="secondary" onClick={() => toast({ message: "An agent joined the world.", tone: "info" })}>Info</Button>
+              </div>
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Progress · Spinner</span>
+              <Progress value={sliderVal} showValue label="Generating" />
+              <Progress tone="success" value={100} label="Complete" showValue />
+              <Progress label="Weaving terrain" />
+              <div className="sg-row" style={{ alignItems: "center" }}>
+                <Spinner size="sm" /> <Spinner size="md" /> <Spinner size="lg" />
+              </div>
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Skeleton — loading placeholder</span>
+              <div className="sg-row" style={{ alignItems: "flex-start" }}>
+                <Skeleton variant="circle" width={44} height={44} />
+                <div className="sg-stack" style={{ flex: 1, gap: 8 }}>
+                  <Skeleton variant="text" width="70%" />
+                  <Skeleton variant="text" lines={2} />
+                </div>
+              </div>
+              <Skeleton variant="block" height={64} />
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Empty state</span>
+              <EmptyState
+                icon={<Sparkles size={24} />}
+                title="Nothing here yet"
+                description="This world is a blank slate. Describe something and watch it appear."
+                action={<Button variant="primary" leadingIcon={<Sparkles size={16} />}>Create the first thing</Button>}
+              />
+            </div>
+          </div>
+        </Section>
+
         {/* ---------------- ONBOARDING ---------------- */}
         <Section
           id="onboarding"
@@ -683,6 +840,7 @@ function StyleGuide() {
         </footer>
       </div>
       {dialogs}
+      {toastViewport}
     </div>
   );
 }
