@@ -990,13 +990,13 @@ function createTellusWorld(
   const loadingOverlaySafetyTimer = window.setTimeout(removeLoadingOverlay, 9000);
   const prefersOriginalTellusIslandRenderer =
     activeWorldTemplate === "tellus" && !isContinentalChunkedWorld;
-  // The classic Tellus island's ocean/fog look was tuned on WebGPU backdrop water before the
-  // terrain texture experiments made WebGL the safer default for larger continental worlds.
-  const useWebGPU =
-    rendererPreference === "webgpu" ||
-    (rendererPreference !== "webgl" && prefersOriginalTellusIslandRenderer)
-      ? "gpu" in navigator
-      : false;
+  // WebGL is now the HARD DEFAULT. three.js's WebGPU backend is currently both slower for this app's
+  // workload (many non-instanced meshes + custom terrain material) AND actively broken here (framebuffer
+  // format + multisample/bindgroup errors on the agent-viewport / portal copies), so we only use WebGPU
+  // when a developer EXPLICITLY opts in via localStorage `tellus.renderer = "webgpu"`. The classic Tellus
+  // island's WebGPU-tuned water/fog now falls back to the WebGL look — strictly better than a broken
+  // WebGPU render. Revisit the auto-selection once the WebGPU path is fixed and the backend matures.
+  const useWebGPU = rendererPreference === "webgpu" && "gpu" in navigator;
   // Visual terrain density (decoupled from the synced 97² sculpt grid). FIXED vertex budget no
   // matter the world scale — bigger worlds stretch the same ~50K-vertex mesh instead of multiplying
   // it (operator: range over thickness; worlds get larger for less).
