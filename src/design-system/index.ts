@@ -18,6 +18,18 @@ import "./Toast.css";
 import "./Progress.css";
 import "./Skeleton.css";
 import "./EmptyState.css";
+import "./RadialMenu.css";
+import "./Dock.css";
+import "./PresenceRoster.css";
+import "./Avatar.css";
+import "./AgentCard.css";
+import "./GenerationCard.css";
+import "./PortalCard.css";
+import "./AssetTile.css";
+import "./ChatThread.css";
+import "./Sheet.css";
+import "./Popover.css";
+import "./InlineAlert.css";
 
 export { Button } from "./Button";
 export type { ButtonProps, ButtonVariant, ButtonSize } from "./Button";
@@ -101,3 +113,40 @@ export type { SkeletonProps, SkeletonVariant } from "./Skeleton";
 
 export { EmptyState } from "./EmptyState";
 export type { EmptyStateProps } from "./EmptyState";
+
+/* ── Wave 3: the world layer (Tellus's differentiators) ── */
+export { RadialMenu } from "./RadialMenu";
+export type { RadialMenuProps, RadialMenuItem } from "./RadialMenu";
+
+export { Dock } from "./Dock";
+export type { DockProps, DockItem } from "./Dock";
+
+export { PresenceRoster } from "./PresenceRoster";
+export type { PresenceRosterProps, PresenceBeing } from "./PresenceRoster";
+
+export { Avatar } from "./Avatar";
+export type { AvatarProps, AvatarKind, AvatarSize, AvatarStatus } from "./Avatar";
+
+export { AgentCard } from "./AgentCard";
+export type { AgentCardProps, AgentCardStatus } from "./AgentCard";
+
+export { GenerationCard } from "./GenerationCard";
+export type { GenerationCardProps, GenerationCardStatus } from "./GenerationCard";
+
+export { PortalCard } from "./PortalCard";
+export type { PortalCardProps } from "./PortalCard";
+
+export { AssetTile } from "./AssetTile";
+export type { AssetTileProps } from "./AssetTile";
+
+export { ChatThread } from "./ChatThread";
+export type { ChatThreadProps, ChatMessage, ChatMessageKind } from "./ChatThread";
+
+export { Sheet } from "./Sheet";
+export type { SheetProps, SheetSide } from "./Sheet";
+
+export { Popover } from "./Popover";
+export type { PopoverProps, PopoverAlign, PopoverPlacement } from "./Popover";
+
+export { InlineAlert } from "./InlineAlert";
+export type { InlineAlertProps, InlineAlertTone } from "./InlineAlert";
