@@ -1603,8 +1603,6 @@ async function executeHyadesGeneration(params: {
     modelUrl,
     provider,
     rawModelUrl: modelUrl,
-    assetStoreModelUrl: modelUrl,
-    assetStoreDownloadUrl: modelUrl,
     sourceImageUrl: imageUrl,
     textImageProvider: imageUrl ? "request" : "hyades-zimage",
     manifestUrl: "/generated-assets/manifest.json",
