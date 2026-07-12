@@ -292,20 +292,16 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
         float waterLayer1 = worley(waterUV * (0.58 + wave * 0.14) - flow * 0.62);
         float surface = clamp(pow(waterLayer0 * waterLayer1, 0.54) * 1.18, 0.0, 1.0);
         float rippleScale = 0.11 + wave * 0.06;
-        float rippleX = pow(
-          worley((waterUV + vec2(rippleScale, 0.0)) * (1.12 + wave * 0.24) + flow)
-            * worley((waterUV + vec2(rippleScale, 0.0)) * (0.58 + wave * 0.14) - flow * 0.62),
-          0.54
-        ) * 1.18;
-        float rippleZ = pow(
-          worley((waterUV + vec2(0.0, rippleScale)) * (1.12 + wave * 0.24) + flow)
-            * worley((waterUV + vec2(0.0, rippleScale)) * (0.58 + wave * 0.14) - flow * 0.62),
-          0.54
-        ) * 1.18;
+        // Cheaper ripple normal: finite-difference only the PRIMARY octave (waterLayer0) instead of
+        // recomputing the full two-octave surface at both offsets. Drops these 4 worley calls to 2 --
+        // worley is ~9 cells x several sin each, the dominant per-pixel cost of horizon-filling water.
+        // The perturbation normal is visually near-identical; the second octave barely moves the gradient.
+        float rippleX = worley((waterUV + vec2(rippleScale, 0.0)) * (1.12 + wave * 0.24) + flow);
+        float rippleZ = worley((waterUV + vec2(0.0, rippleScale)) * (1.12 + wave * 0.24) + flow);
         vec3 rippleNormal = normalize(vec3(
-          (surface - rippleX) * (2.6 + wave),
+          (waterLayer0 - rippleX) * (2.6 + wave),
           0.28,
-          (surface - rippleZ) * (2.6 + wave)
+          (waterLayer0 - rippleZ) * (2.6 + wave)
         ));
         surface = pow(surface, 0.78);
         vec3 viewDir = normalize(cameraPosition - vWorldPosition);
@@ -426,8 +422,11 @@ function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflecto
   };
   const reflection = new Reflector(geometry, {
     clipBias: 0.006,
-    textureWidth: 1024,
-    textureHeight: 1024,
+    // 512² (was 1024²): the reflection is heavily softened (mixed 0.08 toward the water color and
+    // broken up by ripple noise), so the resolution drop is invisible while quartering this extra
+    // full-scene render pass's pixel cost — a real GPU-fill-rate saving on water-heavy views.
+    textureWidth: 512,
+    textureHeight: 512,
     color: tint,
     shader,
     multisample: 0,
@@ -437,7 +436,7 @@ function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflecto
     captures: 0,
     skipped: 0,
     lastCaptureMs: Number.NEGATIVE_INFINITY,
-    minIntervalMs: 1000 / 30,
+    minIntervalMs: 1000 / 20, // 20 Hz (was 30): softened reflection needs no per-frame update
   };
   const renderReflection = reflection.onBeforeRender;
   reflection.onBeforeRender = function (...args) {
@@ -834,7 +833,7 @@ export function createBackdropWaterMaterial(settings?: Partial<WaterSettings>): 
     captures: 0,
     skipped: 0,
     lastCaptureMs: Number.NEGATIVE_INFINITY,
-    minIntervalMs: 1000 / 30,
+    minIntervalMs: 1000 / 20, // 20 Hz (was 30): softened reflection needs no per-frame update
   };
   const updateReflection = reflectionSampler.reflector.updateBefore.bind(reflectionSampler.reflector);
   reflectionSampler.reflector.updateBefore = (frame) => {

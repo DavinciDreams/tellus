@@ -18,6 +18,7 @@ import {
   Viewer,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
+import { tellusAssetLibraryUrl } from "./tellus-urls-identity";
 
 declare global {
   interface Window {
@@ -113,7 +114,7 @@ function assetStoreCesiumModelUrl(assetId: string): string {
   // Cesium's model path does not use Tellus' Three.js Meshopt/KTX2 loader stack.
   // The store's optimized LODs are tiny, but require EXT_meshopt_compression and
   // KHR_texture_basisu; original downloads are heavier but render reliably here.
-  return `/api/assets/download/${encodeURIComponent(assetId)}`;
+  return tellusAssetLibraryUrl(`/api/assets/download/${encodeURIComponent(assetId)}`);
 }
 
 function clamp01(value: number): number {

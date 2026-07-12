@@ -78,7 +78,11 @@ export function Field(props: FieldProps): React.JSX.Element {
       <textarea
         {...rest}
         id={id}
-        className="ds-field__control ds-textarea"
+        className={
+          hasError
+            ? "ds-field__control ds-textarea ds-input--invalid"
+            : "ds-field__control ds-textarea"
+        }
         aria-invalid={hasError ? true : undefined}
         aria-describedby={describedBy}
       />
