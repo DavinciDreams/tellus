@@ -58,8 +58,6 @@ export default defineConfig(({ mode }) => {
     "ZAI_THINKING_TYPE",
     "HYADES_BASE_URL",
     "HYADES_API_KEY",
-    "HYADES_3D_API_BASE",
-    "HYADES_3D_API_KEY",
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
     "ANIGEN_GRADIO_BASE_URL",
@@ -98,7 +96,6 @@ export default defineConfig(({ mode }) => {
     "PIXAL3D_TEXTURE_STEPS",
     "PIXAL3D_TIMEOUT_MS",
     "TELLUS_OPTIMIZE_GLB",
-    "TELLUS_3D_BACKEND",
     "TELLUS_3D_PROVIDER",
     "TELLUS_GRADIO_IMAGE_API_NAME",
     "TELLUS_GRADIO_IMAGE_BASE_URL",
@@ -129,17 +126,6 @@ export default defineConfig(({ mode }) => {
     ? (env.HYADES_BASE_URL ?? "http://192.168.1.187/v1")
     : `${(env.HYADES_BASE_URL ?? "http://192.168.1.187").replace(/\/+$/, "")}/v1`;
   const hyadesApiKey = env.HYADES_API_KEY;
-  const hasLocal3DBackend =
-    env.TELLUS_3D_BACKEND?.trim().toLowerCase() === "hyades"
-      ? Boolean(env.HYADES_3D_API_KEY || env.HYADES_API_KEY)
-      : Boolean(
-          env.INSTANTMESH_GRADIO_BASE_URL ||
-            env.PIXAL3D_GRADIO_BASE_URL ||
-            env.ANIGEN_GRADIO_BASE_URL,
-        );
-  const devGenerationProxyBase = (
-    env.TELLUS_DEV_GENERATION_PROXY_BASE || "https://tellus.garden"
-  ).replace(/\/+$/, "");
 
   return {
     build: {
@@ -247,48 +233,19 @@ export default defineConfig(({ mode }) => {
               next();
               return;
             }
-            try {
-              const body = await bodyFromRequest(request);
-              if (!hasLocal3DBackend) {
-                const headers = new Headers();
-                const contentType = request.headers["content-type"];
-                const accept = request.headers.accept;
-                if (typeof contentType === "string") headers.set("Content-Type", contentType);
-                if (typeof accept === "string") headers.set("Accept", accept);
-                await sendWebResponse(
-                  response,
-                  await fetch(`${devGenerationProxyBase}${request.url}`, {
-                    method: request.method ?? "GET",
-                    headers,
-                    body:
-                      request.method === "GET" || request.method === "HEAD"
-                        ? undefined
-                        : body,
-                  }),
-                );
-                return;
-              }
-              const webRequest = new Request(
-                `http://localhost${request.url}`,
-                {
-                  method: request.method ?? "GET",
-                  headers: request.headers as HeadersInit,
-                  body:
-                    request.method === "GET" || request.method === "HEAD"
-                      ? undefined
-                      : body,
-                },
-              );
-              await sendWebResponse(response, await generate3DHandler(webRequest));
-            } catch (error) {
-              response.statusCode = 500;
-              response.setHeader("Content-Type", "application/json");
-              response.end(
-                JSON.stringify({
-                  error: error instanceof Error ? error.message : String(error),
-                }),
-              );
-            }
+            const body = await bodyFromRequest(request);
+            const webRequest = new Request(
+              `http://localhost${request.url}`,
+              {
+                method: request.method ?? "GET",
+                headers: request.headers as HeadersInit,
+                body:
+                  request.method === "GET" || request.method === "HEAD"
+                    ? undefined
+                    : body,
+              },
+            );
+            await sendWebResponse(response, await generate3DHandler(webRequest));
           });
           server.middlewares.use(async (request, response, next) => {
             if (!request.url?.startsWith("/api/gradio-file")) {
