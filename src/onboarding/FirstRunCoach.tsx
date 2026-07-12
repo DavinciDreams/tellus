@@ -122,11 +122,9 @@ export function FirstRunCoach({
             <div>
               <span className="frc-step__title">Move</span>
               <span className="frc-step__body">
-                <kbd className="frc-key">W</kbd>
-                <kbd className="frc-key">A</kbd>
-                <kbd className="frc-key">S</kbd>
-                <kbd className="frc-key">D</kbd>
-                to walk · drag to look · scroll to zoom
+                Tap or click the ground to walk · drag to look · keyboard:{" "}
+                <kbd className="frc-key">WASD</kbd>
+                {" "}or arrows
               </span>
             </div>
           </li>
