@@ -437,6 +437,18 @@ style.textContent = `
     margin: 0;
     overflow: hidden;
     background: #06080d;
+    --hud-bg: rgb(17 47 38 / 84%);
+    --hud-bg-strong: rgb(9 34 30 / 94%);
+    --hud-bg-soft: rgb(38 76 48 / 86%);
+    --hud-border: rgb(222 188 86 / 72%);
+    --hud-border-soft: rgb(222 188 86 / 38%);
+    --hud-gold: #dcbc60;
+    --hud-gold-bright: #f2d98b;
+    --hud-green: #b8d37a;
+    --hud-text: #fff2c4;
+    --hud-muted: #c5c58d;
+    --hud-shadow: 0 18px 54px rgb(0 0 0 / 42%);
+    --hud-inset: inset 0 0 0 1px rgb(255 244 185 / 7%);
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
@@ -445,7 +457,7 @@ style.textContent = `
     inset: 18px auto auto 18px;
     z-index: 4;
     width: min(320px, calc(100vw - 36px));
-    color: #fff7d6;
+    color: var(--hud-text);
     pointer-events: none;
     text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7);
   }
@@ -458,7 +470,7 @@ style.textContent = `
 
   .df-subtitle {
     margin-top: 3px;
-    color: rgba(255, 247, 214, 0.78);
+    color: var(--hud-muted);
     font-size: 10px;
     font-weight: 650;
   }
@@ -469,12 +481,12 @@ style.textContent = `
     bottom: 18px;
     z-index: 5;
     width: min(340px, calc(100vw - 36px));
-    background: rgba(9, 13, 11, 0.86);
-    border: 1px solid rgba(230, 192, 95, 0.24);
+    background: var(--hud-bg-strong);
+    border: 1px solid var(--hud-border-soft);
     border-radius: 10px;
-    color: #fff7d6;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.38), inset 0 1px rgba(255, 255, 255, 0.04);
+    color: var(--hud-text);
+    backdrop-filter: blur(16px);
+    box-shadow: var(--hud-shadow), var(--hud-inset);
   }
 
   .df-telemetry {
@@ -483,21 +495,21 @@ style.textContent = `
     top: 18px;
     z-index: 5;
     width: min(286px, calc(100vw - 36px));
-    padding: 7px;
-    color: #fff7d6;
-    background: rgba(9, 13, 11, 0.78);
-    border: 1px solid rgba(230, 192, 95, 0.22);
+    padding: 10px;
+    color: var(--hud-text);
+    background: var(--hud-bg-strong);
+    border: 1px solid var(--hud-border-soft);
     border-radius: 10px;
-    backdrop-filter: blur(9px);
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3), inset 0 1px rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(16px);
+    box-shadow: var(--hud-shadow), var(--hud-inset);
     pointer-events: none;
   }
 
   .df-telemetry .df-grid { gap: 5px; }
 
   .df-telemetry .df-stat {
-    border: 0;
-    background: rgba(255, 255, 255, 0.04);
+    border-color: rgb(255 255 255 / 14%);
+    background: rgb(0 0 0 / 24%);
   }
 
   .df-panel summary {
@@ -507,10 +519,10 @@ style.textContent = `
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    color: #e6c05f;
-    font-size: 11px;
-    font-weight: 850;
-    letter-spacing: 0.04em;
+    color: var(--hud-gold-bright);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
     text-transform: uppercase;
     cursor: pointer;
     list-style: none;
@@ -518,13 +530,13 @@ style.textContent = `
 
   .df-panel summary::-webkit-details-marker { display: none; }
   .df-panel summary::after { content: "+"; font-size: 15px; }
-  .df-panel[open] summary::after { content: "−"; }
+  .df-panel[open] summary::after { content: "-"; }
 
   .df-panel-body {
     display: grid;
-    gap: 7px;
-    padding: 0 9px 9px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    gap: 8px;
+    padding: 0 10px 10px;
+    border-top: 1px solid var(--hud-border-soft);
   }
 
   .df-vehicles {
@@ -535,9 +547,9 @@ style.textContent = `
 
   .df-vehicles button {
     border: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.08);
-    color: #fff7d6;
+    border-radius: 8px;
+    background: rgb(0 0 0 / 24%);
+    color: var(--hud-text);
     padding: 5px 7px;
     font-size: 10px;
     font-weight: 850;
@@ -545,9 +557,9 @@ style.textContent = `
   }
 
   .df-vehicles button.active {
-    background: #facc15;
-    border-color: #fde047;
-    color: #111827;
+    background: var(--hud-bg-soft);
+    border-color: var(--hud-border);
+    color: var(--hud-gold-bright);
   }
 
   .df-search {
@@ -560,16 +572,16 @@ style.textContent = `
   .df-search button {
     min-width: 0;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.08);
-    color: #fff7d6;
+    border-radius: 8px;
+    background: rgb(0 0 0 / 24%);
+    color: var(--hud-text);
     padding: 6px 8px;
     font-size: 10px;
     font-weight: 800;
   }
 
   .df-search input::placeholder {
-    color: rgba(255, 247, 214, 0.58);
+    color: rgb(255 243 199 / 58%);
   }
 
   .df-search button {
@@ -584,15 +596,15 @@ style.textContent = `
 
   .df-stat {
     min-width: 0;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid var(--hud-border-soft);
+    border-radius: 8px;
+    background: var(--hud-bg);
     padding: 5px;
   }
 
   .df-stat span {
     display: block;
-    color: rgba(255, 247, 214, 0.62);
+    color: var(--hud-muted);
     font-size: 10px;
     font-weight: 850;
     text-transform: uppercase;
@@ -601,13 +613,13 @@ style.textContent = `
   .df-stat strong {
     display: block;
     margin-top: 3px;
-    color: #fff7d6;
+    color: var(--hud-text);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
   }
 
   .df-tip {
-    color: rgba(255, 247, 214, 0.72);
+    color: var(--hud-muted);
     font-size: 9px;
     line-height: 1.35;
     font-weight: 650;
@@ -619,14 +631,15 @@ style.textContent = `
     bottom: 18px;
     z-index: 5;
     max-width: 270px;
-    color: rgba(255, 247, 214, 0.9);
-    background: rgba(9, 12, 18, 0.68);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 8px;
-    padding: 7px 9px;
+    color: var(--hud-text);
+    background: var(--hud-bg-strong);
+    border: 1px solid var(--hud-border-soft);
+    border-radius: 10px;
+    padding: 10px;
     font-size: 10px;
     line-height: 1.4;
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(16px);
+    box-shadow: var(--hud-shadow), var(--hud-inset);
   }
 
   .cesium-viewer-bottom,

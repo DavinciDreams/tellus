@@ -21,6 +21,7 @@ import {
   PawPrint,
   Pencil,
   PersonStanding,
+  Plane,
   Plus,
   RotateCcw,
   RotateCw,
@@ -16097,7 +16098,7 @@ function App(): React.ReactElement {
               setWorldMenuOpen(false);
             }}
           >
-            <ArrowRight size={18} />
+            <Plane size={18} />
             <span>Travel</span>
           </button>
           <button
