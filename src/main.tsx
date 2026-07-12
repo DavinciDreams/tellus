@@ -3123,7 +3123,8 @@ function createTellusWorld(
     });
   };
 
-  let yaw = 0.72;
+  let yaw = 0.72; // CAMERA orbit direction — changed only by right-drag look (and WASD's frame of reference)
+  let avatarFacing = 0.72; // CHARACTER visual facing — turns toward actual movement, independent of camera
   let pitch = -0.28;
   let zoom = 33;
   // ── Camera mode: presentation-only (physics/movement untouched). "first" parks the main camera
@@ -3252,6 +3253,13 @@ function createTellusWorld(
   };
   applyCameraModeVisibility(); // honor a persisted "first" from the very first frame
   let isDragging = false;
+  // Control scheme: click-to-move primary + right-drag to look (chosen by the operator).
+  //  • orbitEligible  = this press may turn the camera (RIGHT mouse button, or any touch — mobile has
+  //    no right button). Plain LEFT-drag is intentionally inert (reserved for future box-select).
+  //  • tapEligible    = a short press may walk-to/select (LEFT button, or touch). Right-clicks never
+  //    walk or select; they only look.
+  let orbitEligible = false;
+  let tapEligible = false;
   let pointerX = 0;
   let pointerY = 0;
   let pointerTravel = 0;
@@ -8395,7 +8403,8 @@ function createTellusWorld(
       } else {
         movement.set(dx / distance, 0, dz / distance);
         pointWalkStep = distance;
-        yaw = Math.atan2(movement.x, movement.z);
+        // NOTE: do NOT touch `yaw` here — that would rotate the CAMERA toward the walk direction.
+        // The character's facing is updated from the movement vector below (avatarFacing).
       }
     }
     const hasInput = movement.lengthSq() > 0;
@@ -8432,6 +8441,10 @@ function createTellusWorld(
     const chunkSpeedScale = chunkMovementSpeedScale();
     if (hasInput) {
       const movementDirection = _mvDirection.copy(movement).normalize();
+      // Character turns to face its ACTUAL movement direction (click-to-move or WASD) — the camera
+      // (yaw) is left alone so walking never yanks the view around. This is what makes click-to-move
+      // feel right instead of snapping the camera behind the character.
+      avatarFacing = Math.atan2(movementDirection.x, movementDirection.z);
       const speed = scaledPlayerSpeed() *
         speedMultiplier *
         (sailingThingId ? MOUNT_SPEED_MULT : 1) *
@@ -8690,7 +8703,7 @@ function createTellusWorld(
       visitorPosition.y,
       visitorPosition.z,
     );
-    visitor.rotation.y = yaw;
+    visitor.rotation.y = avatarFacing;
     sendPresenceUpdate();
 
     for (const thing of generated) {
@@ -9007,6 +9020,11 @@ function createTellusWorld(
   const _camTarget = new THREE.Vector3();
   const _camLookTarget = new THREE.Vector3();
   const _camOffset = new THREE.Vector3();
+  // Spring-arm camera collision scratch: pull the third-person camera in front of solid objects so they
+  // never block the view of the character.
+  const _camCollideDir = new THREE.Vector3();
+  const _camRaycaster = new THREE.Raycaster();
+  const _camCollisionTargets: THREE.Object3D[] = [];
   const updateCamera = () => {
     if (cameraMode === "first") {
       // First person: eye at the local avatar's head (the same POV math the agent viewport uses,
@@ -9051,7 +9069,34 @@ function createTellusWorld(
     if (skyLookAmount > 0) {
       lookTarget.y += skyLookAmount * zoom * 2.6;
     }
-    camera.position.copy(target).add(offset);
+    // Spring-arm collision: cast one short ray from the character out to where the camera wants to sit.
+    // If a placed object (building/prop) is in the way, pull the camera IN FRONT of it so the character
+    // stays visible. Grass/trees (instanced) are intentionally NOT collided with — the camera would
+    // jitter through foliage. The player's own mount is skipped too.
+    const desiredDist = offset.length();
+    let camDist = desiredDist;
+    if (desiredDist > 0.001) {
+      const camDir = _camCollideDir.copy(offset).multiplyScalar(1 / desiredDist);
+      _camCollisionTargets.length = 0;
+      for (const [id, mesh] of generatedMeshes) {
+        if (id === sailingThingId) continue; // don't collide with the thing you're riding
+        _camCollisionTargets.push(mesh);
+      }
+      _camRaycaster.set(target, camDir);
+      _camRaycaster.far = desiredDist;
+      const camHit = _camRaycaster.intersectObjects(_camCollisionTargets, true)[0];
+      if (camHit) {
+        // 0.45 keeps the lens just off the surface; never closer than 3 units so we don't clip into
+        // the character.
+        camDist = Math.max(3, Math.min(desiredDist, camHit.distance - 0.45));
+      }
+    }
+    camera.position.copy(target).addScaledVector(offset, camDist / (desiredDist || 1));
+    // Terrain floor: never let the camera sink below the ground beneath it (analytic, cheap).
+    const camGroundY = groundHeightAt(camera.position.x, camera.position.z);
+    if (camGroundY !== null && camera.position.y < camGroundY + 1.1) {
+      camera.position.y = camGroundY + 1.1;
+    }
     camera.lookAt(lookTarget);
     syncExternalSkyboxToCamera(camera.position);
   };
@@ -9867,6 +9912,12 @@ function createTellusWorld(
         return; // grabbing an object — not a camera orbit
       }
     }
+    // Classify the press for the click-to-move + right-drag-look scheme. Touch has no right button, so
+    // a touch press is BOTH orbit-eligible (one-finger drag looks) and tap-eligible (tap walks/selects).
+    const isTouch = event.pointerType === "touch";
+    orbitEligible = isTouch || event.button === 2;
+    tapEligible = isTouch || event.button === 0;
+    if (!orbitEligible && !tapEligible) return; // e.g. middle mouse — ignore
     isDragging = true;
     pointerTravel = 0;
     pointerX = event.clientX;
@@ -9901,6 +9952,9 @@ function createTellusWorld(
     pointerTravel += Math.hypot(dx, dy);
     pointerX = event.clientX;
     pointerY = event.clientY;
+    // Only orbit-eligible presses (right mouse / touch) turn the camera. A plain left-drag accumulates
+    // travel (so it won't be mistaken for a tap-walk) but does NOT move the camera.
+    if (!orbitEligible) return;
     yaw -= dx * 0.006;
     pitch = clamp(pitch - dy * 0.003, -1.05, 1.05);
   };
@@ -10171,7 +10225,9 @@ function createTellusWorld(
       isDragging = false;
       return;
     }
-    if (isDragging && pointerTravel < 6) {
+    // A short press that's tap-eligible (left button / touch) selects an object or walks to the ground.
+    // Right-button releases fall through (they only look), so they never walk or change selection.
+    if (isDragging && tapEligible && pointerTravel < 6) {
       const pickedThingId = pickThingIdAtPointer(event);
       selectGenerated(pickedThingId ?? undefined);
       if (
@@ -10209,6 +10265,12 @@ function createTellusWorld(
   window.addEventListener("pointercancel", handlePointerCancel);
   window.addEventListener("blur", handlePointerCancel);
   container.addEventListener("wheel", handleWheel, { passive: true });
+  // Right-drag turns the camera, so suppress the browser context menu over the world canvas.
+  const handleContextMenu = (event: MouseEvent) => {
+    if (isPointerFromUi(event.target)) return; // let real UI (inputs, panels) keep their menu
+    event.preventDefault();
+  };
+  container.addEventListener("contextmenu", handleContextMenu);
 
   const init = async () => {
     try {
@@ -11297,6 +11359,7 @@ function createTellusWorld(
       window.removeEventListener("pointercancel", handlePointerCancel);
       window.removeEventListener("blur", handlePointerCancel);
       container.removeEventListener("wheel", handleWheel);
+      container.removeEventListener("contextmenu", handleContextMenu);
       worldSocketClosedByDestroy = true;
       if (worldSocketReconnectTimer !== undefined) {
         window.clearTimeout(worldSocketReconnectTimer);
