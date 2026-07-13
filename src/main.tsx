@@ -5627,6 +5627,7 @@ function createTellusWorld(
     rotationZ: thing.rotationZ,
     scale: thing.scale,
     color: thing.color,
+    verticalOffset: thing.verticalOffset,
     assetStoreModelId: thing.assetStoreModelId,
     modelUrl: thing.modelUrl,
     pipelineId: thing.modelUrl ? undefined : thing.pipelineId,
@@ -5664,6 +5665,7 @@ function createTellusWorld(
       rotationZ: roundedGeneratedNumber(thing.rotationZ),
       scale: roundedGeneratedNumber(thing.scale),
       color: thing.color,
+      verticalOffset: roundedGeneratedNumber(thing.verticalOffset),
       assetStoreModelId: thing.assetStoreModelId ?? "",
       modelUrl: thing.modelUrl ?? "",
       pipelineId: thing.pipelineId ?? "",
@@ -6300,6 +6302,9 @@ function createTellusWorld(
     }
     const existing = thingById(normalized.id);
     if (existing) {
+      const inferredLocalWaterOffset = vehicleMode(existing) === "water" && existing.verticalOffset === undefined
+        ? existing.position.y - waterVehiclePositionForCurrentWorld(existing.position.x, existing.position.z).y
+        : undefined;
       const pendingUpsert = pendingGeneratedUpserts.get(existing.id);
       if (pendingUpsert) {
         const remoteSignature = generatedThingSignature(normalized);
@@ -6339,6 +6344,13 @@ function createTellusWorld(
         existing.scale = normalized.scale;
       }
       existing.color = normalized.color;
+      existing.verticalOffset = normalized.verticalOffset === undefined
+        ? existing.verticalOffset ?? inferredLocalWaterOffset
+        : normalized.verticalOffset;
+      if (vehicleMode(existing) === "water" && existing.verticalOffset !== undefined) {
+        const surface = waterVehiclePositionForCurrentWorld(existing.position.x, existing.position.z);
+        existing.position.y = surface.y + clamp(existing.verticalOffset, -40, 40);
+      }
       existing.assetStoreModelId = normalized.assetStoreModelId ?? existing.assetStoreModelId;
       // petOwnerId wire convention mirrors animation/avatar fields: "" clears, non-empty sets,
       // ABSENT means a mid-rollout backend stripped the field, so keep the local value.
@@ -6388,6 +6400,7 @@ function createTellusWorld(
       rotationZ: normalized.rotationZ ?? 0,
       scale: normalized.scale,
       color: normalized.color,
+      verticalOffset: normalized.verticalOffset,
       assetStoreModelId: normalized.assetStoreModelId,
       modelUrl: normalized.modelUrl,
       pipelineId: normalized.pipelineId,
@@ -6396,6 +6409,10 @@ function createTellusWorld(
       petOwnerId: normalized.petOwnerId || undefined,
       animationClips: normalized.animationClips,
     };
+    if (vehicleMode(thing) === "water" && thing.verticalOffset !== undefined) {
+      const surface = waterVehiclePositionForCurrentWorld(thing.position.x, thing.position.z);
+      thing.position.y = surface.y + clamp(thing.verticalOffset, -40, 40);
+    }
     generated.push(thing);
     const repairedInteriorPosition = repairInteriorThingPosition(thing);
     ensureGeneratedVisual(thing);
@@ -6965,6 +6982,7 @@ function createTellusWorld(
       rotationZ: source.rotationZ,
       scale: source.scale,
       color: source.color,
+      verticalOffset: source.verticalOffset,
       assetStoreModelId: source.assetStoreModelId,
       modelUrl: source.modelUrl,
       pipelineId: source.pipelineId,
@@ -7041,6 +7059,10 @@ function createTellusWorld(
       ...thing.position,
       y: clamp(thing.position.y + amount, minY, maxY),
     };
+    if (vehicleMode(thing) === "water") {
+      const surface = waterVehiclePositionForCurrentWorld(thing.position.x, thing.position.z);
+      thing.verticalOffset = clamp(thing.position.y - surface.y, -40, 40);
+    }
     if (sailingThingId === id) {
       visitorPosition = riderPositionForThing(thing);
     }
@@ -7067,6 +7089,7 @@ function createTellusWorld(
             ...thing.position,
             y: Math.min(thing.position.y, 0),
           });
+    thing.verticalOffset = undefined;
     if (sailingThingId === id) {
       visitorPosition = riderPositionForThing(thing);
     }

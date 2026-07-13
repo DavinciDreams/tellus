@@ -104,6 +104,10 @@ describe("world object runtime profile", () => {
     ).toBe("ground");
   });
 
+  it("classifies porpoises as water actors", () => {
+    expect(worldThingVehicleMode(thing({ kind: "animal", prompt: "Harbor Porpoise" }))).toBe("water");
+  });
+
   it("preserves deliberate vertical offsets as elevated placement", () => {
     const profile = buildWorldThingRuntimeProfile(
       thing({ prompt: "floating crystal", position: { x: 0, y: 7, z: 0 } }),
