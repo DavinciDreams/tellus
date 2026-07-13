@@ -194,6 +194,7 @@ export interface AssetLibraryModel {
   id: string;
   name: string;
   description?: string;
+  assetCategory?: string;
   file_format?: string;
   file_size?: number;
   effective_file_size?: number;
