@@ -59,6 +59,15 @@ describe("world object runtime profile", () => {
     );
   });
 
+  it("uses real-world semantic rulers for common fauna, vessels, monuments, and cottages", () => {
+    expect(worldThingTargetHeight(thing({ kind: "animal", prompt: "Golden Retriever dog" }))).toBeCloseTo(0.85);
+    expect(worldThingTargetHeight(thing({ kind: "animal", prompt: "Pacific white-sided dolphin" }))).toBeCloseTo(2.2);
+    expect(worldThingTargetHeight(thing({ kind: "animal", prompt: "Humpback whale" }))).toBeCloseTo(8);
+    expect(worldThingTargetHeight(thing({ prompt: "wooden sailing ship" }))).toBeCloseTo(7);
+    expect(worldThingTargetHeight(thing({ kind: "stone", prompt: "Olmec colossal head" }))).toBeCloseTo(2.8);
+    expect(worldThingTargetHeight(thing({ prompt: "rustic cottage" }))).toBeCloseTo(5.4);
+  });
+
   it("classifies placement and mount controller from one shared contract", () => {
     const horse = thing({
       kind: "animal",
