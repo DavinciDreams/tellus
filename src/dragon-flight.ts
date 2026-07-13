@@ -9,10 +9,12 @@ import {
   HeadingPitchRoll,
   HeightReference,
   Ion,
+  IonGeocoderService,
   Math as CesiumMath,
   Model,
   ModelAnimationLoop,
   PolylineGlowMaterialProperty,
+  Rectangle,
   Terrain,
   Transforms,
   Viewer,
@@ -475,6 +477,31 @@ style.textContent = `
     font-weight: 900;
   }
 
+  .df-back-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    margin-bottom: 8px;
+    padding: 0 9px;
+    border: 1px solid var(--hud-border-soft);
+    border-radius: 999px;
+    color: var(--hud-gold-bright);
+    background: var(--hud-bg-strong);
+    box-shadow: var(--hud-inset);
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: 0.25px;
+    text-decoration: none;
+    pointer-events: auto;
+  }
+
+  .df-back-link:hover,
+  .df-back-link:focus-visible {
+    border-color: var(--hud-border);
+    background: var(--hud-bg-soft);
+    outline: none;
+  }
+
   .df-subtitle {
     margin-top: 3px;
     color: var(--hud-muted);
@@ -625,6 +652,10 @@ style.textContent = `
     font-variant-numeric: tabular-nums;
   }
 
+  .df-stat--coordinate {
+    grid-column: span 2;
+  }
+
   .df-tip {
     color: var(--hud-muted);
     font-size: 9px;
@@ -660,6 +691,7 @@ document.head.append(style);
 
 root.innerHTML = `
   <div class="df-hud">
+    <a class="df-back-link" href="/" aria-label="Back to Tellus">&larr; Tellus</a>
     <div class="df-title" data-route-title>${activeRoute.label}</div>
     <div class="df-subtitle" data-route-subtitle>${activeRoute.subtitle}</div>
   </div>
@@ -670,6 +702,8 @@ root.innerHTML = `
       <div class="df-stat"><span>Altitude</span><strong data-stat="altitude">--</strong></div>
       <div class="df-stat"><span>Rings</span><strong data-stat="rings">0/${activeRoute.rings.length}</strong></div>
       <div class="df-stat"><span>Mode</span><strong data-stat="mode">Glide</strong></div>
+      <div class="df-stat df-stat--coordinate"><span>Latitude</span><strong data-stat="latitude">--</strong></div>
+      <div class="df-stat df-stat--coordinate"><span>Longitude</span><strong data-stat="longitude">--</strong></div>
     </div>
   </div>
   <details class="df-panel">
@@ -678,12 +712,14 @@ root.innerHTML = `
       <div class="df-vehicles">
         ${vehicles.map((vehicle) => `<button type="button" data-vehicle="${vehicle.id}">${vehicle.label}</button>`).join("")}
         <button type="button" data-reset-flight>Reset</button>
+        <button type="button" data-mark-place>Mark here</button>
+        <button type="button" data-capture-place>Capture place</button>
       </div>
       <div class="df-vehicles">
         ${routes.map((route) => `<button type="button" data-route="${route.id}">${route.label}</button>`).join("")}
       </div>
       <form class="df-search" data-location-form>
-        <input type="search" list="flight-location-options" data-location-search placeholder="Search city or site" autocomplete="off" />
+        <input type="search" list="flight-location-options" data-location-search placeholder="Search any city or site" autocomplete="off" />
         <button type="submit">Go</button>
         <datalist id="flight-location-options">
           ${flightLocations.map((location) => `<option value="${location.label}"></option>`).join("")}
@@ -719,6 +755,7 @@ viewer.scene.fog.renderable = true;
 viewer.scene.fog.density = 0.00014;
 viewer.scene.screenSpaceCameraController.enableInputs = false;
 viewer.clock.shouldAnimate = true;
+const geocoder = token ? new IonGeocoderService({ scene: viewer.scene, accessToken: token }) : null;
 
 const keys = new Set<string>();
 let selectedVehicle = vehicles[0]!;
@@ -734,6 +771,8 @@ let cameraZoom = 1;
 let pitchHoldSeconds = 0;
 let smoothedFlyerTerrainM = activeRoute.terrainFallbackM;
 const ringEntities = new Map<string, Entity>();
+const placeMarkers: Entity[] = [];
+let placeMarkerNumber = 0;
 const state: FlightState = {
   lon: activeRoute.start.lon,
   lat: activeRoute.start.lat,
@@ -1029,6 +1068,54 @@ function flyToLocation(location: FlightLocation) {
   setStatus(`${location.label}<br />${location.note}<br />Free flight: no course boundary.`);
 }
 
+async function searchEarthLocation(query: string): Promise<FlightLocation | null> {
+  if (geocoder) {
+    const result = (await geocoder.geocode(query))[0];
+    if (result) {
+      const destination = result.destination;
+      const cartographic = destination instanceof Cartesian3
+        ? Cartographic.fromCartesian(destination)
+        : Rectangle.center(destination, new Cartographic());
+      if (cartographic) {
+        return earthSearchLocation(
+          query,
+          result.displayName,
+          CesiumMath.toDegrees(cartographic.longitude),
+          CesiumMath.toDegrees(cartographic.latitude),
+          "Cesium ion",
+        );
+      }
+    }
+  }
+
+  // Submit-only fallback: Nominatim permits user-triggered searches but not client-side autocomplete.
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`,
+    { headers: { Accept: "application/json" } },
+  );
+  if (!response.ok) throw new Error(`Earth geocoder returned ${response.status}`);
+  const results = await response.json() as Array<{ display_name?: string; lat?: string; lon?: string }>;
+  const result = results[0];
+  const lat = Number(result?.lat);
+  const lon = Number(result?.lon);
+  if (!result || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return earthSearchLocation(query, result.display_name ?? query, lon, lat, "OpenStreetMap");
+}
+
+function earthSearchLocation(query: string, label: string, lon: number, lat: number, source: string): FlightLocation {
+  return {
+    id: `geocode-${query.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    label,
+    aliases: [],
+    lon,
+    lat,
+    terrainFallbackM: EARTH_TERRAIN_FALLBACK_M,
+    altitudeM: 520,
+    headingDeg: 0,
+    note: `Geocoded from “${query.trim()}” via ${source}.`,
+  };
+}
+
 function updateFlyerTransform() {
   const position = flyerPosition();
   const hpr = flyerHeadingPitchRoll();
@@ -1070,6 +1157,61 @@ function updateHud(mode: string) {
   setStat("altitude", `${Math.round(state.altitudeM)} m`);
   setStat("rings", activeRoute.rings.length ? `${state.completedRings.size}/${activeRoute.rings.length}` : "Free");
   setStat("mode", mode);
+  setStat("latitude", formatCoordinate(state.lat, "N", "S"));
+  setStat("longitude", formatCoordinate(state.lon, "E", "W"));
+}
+
+function formatCoordinate(value: number, positiveSuffix: string, negativeSuffix: string): string {
+  return `${Math.abs(value).toFixed(5)}° ${value >= 0 ? positiveSuffix : negativeSuffix}`;
+}
+
+function markCurrentPlace() {
+  placeMarkerNumber += 1;
+  const coordinateLabel = `${state.lat.toFixed(5)}, ${state.lon.toFixed(5)}`;
+  const marker = viewer.entities.add({
+    name: `Flight marker ${placeMarkerNumber}`,
+    description: `Placed at ${coordinateLabel}`,
+    position: Cartesian3.fromDegrees(state.lon, state.lat),
+    point: {
+      pixelSize: 11,
+      color: Color.YELLOW,
+      outlineColor: Color.BLACK,
+      outlineWidth: 2,
+      heightReference: HeightReference.CLAMP_TO_GROUND,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+    label: {
+      text: `Marker ${placeMarkerNumber}\n${coordinateLabel}`,
+      fillColor: Color.WHITE,
+      outlineColor: Color.BLACK,
+      outlineWidth: 3,
+      pixelOffset: new Cartesian3(0, -32, 0),
+      heightReference: HeightReference.CLAMP_TO_GROUND,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+  });
+  placeMarkers.push(marker);
+  if (placeMarkers.length > 20) viewer.entities.remove(placeMarkers.shift()!);
+  setStatus(`Marker ${placeMarkerNumber} placed.<br />${coordinateLabel}`);
+}
+
+function captureCurrentPlace() {
+  viewer.render();
+  viewer.scene.canvas.toBlob((blob) => {
+    if (!blob) {
+      setStatus("Could not capture this view. Try again after the terrain finishes loading.");
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const lat = state.lat.toFixed(5);
+    const lon = state.lon.toFixed(5);
+    link.href = url;
+    link.download = `tellus-earth-${lat}-${lon}.png`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setStatus(`Place captured.<br />${lat}, ${lon}`);
+  }, "image/png");
 }
 
 function checkRings() {
@@ -1202,17 +1344,31 @@ document.querySelectorAll<HTMLButtonElement>("[data-vehicle]").forEach((button) 
 document.querySelectorAll<HTMLButtonElement>("[data-route]").forEach((button) => {
   button.addEventListener("click", () => selectRoute(button.dataset.route ?? "chaco"));
 });
-document.querySelector<HTMLFormElement>("[data-location-form]")?.addEventListener("submit", (event) => {
+document.querySelector<HTMLFormElement>("[data-location-form]")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = document.querySelector<HTMLInputElement>("[data-location-search]");
-  const location = findFlightLocation(input?.value ?? "");
+  const query = input?.value.trim() ?? "";
+  if (!query) return;
+  let location = findFlightLocation(query);
   if (!location) {
-    setStatus("Location not found yet. Try Rome, Nazca, Cahokia, Chaco, Mossman, Giza, Stonehenge, Angkor, Athens, or Yosemite.");
+    setStatus(`Searching Earth for “${query}”…`);
+    try {
+      location = await searchEarthLocation(query);
+    } catch (error) {
+      console.warn("[dragon-flight] location search failed", error);
+      setStatus("Earth search is temporarily unavailable. Try again, or choose one of the suggested sites.");
+      return;
+    }
+  }
+  if (!location) {
+    setStatus(`No Earth location found for “${query}”. Try a city, region, landmark, or country.`);
     return;
   }
   flyToLocation(location);
 });
 document.querySelector<HTMLButtonElement>("[data-reset-flight]")?.addEventListener("click", resetFlight);
+document.querySelector<HTMLButtonElement>("[data-mark-place]")?.addEventListener("click", markCurrentPlace);
+document.querySelector<HTMLButtonElement>("[data-capture-place]")?.addEventListener("click", captureCurrentPlace);
 
 setActiveRouteButtons();
 drawRings();
