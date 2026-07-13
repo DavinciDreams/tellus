@@ -189,6 +189,7 @@ export const terrainPaintKinds = [
 
 export const waterMountTerms = [
   "dolphin",
+  "porpoise",
   "orca",
   "whale",
   "sea turtle",

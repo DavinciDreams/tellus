@@ -212,9 +212,24 @@ describe("asset library browsing", () => {
             {
               id: "dog-1",
               name: "Golden Retriever",
+              asset_category: "fauna",
               file_format: "glb",
               has_thumbnail: true,
               has_game_optimized: true,
+              runtime_metadata: { animations: [{ name: "Idle" }, { name: "Walk" }] },
+            },
+            {
+              id: "rigged-only",
+              name: "Rigged but static prop",
+              asset_category: "fauna",
+              file_format: "glb",
+            },
+            {
+              id: "windmill-1",
+              name: "Animated windmill",
+              asset_category: "building",
+              file_format: "glb",
+              runtime_metadata: { animations: [{ name: "Turn" }] },
             },
             {
               id: "bot-1",
@@ -230,7 +245,7 @@ describe("asset library browsing", () => {
     const result = await browseAssetLibrary("", 1, "newest", 24, "animated");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://hyades.example/api/assets/animated-models",
+      "https://hyades.example/api/assets/animated-models?page=1&per_page=100",
       { cache: "no-store" },
     );
     expect(result.total).toBe(1);
@@ -241,6 +256,7 @@ describe("asset library browsing", () => {
         file_format: "glb",
         hasThumbnail: true,
         hasGameOptimized: true,
+        animationClips: [expect.objectContaining({ name: "Idle" }), expect.objectContaining({ name: "Walk" })],
       }),
     ]);
   });

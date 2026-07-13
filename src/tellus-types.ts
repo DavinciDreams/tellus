@@ -175,6 +175,9 @@ export interface GeneratedThing {
   rotationZ?: number;
   scale: number;
   color: number;
+  /** Explicit vertical displacement from the active placement surface. Persisted so delayed
+   * server echoes cannot reinterpret a deliberately submerged or raised asset as grounded. */
+  verticalOffset?: number;
   /** Immutable 3D Asset Manager model id. modelUrl is only a cached serving hint. */
   assetStoreModelId?: string;
   modelUrl?: string;
@@ -194,6 +197,7 @@ export interface AssetLibraryModel {
   id: string;
   name: string;
   description?: string;
+  assetCategory?: string;
   file_format?: string;
   file_size?: number;
   effective_file_size?: number;

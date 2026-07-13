@@ -258,12 +258,18 @@ const parseAnimationMetadata = (raw: unknown): AssetAnimationMetadata | null => 
 };
 
 const parseAnimationMetadataList = (record: Record<string, unknown>): AssetAnimationMetadata[] | undefined => {
+  const runtimeMetadata = record.runtime_metadata ?? record.runtimeMetadata;
+  const runtimeRecord = runtimeMetadata && typeof runtimeMetadata === "object" && !Array.isArray(runtimeMetadata)
+    ? runtimeMetadata as Record<string, unknown>
+    : undefined;
   const raw =
     record.animationClips ??
     record.animation_clips ??
     record.animations ??
     record.animation_metadata ??
-    record.animationMetadata;
+    record.animationMetadata ??
+    runtimeRecord?.animations ??
+    runtimeRecord?.animation_clips;
   if (!Array.isArray(raw)) return undefined;
   const clips = raw
     .map(parseAnimationMetadata)
@@ -282,7 +288,8 @@ const parseAssetLibraryModels = (rawModels: unknown): AssetLibraryModel[] => {
     const model: AssetLibraryModel = {
         id,
         name,
-        description: name,
+        description: stringField(record, "description", "summary") ?? name,
+        assetCategory: stringField(record, "asset_category", "assetCategory", "category"),
         file_format: stringField(record, "file_format", "fileFormat", "format"),
         file_size: numberField(record, "file_size", "fileSize", "size"),
         effective_file_size: numberField(record, "effective_file_size", "effectiveFileSize"),
@@ -371,15 +378,28 @@ async function fetchAnimatedAssetLibraryModels(
   perPage: number,
   sort: AssetBrowseSort,
 ): Promise<AssetBrowseResult> {
-  const response = await fetch(tellusAssetLibraryUrl("/api/assets/animated-models"), {
-    cache: "no-store",
-  });
-  if (!response.ok) return { models: [], hasNext: false, total: 0 };
-  const parsed = await readJsonResponse<unknown>(response);
+  const rawModels: unknown[] = [];
+  for (let sourcePage = 1; sourcePage <= 10; sourcePage++) {
+    const params = new URLSearchParams({ page: String(sourcePage), per_page: "100" });
+    const response = await fetch(tellusAssetLibraryUrl(`/api/assets/animated-models?${params.toString()}`), {
+      cache: "no-store",
+    });
+    if (!response.ok) break;
+    const parsed = await readJsonResponse<Record<string, unknown>>(response);
+    const pageModels = assetModelsFromResponse(parsed);
+    if (Array.isArray(pageModels)) rawModels.push(...pageModels);
+    const pagination = parsed.pagination;
+    const hasNext = pagination && typeof pagination === "object" && !Array.isArray(pagination)
+      ? (pagination as Record<string, unknown>).has_next === true
+      : false;
+    if (!hasNext) break;
+  }
   const needle = searchTerm.toLowerCase();
-  const allModels = parseAssetLibraryModels(assetModelsFromResponse(parsed)).filter((model) => {
+  const allModels = parseAssetLibraryModels(rawModels).filter((model) => {
     const format = model.file_format?.toLowerCase();
     if (format && format !== "glb" && format !== "gltf") return false;
+    if (model.assetCategory && model.assetCategory !== "fauna") return false;
+    if (!model.animationClips?.length) return false;
     if (!needle) return true;
     const haystack = [model.name, model.description, ...(model.tags ?? [])].join(" ").toLowerCase();
     return haystack.includes(needle);

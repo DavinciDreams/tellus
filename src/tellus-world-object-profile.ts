@@ -170,6 +170,20 @@ function avatarHeight(ratio: number): number {
   return STANDARD_HUMANOID_HEIGHT * ratio;
 }
 
+function realisticSemanticHeight(lower: string): number | null {
+  if (/\b(blue|humpback|sperm|orca|killer) whale\b|\bwhale\b/.test(lower)) return 8;
+  if (/\bdolphin\b|\bporpoise\b/.test(lower)) return 2.2;
+  if (/\b(ship|galleon|schooner|yacht|ferry|trawler)\b/.test(lower)) return 7;
+  if (/\b(canoe|kayak|skiff|dinghy|raft)\b/.test(lower)) return 1.4;
+  if (/\bolmec\b.*\bhead\b|\bcolossal head\b/.test(lower)) return 2.8;
+  if (/\b(cottage|cabin|house|hut)\b/.test(lower)) return 5.4;
+  if (/\b(dog|puppy|canine|wolf|fox)\b/.test(lower)) return 0.85;
+  if (/\b(cat|kitten|rabbit|hare)\b/.test(lower)) return 0.45;
+  if (/\b(horse|deer|elk|moose|reindeer)\b/.test(lower)) return 1.75;
+  if (/\b(bird|owl|hawk|eagle|parrot|swan|duck)\b/.test(lower)) return 0.65;
+  return null;
+}
+
 function isHumanoidPrompt(lower: string): boolean {
   return (
     lower.includes("humanoid") ||
@@ -193,6 +207,8 @@ export function worldThingTargetHeight(
 ): number {
   const lower = thing.prompt.toLowerCase();
   const variation = clamp(thing.scale, 0.25, 12);
+  const semanticHeight = realisticSemanticHeight(lower);
+  if (semanticHeight !== null) return clamp(semanticHeight * variation, 0.2, 64);
   if (lower === "mirror") return clamp(avatarHeight(AVATAR_HEIGHT_RATIOS.mirror) * variation, 1.2, 12);
   const buildingRecipeId = proceduralBuildingRecipeId(thing.modelUrl);
   if (buildingRecipeId) {

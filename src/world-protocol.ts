@@ -71,6 +71,7 @@ export interface WorldGeneratedThing {
   rotationZ?: number;
   scale: number;
   color: number;
+  verticalOffset?: number;
   /** Immutable 3D Asset Manager model id. modelUrl is a cached/resolved fetch URL. */
   assetStoreModelId?: string;
   modelUrl?: string;
@@ -366,6 +367,8 @@ export function isWorldGeneratedThing(value: unknown): value is WorldGeneratedTh
     !Number.isFinite(value.scale) ||
     typeof value.color !== "number" ||
     !Number.isFinite(value.color) ||
+    (value.verticalOffset !== undefined &&
+      (typeof value.verticalOffset !== "number" || !Number.isFinite(value.verticalOffset))) ||
     typeof value.updatedAt !== "string"
   ) {
     return false;
