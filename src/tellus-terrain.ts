@@ -892,8 +892,12 @@ export function waterBlockedByLand(position: Vec3): boolean {
 
 export function waterVehiclePosition(x: number, z: number, fallback?: Vec3): Vec3 {
   const position = oceanPosition(x, z);
-  if (!waterBlockedByLand(position)) return position;
-  return fallback ? { ...fallback } : oceanPosition(WORLD_RADIUS + 5, 0);
+  if (waterBlockedByLand(position)) return fallback ? { ...fallback } : oceanPosition(WORLD_RADIUS + 5, 0);
+  if (!fallback) return position;
+  const previousSurfaceY = oceanPosition(fallback.x, fallback.z).y;
+  const manualOffset = fallback.y - previousSurfaceY;
+  if (!Number.isFinite(manualOffset) || Math.abs(manualOffset) <= 0.05) return position;
+  return { ...position, y: position.y + Math.max(-40, Math.min(40, manualOffset)) };
 }
 
 export function distantIslandShorePosition(spec: DistantIslandSpec, x: number, z: number): Vec3 {
@@ -972,8 +976,8 @@ export function movedVehiclePosition(
   const previousGround = groundHeightAt(fallback.x, fallback.z);
   if (previousGround === null || !Number.isFinite(previousGround)) return position;
   const manualOffset = fallback.y - previousGround;
-  if (manualOffset <= 0.05) return position;
-  return { ...position, y: position.y + manualOffset };
+  if (Math.abs(manualOffset) <= 0.05) return position;
+  return { ...position, y: position.y + Math.max(-40, Math.min(40, manualOffset)) };
 }
 
 export function baseTerrainHeight(x: number, z: number): number {

@@ -1093,8 +1093,8 @@ function createTellusWorld(
     if (!fallback) return position;
     const previousSurface = chunkedWaterSurfaceY(fallback.x, fallback.z);
     const manualOffset = fallback.y - previousSurface;
-    if (!Number.isFinite(manualOffset) || manualOffset <= 0.05) return position;
-    return { ...position, y: position.y + clamp(manualOffset, 0, 40) };
+    if (!Number.isFinite(manualOffset) || Math.abs(manualOffset) <= 0.05) return position;
+    return { ...position, y: position.y + clamp(manualOffset, -40, 40) };
   };
   const chunkedWaterVehiclePosition = (x: number, z: number, fallback?: Vec3): Vec3 => {
     const clamped = clampChunkedPoint(x, z);

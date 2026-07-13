@@ -54,6 +54,13 @@ function mountAt(y: number): GeneratedThing {
   };
 }
 
+function waterMountAt(y: number): GeneratedThing {
+  return {
+    ...thingAt(y),
+    prompt: "wooden sailing boat",
+  };
+}
+
 describe("Tellus terrain defaults", () => {
   afterEach(() => {
     applyWorldTerrainTemplate("tellus");
@@ -108,6 +115,14 @@ describe("Tellus terrain defaults", () => {
 
     const grounded = movedVehiclePosition(mountAt(3), 12, 18, { x: 0, y: 3, z: 0 });
     expect(grounded.y).toBe(3);
+  });
+
+  it("preserves raised and lowered water offsets instead of snapping to the surface", () => {
+    const raised = movedVehiclePosition(waterMountAt(2.14), 120, 0, { x: 110, y: 2.14, z: 0 });
+    const lowered = movedVehiclePosition(waterMountAt(-1.86), 120, 0, { x: 110, y: -1.86, z: 0 });
+
+    expect(raised.y).toBeCloseTo(2.14);
+    expect(lowered.y).toBeCloseTo(-1.86);
   });
 
   it("keeps ground mounts moving when terrain height cannot resolve the next spot", () => {
