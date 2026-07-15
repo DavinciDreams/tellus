@@ -301,6 +301,26 @@ describe("createChunkRenderer lifecycle", () => {
     r.dispose();
   });
 
+  it("reports only surface-changing chunk regions and ignores pure LOD rebuilds", async () => {
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    r.update(CHUNK_SPAN * 10 + 1, CHUNK_SPAN * 10 + 1);
+    await resolveAll();
+    r.flush();
+    expect(r.consumeChangedRegions()).toHaveLength(25);
+    expect(r.consumeChangedRegions()).toEqual([]);
+
+    // Crossing one chunk changes several terrain LODs, but only the newly streamed column has a new
+    // surface. Existing chunks must not force unrelated procplant cells to rebuild.
+    r.update(CHUNK_SPAN * 11 + 1, CHUNK_SPAN * 10 + 1);
+    await resolveAll();
+    r.flush();
+    const changed = r.consumeChangedRegions();
+    expect(changed).toHaveLength(5);
+    expect(changed.every((region) => region.minX === 13 * CHUNK_SPAN)).toBe(true);
+    r.dispose();
+  });
+
   it("retries failed chunk fetches even when the player remains in the same center chunk", async () => {
     let now = 1_000;
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);

@@ -9649,14 +9649,18 @@ function createTellusWorld(
       const movingOnFoot = hasMovementKeyHeld() && !sailingThingId && !flying;
       const chunkStatsBeforeFlush = chunkRenderer.stats();
       const terrainOnlyActive = terrainOnlyDebug();
-      const movingBuildBudget = terrainOnlyActive
-        ? 1
-        : (chunkStatsBeforeFlush.ready > 2 ? 2 : 1);
+      // One terrain upload per moving frame keeps chunk crossings below the frame budget. This does
+      // not reduce geometry or draw distance; look-ahead prefetching still prepares the same chunks.
+      const movingBuildBudget = 1;
       chunkRenderer.flush(
         movingOnFoot ? movingBuildBudget : terrainOnlyActive ? 4 : 3,
-        movingOnFoot ? (terrainOnlyActive ? 3 : 6) : terrainOnlyActive ? 14 : 9,
+        movingOnFoot ? 4 : terrainOnlyActive ? 14 : 9,
         movingOnFoot ? (terrainOnlyActive ? 2 : 3) : 6,
       );
+      const changedTerrainRegions = chunkRenderer.consumeChangedRegions();
+      if (changedTerrainRegions.length > 0) {
+        procplants.notifyRegionsChanged(changedTerrainRegions);
+      }
       // When the active chunk set changes (chunks streamed in/out), defer placed-asset grounding until
       // movement is idle. Treating streaming like a terrain edit used to invalidate all vegetation and
       // walk every generated thing on the boundary frame, which made every chunk crossing hitch.
@@ -9666,8 +9670,6 @@ function createTellusWorld(
       if (activeChunks !== lastActiveChunkCount || provisionalChunks !== lastProvisionalChunkCount) {
         lastActiveChunkCount = activeChunks;
         lastProvisionalChunkCount = provisionalChunks;
-        vegetation.notifyTerrainChanged();
-        procplants.notifyTerrainChanged();
         if (!chunkStreamGroundingPending && chunkStreamGroundingQueue.length === 0) {
           chunkStreamGroundingPending = true;
           for (const thing of generated) {
