@@ -460,6 +460,8 @@ describe("procplant vegetation", () => {
 
     expect(stats.plants).toBeGreaterThan(0);
     expect(stats.instances).toBeGreaterThanOrEqual(stats.plants * 20);
+    expect(stats.grassInstances).toBeGreaterThan(0);
+    expect(stats.grassTriangles).toBeGreaterThan(stats.grassInstances);
     expect(stats.stemTriangles).toBe(0);
 
     vegetation.dispose();

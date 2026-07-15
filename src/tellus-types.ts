@@ -1,6 +1,7 @@
 import type { createRoot } from "react-dom/client";
 import type * as THREE from "three";
 import type { AssetAnimationMetadata } from "./tellus-animation-intents";
+import type { ProcPlantVegetationStats } from "./tellus-procplant-vegetation";
 import type { MeshStats } from "./webrtc-mesh";
 import type { WorldChatChannel, WorldChatMessage, WorldGeneratedThing, WorldPresence, WorldPortal, PortalEntered, WorldBiomeCell } from "./world-protocol";
 
@@ -443,6 +444,7 @@ export interface TellusWorldApi {
   // Live counters for the procedural vegetation + ambient physics (debug overlay).
   getAmbientStats(): {
     vegetation: { tier: number; chunks: number; grassIndices: number; trees: number };
+    procplants: ProcPlantVegetationStats;
     chunkTerrain: { active: number; visible: number; pending: number; failed: number } | null;
     physicsBodies: number;
     rapierSolids: number;
