@@ -607,6 +607,16 @@ function createTellusWorld(
     disabled: boolean; // a failure here disables the whole group, reverting to regular meshes
   }
   const instancePools = new Map<string, InstancePool>();
+  const refreshInstancePoolBounds = (pool: InstancePool) => {
+    let drawCount = 0;
+    for (const slot of pool.slotToThing.keys()) drawCount = Math.max(drawCount, slot + 1);
+    for (const instanced of pool.instanced) {
+      // Only submit the occupied slot range. Recycled holes inside it remain zero-scale matrices.
+      instanced.count = drawCount;
+      instanced.instanceMatrix.needsUpdate = true;
+      instanced.computeBoundingSphere();
+    }
+  };
   const generatedAssetPerfStats = () => {
     let instancedThings = 0;
     let instancedDraws = 0;
@@ -617,6 +627,8 @@ function createTellusWorld(
     let visibleMeshes = 0;
     let childMeshes = 0;
     let visibleChildMeshes = 0;
+    let frustumCulledChildMeshes = 0;
+    let alwaysRenderedChildMeshes = 0;
     let visibleBuildingLodProxies = 0;
     const materialKeys = new Set<string>();
     for (const mesh of generatedMeshes.values()) {
@@ -625,7 +637,11 @@ function createTellusWorld(
         const effectivelyVisible = parentVisible && child.visible;
         if (!(child instanceof THREE.Mesh) || child instanceof THREE.InstancedMesh) return;
         childMeshes++;
-        if (effectivelyVisible) visibleChildMeshes++;
+        if (effectivelyVisible) {
+          visibleChildMeshes++;
+          if (child.frustumCulled) frustumCulledChildMeshes++;
+          else alwaysRenderedChildMeshes++;
+        }
         if (effectivelyVisible && child.userData.generatedBuildingLodProxy) visibleBuildingLodProxies++;
         const materials = Array.isArray(child.material) ? child.material : [child.material];
         for (const material of materials) materialKeys.add(material.uuid);
@@ -680,6 +696,8 @@ function createTellusWorld(
       meshes: {
         childMeshes,
         visibleChildMeshes,
+        frustumCulledChildMeshes,
+        alwaysRenderedChildMeshes,
         visibleBuildingLodProxies,
         uniqueMaterials: materialKeys.size,
       },
@@ -688,6 +706,10 @@ function createTellusWorld(
         pools: instancePools.size,
         instancedThings,
         instancedDraws,
+        frustumCulledDraws: [...instancePools.values()].reduce(
+          (total, pool) => total + pool.instanced.filter((mesh) => mesh.frustumCulled).length,
+          0,
+        ),
         disabledUrls: instancingDisabledUrls.size,
       },
     };
@@ -4710,7 +4732,7 @@ function createTellusWorld(
       if (subMeshes.length === 0) return null;
       for (const sub of subMeshes) {
         const inst = new THREE.InstancedMesh(sub.geometry, sub.material, capacity);
-        inst.frustumCulled = false;
+        inst.frustumCulled = true;
         inst.castShadow = true;
         inst.receiveShadow = true;
         inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -4720,7 +4742,7 @@ function createTellusWorld(
           inst.setMatrixAt(i, INSTANCE_ZERO_MATRIX);
         }
         inst.instanceMatrix.needsUpdate = true;
-        inst.count = capacity;
+        inst.count = 0;
         instanced.push(inst);
       }
       for (const inst of instanced) scene.add(inst);
@@ -4756,7 +4778,7 @@ function createTellusWorld(
       const tmp = new THREE.Matrix4();
       for (const old of oldInstanced) {
         const inst = new THREE.InstancedMesh(old.geometry, old.material, newCapacity);
-        inst.frustumCulled = false;
+        inst.frustumCulled = true;
         inst.castShadow = true;
         inst.receiveShadow = true;
         inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -4780,6 +4802,7 @@ function createTellusWorld(
       }
       pool.instanced = newInstanced;
       pool.capacity = newCapacity;
+      refreshInstancePoolBounds(pool);
       return true;
     } catch (error) {
       for (const inst of newInstanced) {
@@ -4832,6 +4855,7 @@ function createTellusWorld(
       }
       pool.slotToThing.set(slot, thing.id);
       pool.thingToSlot.set(thing.id, slot);
+      refreshInstancePoolBounds(pool);
       mesh.visible = false;
       return true;
     } catch (error) {
@@ -4854,6 +4878,7 @@ function createTellusWorld(
         pool.thingToSlot.delete(thingId);
         pool.slotToThing.delete(slot);
         pool.freeSlots.push(slot);
+        refreshInstancePoolBounds(pool);
       } catch (error) {
         disableInstancePool(pool.modelUrl, error);
       }
@@ -5243,8 +5268,8 @@ function createTellusWorld(
         }
         for (let j = 0; j < pool.subMeshCount; j += 1) {
           pool.instanced[j].setMatrixAt(slot, subMeshes[j].matrixWorld);
-          pool.instanced[j].instanceMatrix.needsUpdate = true;
         }
+        refreshInstancePoolBounds(pool);
       } catch (error) {
         disableInstancePool(pool.modelUrl, error);
       }
