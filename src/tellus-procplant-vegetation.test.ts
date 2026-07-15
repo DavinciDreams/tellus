@@ -715,10 +715,16 @@ describe("procplant vegetation", () => {
       vegetation.update(1, 1, 1, 60, i * 16);
     }
     expect(vegetation.stats().queuedRebuilds).toBe(0);
+    const builtBeforeCrossing = vegetation.stats().chunksBuilt;
 
     vegetation.update(17, 1, 1, 60, 2_000);
     expect(vegetation.stats().queuedRebuilds).toBeGreaterThan(0);
     expect(vegetation.stats().queuedRebuilds).toBeLessThan(vegetation.stats().chunks / 2);
+    expect(vegetation.stats().chunksBuilt).toBe(builtBeforeCrossing);
+    expect(vegetation.stats().buildPausedForMotion).toBe(true);
+
+    vegetation.update(17, 1, 1, 60, 2_700);
+    expect(vegetation.stats().chunksBuilt).toBeGreaterThan(builtBeforeCrossing);
 
     vegetation.dispose();
   });

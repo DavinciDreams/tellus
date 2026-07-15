@@ -1417,12 +1417,18 @@ export function createProcPlantVegetation(
     const movementIntentActive = options.shouldPauseBuild?.() ?? false;
     const stationary = !movementIntentActive && (chunksBuilt === 0 || nowMs - lastPlayerMovedAt > 650);
     buildPausedForMotion = !stationary && rebuildQueue.length > 0;
-    const maxBuilds = stationary
-      ? (fps < 28 ? LOW_FPS_BUILD_BUDGET + 1 : NORMAL_BUILD_BUDGET + 2)
-      : (fps < 28 ? 1 : 2);
-    const buildMsBudget = stationary
-      ? (fps < 28 ? LOW_FPS_BUILD_MS_BUDGET + 1.5 : NORMAL_BUILD_MS_BUDGET + 3)
-      : (fps < 28 ? 1.8 : 3.4);
+    // A single uncached procedural community can take hundreds of milliseconds to assemble. A time
+    // budget cannot interrupt buildChunk once it begins, so starting even one while moving creates a
+    // visible boundary hitch. Keep the already-built 9x9 ring on screen and defer new/revised chunks
+    // until the player has stopped for a short settle period. The same full-detail geometry is built;
+    // this changes scheduling, not visual quality or density.
+    if (!stationary) {
+      lastUpdateMs = performance.now() - updateStartedAt;
+      maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
+      return;
+    }
+    const maxBuilds = fps < 28 ? LOW_FPS_BUILD_BUDGET + 1 : NORMAL_BUILD_BUDGET + 2;
+    const buildMsBudget = fps < 28 ? LOW_FPS_BUILD_MS_BUDGET + 1.5 : NORMAL_BUILD_MS_BUDGET + 3;
     const buildStartedAt = performance.now();
     let budget = maxBuilds;
     while (budget > 0 && rebuildQueue.length > 0) {
