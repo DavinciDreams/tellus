@@ -558,6 +558,114 @@ function createTellusWorld(
   let rendererContextLostCount = 0;
   let rendererContextRestoredCount = 0;
   let rendererContextLastEvent = "";
+  type WebGlGpuTimerExtension = {
+    TIME_ELAPSED_EXT: number;
+    GPU_DISJOINT_EXT: number;
+  };
+  type WebGlGpuTimer = {
+    gl: WebGL2RenderingContext;
+    extension: WebGlGpuTimerExtension;
+    active: WebGLQuery | null;
+    pending: WebGLQuery[];
+    lastMs: number;
+    maxMs: number;
+    totalMs: number;
+    samples: number;
+    failed: boolean;
+  };
+  let webGlGpuTimer: WebGlGpuTimer | null = null;
+
+  const initializeWebGlGpuTimer = () => {
+    if (!(renderer instanceof THREE.WebGLRenderer)) return;
+    const context = renderer.getContext();
+    if (!(context instanceof WebGL2RenderingContext)) return;
+    const extension = context.getExtension("EXT_disjoint_timer_query_webgl2") as
+      | WebGlGpuTimerExtension
+      | null;
+    if (!extension) return;
+    webGlGpuTimer = {
+      gl: context,
+      extension,
+      active: null,
+      pending: [],
+      lastMs: 0,
+      maxMs: 0,
+      totalMs: 0,
+      samples: 0,
+      failed: false,
+    };
+  };
+
+  const pollWebGlGpuTimer = () => {
+    const timer = webGlGpuTimer;
+    if (!timer || timer.failed) return;
+    try {
+      if (timer.gl.getParameter(timer.extension.GPU_DISJOINT_EXT)) {
+        for (const query of timer.pending) timer.gl.deleteQuery(query);
+        timer.pending.length = 0;
+        return;
+      }
+      while (timer.pending.length > 0) {
+        const query = timer.pending[0]!;
+        if (!timer.gl.getQueryParameter(query, timer.gl.QUERY_RESULT_AVAILABLE)) break;
+        timer.pending.shift();
+        const elapsedNanoseconds = Number(
+          timer.gl.getQueryParameter(query, timer.gl.QUERY_RESULT),
+        );
+        timer.gl.deleteQuery(query);
+        if (!Number.isFinite(elapsedNanoseconds)) continue;
+        const elapsedMs = elapsedNanoseconds / 1_000_000;
+        timer.lastMs = elapsedMs;
+        timer.maxMs = Math.max(timer.maxMs, elapsedMs);
+        timer.totalMs += elapsedMs;
+        timer.samples++;
+      }
+    } catch {
+      timer.failed = true;
+    }
+  };
+
+  const beginWebGlGpuTimer = (frame: number): boolean => {
+    const timer = webGlGpuTimer;
+    if (!timer || timer.failed) return false;
+    pollWebGlGpuTimer();
+    // Timer queries are diagnostic and can themselves add driver overhead. Sample roughly once per
+    // second at the target frame rate instead of wrapping every draw.
+    if (frame % 60 !== 0 || timer.active || timer.pending.length >= 3) return false;
+    try {
+      const query = timer.gl.createQuery();
+      if (!query) return false;
+      timer.gl.beginQuery(timer.extension.TIME_ELAPSED_EXT, query);
+      timer.active = query;
+      return true;
+    } catch {
+      timer.failed = true;
+      return false;
+    }
+  };
+
+  const endWebGlGpuTimer = () => {
+    const timer = webGlGpuTimer;
+    if (!timer?.active || timer.failed) return;
+    try {
+      timer.gl.endQuery(timer.extension.TIME_ELAPSED_EXT);
+      timer.pending.push(timer.active);
+      timer.active = null;
+    } catch {
+      timer.failed = true;
+      timer.active = null;
+    }
+  };
+
+  const disposeWebGlGpuTimer = () => {
+    const timer = webGlGpuTimer;
+    if (!timer) return;
+    if (timer.active) timer.gl.deleteQuery(timer.active);
+    for (const query of timer.pending) timer.gl.deleteQuery(query);
+    timer.pending.length = 0;
+    timer.active = null;
+    webGlGpuTimer = null;
+  };
 
   const generated: GeneratedThing[] = [];
   const logs: TellusLog[] = [];
@@ -3007,6 +3115,19 @@ function createTellusWorld(
         reflectionSkips,
       },
       programs: info.programs?.length ?? 0,
+      gpuTiming: webGlGpuTimer
+        ? {
+            supported: true,
+            failed: webGlGpuTimer.failed,
+            lastMs: Math.round(webGlGpuTimer.lastMs * 10) / 10,
+            averageMs: webGlGpuTimer.samples > 0
+              ? Math.round((webGlGpuTimer.totalMs / webGlGpuTimer.samples) * 10) / 10
+              : 0,
+            maxMs: Math.round(webGlGpuTimer.maxMs * 10) / 10,
+            samples: webGlGpuTimer.samples,
+            pending: webGlGpuTimer.pending.length,
+          }
+        : { supported: false },
       scene: {
         visibleMeshes,
         visibleShadowCasters,
@@ -3139,6 +3260,12 @@ function createTellusWorld(
     perfDiagnostics.heartbeat.lastGapMs = 0;
     perfDiagnostics.heartbeat.maxGapMs = 0;
     perfDiagnostics.heartbeat.count = 0;
+    if (webGlGpuTimer) {
+      webGlGpuTimer.lastMs = 0;
+      webGlGpuTimer.maxMs = 0;
+      webGlGpuTimer.totalMs = 0;
+      webGlGpuTimer.samples = 0;
+    }
     recentLongTasks.length = 0;
     return true;
   };
@@ -9400,7 +9527,7 @@ function createTellusWorld(
     }
   };
 
-  const animate = async () => {
+  const animate = () => {
     if (destroyed || !renderer) return;
     const now = performance.now();
     const frameStartedAt = now;
@@ -9726,8 +9853,13 @@ function createTellusWorld(
         if (renderer.shadowMap.enabled && perfDiagnostics.frames % shadowEveryDebug() === 0) {
           sun.shadow.needsUpdate = true;
         }
-        renderPortalPreview();
-        renderer.render(scene, camera);
+        const gpuTimerActive = beginWebGlGpuTimer(perfDiagnostics.frames);
+        try {
+          renderPortalPreview();
+          renderer.render(scene, camera);
+        } finally {
+          if (gpuTimerActive) endWebGlGpuTimer();
+        }
       }
       perfDiagnostics.phases.renderMs = performance.now() - phaseStartedAt;
       perfDiagnostics.phases.maxRenderMs = Math.max(
@@ -10367,6 +10499,7 @@ function createTellusWorld(
         await renderer.init();
       } else {
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        initializeWebGlGpuTimer();
         addLog({
           agentId: "world",
           agentName: "Tellus",
@@ -11502,6 +11635,7 @@ function createTellusWorld(
       transformControls?.dispose();
       disposeWallDoorPlacementGhost();
       disposePortalPreview();
+      disposeWebGlGpuTimer();
       renderer?.dispose();
       if (renderer?.domElement.parentElement === container) {
         container.removeChild(renderer.domElement);
@@ -11686,6 +11820,80 @@ function BuildingMaterialTile({
 
 // One avatar-picker grid tile: store thumbnail when it loads, else a colored-initial fallback
 // ("classic" has no store thumbnail and always renders the initial tile). Click = select.
+interface DebugFpsValueProps {
+  worldRef: React.RefObject<TellusWorldApi | null>;
+}
+
+function DebugFpsValue({ worldRef }: DebugFpsValueProps): React.ReactElement {
+  const [fps, setFps] = useState(() => worldRef.current?.getFps() ?? 0);
+
+  useEffect(() => {
+    const refresh = () => setFps(worldRef.current?.getFps() ?? 0);
+    refresh();
+    const id = window.setInterval(refresh, 250);
+    return () => window.clearInterval(id);
+  }, [worldRef]);
+
+  return <strong>{fps}</strong>;
+}
+
+interface DebugLiveRowsProps {
+  worldRef: React.RefObject<TellusWorldApi | null>;
+  rxEnabled: boolean;
+}
+
+function DebugLiveRows({ worldRef, rxEnabled }: DebugLiveRowsProps): React.ReactElement {
+  const [p2pStats, setP2pStats] = useState<MeshStats | null>(null);
+  const [ambientStats, setAmbientStats] = useState<ReturnType<
+    TellusWorldApi["getAmbientStats"]
+  > | null>(null);
+
+  useEffect(() => {
+    const refresh = () => {
+      setP2pStats(worldRef.current?.getP2pStats() ?? null);
+      setAmbientStats(worldRef.current?.getAmbientStats() ?? null);
+    };
+    refresh();
+    const id = window.setInterval(refresh, 1000);
+    return () => window.clearInterval(id);
+  }, [worldRef]);
+
+  return (
+    <>
+      {ambientStats && (
+        <>
+          <div className="debug-stats-row">
+            procplants {ambientStats.procplants.chunks} chunks · {ambientStats.procplants.grassInstances} grass tufts ·{" "}
+            {Math.round(ambientStats.procplants.grassTriangles)} grass tris · {ambientStats.procplants.plants} communities ·{" "}
+            {ambientStats.procplants.organDraws} organ draws
+          </div>
+          <div className="debug-stats-row">
+            plant work {ambientStats.procplants.lastUpdateMs} ms · build {ambientStats.procplants.lastBuildMs} ms /{" "}
+            {ambientStats.procplants.maxBuildMs} max · queue {ambientStats.procplants.queuedRebuilds} · LOD{" "}
+            {ambientStats.procplants.lod0}/{ambientStats.procplants.lod1}/{ambientStats.procplants.lod2} · physics{" "}
+            {ambientStats.physicsBodies} · rapier {ambientStats.rapierSolids}
+          </div>
+        </>
+      )}
+      {ambientStats?.chunkTerrain && (
+        <div className="debug-stats-row">
+          terrain chunks {ambientStats.chunkTerrain.visible} visible / {ambientStats.chunkTerrain.active} cached ·{" "}
+          {ambientStats.chunkTerrain.pending} pending · {ambientStats.chunkTerrain.failed} failed
+        </div>
+      )}
+      <div className="debug-stats-row">
+        P2P {p2pStats?.tx ? "TX on" : "TX off"} ·{" "}
+        {(p2pStats?.rx ?? rxEnabled) ? "RX on" : "RX off"} · {p2pStats?.rxStreams ?? 0}/16 streams
+      </div>
+      {(p2pStats?.peers ?? []).slice(0, 4).map((peer) => (
+        <div key={peer.id} className="debug-stats-row">
+          {peer.id.slice(0, 6)} {peer.state} · {Math.round(peer.kbps)} kbps
+        </div>
+      ))}
+    </>
+  );
+}
+
 function App(): React.ReactElement {
   const { askConfirm, askPrompt, dialogs } = useDialogs();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -11765,7 +11973,6 @@ function App(): React.ReactElement {
   const [portalTargetWorldId, setPortalTargetWorldId] = useState("");
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
   const [showFps, setShowFps] = useState(false);
-  const [fps, setFps] = useState(0);
   const [debugModeFlags, setDebugModeFlags] = useState<string[]>(() => readDebugModeFlags());
   const brandClicksRef = useRef<number[]>([]);
   const handleBrandTripleClick = () => {
@@ -11811,10 +12018,6 @@ function App(): React.ReactElement {
   const [selectedMic, setSelectedMic] = useState<string>("");
   const [selectedCam, setSelectedCam] = useState<string>("");
   const [p2pError, setP2pError] = useState<string | null>(null);
-  const [p2pStats, setP2pStats] = useState<MeshStats | null>(null);
-  const [ambientStats, setAmbientStats] = useState<ReturnType<
-    TellusWorldApi["getAmbientStats"]
-  > | null>(null);
   // ── Camera mode (1st/3rd person; the world layer owns the actual camera + persistence) ──
   const [cameraMode, setCameraModeState] = useState<"first" | "third">(() => {
     try {
@@ -12026,16 +12229,6 @@ function App(): React.ReactElement {
     setSelectedCam(id);
     void worldRef.current?.setP2pDevices(selectedMic || undefined, id || undefined).then(attachSelfPreview);
   };
-
-  // Sample mesh stats while the social panel OR the debug overlay is open (≈1Hz).
-  useEffect(() => {
-    if (!worldChatOpen && !showFps) return;
-    const id = window.setInterval(() => {
-      setP2pStats(worldRef.current?.getP2pStats() ?? null);
-      setAmbientStats(worldRef.current?.getAmbientStats() ?? null);
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [worldChatOpen, showFps]);
 
   // ── "Your Agent" panel handlers (self-contained; pure fetch against the Hyades world agent API) ──
   const fetchAgentStatus = useCallback(async (signal?: AbortSignal): Promise<AgentStatus | null> => {
@@ -14557,13 +14750,6 @@ function App(): React.ReactElement {
       .filter((thing): thing is WorldGeneratedThing => thing !== null);
   };
 
-  useEffect(() => {
-    if (!showFps) return;
-    const id = window.setInterval(() => {
-      setFps(worldRef.current?.getFps() ?? 0);
-    }, 250);
-    return () => window.clearInterval(id);
-  }, [showFps]);
 
   useEffect(() => {
     window.__tellusSnapshot = () => snapshot;
@@ -15387,7 +15573,7 @@ function App(): React.ReactElement {
     <div className="debug-stats-panel" aria-label="Tellus debug stats">
       <div className="debug-stats-grid">
         <span>FPS</span>
-        <strong>{fps}</strong>
+        <DebugFpsValue worldRef={worldRef} />
         <span>Items</span>
         <strong>{debugGeneratedStats.total}</strong>
         <span>Ready</span>
@@ -15405,27 +15591,7 @@ function App(): React.ReactElement {
         <span>Agents</span>
         <strong>{remoteAgents.length}</strong>
       </div>
-      {ambientStats && (
-        <>
-          <div className="debug-stats-row">
-            procplants {ambientStats.procplants.chunks} chunks · {ambientStats.procplants.grassInstances} grass tufts ·{" "}
-            {Math.round(ambientStats.procplants.grassTriangles)} grass tris · {ambientStats.procplants.plants} communities ·{" "}
-            {ambientStats.procplants.organDraws} organ draws
-          </div>
-          <div className="debug-stats-row">
-            plant work {ambientStats.procplants.lastUpdateMs} ms · build {ambientStats.procplants.lastBuildMs} ms /{" "}
-            {ambientStats.procplants.maxBuildMs} max · queue {ambientStats.procplants.queuedRebuilds} · LOD{" "}
-            {ambientStats.procplants.lod0}/{ambientStats.procplants.lod1}/{ambientStats.procplants.lod2} · physics{" "}
-            {ambientStats.physicsBodies} · rapier {ambientStats.rapierSolids}
-          </div>
-        </>
-      )}
-      {ambientStats?.chunkTerrain && (
-        <div className="debug-stats-row">
-          terrain chunks {ambientStats.chunkTerrain.visible} visible / {ambientStats.chunkTerrain.active} cached ·{" "}
-          {ambientStats.chunkTerrain.pending} pending · {ambientStats.chunkTerrain.failed} failed
-        </div>
-      )}
+      <DebugLiveRows worldRef={worldRef} rxEnabled={rxEnabled} />
       {isChunkedWorldId(activeWorldId ?? "") && (() => {
         const side = 2 * chunkLoadRadius + 1;
         return (
@@ -15447,10 +15613,6 @@ function App(): React.ReactElement {
           </div>
         );
       })()}
-      <div className="debug-stats-row">
-        P2P {p2pStats?.tx ? "TX on" : "TX off"} ·{" "}
-        {(p2pStats?.rx ?? rxEnabled) ? "RX on" : "RX off"} · {p2pStats?.rxStreams ?? 0}/16 streams
-      </div>
       {selectedRuntimeProfile && activeSelectedThing && (
         <div className="debug-object-profile">
           <strong>{activeSelectedThing.prompt}</strong>
@@ -15467,11 +15629,6 @@ function App(): React.ReactElement {
           )}
         </div>
       )}
-      {(p2pStats?.peers ?? []).slice(0, 4).map((peer) => (
-        <div key={peer.id} className="debug-stats-row">
-          {peer.id.slice(0, 6)} {peer.state} · {Math.round(peer.kbps)} kbps
-        </div>
-      ))}
       <div className="debug-stats-hint">triple-click logo or press ` to hide</div>
     </div>
   ) : null;
