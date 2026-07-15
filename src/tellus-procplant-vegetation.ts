@@ -158,6 +158,7 @@ const PROC_TREE_DETAIL_DISTANCE = 58;
 const PROC_TREE_DETAIL_DISTANCE_THIRD = 72;
 const PROCPLANT_RENDER_STYLE_REVISION = 5;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
+const BIOME_MIX_SERVER_REFRESH_FALLBACK_MS = 60_000;
 const LOW_FPS_BUILD_BUDGET = 1;
 const NORMAL_BUILD_BUDGET = 2;
 const LOW_FPS_BUILD_MS_BUDGET = 2.5;
@@ -706,6 +707,7 @@ export function createProcPlantVegetation(
   let builtLastUpdate = 0;
   let buildDeferred = false;
   let biomeMixServerRefreshInFlight = false;
+  let biomeMixServerRefreshTimer: number | null = null;
   let activeBiomeMixSignature = "";
   let lastPlayerX: number | null = null;
   let lastPlayerZ: number | null = null;
@@ -874,6 +876,9 @@ export function createProcPlantVegetation(
     window.addEventListener(BIOME_MIX_STORAGE_EVENT, onBiomeMixCustomEvent);
     window.addEventListener("focus", onBiomeMixFocus);
     document.addEventListener("visibilitychange", onBiomeMixVisibility);
+    biomeMixServerRefreshTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") refreshBiomeMixesFromServer();
+    }, BIOME_MIX_SERVER_REFRESH_FALLBACK_MS);
     refreshBiomeMixesFromServer();
   }
 
@@ -1479,6 +1484,10 @@ export function createProcPlantVegetation(
     dispose: () => {
       disposed = true;
       if (typeof window !== "undefined") {
+        if (biomeMixServerRefreshTimer !== null) {
+          window.clearInterval(biomeMixServerRefreshTimer);
+          biomeMixServerRefreshTimer = null;
+        }
         window.removeEventListener("storage", onBiomeMixStorage);
         window.removeEventListener(BIOME_MIX_STORAGE_EVENT, onBiomeMixCustomEvent);
         window.removeEventListener("focus", onBiomeMixFocus);
