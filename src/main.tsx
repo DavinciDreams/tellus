@@ -46,7 +46,10 @@ import {
   PROCPLANT_PLACEABLE_CATALOG,
   procPlantPlaceableById,
 } from "./tellus-procplant-biomes";
-import { createProcPlantVegetation } from "./tellus-procplant-vegetation";
+import {
+  createProcPlantVegetation,
+  type ProcPlantVegetationStats,
+} from "./tellus-procplant-vegetation";
 import { staticTerrainAutoVegetationEnabled } from "./tellus-static-terrain";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
 import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, resetLiveMirrors } from "./tellus-procedural-assets";
@@ -1431,6 +1434,8 @@ function createTellusWorld(
           plants: 0,
           manualPlants: 0,
           instances: 0,
+          grassInstances: 0,
+          grassTriangles: 0,
           stemTriangles: 0,
           organDraws: 0,
           lod0: 0,
@@ -15376,12 +15381,19 @@ function App(): React.ReactElement {
         <strong>{remoteAgents.length}</strong>
       </div>
       {ambientStats && (
-        <div className="debug-stats-row">
-          veg T{ambientStats.vegetation.tier} · {ambientStats.vegetation.chunks} chunks ·{" "}
-          {Math.round(ambientStats.vegetation.grassIndices / 3)} grass tris ·{" "}
-          {ambientStats.vegetation.trees} trees · physics {ambientStats.physicsBodies} · rapier{" "}
-          {ambientStats.rapierSolids}
-        </div>
+        <>
+          <div className="debug-stats-row">
+            procplants {ambientStats.procplants.chunks} chunks · {ambientStats.procplants.grassInstances} grass tufts ·{" "}
+            {Math.round(ambientStats.procplants.grassTriangles)} grass tris · {ambientStats.procplants.plants} communities ·{" "}
+            {ambientStats.procplants.organDraws} organ draws
+          </div>
+          <div className="debug-stats-row">
+            plant work {ambientStats.procplants.lastUpdateMs} ms · build {ambientStats.procplants.lastBuildMs} ms /{" "}
+            {ambientStats.procplants.maxBuildMs} max · queue {ambientStats.procplants.queuedRebuilds} · LOD{" "}
+            {ambientStats.procplants.lod0}/{ambientStats.procplants.lod1}/{ambientStats.procplants.lod2} · physics{" "}
+            {ambientStats.physicsBodies} · rapier {ambientStats.rapierSolids}
+          </div>
+        </>
       )}
       {ambientStats?.chunkTerrain && (
         <div className="debug-stats-row">

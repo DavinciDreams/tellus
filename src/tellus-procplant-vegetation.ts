@@ -69,6 +69,8 @@ export interface ProcPlantVegetationStats {
   plants: number;
   manualPlants: number;
   instances: number;
+  grassInstances: number;
+  grassTriangles: number;
   stemTriangles: number;
   organDraws: number;
   lod0: number;
@@ -114,6 +116,8 @@ export interface ProcPlantManualPlacement {
 interface ChunkStats {
   plants: number;
   instances: number;
+  grassInstances: number;
+  grassTriangles: number;
   stemTriangles: number;
   organDraws: number;
 }
@@ -590,6 +594,8 @@ const emptyStats = (): ProcPlantVegetationStats => ({
   plants: 0,
   manualPlants: 0,
   instances: 0,
+  grassInstances: 0,
+  grassTriangles: 0,
   stemTriangles: 0,
   organDraws: 0,
   lod0: 0,
@@ -920,7 +926,14 @@ export function createProcPlantVegetation(
 
   const buildChunk = (chunk: ActiveChunk) => {
     disposeGroup(chunk.group);
-    chunk.stats = { plants: 0, instances: 0, stemTriangles: 0, organDraws: 0 };
+    chunk.stats = {
+      plants: 0,
+      instances: 0,
+      grassInstances: 0,
+      grassTriangles: 0,
+      stemTriangles: 0,
+      organDraws: 0,
+    };
     chunk.rev = terrainRev;
     chunk.styleRev = PROCPLANT_RENDER_STYLE_REVISION;
     const seed = procPlantChunkSeed(options.worldId, chunk.cx, chunk.cz, 0);
@@ -1295,6 +1308,12 @@ export function createProcPlantVegetation(
       mesh.receiveShadow = false;
       chunk.group.add(mesh);
       chunk.stats.organDraws++;
+      if (bucket.key.startsWith("grassCarpet:")) {
+        const vertices = bucket.geometry.getAttribute("position")?.count ?? 0;
+        const trianglesPerInstance = (bucket.geometry.getIndex()?.count ?? vertices) / 3;
+        chunk.stats.grassInstances += bucket.instances.length;
+        chunk.stats.grassTriangles += trianglesPerInstance * bucket.instances.length;
+      }
     }
   };
 
@@ -1360,7 +1379,14 @@ export function createProcPlantVegetation(
             styleRev: 0,
             lastNeededMs: nowMs,
             group: new THREE.Group(),
-            stats: { plants: 0, instances: 0, stemTriangles: 0, organDraws: 0 },
+            stats: {
+              plants: 0,
+              instances: 0,
+              grassInstances: 0,
+              grassTriangles: 0,
+              stemTriangles: 0,
+              organDraws: 0,
+            },
           };
           chunksCreated++;
           chunk.group.name = `tellus-procplants-${key}`;
@@ -1439,6 +1465,8 @@ export function createProcPlantVegetation(
     for (const chunk of active.values()) {
       out.plants += chunk.stats.plants;
       out.instances += chunk.stats.instances;
+      out.grassInstances += chunk.stats.grassInstances;
+      out.grassTriangles += chunk.stats.grassTriangles;
       out.stemTriangles += chunk.stats.stemTriangles;
       out.organDraws += chunk.stats.organDraws;
       if (chunk.lod === 0) out.lod0++;
