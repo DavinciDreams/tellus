@@ -635,6 +635,17 @@ const normalizeManualPlacement = (value: unknown): ProcPlantManualPlacement | nu
   };
 };
 
+const manualPlacementsEqual = (
+  left: ProcPlantManualPlacement,
+  right: ProcPlantManualPlacement,
+): boolean =>
+  left.id === right.id &&
+  left.presetId === right.presetId &&
+  left.seed === right.seed &&
+  left.x === right.x &&
+  left.z === right.z &&
+  left.scale === right.scale;
+
 const renderableEntriesForMix = (mix: TellusBiomeMixDefinition): TellusBiomeMixEntry[] =>
   mix.entries.filter((entry) =>
     entry.enabled !== false &&
@@ -1406,7 +1417,7 @@ export function createProcPlantVegetation(
       const changedChunks = new Set<string>();
       for (const [id, current] of manualPlacements) {
         const next = nextPlacements.get(id);
-        if (!next || JSON.stringify(next) !== JSON.stringify(current)) {
+        if (!next || !manualPlacementsEqual(next, current)) {
           changedChunks.add(manualPlacementChunks.get(id) ?? chunkKeyAt(current.x, current.z));
           if (next) changedChunks.add(chunkKeyAt(next.x, next.z));
         }
