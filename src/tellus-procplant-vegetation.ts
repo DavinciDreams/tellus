@@ -51,6 +51,7 @@ export interface ProcPlantVegetationOptions {
   sampleHeight: (x: number, z: number) => number | null;
   samplePaint: (x: number, z: number) => TerrainPaintKind | null;
   sampleEcology?: (x: number, z: number, height: number, paint: TerrainPaintKind | null, seed: number) => EcologySample;
+  ecologyRegionKey?: (x: number, z: number) => string;
   bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
   chunkSize?: number;
   maxRing?: number;
@@ -92,6 +93,7 @@ export interface ProcPlantVegetationStats {
 export interface ProcPlantVegetationSystem {
   update(px: number, pz: number, playerY: number, fps: number, nowMs: number): void;
   notifyTerrainChanged(): void;
+  notifyRegionsChanged(regions: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }>): void;
   placeManualPlant(placement: ProcPlantManualPlacement, options?: { persist?: boolean }): boolean;
   replaceManualPlants(placements: ProcPlantManualPlacement[], options?: { persist?: boolean }): void;
   removeManualPlant(id: string, options?: { persist?: boolean }): boolean;
@@ -934,6 +936,29 @@ export function createProcPlantVegetation(
     const z0 = chunk.cz * chunkSize;
     const attempts = plantCap * 5;
     const grassCarpetPaints = new Set<TerrainPaintKind>();
+    const ecologyMixByRegion = new Map<string, TellusBiomeMixDefinition | undefined>();
+    const ecologyMixAt = (
+      x: number,
+      z: number,
+      height: number,
+      paint: TerrainPaintKind | null,
+      ecologySeed: number,
+    ): TellusBiomeMixDefinition | undefined => {
+      const regionKey = options.ecologyRegionKey?.(x, z) ?? chunk.key;
+      if (ecologyMixByRegion.has(regionKey)) return ecologyMixByRegion.get(regionKey);
+      const ecology = options.sampleEcology?.(x, z, height, paint, ecologySeed) ??
+        resolveEcologySample({
+          seed: ecologySeed,
+          x,
+          z,
+          height,
+          slope: estimateSlope(x, z, height),
+          terrainPaint: paint,
+        });
+      const mix = activeBiomeMixRegistry.mixesByEcologyBiome[ecology.biome];
+      ecologyMixByRegion.set(regionKey, mix);
+      return mix;
+    };
 
     const grassRing = Math.max(
       Math.abs(chunk.cx - Math.floor((lastPlayerX ?? chunk.cx * chunkSize) / chunkSize)),
@@ -966,7 +991,8 @@ export function createProcPlantVegetation(
         if (options.isExcluded?.(x, z, height)) continue;
         const paint = options.samplePaint(x, z);
         if (!paint || paint === "stone" || paint === "brick") continue;
-        const mix = activeBiomeMixRegistry.mixesByTerrainPaint[paint];
+        const mix = ecologyMixAt(x, z, height, paint, cellSeed) ??
+          activeBiomeMixRegistry.mixesByTerrainPaint[paint];
         if (!mix) continue;
         const grassEntries = mix.entries
           .filter((entry) => entry.enabled && !isAssetMixEntry(entry))
@@ -1048,7 +1074,8 @@ export function createProcPlantVegetation(
           terrainPaint: paint,
         });
       const lodDensity = chunk.lod === 2 ? 0.65 : chunk.lod === 1 ? 0.52 : 0.48;
-      const customMix = paint ? activeBiomeMixRegistry.mixesByTerrainPaint[paint] : undefined;
+      const customMix = activeBiomeMixRegistry.mixesByEcologyBiome[ecology.biome] ??
+        (paint ? activeBiomeMixRegistry.mixesByTerrainPaint[paint] : undefined);
       const customEntry = customMix ? chooseBiomeMixEntry(customMix, rand, densityMultiplier, lodDensity) : null;
       if (customMix && !customEntry) continue;
       const patch = customEntry ? null : biomePatchForEcology(ecology, patchSeed) ?? biomePatchForPaint(paint, patchSeed);
@@ -1426,6 +1453,20 @@ export function createProcPlantVegetation(
     notifyTerrainChanged: () => {
       if (!terrainDirty) terrainInvalidations++;
       terrainDirty = true;
+    },
+    notifyRegionsChanged: (regions) => {
+      if (regions.length === 0) return;
+      terrainInvalidations++;
+      for (const [key, chunk] of active) {
+        const minX = chunk.cx * chunkSize;
+        const minZ = chunk.cz * chunkSize;
+        if (!regions.some((region) =>
+          minX < region.maxX && minX + chunkSize > region.minX &&
+          minZ < region.maxZ && minZ + chunkSize > region.minZ
+        )) continue;
+        chunk.rev = -1;
+        enqueue(key, true);
+      }
     },
     placeManualPlant: (placement, writeOptions = {}) => {
       if (disposed) return false;
