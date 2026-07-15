@@ -17,10 +17,17 @@ import {
   procPlantPlaceableById,
   treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
-import { buildingMaterialForEcology, resolveEcologySample } from "./tellus-ecology";
+import {
+  buildingMaterialForEcology,
+  resolveEcologySample,
+  worldBiomeCellBounds,
+  worldBiomeCellCoordinates,
+} from "./tellus-ecology";
 import { createProcPlantVegetation, procPlantChunkSeed } from "./tellus-procplant-vegetation";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 import { SEA_LEVEL } from "./tellus-constants";
+import type { TellusBiomeMixDefinition } from "./tellus-biome-mix";
+import type { EcologyBiomeId } from "./tellus-ecology";
 
 const templateBounds = (template: ProcPlantTemplate) => {
   const min = new THREE.Vector3(Infinity, Infinity, Infinity);
@@ -194,6 +201,7 @@ describe("procplant vegetation", () => {
     const patch = biomePatchForEcology(ecology, 7);
 
     expect(ecology.biome).toBe("estuary");
+    expect(ecology.biomeWeights).toEqual({ estuary: 1 });
     expect(["reedSedge", "mangroveRoots", "phiFern", "furGrass"]).toContain(patch?.primary);
     expect(buildingMaterialForEcology(ecology, "simple-house")).toBe("brick-cottage");
   });
@@ -210,6 +218,21 @@ describe("procplant vegetation", () => {
 
     expect(ecology.biome).toBe("temperate-rain-forest");
     expect(buildingMaterialForEcology(ecology, "simple-house")).toMatch(/shingle|timber-frame/);
+  });
+
+  it("maps finite and chunked world positions onto the authoritative 24 by 24 biome grid", () => {
+    expect(worldBiomeCellCoordinates(0, 0, { chunkedWorldChunks: { w: 64, h: 64 } })).toEqual({ cx: 0, cz: 0 });
+    expect(worldBiomeCellCoordinates(255, 511, { chunkedWorldChunks: { w: 64, h: 64 } })).toEqual({ cx: 0, cz: 1 });
+    expect(worldBiomeCellCoordinates(256, 512, { chunkedWorldChunks: { w: 64, h: 64 } })).toEqual({ cx: 1, cz: 2 });
+    expect(worldBiomeCellCoordinates(64 * 96, 64 * 96, { chunkedWorldChunks: { w: 64, h: 64 } })).toEqual({ cx: 23, cz: 23 });
+    expect(worldBiomeCellCoordinates(-144, -144, { worldRadius: 144 })).toEqual({ cx: 0, cz: 0 });
+    expect(worldBiomeCellCoordinates(0, 0, { worldRadius: 144 })).toEqual({ cx: 12, cz: 12 });
+    expect(worldBiomeCellBounds(1, 2, { chunkedWorldChunks: { w: 64, h: 64 } })).toEqual({
+      minX: 256,
+      maxX: 512,
+      minZ: 512,
+      maxZ: 768,
+    });
   });
 
   it("lets climate and substrate split one terrain paint into different biomes", () => {
@@ -442,6 +465,82 @@ describe("procplant vegetation", () => {
     vegetation.dispose();
   });
 
+  it("samples grass ecology once per biome region while preserving region boundaries", () => {
+    const grassMix = (biome: EcologyBiomeId): TellusBiomeMixDefinition => ({
+      version: 1,
+      id: `${biome}-grass`,
+      label: `${biome} grass`,
+      source: "ecology",
+      ecologyBiome: biome,
+      seed: 1,
+      density: 1,
+      diversity: 1,
+      targetVerticesPerChunk: 12_000,
+      entries: [{
+        id: `${biome}-fur-grass`,
+        label: "Fur Grass",
+        source: "preset",
+        presetId: "furGrass",
+        weight: 1,
+        density: 1,
+        scale: 1,
+        environment: { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
+        seed: 2,
+        enabled: true,
+      }],
+    });
+    const sampledRegions = new Set<string>();
+    let ecologySamples = 0;
+    const vegetation = createProcPlantVegetation({
+      scene: new THREE.Scene(),
+      worldId: "chunked-biome-boundary-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      sampleEcology: (x, z, height, paint, seed) => {
+        ecologySamples++;
+        const region = x < 8 ? "left" : "right";
+        sampledRegions.add(region);
+        return resolveEcologySample({
+          seed,
+          x,
+          z,
+          height,
+          terrainPaint: paint,
+          biomeCell: {
+            cx: region === "left" ? 0 : 1,
+            cz: 0,
+            biome: region === "left" ? "grassland" : "desert",
+            intensity: 1,
+          },
+        });
+      },
+      ecologyRegionKey: (x) => x < 8 ? "left" : "right",
+      bounds: { minX: 0, maxX: 16, minZ: 0, maxZ: 16 },
+      chunkSize: 16,
+      maxRing: 0,
+      densityMultiplier: 1,
+      biomeMixRegistry: {
+        version: 1,
+        worldId: "chunked-biome-boundary-test",
+        updatedAt: new Date(0).toISOString(),
+        mixesByTerrainPaint: {},
+        mixesByEcologyBiome: {
+          grassland: grassMix("grassland"),
+          desert: grassMix("desert"),
+        },
+      },
+    });
+
+    for (let i = 0; i < 20 && vegetation.stats().chunksBuilt === 0; i++) {
+      vegetation.update(1, 1, 1, 60, i * 16);
+    }
+
+    expect(sampledRegions).toEqual(new Set(["left", "right"]));
+    expect(ecologySamples).toBeLessThan(25);
+
+    vegetation.dispose();
+  });
+
   it("keeps procplant placements out of shoreline water", () => {
     const scene = new THREE.Scene();
     const vegetation = createProcPlantVegetation({
@@ -649,6 +748,27 @@ describe("procplant vegetation", () => {
     vegetation.replaceManualPlants([{ ...placement }], { persist: false });
     expect(vegetation.stats().queuedRebuilds).toBe(0);
     expect(vegetation.stats().chunksBuilt).toBe(chunksBuilt);
+
+    vegetation.dispose();
+  });
+
+  it("rebuilds only procplant chunks intersecting a changed biome region", () => {
+    const vegetation = createProcPlantVegetation({
+      scene: new THREE.Scene(),
+      worldId: "chunked-targeted-biome-patch-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -80, maxX: 80, minZ: -80, maxZ: 80 },
+      densityMultiplier: 0,
+      viewMode: () => "first",
+    });
+    vegetation.update(0, 0, 1, 60, 0);
+    for (let i = 1; i < 80 && vegetation.stats().queuedRebuilds > 0; i++) {
+      vegetation.update(0, 0, 1, 60, i * 16);
+    }
+
+    vegetation.notifyRegionsChanged([{ minX: 0, maxX: 16, minZ: 0, maxZ: 16 }]);
+    expect(vegetation.stats().queuedRebuilds).toBe(1);
 
     vegetation.dispose();
   });

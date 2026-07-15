@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { CHUNK_SPAN, SEA_LEVEL } from "./tellus-constants";
+import { CHUNK_SPAN, SEA_LEVEL, WORLD_RADIUS } from "./tellus-constants";
 import type { BuildingMaterialStyle } from "./tellus-proc-buildings";
 import {
   resolveProcPlantCommunity,
@@ -29,6 +29,55 @@ export interface EcologySampleInput {
   terrainPaint?: TerrainPaintKind | null;
   biomeCell?: WorldBiomeCell | null;
 }
+
+export const WORLD_BIOME_GRID_SIZE = 24;
+
+export interface WorldBiomeGridContext {
+  chunkedWorldChunks?: { w: number; h: number } | null;
+  worldRadius?: number;
+}
+
+const biomeGridAxis = (value: number, min: number, span: number): number =>
+  Math.max(0, Math.min(WORLD_BIOME_GRID_SIZE - 1, Math.floor(((value - min) / span) * WORLD_BIOME_GRID_SIZE)));
+
+export const worldBiomeCellCoordinates = (
+  x: number,
+  z: number,
+  context: WorldBiomeGridContext = {},
+): { cx: number; cz: number } => {
+  const chunks = context.chunkedWorldChunks;
+  if (chunks && chunks.w > 0 && chunks.h > 0) {
+    return {
+      cx: biomeGridAxis(x, 0, chunks.w * CHUNK_SPAN),
+      cz: biomeGridAxis(z, 0, chunks.h * CHUNK_SPAN),
+    };
+  }
+  const radius = Math.max(1, context.worldRadius ?? WORLD_RADIUS);
+  return {
+    cx: biomeGridAxis(x, -radius, radius * 2),
+    cz: biomeGridAxis(z, -radius, radius * 2),
+  };
+};
+
+export const worldBiomeCellBounds = (
+  cx: number,
+  cz: number,
+  context: WorldBiomeGridContext = {},
+): { minX: number; maxX: number; minZ: number; maxZ: number } => {
+  const chunks = context.chunkedWorldChunks;
+  const minX = chunks ? 0 : -(context.worldRadius ?? WORLD_RADIUS);
+  const minZ = chunks ? 0 : -(context.worldRadius ?? WORLD_RADIUS);
+  const spanX = chunks ? chunks.w * CHUNK_SPAN : (context.worldRadius ?? WORLD_RADIUS) * 2;
+  const spanZ = chunks ? chunks.h * CHUNK_SPAN : (context.worldRadius ?? WORLD_RADIUS) * 2;
+  const cellWidth = spanX / WORLD_BIOME_GRID_SIZE;
+  const cellDepth = spanZ / WORLD_BIOME_GRID_SIZE;
+  return {
+    minX: minX + cx * cellWidth,
+    maxX: minX + (cx + 1) * cellWidth,
+    minZ: minZ + cz * cellDepth,
+    maxZ: minZ + (cz + 1) * cellDepth,
+  };
+};
 
 export const ECOLOGY_BIOMES: EcologyBiomeId[] = [
   "tropical-rain-forest",
@@ -117,7 +166,6 @@ export const resolveEcologySample = (input: EcologySampleInput): EcologySample =
   const weights: Partial<Record<EcologyBiomeId, number>> = {};
   const authoredBiome = normalizeEcologyBiomeId(input.biomeCell?.becoming ?? input.biomeCell?.biome);
 
-  if (authoredBiome) addWeight(weights, authoredBiome, Math.max(2.5, (input.biomeCell?.intensity ?? 1) * 2.5));
   if (salinity > 0.35) addWeight(weights, coastal ? "coastal" : "estuary", salinity);
   if (moisture > 0.76 && elevation < 0.32) addWeight(weights, warmth > 0.62 ? "tropical-rain-forest" : "temperate-rain-forest", moisture);
   if (moisture > 0.82 && salinity > 0.2) addWeight(weights, "estuary", moisture * salinity);
@@ -130,6 +178,11 @@ export const resolveEcologySample = (input: EcologySampleInput): EcologySample =
   if (paint === "snow") addWeight(weights, "arctic-alpine", 1);
   if (paint === "rock") addWeight(weights, elevation > 0.45 || warmth < 0.32 ? "arctic-alpine" : "desert", 0.52);
   if (paint === "grass" || paint === "flowers" || paint === "meadow") addWeight(weights, "grassland", 0.55);
+
+  if (authoredBiome) {
+    for (const id of ECOLOGY_BIOMES) delete weights[id];
+    weights[authoredBiome] = 1;
+  }
 
   let total = 0;
   let biome: EcologyBiomeId = "grassland";

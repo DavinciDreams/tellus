@@ -160,7 +160,12 @@ import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, gener
 import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial, terrainKindCode, terrainTextureDiagnostics } from "./tellus-terrain-material";
 import { largeWorldBaseHeight, largeWorldBiomeCellAt, largeWorldTerrainKind, usesContinentalChunkedTerrain } from "./tellus-large-world-terrain";
-import { buildingMaterialForEcology, resolveEcologySample } from "./tellus-ecology";
+import {
+  buildingMaterialForEcology,
+  resolveEcologySample,
+  worldBiomeCellBounds,
+  worldBiomeCellCoordinates,
+} from "./tellus-ecology";
 import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
 import { generateInteriorRoom, normalizeInteriorBiomeMaterial, type InteriorBiomeMaterial } from "./tellus-building";
 import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
@@ -561,6 +566,7 @@ function createTellusWorld(
   let pendingPortalSwitch: PortalEntered | null = null;
   // TELLUS INFINITY biomes: the world's biome cells keyed "cx:cz" (diff-merged from world.biome.patch).
   const worldBiomeCells = new Map<string, WorldBiomeCell>();
+  let worldBiomeGridAuthoritative = false;
   const seenWorldChatIds = new Set<string>();
   const generatedMeshes = new Map<string, THREE.Object3D>();
   type GeneratedAnimationState = {
@@ -1246,10 +1252,17 @@ function createTellusWorld(
     return kind === "water";
   };
   const biomeCellAt = (x: number, z: number, height: number): WorldBiomeCell | null => {
-    const key = `${Math.floor(x / CHUNK_SPAN)}:${Math.floor(z / CHUNK_SPAN)}`;
-    return worldBiomeCells.get(key) ?? (isChunked
+    const cell = worldBiomeCellCoordinates(x, z, {
+      chunkedWorldChunks: chunkedDims,
+      worldRadius: WORLD_RADIUS,
+    });
+    const key = `${cell.cx}:${cell.cz}`;
+    const authored = worldBiomeCells.get(key);
+    if (authored) return authored;
+    if (worldBiomeGridAuthoritative) return { ...cell, biome: "grassland", intensity: 1 };
+    return isChunked
       ? largeWorldBiomeCellAt(x, z, height)
-      : activeEvoflowWorldBiomeCellAt(x, z, height));
+      : activeEvoflowWorldBiomeCellAt(x, z, height);
   };
   const sampleEcology = (x: number, z: number, height: number, paint: TerrainPaintKind | null, seed: number) =>
     resolveEcologySample({
@@ -1380,6 +1393,13 @@ function createTellusWorld(
         sampleHeight: sampleVegetationHeight,
         samplePaint: sampleVegetationPaint,
         sampleEcology,
+        ecologyRegionKey: (x, z) => {
+          const cell = worldBiomeCellCoordinates(x, z, {
+            chunkedWorldChunks: chunkedDims,
+            worldRadius: WORLD_RADIUS,
+          });
+          return `${cell.cx}:${cell.cz}`;
+        },
         bounds: chunkedVegetationBounds,
         densityMultiplier: procPlantDensityPreference,
         isExcluded: terrainVegetationExcluded,
@@ -1405,6 +1425,7 @@ function createTellusWorld(
     : {
         update: () => undefined,
         notifyTerrainChanged: () => undefined,
+        notifyRegionsChanged: () => undefined,
         stats: () => ({
           chunks: 0,
           plants: 0,
@@ -4212,6 +4233,7 @@ function createTellusWorld(
         // instead of waiting up to 10 min for the next diff tick. Live world.biome.patch then merges deltas.
         worldBiomeCells.clear();
         const snapshotBiomes = biomeCellsFromSnapshot(parsed);
+        worldBiomeGridAuthoritative = snapshotBiomes !== null;
         if (snapshotBiomes) for (const c of snapshotBiomes) worldBiomeCells.set(`${c.cx}:${c.cz}`, c);
         syncPortalMarkers();
         publish();
@@ -4286,7 +4308,12 @@ function createTellusWorld(
       // TELLUS INFINITY biomes: diff-merge the changed cells into the local grid (a seed sends the full set).
       const biomeCells = biomeCellsFromWorldPatch(parsed);
       if (biomeCells) {
+        worldBiomeGridAuthoritative = true;
         for (const c of biomeCells) worldBiomeCells.set(`${c.cx}:${c.cz}`, c);
+        procplants.notifyRegionsChanged(biomeCells.map((cell) => worldBiomeCellBounds(cell.cx, cell.cz, {
+          chunkedWorldChunks: chunkedDims,
+          worldRadius: WORLD_RADIUS,
+        })));
         publish();
       }
       // Emote frames: play that clip ONCE over the avatar's locomotion, then resume. Rigless
