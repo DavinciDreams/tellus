@@ -229,6 +229,27 @@ describe("createChunkRenderer lifecycle", () => {
     r.dispose();
   });
 
+  it("keeps hysteresis-ring terrain cached but hides it outside the visible load ring", async () => {
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    const group = scene.getObjectByName("tellus-chunk-terrain") as THREE.Group;
+    r.update(CHUNK_SPAN * 10 + 1, CHUNK_SPAN * 10 + 1);
+    await resolveAll();
+    r.flush();
+
+    r.update(CHUNK_SPAN * 11 + 1, CHUNK_SPAN * 10 + 1);
+    expect(r.stats().active).toBe(25);
+    expect(r.stats().visible).toBe(20);
+    expect(group.children.filter((child) => child.visible)).toHaveLength(20);
+
+    await resolveAll();
+    r.flush();
+    expect(r.stats().active).toBe(30);
+    expect(r.stats().visible).toBe(25);
+    expect(group.children.filter((child) => child.visible)).toHaveLength(25);
+    r.dispose();
+  });
+
   it("does NOT build a fetched chunk that drifted out of keep-radius before flush (evict race)", async () => {
     const scene = new THREE.Scene();
     const r = createChunkRenderer(scene);
