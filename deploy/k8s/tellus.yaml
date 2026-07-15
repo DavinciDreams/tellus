@@ -28,6 +28,8 @@ data:
       "assetForgeApiBase": "",
       "apiBase": "",
       "generationProvider": "pixal3d-gradio",
+      "playerGenerationProvider": "instantmesh-gradio",
+      "agentGenerationProvider": "pixal3d-gradio",
       "agentModel": "GLM-5.1",
       "worldApiBase": "https://hyades.gnostr.cloud",
       "worldId": "main",
