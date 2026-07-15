@@ -310,6 +310,7 @@ export interface ChunkRenderer {
     maxFlushMs: number;
     provisional: number;
     currentProvisional: boolean;
+    localLodRebuilds: number;
   };
   dispose(): void;
 }
@@ -349,6 +350,7 @@ export function createChunkRenderer(
   let lastFlushBuilt = 0;
   let lastFlushMs = 0;
   let maxFlushMs = 0;
+  let localLodRebuilds = 0;
   let fetchStartBudget = Number.POSITIVE_INFINITY;
   // Runtime-tunable load ring (the chunk slider). loadRadius = chunks fetched around the centre ((2r+1)²);
   // keepRadius = loadRadius + 1 for the same evict hysteresis the CHUNK_LOAD/KEEP constants had (2 → 3).
@@ -470,8 +472,31 @@ export function createChunkRenderer(
         const a = active.get(k);
         if (a && a.lodSegments === lod) continue; // already at right detail
         if (inflight.has(k) && lodOf.get(k) === lod) continue;
-        if (ready.has(k) && lodOf.get(k) === lod) continue;
+        if (ready.has(k)) {
+          // Fresh server data already awaits a build. Apply the currently wanted LOD to that data
+          // instead of issuing a second request just because the player crossed a chunk boundary.
+          lodOf.set(k, lod);
+          continue;
+        }
         if (queuedFetches.has(k) && lodOf.get(k) === lod) continue;
+        if (a && a.revision >= 0 && !inflight.has(k)) {
+          // LOD is a local rendering choice; the active chunk already owns all authoritative height
+          // and paint arrays. Reusing them avoids refetching and JSON-decoding thousands of values for
+          // every near/far-ring transition while retaining exactly the same resulting geometry.
+          queuedFetches.delete(k);
+          ready.set(k, {
+            cx: a.cx,
+            cz: a.cz,
+            revision: a.revision,
+            segments: CHUNK_SEGMENTS,
+            sculptOffsets: a.sculptOffsets,
+            paint: a.paint,
+            heightMode: a.heightMode,
+          });
+          lodOf.set(k, lod);
+          localLodRebuilds++;
+          continue;
+        }
         const retry = retryAt.get(k);
         if (retry !== undefined && retry > now) continue;
         queueChunkFetch(tcx, tcz, lod, ring);
@@ -882,6 +907,7 @@ export function createChunkRenderer(
       currentProvisional:
         Number.isFinite(centerCx) &&
         (active.get(key(centerCx, centerCz))?.revision ?? 0) < 0,
+      localLodRebuilds,
     }),
     dispose,
   };

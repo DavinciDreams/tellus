@@ -313,6 +313,9 @@ describe("createChunkRenderer lifecycle", () => {
     // Crossing one chunk changes several terrain LODs, but only the newly streamed column has a new
     // surface. Existing chunks must not force unrelated procplant cells to rebuild.
     r.update(CHUNK_SPAN * 11 + 1, CHUNK_SPAN * 10 + 1);
+    // Only the five genuinely new chunks should hit the network. Existing chunks changing LOD reuse
+    // their authoritative in-memory height/paint data.
+    expect(pending.size).toBe(5);
     await resolveAll();
     r.flush();
     const changed = r.consumeChangedRegions();
