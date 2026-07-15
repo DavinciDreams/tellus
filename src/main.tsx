@@ -751,11 +751,10 @@ function createTellusWorld(
     typeof navigator !== "undefined" &&
     Boolean(navigator.mediaDevices?.getUserMedia);
 
-  // P2P diagnostics: on by default (low volume) so connection issues are visible in the console;
-  // silence with localStorage 'tellus.p2pDebug' = '0'.
+  // P2P diagnostics are opt-in; high-frequency presence/signalling logs can otherwise swamp DevTools.
   const p2pLog = (...args: unknown[]): void => {
     try {
-      if (window.localStorage.getItem("tellus.p2pDebug") === "0") return;
+      if (window.localStorage.getItem("tellus.p2pDebug") !== "1") return;
     } catch {
       /* ignore */
     }
@@ -836,13 +835,18 @@ function createTellusWorld(
     }
   };
 
+  let lastP2pRosterSignature = "";
   const feedP2pPresence = (peerIds: string[]): void => {
+    const stablePeerIds = [...new Set(peerIds)].sort();
+    const signature = stablePeerIds.join("\n");
+    if (signature === lastP2pRosterSignature) return;
+    lastP2pRosterSignature = signature;
     if (p2pMesh) {
-      p2pLog("roster", peerIds);
-      p2pMesh.setPresence(peerIds);
+      p2pLog("roster", stablePeerIds);
+      p2pMesh.setPresence(stablePeerIds);
     } else {
-      p2pLog("roster (mesh pending)", peerIds);
-      pendingPeerRoster = peerIds;
+      p2pLog("roster (mesh pending)", stablePeerIds);
+      pendingPeerRoster = stablePeerIds;
     }
   };
 
@@ -15354,7 +15358,7 @@ function App(): React.ReactElement {
       )}
       {ambientStats?.chunkTerrain && (
         <div className="debug-stats-row">
-          terrain chunks {ambientStats.chunkTerrain.active} active ·{" "}
+          terrain chunks {ambientStats.chunkTerrain.visible} visible / {ambientStats.chunkTerrain.active} cached ·{" "}
           {ambientStats.chunkTerrain.pending} pending · {ambientStats.chunkTerrain.failed} failed
         </div>
       )}

@@ -292,6 +292,7 @@ export interface ChunkRenderer {
   samplePaint(worldX: number, worldZ: number): TerrainPaintKind | null;
   stats(): {
     active: number;
+    visible: number;
     pending: number;
     queued: number;
     inflight: number;
@@ -347,6 +348,13 @@ export function createChunkRenderer(
   // keepRadius = loadRadius + 1 for the same evict hysteresis the CHUNK_LOAD/KEEP constants had (2 → 3).
   let loadRadius = CHUNK_LOAD_RADIUS;
   const keepRadius = () => loadRadius + 1;
+
+  const isInVisibleRing = (cx: number, cz: number) =>
+    !Number.isFinite(centerCx) || Math.max(Math.abs(cx - centerCx), Math.abs(cz - centerCz)) <= loadRadius;
+
+  const updateChunkVisibility = () => {
+    for (const chunk of active.values()) chunk.mesh.visible = isInVisibleRing(chunk.cx, chunk.cz);
+  };
 
   const lodForRing = (ring: number) => {
     if (ring <= CHUNK_LOD_NEAR_RADIUS) return CHUNK_SEGMENTS;
@@ -480,6 +488,7 @@ export function createChunkRenderer(
     if (cx === centerCx && cz === centerCz && !hasDueRetry) return; // re-evaluate on cell change or due retry
     centerCx = cx;
     centerCz = cz;
+    updateChunkVisibility();
 
     // Ensure chunks within the load radius are fetched (skip already-active at the right LOD).
     scheduleAround(cx, cz, loadRadius, now);
@@ -568,12 +577,14 @@ export function createChunkRenderer(
       existing.sculptOffsets = mergedData.sculptOffsets;
       existing.paint = mergedData.paint;
       existing.heightMode = mergedData.heightMode;
+      existing.mesh.visible = isInVisibleRing(existing.cx, existing.cz);
       return;
     }
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(mergedData.cx * CHUNK_SPAN, 0, mergedData.cz * CHUNK_SPAN);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
+    mesh.visible = isInVisibleRing(mergedData.cx, mergedData.cz);
     group.add(mesh);
     active.set(k, {
       mesh,
@@ -823,6 +834,7 @@ export function createChunkRenderer(
     samplePaint,
     stats: () => ({
       active: active.size,
+      visible: [...active.values()].filter((chunk) => chunk.mesh.visible).length,
       pending: queuedFetches.size + inflight.size + ready.size,
       queued: queuedFetches.size,
       inflight: inflight.size,

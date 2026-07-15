@@ -597,4 +597,59 @@ describe("procplant vegetation", () => {
 
     vegetation.dispose();
   });
+
+  it("does not queue every active procplant chunk when crossing a vegetation-cell boundary", () => {
+    const vegetation = createProcPlantVegetation({
+      scene: new THREE.Scene(),
+      worldId: "chunked-cell-crossing-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "forest-floor",
+      bounds: { minX: -120, maxX: 120, minZ: -120, maxZ: 120 },
+      densityMultiplier: 0,
+      viewMode: () => "first",
+    });
+
+    vegetation.update(1, 1, 1, 60, 0);
+    for (let i = 1; i < 80 && vegetation.stats().queuedRebuilds > 0; i++) {
+      vegetation.update(1, 1, 1, 60, i * 16);
+    }
+    expect(vegetation.stats().queuedRebuilds).toBe(0);
+
+    vegetation.update(17, 1, 1, 60, 2_000);
+    expect(vegetation.stats().queuedRebuilds).toBeGreaterThan(0);
+    expect(vegetation.stats().queuedRebuilds).toBeLessThan(vegetation.stats().chunks / 2);
+
+    vegetation.dispose();
+  });
+
+  it("ignores identical manual procplant snapshots", () => {
+    const placement = {
+      id: "manual-stable-1",
+      presetId: "daylilyFlower",
+      seed: 42,
+      x: 1,
+      z: 1,
+      scale: 1,
+    };
+    const vegetation = createProcPlantVegetation({
+      scene: new THREE.Scene(),
+      worldId: "chunked-stable-manual-snapshot-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -20, maxX: 20, minZ: -20, maxZ: 20 },
+      densityMultiplier: 0,
+    });
+
+    vegetation.replaceManualPlants([placement], { persist: false });
+    for (let i = 0; i < 80 && (i === 0 || vegetation.stats().queuedRebuilds > 0); i++) {
+      vegetation.update(0, 0, 1, 60, i * 16);
+    }
+    const chunksBuilt = vegetation.stats().chunksBuilt;
+
+    vegetation.replaceManualPlants([{ ...placement }], { persist: false });
+    expect(vegetation.stats().queuedRebuilds).toBe(0);
+    expect(vegetation.stats().chunksBuilt).toBe(chunksBuilt);
+
+    vegetation.dispose();
+  });
 });

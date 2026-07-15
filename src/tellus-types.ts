@@ -443,7 +443,7 @@ export interface TellusWorldApi {
   // Live counters for the procedural vegetation + ambient physics (debug overlay).
   getAmbientStats(): {
     vegetation: { tier: number; chunks: number; grassIndices: number; trees: number };
-    chunkTerrain: { active: number; pending: number; failed: number } | null;
+    chunkTerrain: { active: number; visible: number; pending: number; failed: number } | null;
     physicsBodies: number;
     rapierSolids: number;
   };

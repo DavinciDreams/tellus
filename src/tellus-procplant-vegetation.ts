@@ -122,8 +122,6 @@ interface ActiveChunk {
   lod: 0 | 1 | 2;
   rev: number;
   styleRev: number;
-  styleCenterCx: number;
-  styleCenterCz: number;
   lastNeededMs: number;
   group: THREE.Group;
   stats: ChunkStats;
@@ -637,6 +635,17 @@ const normalizeManualPlacement = (value: unknown): ProcPlantManualPlacement | nu
   };
 };
 
+const manualPlacementsEqual = (
+  left: ProcPlantManualPlacement,
+  right: ProcPlantManualPlacement,
+): boolean =>
+  left.id === right.id &&
+  left.presetId === right.presetId &&
+  left.seed === right.seed &&
+  left.x === right.x &&
+  left.z === right.z &&
+  left.scale === right.scale;
+
 const renderableEntriesForMix = (mix: TellusBiomeMixDefinition): TellusBiomeMixEntry[] =>
   mix.entries.filter((entry) =>
     entry.enabled !== false &&
@@ -881,8 +890,6 @@ export function createProcPlantVegetation(
     chunk.stats = { plants: 0, instances: 0, stemTriangles: 0, organDraws: 0 };
     chunk.rev = terrainRev;
     chunk.styleRev = PROCPLANT_RENDER_STYLE_REVISION;
-    chunk.styleCenterCx = Math.floor((lastPlayerX ?? chunk.cx * chunkSize) / chunkSize);
-    chunk.styleCenterCz = Math.floor((lastPlayerZ ?? chunk.cz * chunkSize) / chunkSize);
     const seed = procPlantChunkSeed(options.worldId, chunk.cx, chunk.cz, 0);
     const rand = mulberry32(seed);
     const plantCap = chunk.lod === 0
@@ -898,8 +905,8 @@ export function createProcPlantVegetation(
     const grassCarpetPaints = new Set<TerrainPaintKind>();
 
     const grassRing = Math.max(
-      Math.abs(chunk.cx - chunk.styleCenterCx),
-      Math.abs(chunk.cz - chunk.styleCenterCz),
+      Math.abs(chunk.cx - Math.floor((lastPlayerX ?? chunk.cx * chunkSize) / chunkSize)),
+      Math.abs(chunk.cz - Math.floor((lastPlayerZ ?? chunk.cz * chunkSize) / chunkSize)),
     );
     const grassLod = fullDetailLod || grassRing <= GRASS_FIELD_FULL_DENSITY_RING
       ? 0
@@ -1294,8 +1301,6 @@ export function createProcPlantVegetation(
             lod,
             rev: -1,
             styleRev: 0,
-            styleCenterCx: Number.NaN,
-            styleCenterCz: Number.NaN,
             lastNeededMs: nowMs,
             group: new THREE.Group(),
             stats: { plants: 0, instances: 0, stemTriangles: 0, organDraws: 0 },
@@ -1312,9 +1317,7 @@ export function createProcPlantVegetation(
         }
         if (
           chunk.rev !== terrainRev ||
-          chunk.styleRev !== PROCPLANT_RENDER_STYLE_REVISION ||
-          chunk.styleCenterCx !== centerCx ||
-          chunk.styleCenterCz !== centerCz
+          chunk.styleRev !== PROCPLANT_RENDER_STYLE_REVISION
         ) enqueue(key);
       }
     }
@@ -1406,12 +1409,34 @@ export function createProcPlantVegetation(
     },
     replaceManualPlants: (placements, writeOptions = {}) => {
       if (disposed) return;
-      manualPlacements.clear();
-      manualPlacementChunks.clear();
-      enqueueAllActive();
+      const nextPlacements = new Map<string, ProcPlantManualPlacement>();
       for (const placement of placements) {
         const normalized = normalizeManualPlacement(placement);
-        if (normalized) rememberManualPlacement(normalized);
+        if (normalized) nextPlacements.set(normalized.id, normalized);
+      }
+      const changedChunks = new Set<string>();
+      for (const [id, current] of manualPlacements) {
+        const next = nextPlacements.get(id);
+        if (!next || !manualPlacementsEqual(next, current)) {
+          changedChunks.add(manualPlacementChunks.get(id) ?? chunkKeyAt(current.x, current.z));
+          if (next) changedChunks.add(chunkKeyAt(next.x, next.z));
+        }
+      }
+      for (const [id, next] of nextPlacements) {
+        if (!manualPlacements.has(id)) changedChunks.add(chunkKeyAt(next.x, next.z));
+      }
+      if (changedChunks.size > 0) {
+        manualPlacements.clear();
+        manualPlacementChunks.clear();
+        for (const placement of nextPlacements.values()) {
+          manualPlacements.set(placement.id, placement);
+          manualPlacementChunks.set(placement.id, chunkKeyAt(placement.x, placement.z));
+        }
+        for (const key of changedChunks) {
+          const chunk = active.get(key);
+          if (chunk) chunk.rev = -1;
+          enqueue(key, true);
+        }
       }
       if (writeOptions.persist !== false) saveManualPlacements();
     },
