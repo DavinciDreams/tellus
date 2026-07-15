@@ -15,6 +15,7 @@ import { loadBiomeAssetTemplate } from "./tellus-biome-asset-template";
 import {
   BIOME_MIX_STORAGE_EVENT,
   activeBiomeMixStorageKey,
+  biomeMixRenderSignature,
   genomeForMixEntry,
   isAssetMixEntry,
   loadActiveBiomeMixRegistryForWorld,
@@ -736,7 +737,7 @@ export function createProcPlantVegetation(
   });
   let activeBiomeMixRegistry: TellusBiomeMixRegistry =
     options.biomeMixRegistry ?? loadActiveBiomeMixRegistryForWorld(options.worldId);
-  activeBiomeMixSignature = JSON.stringify(activeBiomeMixRegistry);
+  activeBiomeMixSignature = biomeMixRenderSignature(activeBiomeMixRegistry);
 
   const inBounds = (x: number, z: number) =>
     x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
@@ -838,7 +839,7 @@ export function createProcPlantVegetation(
   };
 
   const applyBiomeMixRegistry = (registry: TellusBiomeMixRegistry) => {
-    const signature = JSON.stringify(registry);
+    const signature = biomeMixRenderSignature(registry);
     if (signature === activeBiomeMixSignature) return false;
     activeBiomeMixRegistry = registry;
     activeBiomeMixSignature = signature;

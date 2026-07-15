@@ -100,6 +100,17 @@ export interface PersistedTellusBiomeMixRegistryV2 {
   ecologyBiomeMixIndexes: Partial<Record<EcologyBiomeId, number>>;
 }
 
+/**
+ * A stable description of the biome mix inputs that can change rendered
+ * vegetation. Server timestamps and hydrated geometry are deliberately
+ * excluded: neither represents a new mix, and comparing them used to make
+ * the periodic server refresh rebuild every active procplant chunk.
+ */
+export const biomeMixRenderSignature = (registry: TellusBiomeMixRegistry): string =>
+  JSON.stringify(registry, (key, value) =>
+    key === "updatedAt" || key === "template" ? undefined : value
+  );
+
 export interface ProcPlantLabExport {
   version?: number;
   savedAt?: string;
