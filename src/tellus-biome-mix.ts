@@ -91,6 +91,15 @@ export interface TellusBiomeMixRegistry {
   mixesByEcologyBiome: Partial<Record<EcologyBiomeId, TellusBiomeMixDefinition>>;
 }
 
+export interface PersistedTellusBiomeMixRegistryV2 {
+  version: 2;
+  worldId: string;
+  updatedAt: string;
+  mixes: TellusBiomeMixDefinition[];
+  terrainPaintMixIndexes: Partial<Record<TerrainPaintKind, number>>;
+  ecologyBiomeMixIndexes: Partial<Record<EcologyBiomeId, number>>;
+}
+
 export interface ProcPlantLabExport {
   version?: number;
   savedAt?: string;
@@ -448,7 +457,57 @@ const normalizeBiomeAssetTemplate = (value: unknown): TellusBiomeAssetTemplate |
   return { version: 1, vertexCount, positions, normals, colors, indices };
 };
 
-const normalizeBiomeMixRegistry = (raw: unknown, worldId: string): TellusBiomeMixRegistry => {
+export const compactBiomeMixDefinitionForPersistence = (
+  raw: TellusBiomeMixDefinition,
+): TellusBiomeMixDefinition | null => {
+  const normalized = normalizeBiomeMixDefinition(raw);
+  if (!normalized) return null;
+  const entries = normalized.entries
+    .filter((entry) => !isAssetMixEntry(entry) || entry.asset.runtimeOnly !== true)
+    .map((entry) => isAssetMixEntry(entry)
+      ? { ...entry, asset: { ...entry.asset, template: undefined, runtimeOnly: false } }
+      : entry);
+  return entries.length > 0 ? { ...normalized, entries } : null;
+};
+
+export const serializeBiomeMixRegistryForPersistence = (
+  registry: TellusBiomeMixRegistry,
+): PersistedTellusBiomeMixRegistryV2 => {
+  const mixes: TellusBiomeMixDefinition[] = [];
+  const indexesBySignature = new Map<string, number>();
+  const addMix = (mix: TellusBiomeMixDefinition | undefined): number | undefined => {
+    if (!mix) return undefined;
+    const compact = compactBiomeMixDefinitionForPersistence(mix);
+    if (!compact) return undefined;
+    const signature = JSON.stringify(compact);
+    const existing = indexesBySignature.get(signature);
+    if (existing !== undefined) return existing;
+    const index = mixes.length;
+    mixes.push(compact);
+    indexesBySignature.set(signature, index);
+    return index;
+  };
+  const terrainPaintMixIndexes: PersistedTellusBiomeMixRegistryV2["terrainPaintMixIndexes"] = {};
+  for (const [paint, mix] of Object.entries(registry.mixesByTerrainPaint)) {
+    const index = addMix(mix);
+    if (index !== undefined) terrainPaintMixIndexes[paint as TerrainPaintKind] = index;
+  }
+  const ecologyBiomeMixIndexes: PersistedTellusBiomeMixRegistryV2["ecologyBiomeMixIndexes"] = {};
+  for (const [biome, mix] of Object.entries(registry.mixesByEcologyBiome)) {
+    const index = addMix(mix);
+    if (index !== undefined) ecologyBiomeMixIndexes[biome as EcologyBiomeId] = index;
+  }
+  return {
+    version: 2,
+    worldId: registry.worldId,
+    updatedAt: registry.updatedAt,
+    mixes,
+    terrainPaintMixIndexes,
+    ecologyBiomeMixIndexes,
+  };
+};
+
+export const normalizeBiomeMixRegistry = (raw: unknown, worldId: string): TellusBiomeMixRegistry => {
   const empty: TellusBiomeMixRegistry = {
     version: 1,
     worldId,
@@ -456,7 +515,31 @@ const normalizeBiomeMixRegistry = (raw: unknown, worldId: string): TellusBiomeMi
     mixesByTerrainPaint: {},
     mixesByEcologyBiome: {},
   };
-  if (!isRecord(raw) || raw.version !== 1) return empty;
+  if (!isRecord(raw) || (raw.version !== 1 && raw.version !== 2)) return empty;
+  if (raw.version === 2) {
+    const mixes = Array.isArray(raw.mixes)
+      ? raw.mixes.map(normalizeBiomeMixDefinition)
+      : [];
+    const mixesByTerrainPaint: TellusBiomeMixRegistry["mixesByTerrainPaint"] = {};
+    const terrainIndexes = isRecord(raw.terrainPaintMixIndexes) ? raw.terrainPaintMixIndexes : {};
+    for (const [paint, value] of Object.entries(terrainIndexes)) {
+      const mix = typeof value === "number" ? mixes[value] : null;
+      if (mix) mixesByTerrainPaint[paint as TerrainPaintKind] = mix;
+    }
+    const mixesByEcologyBiome: TellusBiomeMixRegistry["mixesByEcologyBiome"] = {};
+    const ecologyIndexes = isRecord(raw.ecologyBiomeMixIndexes) ? raw.ecologyBiomeMixIndexes : {};
+    for (const [biome, value] of Object.entries(ecologyIndexes)) {
+      const mix = typeof value === "number" ? mixes[value] : null;
+      if (mix) mixesByEcologyBiome[biome as EcologyBiomeId] = mix;
+    }
+    return {
+      version: 1,
+      worldId: typeof raw.worldId === "string" ? raw.worldId : worldId,
+      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date(0).toISOString(),
+      mixesByTerrainPaint,
+      mixesByEcologyBiome,
+    };
+  }
   const mixesByTerrainPaint: Partial<Record<TerrainPaintKind, TellusBiomeMixDefinition>> = {};
   const terrainRecord = isRecord(raw.mixesByTerrainPaint) ? raw.mixesByTerrainPaint : {};
   for (const [paint, value] of Object.entries(terrainRecord)) {
@@ -493,7 +576,7 @@ export const saveActiveBiomeMixForWorld = (
   worldId: string,
   mix: TellusBiomeMixDefinition,
 ): TellusBiomeMixRegistry | null => {
-  const normalized = normalizeBiomeMixDefinition(mix);
+  const normalized = compactBiomeMixDefinitionForPersistence(mix);
   if (!normalized || typeof window === "undefined") return null;
   const registry = loadActiveBiomeMixRegistryForWorld(worldId);
   const targetPaint = biomeMixTargetTerrainPaint(normalized);
@@ -502,7 +585,10 @@ export const saveActiveBiomeMixForWorld = (
   registry.worldId = worldId;
   registry.updatedAt = new Date().toISOString();
   try {
-    window.localStorage.setItem(activeBiomeMixStorageKey(worldId), JSON.stringify(registry));
+    window.localStorage.setItem(
+      activeBiomeMixStorageKey(worldId),
+      JSON.stringify(serializeBiomeMixRegistryForPersistence(registry)),
+    );
     window.dispatchEvent(new CustomEvent(BIOME_MIX_STORAGE_EVENT, {
       detail: { worldId, targetPaint, ecologyBiome: normalized.ecologyBiome, mix: normalized },
     }));
@@ -520,7 +606,10 @@ export const applyActiveBiomeMixRegistryForWorld = (
   const registry = normalizeBiomeMixRegistry(rawRegistry, worldId);
   if (typeof window !== "undefined") {
     try {
-      window.localStorage.setItem(activeBiomeMixStorageKey(worldId), JSON.stringify(registry));
+      window.localStorage.setItem(
+        activeBiomeMixStorageKey(worldId),
+        JSON.stringify(serializeBiomeMixRegistryForPersistence(registry)),
+      );
       window.dispatchEvent(new CustomEvent(BIOME_MIX_STORAGE_EVENT, {
         detail: { worldId, registry },
       }));
@@ -570,7 +659,7 @@ export const saveActiveBiomeMixRegistryToServer = async (
     const response = await fetch(biomeMixWorldMetadataUrl(registry.worldId), {
       method: "PATCH",
       headers: biomeMixServerHeaders(),
-      body: JSON.stringify({ activeBiomeMixes: registry }),
+      body: JSON.stringify({ activeBiomeMixes: serializeBiomeMixRegistryForPersistence(registry) }),
     });
     return response.ok;
   } catch (error) {

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   isAssetMixEntry,
   normalizeBiomeMixDefinition,
+  normalizeBiomeMixRegistry,
+  serializeBiomeMixRegistryForPersistence,
 } from "./tellus-biome-mix";
 import { ECOLOGY_TERRAIN_PAINT_MAP } from "./tellus-procplant-biomes";
 
@@ -79,5 +81,79 @@ describe("Tellus biome mix normalization", () => {
       "arctic-alpine": "snow",
       savanna: "meadow",
     });
+  });
+
+  it("persists one compact mix without baked asset geometry or session-only assets", () => {
+    const mix = normalizeBiomeMixDefinition({
+      version: 1,
+      id: "compact-forest",
+      label: "Compact Forest",
+      source: "ecology",
+      ecologyBiome: "temperate-rain-forest",
+      targetTerrainPaint: "forest-floor",
+      seed: 12,
+      density: 0.8,
+      diversity: 0.7,
+      targetVerticesPerChunk: 100_000,
+      entries: [
+        {
+          id: "shared-tree",
+          label: "Shared Tree",
+          source: "asset",
+          asset: {
+            kind: "glb",
+            name: "tree.glb",
+            libraryId: "asset-tree",
+            lodPreference: "lod2",
+            runtimeOnly: false,
+            template: {
+              version: 1,
+              vertexCount: 3,
+              positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+              normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+              colors: [0, 1, 0, 0, 1, 0, 0, 1, 0],
+              indices: [0, 1, 2],
+            },
+          },
+          weight: 1,
+          density: 0.3,
+          scale: 8,
+          environment: { light: 0.8, moisture: 0.6, crowding: 0.4, biomeWarmth: 0.5 },
+          seed: 2,
+          enabled: true,
+        },
+        {
+          id: "local-tree",
+          label: "Local Tree",
+          source: "asset",
+          asset: { kind: "glb", name: "local.glb", libraryId: "blob-tree", runtimeOnly: true },
+          weight: 1,
+          density: 0.3,
+          scale: 8,
+          environment: { light: 0.8, moisture: 0.6, crowding: 0.4, biomeWarmth: 0.5 },
+          seed: 3,
+          enabled: true,
+        },
+      ],
+    });
+    expect(mix).toBeTruthy();
+    const persisted = serializeBiomeMixRegistryForPersistence({
+      version: 1,
+      worldId: "chunked-compact-test",
+      updatedAt: new Date(0).toISOString(),
+      mixesByTerrainPaint: { "forest-floor": mix! },
+      mixesByEcologyBiome: { "temperate-rain-forest": mix! },
+    });
+
+    expect(persisted.version).toBe(2);
+    expect(persisted.mixes).toHaveLength(1);
+    expect(persisted.terrainPaintMixIndexes["forest-floor"]).toBe(0);
+    expect(persisted.ecologyBiomeMixIndexes["temperate-rain-forest"]).toBe(0);
+    expect(persisted.mixes[0]?.entries).toHaveLength(1);
+    expect(persisted.mixes[0]?.entries[0]?.asset?.template).toBeUndefined();
+    expect(JSON.stringify(persisted)).not.toContain("positions");
+    const roundTripped = normalizeBiomeMixRegistry(persisted, persisted.worldId);
+    expect(roundTripped.mixesByTerrainPaint["forest-floor"]?.id).toBe("compact-forest");
+    expect(roundTripped.mixesByEcologyBiome["temperate-rain-forest"]?.id).toBe("compact-forest");
   });
 });

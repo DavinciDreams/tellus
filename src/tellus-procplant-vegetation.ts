@@ -11,6 +11,7 @@ import {
 import { resolveEcologySample, type EcologySample } from "./tellus-ecology";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 import { buildRetroCutoutTreeTemplate } from "./tellus-veg-archetypes";
+import { loadBiomeAssetTemplate } from "./tellus-biome-asset-template";
 import {
   BIOME_MIX_STORAGE_EVENT,
   activeBiomeMixStorageKey,
@@ -157,7 +158,6 @@ const PROC_TREE_DETAIL_DISTANCE = 58;
 const PROC_TREE_DETAIL_DISTANCE_THIRD = 72;
 const PROCPLANT_RENDER_STYLE_REVISION = 5;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
-const BIOME_MIX_SERVER_REFRESH_MS = 8_000;
 const LOW_FPS_BUILD_BUDGET = 1;
 const NORMAL_BUILD_BUDGET = 2;
 const LOW_FPS_BUILD_MS_BUDGET = 2.5;
@@ -705,7 +705,6 @@ export function createProcPlantVegetation(
   let totalBuildMs = 0;
   let builtLastUpdate = 0;
   let buildDeferred = false;
-  let lastBiomeMixServerRefreshMs = 0;
   let biomeMixServerRefreshInFlight = false;
   let activeBiomeMixSignature = "";
   let lastPlayerX: number | null = null;
@@ -801,24 +800,51 @@ export function createProcPlantVegetation(
     for (const key of active.keys()) enqueue(key);
   };
 
+  const hydrateBiomeMixAssets = (registry: TellusBiomeMixRegistry) => {
+    const entries = [...new Set([
+      ...Object.values(registry.mixesByTerrainPaint),
+      ...Object.values(registry.mixesByEcologyBiome),
+    ].flatMap((mix) => mix?.entries ?? []))]
+      .filter((entry) =>
+        isAssetMixEntry(entry) &&
+        !entry.asset.template &&
+        entry.asset.runtimeOnly !== true &&
+        Boolean(entry.asset.libraryId)
+      );
+    if (entries.length === 0) return;
+    void Promise.all(entries.map(async (entry) => {
+      if (!isAssetMixEntry(entry) || !entry.asset.libraryId) return false;
+      const template = await loadBiomeAssetTemplate(
+        entry.asset.libraryId,
+        entry.asset.lodPreference ?? "lod2",
+      );
+      if (!template) return false;
+      entry.asset.template = template;
+      return true;
+    })).then((hydrated) => {
+      if (disposed || activeBiomeMixRegistry !== registry || !hydrated.some(Boolean)) return;
+      enqueueAllActive();
+    });
+  };
+
   const applyBiomeMixRegistry = (registry: TellusBiomeMixRegistry) => {
     const signature = JSON.stringify(registry);
     if (signature === activeBiomeMixSignature) return false;
     activeBiomeMixRegistry = registry;
     activeBiomeMixSignature = signature;
     enqueueAllActive();
+    hydrateBiomeMixAssets(registry);
     return true;
   };
+
+  hydrateBiomeMixAssets(activeBiomeMixRegistry);
 
   const reloadActiveBiomeMixes = () => {
     applyBiomeMixRegistry(loadActiveBiomeMixRegistryForWorld(options.worldId));
   };
 
-  const refreshBiomeMixesFromServer = (force = false) => {
+  const refreshBiomeMixesFromServer = () => {
     if (typeof window === "undefined" || disposed || biomeMixServerRefreshInFlight) return;
-    const now = performance.now();
-    if (!force && now - lastBiomeMixServerRefreshMs < BIOME_MIX_SERVER_REFRESH_MS) return;
-    lastBiomeMixServerRefreshMs = now;
     biomeMixServerRefreshInFlight = true;
     void loadActiveBiomeMixRegistryFromServer(options.worldId)
       .then((registry) => {
@@ -839,16 +865,16 @@ export function createProcPlantVegetation(
     if (!detail?.worldId || detail.worldId === options.worldId) reloadActiveBiomeMixes();
   };
   const onBiomeMixVisibility = () => {
-    if (document.visibilityState === "visible") refreshBiomeMixesFromServer(true);
+    if (document.visibilityState === "visible") refreshBiomeMixesFromServer();
   };
-  const onBiomeMixFocus = () => refreshBiomeMixesFromServer(true);
+  const onBiomeMixFocus = () => refreshBiomeMixesFromServer();
 
   if (typeof window !== "undefined") {
     window.addEventListener("storage", onBiomeMixStorage);
     window.addEventListener(BIOME_MIX_STORAGE_EVENT, onBiomeMixCustomEvent);
     window.addEventListener("focus", onBiomeMixFocus);
     document.addEventListener("visibilitychange", onBiomeMixVisibility);
-    refreshBiomeMixesFromServer(true);
+    refreshBiomeMixesFromServer();
   }
 
   const estimateSlope = (x: number, z: number, height: number): number => {
@@ -1244,7 +1270,6 @@ export function createProcPlantVegetation(
     if (disposed) return;
     const updateStartedAt = performance.now();
     builtLastUpdate = 0;
-    refreshBiomeMixesFromServer();
     buildDeferred = options.shouldDeferBuild?.() ?? false;
     if (
       lastPlayerX === null ||
