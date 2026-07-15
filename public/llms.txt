@@ -22,12 +22,21 @@ assets, chat, and use portals.
 
 - Local dev: `bun install`, then `bun run dev`, open http://localhost:3344/.
 - Checks: `bun run typecheck`, `bun run test`, `bun run build`.
+- Current deploy: Gnostr at https://tellus.gnostr.cloud/. Coolify docs are
+  optional hosting notes, not the active production path.
 - Public docs do not imply access. Hyades enforces premium/auth for protected
   MCP endpoint use and bearer-token minting.
 - Browser `GET` on an MCP endpoint returns 405; MCP clients use JSON-RPC over
   HTTP POST.
 - Passkeys are WebAuthn origin-sensitive; localhost RP-ID errors usually mean
   the origin allow-list needs to match the relying-party domain.
+- 3D generation: Tellus chooses one world-level `generationProvider`; production
+  `/api/generate-3d` dispatches to Hyades `/3d/jobs` for queueing, Z Image Turbo
+  concept images, the selected 3D provider, and asset-store upload.
+- Generated world things need stable ids immediately. Preserve
+  `assetStoreModelId`; treat `modelUrl` as a cacheable serving hint.
+- Direct InstantMesh testing: `bun run instantmesh:setup`, then
+  `bun run instantmesh:start`; default Gradio URL is http://127.0.0.1:43839/.
 
 ## Code Map
 

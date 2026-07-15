@@ -26,10 +26,32 @@ bun run build
 The local client uses `public/tellus-config.json` and usually points at the live
 Hyades backend, `https://hyades.gnostr.cloud`.
 
+The current live Tellus app is deployed to Gnostr at
+<https://tellus.gnostr.cloud/>. Coolify docs are optional hosting notes for
+separate copies, not the active production deploy path.
+
 Passkeys are tied to the configured WebAuthn relying-party domain. If passkey
 login works on production but fails on `localhost`, that is usually an origin
 allow-list issue rather than an account bug. UI and gameplay changes should not
 need passkey login unless they touch account, premium, or MCP token flows.
+
+## Generation notes
+
+Production 3D generation is Tellus -> `/api/generate-3d` -> Hyades `/3d/jobs`.
+Hyades owns the durable queue, the Z Image Turbo text-to-image step, the selected
+3D provider, and the shared asset-store upload. Tellus owns the world-level
+`generationProvider` setting, which is currently shared by player and agent
+generation and defaults to `pixal3d-gradio`.
+
+Use `TELLUS_3D_BACKEND=direct` only for local Gradio debugging. In production,
+keep `TELLUS_3D_BACKEND=hyades` or provide `HYADES_API_KEY` /
+`HYADES_3D_API_KEY` so `/api/generate-3d` defaults to Hyades. Preserve
+`assetStoreModelId` on generated things; `modelUrl` is only a cached serving
+hint and may be rewritten through the Hyades asset proxy.
+
+For direct InstantMesh testing, use `bun run instantmesh:setup` and
+`bun run instantmesh:start`; see the README for upstream links and compute
+notes.
 
 ## MCP docs
 

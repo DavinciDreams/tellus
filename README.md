@@ -111,7 +111,20 @@ concept image → image-to-3D → asset store), **LLM** chat and **vision**
 (`/v1/chat/completions`), and the **asset library** (`/api/assets/*`, proxied
 server-side to the 3D Asset Manager store). Deploy assets live under `deploy/`.
 
-## Coolify
+## Deployment
+
+The current live Tellus deployment is Gnostr:
+
+- App: <https://tellus.gnostr.cloud/>
+- Deploy notes: `docs/GNOSTR_CLOUD_SETUP.md`
+- Deployment convention: push a `v*` tag to the working Gnostr remote so Uranus
+  CI builds it.
+
+`deploy/COOLIFY.md` is optional hosting documentation, not the active production
+deployment. Use it only if you are intentionally standing up a separate Coolify
+copy.
+
+### Optional Coolify
 
 Deploy Tellus as a Dockerfile-based app. The container listens on port `3000`
 and serves both the built WebGPU client and the required `/api/*` routes.
@@ -120,43 +133,136 @@ Set these Coolify environment variables:
 
 ```text
 PORT=3000
-VITE_TELLUS_GENERATION_PROVIDER=instantmesh-gradio
-VITE_TELLUS_PLAYER_GENERATION_PROVIDER=instantmesh-gradio
-VITE_TELLUS_AGENT_GENERATION_PROVIDER=pixal3d-gradio
-INSTANTMESH_GRADIO_BASE_URL=http://192.168.1.177:43839
-INSTANTMESH_SAMPLE_STEPS=30
-ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
-ZAI_API_KEY=...
-ZAI_MODEL=GLM-5.1
+VITE_TELLUS_GENERATION_PROVIDER=pixal3d-gradio
+TELLUS_3D_BACKEND=hyades
+HYADES_3D_API_BASE=https://hyades.gnostr.cloud
+HYADES_API_KEY=...
 ```
 
-`INSTANTMESH_GRADIO_BASE_URL` only needs to be reachable from the Coolify
-server. A LAN URL is good when Coolify is on the same network as InstantMesh.
-Off-network hosts such as Vercel need a public URL, VPN, reverse proxy, or
-tunnel.
+With `HYADES_API_KEY` set, `/api/generate-3d` defaults to Hyades even if
+`TELLUS_3D_BACKEND` is omitted. Set `TELLUS_3D_BACKEND=direct` only when you
+want this app to call local Gradio providers itself for development.
 
 ## 3D Generation
 
-Tellus supports three generation modes:
+### Production flow
+
+Tellus supports these generation providers:
 
 ```text
 VITE_TELLUS_GENERATION_PROVIDER=instantmesh-gradio
+VITE_TELLUS_GENERATION_PROVIDER=pixal3d-gradio
+VITE_TELLUS_GENERATION_PROVIDER=anigen-gradio
 VITE_TELLUS_GENERATION_PROVIDER=asset-forge
 VITE_TELLUS_GENERATION_PROVIDER=local
 ```
 
-`local` keeps the fast procedural meshes. `asset-forge` calls the Asset Forge
-pipeline. `instantmesh-gradio` calls a direct InstantMesh Gradio adapter through
-Tellus' own `/api/generate-3d` endpoint.
+`local` keeps the fast procedural meshes. `asset-forge` calls the legacy Asset
+Forge pipeline. `instantmesh-gradio` and `pixal3d-gradio` both enter Tellus'
+own `/api/generate-3d` endpoint; in production that endpoint dispatches to
+Hyades `/3d/jobs`, where the durable queue creates the Z Image Turbo concept
+image, runs the selected 3D provider, and uploads the result to the asset store.
+`pixal3d-gradio` is the default high-quality shared provider for both player
+and agent-generated assets; change `VITE_TELLUS_GENERATION_PROVIDER` or
+`public/tellus-config.json` to switch the whole world to a different provider.
 
-Tellus can route players and agents through different direct generators. The
-default is fast player creation through `VITE_TELLUS_PLAYER_GENERATION_PROVIDER=instantmesh-gradio`
-and slower autonomous agent creation through
-`VITE_TELLUS_AGENT_GENERATION_PROVIDER=pixal3d-gradio`.
-
-For direct InstantMesh:
+The intended production path is:
 
 ```text
+Tellus browser
+  -> Tellus /api/generate-3d
+  -> Hyades /3d/jobs
+  -> Z Image Turbo concept image when no source image was supplied
+  -> selected 3D provider: pixal3d or instantmesh
+  -> shared 3D asset store upload
+  -> Hyades/Tellus world state keeps the generated thing id and assetStoreModelId
+  -> Tellus loads /api/assets/model/{assetStoreModelId}/game-optimized
+```
+
+Player-triggered and agent-triggered generation intentionally share the same
+provider. Earlier builds had separate player/agent provider knobs, but that
+made local testing and contributor setup harder. Use one world-level
+`generationProvider` now; add a new provider behind that boundary when the next
+3D backend is ready.
+
+### Gotchas
+
+- `generationProvider` is a Tellus world/client setting. It chooses which
+  provider Tellus asks for; it does not mean the browser calls Pixal or
+  InstantMesh directly.
+- In production, `/api/generate-3d` should use Hyades. Set
+  `TELLUS_3D_BACKEND=hyades`, or provide `HYADES_API_KEY` /
+  `HYADES_3D_API_KEY` and let the server default to Hyades. Use
+  `TELLUS_3D_BACKEND=direct` only for local Gradio debugging.
+- If generation returns a 503 about provider config, check whether the server is
+  in direct mode. Direct mode needs `PIXAL3D_GRADIO_BASE_URL`,
+  `INSTANTMESH_GRADIO_BASE_URL`, or `ANIGEN_GRADIO_BASE_URL`; Hyades mode needs
+  a Hyades API key with generation capability.
+- Do not create separate player and agent provider settings. Non-premium users
+  can generate while present in-world; premium affects keeping agents alive
+  while away, not which 3D provider is selected.
+- `thing.id` is created immediately so the world can render a queued placeholder
+  and reconcile status updates. The asset store id arrives later as
+  `assetStoreModelId`; preserve it unchanged through Hyades, Gnostr, imports,
+  exports, and snapshots.
+- `modelUrl` is only a serving hint. If an asset-store id exists, Tellus should
+  be able to reload through
+  `/api/assets/model/{assetStoreModelId}/game-optimized` even if names,
+  optimization outputs, or route shapes change.
+- The 3D Asset Manager performs optimization, LOD, and impostor baking after
+  upload. Tellus should load the ready model as soon as available and then
+  naturally converge to optimized routes as the asset store finishes work.
+- If an object appears in the asset store but not in-world, suspect URL/proxy or
+  `assetStoreModelId` reconciliation first. If it never appears in the asset
+  store, suspect Hyades job submission, Z Image, or the selected 3D provider.
+- Local Vite needs server env vars in `vite.config.ts`'s allowlist. If a new
+  backend env var seems ignored in dev, check that list before chasing Hyades.
+- Passkey/WebAuthn origin errors are separate from generation. Localhost RP-ID
+  failures usually mean the WebAuthn origin allow-list does not match the
+  current dev URL.
+
+### Direct local Gradio development
+
+Tellus can call a local InstantMesh service for debugging by setting
+`TELLUS_3D_BACKEND=direct` and
+`VITE_TELLUS_GENERATION_PROVIDER=instantmesh-gradio`.
+
+InstantMesh upstream:
+
+- Official repo: <https://github.com/TencentARC/InstantMesh>
+- Hugging Face model/demo: <https://huggingface.co/TencentARC/InstantMesh>
+
+The official InstantMesh README recommends Python 3.10+, PyTorch 2.1.0+, and
+CUDA 12.1. It starts the local Gradio demo with `python app.py`, and can run the
+demo across two GPUs when multiple GPUs are available. It does not publish a
+single fixed VRAM minimum; for Tellus local testing, use an NVIDIA CUDA GPU and
+expect 12 GB VRAM to be a practical lower target for the reduced settings in
+`scripts/start-instantmesh.sh`. More VRAM gives more room for higher mesh/grid
+and preview settings.
+
+Tellus helper scripts:
+
+```bash
+bun run instantmesh:setup
+bun run instantmesh:start
+```
+
+Those wrap:
+
+```bash
+scripts/setup-instantmesh.sh auto
+scripts/start-instantmesh.sh docker
+```
+
+The setup script clones `https://github.com/TencentARC/InstantMesh.git` into
+`external/InstantMesh` and builds either a Docker image or a Miniconda env. The
+Docker path uses `scripts/InstantMesh.Dockerfile`, based on CUDA 12.1, PyTorch
+2.1.0, and xformers 0.0.22.post7. The start script exposes the Gradio app at
+`http://127.0.0.1:43839` by default; override with
+`INSTANTMESH_GRADIO_PORT`.
+
+```text
+TELLUS_3D_BACKEND=direct
 INSTANTMESH_GRADIO_BASE_URL=http://192.168.1.177:43839
 INSTANTMESH_SAMPLE_STEPS=30
 TELLUS_GENERATED_ASSET_DIR=Z:\3d\assets\tellus
@@ -180,13 +286,13 @@ TELLUS_OPTIMIZE_TEXTURE_QUALITY=82
 TELLUS_OPTIMIZE_SIMPLIFY_ERROR=0.0001
 ```
 
-For deployed builds, `INSTANTMESH_GRADIO_BASE_URL` must be a URL that the
-deployed server can reach. LAN addresses work for same-network hosts such as a
-home Coolify server; off-network hosts such as Vercel need a public or tunneled
-URL.
+In direct mode, each provider base URL must be reachable from the Tellus server
+process. LAN addresses work for same-network hosts such as a home Coolify
+server; off-network hosts such as Vercel need a public or tunneled URL. This
+does not apply to the normal Hyades mode.
 
-InstantMesh is image-to-3D, while Tellus agents speak in text prompts. Tellus
-therefore runs a middle step:
+Direct InstantMesh is image-to-3D, while Tellus agents speak in text prompts.
+In direct mode, Tellus therefore runs a local middle step:
 
 ```text
 text prompt -> concept image -> InstantMesh -> persisted GLB
@@ -204,12 +310,13 @@ upstream Gradio timeout. `TELLUS_GENERATION_QUEUED_TTL_MS` should also be long
 enough for jobs waiting behind the currently loaded model, otherwise queued
 visitor requests can expire before they ever start.
 
-Generated GLBs are uploaded into the 3D asset store after the staging copy is
-written to `TELLUS_GENERATED_ASSET_DIR`. Set `TELLUS_ASSET_STORE_SESSION_COOKIE`
-to a valid server-side asset-store session cookie, or use
-`TELLUS_ASSET_STORE_UPLOAD_TOKEN` when the asset store supports bearer-token
-uploads. `TELLUS_REQUIRE_ASSET_STORE_UPLOAD=true` makes generation fail loudly
-if the object cannot be persisted into the asset store.
+In direct mode, generated GLBs are uploaded into the 3D asset store after the
+staging copy is written to `TELLUS_GENERATED_ASSET_DIR`. Set
+`TELLUS_ASSET_STORE_SESSION_COOKIE` to a valid server-side asset-store session
+cookie, or use `TELLUS_ASSET_STORE_UPLOAD_TOKEN` when the asset store supports
+bearer-token uploads. `TELLUS_REQUIRE_ASSET_STORE_UPLOAD=true` makes generation
+fail loudly if the object cannot be persisted into the asset store. In Hyades
+mode, Hyades owns that upload step.
 
 Tellus persists the asset store's immutable model id as `assetStoreModelId` on
 placed generated objects. Hyades / gnostr proxy deployments must preserve that

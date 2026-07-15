@@ -1,37 +1,83 @@
 # Gnostr Cloud setup notes
 
-These notes are for wiring a local Git checkout to the Gnostr Cloud/Uranus repo
-surface without leaking Nostr private keys into chat, shell history, or docs.
+These notes document the current Tellus Gnostr Cloud deployment path without
+recording Nostr private keys. Do not paste or commit an `nsec`; use the stored
+local identity flow when authentication is required.
 
-## Verified endpoints
+## Current live surfaces
 
-- Landing page/docs: <https://gnostr.cloud/>
+- Primary Gnostr app host: <https://tellus.gnostr.cloud/>
+- Alternate public host: <https://tellus.garden/>
 - Build wall: <https://uranus.gnostr.cloud/wall>
-- Repo inventory: <https://uranus.gnostr.cloud/api/repos>
-- Tellus source browser:
+- Repo source browser:
   <https://uranus.gnostr.cloud/source?repo=a684e920e475ae9535a26256a3fccf0f0e67650156ea6542bc0baab983e7c1ca%2Ftellus>
 
-The Uranus API currently reports the Tellus repo as:
+Both app hosts returned `HTTP 200` when checked on 2026-07-12.
+
+## Local remote
+
+The working Gnostr remote in this checkout is `gnostr-tellus`:
 
 ```text
-canonical: a684e920e475ae9535a26256a3fccf0f0e67650156ea6542bc0baab983e7c1ca/tellus
-default branch: master
-head: 75277f7fdd1eb7e43b42372ba3494c81db29aaa2
+gnostr-cloud://info@monumentalsystems.com/tellus?provider=d0b51eaeb289cda95c969f9a70ee76c15c4fa084a055037919beef5613ef1caf
 ```
 
-## Key setup
+Check it with:
 
-Use a NIP-07 browser signer such as nos2x to generate or import the Nostr key.
-Do not paste the `nsec` private key into chat or commit it to the repo.
+```powershell
+git remote -v
+git ls-remote --heads --tags gnostr-tellus
+```
 
-When a CLI asks for the private key, prefer an interactive prompt. If the tool
-only accepts an argument, paste it directly into that local terminal invocation
-and avoid saving it in scripts.
+As of 2026-07-12, the verified remote refs were:
+
+```text
+refs/heads/master 237f9e53a6293526ea15038843e57119332e9dbd
+refs/heads/main   6d4fba2b5f0572412dd2f3d141251befd93bfc9d
+refs/tags/v0.8.163 237f9e53a6293526ea15038843e57119332e9dbd
+```
+
+The helper may print an endpoint-close warning after a successful ref listing or
+push. Treat the ref output as authoritative and re-run `git ls-remote` when in
+doubt.
+
+## Auth convention
+
+Use the stored identity name for pushes:
+
+```powershell
+$env:GIT_NOSTR_IDENTITY = "lisa"
+```
+
+Do not put the private key in shell history, scripts, docs, or chat. If the
+helper reports that no credential is available, set the identity environment
+variable and retry.
+
+## Deploy convention
+
+`master` is the deploy branch on Gnostr Cloud. Release deploys are triggered by
+pushing a `v*` tag after `master` points at the desired commit.
+
+Typical deploy flow:
+
+```powershell
+bun run build
+git push origin HEAD:main
+$env:GIT_NOSTR_IDENTITY = "lisa"
+git push gnostr-tellus HEAD:master
+git tag v0.8.164
+git push gnostr-tellus v0.8.164
+git ls-remote --heads --tags gnostr-tellus
+```
+
+Use the next unused version tag. If a deploy looks stale, compare the desired
+commit with `gnostr-tellus/master` and the latest `v*` tag before assuming the
+app bundle is wrong.
 
 ## Helper install check
 
-Git can only clone custom URL schemes when a matching remote helper is on
-`PATH`. On Windows, Cargo installs helpers into `%USERPROFILE%\.cargo\bin`.
+Git can only use custom URL schemes when a matching remote helper is on `PATH`.
+On Windows, Cargo usually installs helpers into `%USERPROFILE%\.cargo\bin`.
 
 Check local helper availability:
 
@@ -55,72 +101,8 @@ Make sure this directory is on `PATH`:
 $env:USERPROFILE + "\.cargo\bin"
 ```
 
-The public landing page shows `cargo install gnostr-cloud-cli`, but as of
-2026-06-17 `cargo search gnostr-cloud-cli` did not find a published crate. The
-installable package I could verify is `gnostr`.
+## Legacy remotes
 
-## Current helper behavior
-
-This checkout already has these helper binaries installed:
-
-```text
-git-remote-gnostr-cloud.exe
-git-remote-gnostr.exe
-git-remote-nostr.exe
-gnostr.exe
-```
-
-The configured local remotes are older `saturn` examples and point at the slug
-`saturn`, not `tellus`:
-
-```text
-saturn        gnostr-cloud://a684e920e475ae9535a26256a3fccf0f0e67650156ea6542bc0baab983e7c1ca/saturn?provider=d0b51eaeb289cda95c969f9a70ee76c15c4fa084a055037919beef5613ef1caf
-saturn-gnostr gnostr://a684e920e475ae9535a26256a3fccf0f0e67650156ea6542bc0baab983e7c1ca/saturn
-saturn-npub   gnostr://npub156zwjg8ywkhf2ddzvft28lx0pu8xwegp2m4x2s4upw4tnql8c89q7ul7df/saturn
-```
-
-Testing the corrected Tellus URL with the currently installed
-`git-remote-gnostr-cloud` fails before authentication:
-
-```text
-git ls-remote "gnostr-cloud://a684e920e475ae9535a26256a3fccf0f0e67650156ea6542bc0baab983e7c1ca/tellus?provider=d0b51eaeb289cda95c969f9a70ee76c15c4fa084a055037919beef5613ef1caf"
-warning: gnostr-cloud unexpectedly said: ''
-fatal: malformed response in ref list: ok
-Invalid gnostr URL: gnostr-cloud://...
-```
-
-Testing the older `nostr://` helper reaches Nostr lookup, but does not find repo
-events for the Uranus repo coordinates:
-
-```text
-git ls-remote "nostr://npub156zwjg8ywkhf2ddzvft28lx0pu8xwegp2m4x2s4upw4tnql8c89q7ul7df/tellus"
-nostr: fetching...
-Error: no repo events at specified coordinates
-```
-
-That means the current blocker is not the Nostr key. It is the local
-`gnostr-cloud://` Git helper implementation or URL contract.
-
-## Commands to retry when the helper is updated
-
-Use a separate remote name from the stale `saturn` examples:
-
-```powershell
-git remote add gnostr-cloud "gnostr-cloud://a684e920e475ae9535a26256a3fccf0f0e67650156ea6542bc0baab983e7c1ca/tellus?provider=d0b51eaeb289cda95c969f9a70ee76c15c4fa084a055037919beef5613ef1caf"
-git ls-remote gnostr-cloud
-```
-
-Fresh clone form:
-
-```powershell
-git clone "gnostr-cloud://a684e920e475ae9535a26256a3fccf0f0e67650156ea6542bc0baab983e7c1ca/tellus?provider=d0b51eaeb289cda95c969f9a70ee76c15c4fa084a055037919beef5613ef1caf" tellus-gnostr
-```
-
-The deploy workflow in this repo is tag-only. A `v*` tag pushed to the working
-Gnostr Cloud remote should enqueue the Uranus CI job:
-
-```powershell
-git tag v0.8.54
-git push gnostr-cloud v0.8.54
-```
-
+This checkout may still contain older `saturn`, `saturn-gnostr`, and
+`saturn-npub` remotes. They are historical examples and do not deploy Tellus.
+Use `gnostr-tellus` for Tellus deploy verification and pushes.
