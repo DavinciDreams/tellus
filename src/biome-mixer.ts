@@ -2197,11 +2197,16 @@ applyWorldButton.addEventListener("click", () => {
     updateStatus("Could not save biome mix for this world.");
     return;
   }
-  updateStatus(`Applied ${currentMix.label} to ${labelForProcPlantId(targetPaint)} in ${registry.worldId}; ${biomeMixReportText(currentMix)}.`);
+  const persistedMix = registry.mixesByTerrainPaint[targetPaint];
+  const omittedSessionAssets = currentMix.entries.length - (persistedMix?.entries.length ?? 0);
+  const omittedNotice = omittedSessionAssets > 0
+    ? ` ${omittedSessionAssets} session-only asset${omittedSessionAssets === 1 ? " was" : "s were"} omitted; add it from the shared asset library to publish it.`
+    : "";
+  updateStatus(`Applied ${currentMix.label} to ${labelForProcPlantId(targetPaint)} in ${registry.worldId}; ${biomeMixReportText(persistedMix ?? currentMix)}.${omittedNotice}`);
   void saveActiveBiomeMixRegistryToServer(registry).then((saved) => {
     updateStatus(saved
-      ? `Applied ${currentMix.label} to ${labelForProcPlantId(targetPaint)} in ${registry.worldId} and saved to Hyades; ${biomeMixReportText(currentMix)}.`
-      : `Applied ${currentMix.label} locally; Hyades save is unavailable; ${biomeMixReportText(currentMix)}.`);
+      ? `Applied ${currentMix.label} to ${labelForProcPlantId(targetPaint)} in ${registry.worldId} and saved to Hyades; ${biomeMixReportText(persistedMix ?? currentMix)}.${omittedNotice}`
+      : `Applied ${currentMix.label} locally; Hyades save is unavailable; ${biomeMixReportText(persistedMix ?? currentMix)}.${omittedNotice}`);
   });
 });
 
