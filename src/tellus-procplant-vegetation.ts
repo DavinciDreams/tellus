@@ -452,9 +452,11 @@ const mulberry32 = (seed: number) => {
 const disposeGroup = (group: THREE.Group) => {
   group.traverse((object) => {
     if (object instanceof THREE.Mesh || object instanceof THREE.InstancedMesh) {
-      object.geometry.dispose();
+      if (!object.geometry.userData.tellusProcplantShared) object.geometry.dispose();
       const materials = Array.isArray(object.material) ? object.material : [object.material];
-      for (const material of materials) material.dispose();
+      for (const material of materials) {
+        if (!material.userData.tellusProcplantShared) material.dispose();
+      }
     }
   });
   group.clear();
@@ -723,6 +725,7 @@ export function createProcPlantVegetation(
   let lastMoveDirX = 0;
   let lastMoveDirZ = 0;
   let lastPlayerMovedAt = Number.NEGATIVE_INFINITY;
+  let lastMovingBuildAt = Number.NEGATIVE_INFINITY;
   let buildPausedForMotion = false;
   let disposed = false;
   const active = new Map<string, ActiveChunk>();
@@ -735,6 +738,31 @@ export function createProcPlantVegetation(
     color: 0xffffff,
     side: THREE.DoubleSide,
   });
+  stemMaterial.userData.tellusProcplantShared = true;
+  organMaterial.userData.tellusProcplantShared = true;
+  const stemGeometryCache = new Map<ProcPlantTemplate, THREE.BufferGeometry>();
+  const organGeometryCache = new Map<string, THREE.BufferGeometry>();
+  const stemGeometryForTemplate = (template: ProcPlantTemplate): THREE.BufferGeometry => {
+    const cached = stemGeometryCache.get(template);
+    if (cached) return cached;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(template.pos, 3));
+    geometry.setAttribute("normal", new THREE.BufferAttribute(template.nrm, 3));
+    geometry.setAttribute("color", new THREE.BufferAttribute(template.col, 3));
+    geometry.setIndex(new THREE.BufferAttribute(template.idx, 1));
+    geometry.computeBoundingSphere();
+    geometry.userData.tellusProcplantShared = true;
+    stemGeometryCache.set(template, geometry);
+    return geometry;
+  };
+  const organGeometryForKey = (key: string): THREE.BufferGeometry => {
+    const cached = organGeometryCache.get(key);
+    if (cached) return cached;
+    const geometry = geometryForKey(key);
+    geometry.userData.tellusProcplantShared = true;
+    organGeometryCache.set(key, geometry);
+    return geometry;
+  };
   let activeBiomeMixRegistry: TellusBiomeMixRegistry =
     options.biomeMixRegistry ?? loadActiveBiomeMixRegistryForWorld(options.worldId);
   activeBiomeMixSignature = biomeMixRenderSignature(activeBiomeMixRegistry);
@@ -1034,7 +1062,7 @@ export function createProcPlantVegetation(
         const key = `grassCarpet:${bladeCount}`;
         let bucket = organBuckets.get(key);
         if (!bucket) {
-          bucket = { key, geometry: geometryForKey(key), instances: [] };
+          bucket = { key, geometry: organGeometryForKey(key), instances: [] };
           organBuckets.set(key, bucket);
         }
         const baseColor = new THREE.Color(genome.leaf.colorA);
@@ -1141,7 +1169,7 @@ export function createProcPlantVegetation(
         const key = `grassCarpet:${bladeCount}`;
         let bucket = organBuckets.get(key);
         if (!bucket) {
-          bucket = { key, geometry: geometryForKey(key), instances: [] };
+          bucket = { key, geometry: organGeometryForKey(key), instances: [] };
           organBuckets.set(key, bucket);
         }
         const baseColor = new THREE.Color(genome.leaf.colorA);
@@ -1234,7 +1262,7 @@ export function createProcPlantVegetation(
         const key = geometryKeyFor(genome, instance);
         let bucket = organBuckets.get(key);
         if (!bucket) {
-          bucket = { key, geometry: geometryForKey(key), instances: [] };
+          bucket = { key, geometry: organGeometryForKey(key), instances: [] };
           organBuckets.set(key, bucket);
         }
         const placed = {
@@ -1274,7 +1302,7 @@ export function createProcPlantVegetation(
         const key = geometryKeyFor(genome, instance);
         let bucket = organBuckets.get(key);
         if (!bucket) {
-          bucket = { key, geometry: geometryForKey(key), instances: [] };
+          bucket = { key, geometry: organGeometryForKey(key), instances: [] };
           organBuckets.set(key, bucket);
         }
         bucket.instances.push({
@@ -1286,15 +1314,33 @@ export function createProcPlantVegetation(
     }
 
     if (stemTemplates.length > 0) {
-      const geometry = templateToGeometry(stemTemplates);
-      const mesh = new THREE.Mesh(geometry, stemMaterial.clone());
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
-      chunk.group.add(mesh);
+      // Templates are already cached and immutable. Instancing their transforms avoids re-copying and
+      // transforming every stem vertex into a new merged BufferGeometry whenever a streamed chunk is
+      // built. Grouping by template retains batching while making repeated communities cheap.
+      const stemsByTemplate = new Map<ProcPlantTemplate, THREE.Matrix4[]>();
+      for (const entry of stemTemplates) {
+        const matrices = stemsByTemplate.get(entry.template) ?? [];
+        matrices.push(entry.matrix);
+        stemsByTemplate.set(entry.template, matrices);
+      }
+      for (const [template, matrices] of stemsByTemplate) {
+        const mesh = new THREE.InstancedMesh(
+          stemGeometryForTemplate(template),
+          stemMaterial,
+          matrices.length,
+        );
+        mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+        matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.computeBoundingSphere();
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
+        chunk.group.add(mesh);
+      }
     }
 
     for (const bucket of organBuckets.values()) {
-      const mesh = new THREE.InstancedMesh(bucket.geometry, organMaterial.clone(), bucket.instances.length);
+      const mesh = new THREE.InstancedMesh(bucket.geometry, organMaterial, bucket.instances.length);
       // Chunk vegetation is rebuilt when its contents change; its instance buffer is otherwise immutable.
       // Static usage lets the backend keep it in GPU-optimal storage instead of treating every plant organ
       // as a per-frame streaming buffer.
@@ -1417,18 +1463,24 @@ export function createProcPlantVegetation(
     const movementIntentActive = options.shouldPauseBuild?.() ?? false;
     const stationary = !movementIntentActive && (chunksBuilt === 0 || nowMs - lastPlayerMovedAt > 650);
     buildPausedForMotion = !stationary && rebuildQueue.length > 0;
-    // A single uncached procedural community can take hundreds of milliseconds to assemble. A time
-    // budget cannot interrupt buildChunk once it begins, so starting even one while moving creates a
-    // visible boundary hitch. Keep the already-built 9x9 ring on screen and defer new/revised chunks
-    // until the player has stopped for a short settle period. The same full-detail geometry is built;
-    // this changes scheduling, not visual quality or density.
-    if (!stationary) {
+    // Continue filling ahead during travel, but start at most one chunk at a controlled cadence. The
+    // shared/instanced geometry path above keeps each build small; throttling prevents several chunks
+    // from landing on one frame and avoids the old stop-then-catch-up burst.
+    const movingBuildIntervalMs = fps >= 50 ? 100 : 250;
+    const movingBuildAllowed =
+      !stationary &&
+      nowMs - lastMovingBuildAt >= movingBuildIntervalMs;
+    if (!stationary && !movingBuildAllowed) {
       lastUpdateMs = performance.now() - updateStartedAt;
       maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
       return;
     }
-    const maxBuilds = fps < 28 ? LOW_FPS_BUILD_BUDGET + 1 : NORMAL_BUILD_BUDGET + 2;
-    const buildMsBudget = fps < 28 ? LOW_FPS_BUILD_MS_BUDGET + 1.5 : NORMAL_BUILD_MS_BUDGET + 3;
+    const maxBuilds = stationary
+      ? (fps < 28 ? LOW_FPS_BUILD_BUDGET + 1 : NORMAL_BUILD_BUDGET + 2)
+      : 1;
+    const buildMsBudget = stationary
+      ? (fps < 28 ? LOW_FPS_BUILD_MS_BUDGET + 1.5 : NORMAL_BUILD_MS_BUDGET + 3)
+      : LOW_FPS_BUILD_MS_BUDGET;
     const buildStartedAt = performance.now();
     let budget = maxBuilds;
     while (budget > 0 && rebuildQueue.length > 0) {
@@ -1444,6 +1496,7 @@ export function createProcPlantVegetation(
       totalBuildMs += chunkBuildMs;
       chunksBuilt++;
       builtLastUpdate++;
+      if (!stationary) lastMovingBuildAt = nowMs;
       budget--;
       if (performance.now() - buildStartedAt >= buildMsBudget) break;
     }
@@ -1573,6 +1626,10 @@ export function createProcPlantVegetation(
       active.clear();
       root.clear();
       options.scene.remove(root);
+      for (const geometry of stemGeometryCache.values()) geometry.dispose();
+      for (const geometry of organGeometryCache.values()) geometry.dispose();
+      stemGeometryCache.clear();
+      organGeometryCache.clear();
       stemMaterial.dispose();
       organMaterial.dispose();
     },
