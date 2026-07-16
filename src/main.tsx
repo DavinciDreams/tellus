@@ -9086,6 +9086,8 @@ function createTellusWorld(
   const _camCollideDir = new THREE.Vector3();
   const _camRaycaster = new THREE.Raycaster();
   const _camCollisionTargets: THREE.Object3D[] = [];
+  // Generous allowance for a generated object's bounds extending past its center (e.g. a large building).
+  const CAM_COLLISION_RADIUS_MARGIN = 12;
   const updateCamera = () => {
     if (cameraMode === "first") {
       // First person: eye at the local avatar's head (the same POV math the agent viewport uses,
@@ -9139,8 +9141,15 @@ function createTellusWorld(
     if (desiredDist > 0.001) {
       const camDir = _camCollideDir.copy(offset).multiplyScalar(1 / desiredDist);
       _camCollisionTargets.length = 0;
+      // Cheap distance pre-filter before the expensive recursive triangle raycast: a mesh whose
+      // center is well beyond the ray's own length can never be hit, so skip it without descending
+      // into its geometry. Margin covers large meshes (e.g. buildings) whose bounds extend past their
+      // center point. In a world with hundreds of generated things this keeps intersectObjects's
+      // target list — and per-frame triangle-intersection cost — bounded by nearby objects only.
+      const maxCollideDistSq = (desiredDist + CAM_COLLISION_RADIUS_MARGIN) ** 2;
       for (const [id, mesh] of generatedMeshes) {
         if (id === sailingThingId) continue; // don't collide with the thing you're riding
+        if (mesh.position.distanceToSquared(target) > maxCollideDistSq) continue;
         _camCollisionTargets.push(mesh);
       }
       _camRaycaster.set(target, camDir);
