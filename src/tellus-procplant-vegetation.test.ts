@@ -11,8 +11,12 @@ import {
 } from "./tellus-procplants";
 import {
   PROCPLANT_PLACEABLE_CATALOG,
+  ECOLOGY_BIOME_OPTIONS,
+  GLOBAL_DEFAULT_EXCLUDED_PROCPLANT_PRESETS,
   biomePatchForEcology,
   biomePatchForPaint,
+  biomePatchesForEcologyBiome,
+  biomePatchesForPaint,
   genomeForBiomePatch,
   procPlantPlaceableById,
   treeBackendForBiomePatch,
@@ -67,6 +71,28 @@ describe("procplant vegetation", () => {
     expect(shouldCullDistantGroundPlant("shrub", 100, false)).toBe(false);
     expect(shouldCullDistantGroundPlant("palm", 100, false)).toBe(false);
     expect(shouldCullDistantGroundPlant("tree", 100, false)).toBe(false);
+  });
+  it("keeps expensive authored-only plants out of global biome defaults", () => {
+    const paints = [
+      "meadow", "flowers", "grass", "beach", "dirt", "forest-floor", "desert-sand",
+      "rock", "snow", "stone", "gravel", "jungle-moss", "brick",
+    ] as const;
+    const patches = [
+      ...paints.flatMap((paint) => biomePatchesForPaint(paint, 17)),
+      ...ECOLOGY_BIOME_OPTIONS.flatMap((biome) => biomePatchesForEcologyBiome(biome, 23, 20)),
+    ];
+    expect([...GLOBAL_DEFAULT_EXCLUDED_PROCPLANT_PRESETS]).toEqual([
+      "phiFern",
+      "acaciaUmbrella",
+      "blueSpruce",
+    ]);
+    for (const patch of patches) {
+      expect(GLOBAL_DEFAULT_EXCLUDED_PROCPLANT_PRESETS.has(patch.primary)).toBe(false);
+      expect(patch.secondary && GLOBAL_DEFAULT_EXCLUDED_PROCPLANT_PRESETS.has(patch.secondary)).not.toBe(true);
+    }
+    expect(procPlantPlaceableById("phiFern")).toBeDefined();
+    expect(procPlantPlaceableById("acaciaUmbrella")).toBeDefined();
+    expect(procPlantPlaceableById("blueSpruce")).toBeDefined();
   });
   it("derives stable chunk seeds from world, chunk, and terrain revision", () => {
     const a = procPlantChunkSeed("chunked-64-main", 8, -3, 0);
@@ -226,7 +252,7 @@ describe("procplant vegetation", () => {
 
     expect(ecology.biome).toBe("estuary");
     expect(ecology.biomeWeights).toEqual({ estuary: 1 });
-    expect(["reedSedge", "mangroveRoots", "phiFern", "furGrass"]).toContain(patch?.primary);
+    expect(["reedSedge", "mangroveRoots", "furGrass"]).toContain(patch?.primary);
     expect(buildingMaterialForEcology(ecology, "simple-house")).toBe("brick-cottage");
   });
 
@@ -718,7 +744,7 @@ describe("procplant vegetation", () => {
     expect(after.chunks).toBe(before.chunks);
     expect(after.queuedRebuilds).toBe(0);
     expect(after.plants).toBeGreaterThan(0);
-    expect(after.stemTriangles).toBeGreaterThan(0);
+    expect(after.stemTriangles + after.grassTriangles).toBeGreaterThan(0);
 
     vegetation.dispose();
   });
