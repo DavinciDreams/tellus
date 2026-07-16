@@ -23,7 +23,11 @@ import {
   worldBiomeCellBounds,
   worldBiomeCellCoordinates,
 } from "./tellus-ecology";
-import { createProcPlantVegetation, procPlantChunkSeed } from "./tellus-procplant-vegetation";
+import {
+  createProcPlantVegetation,
+  procPlantChunkSeed,
+  shouldUseCheapDistantTree,
+} from "./tellus-procplant-vegetation";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 import { SEA_LEVEL } from "./tellus-constants";
 import type { TellusBiomeMixDefinition } from "./tellus-biome-mix";
@@ -44,6 +48,15 @@ const templateBounds = (template: ProcPlantTemplate) => {
 };
 
 describe("procplant vegetation", () => {
+  it("never replaces distant ground plants with a tree silhouette", () => {
+    expect(shouldUseCheapDistantTree(procPlantPresets.desertRosette.habit, false, 1.25)).toBe(false);
+    expect(shouldUseCheapDistantTree("flower", false, 4)).toBe(false);
+    expect(shouldUseCheapDistantTree("shrub", false, 4)).toBe(false);
+    expect(shouldUseCheapDistantTree("palm", false, 8)).toBe(false);
+    expect(shouldUseCheapDistantTree("tree", false, 4)).toBe(true);
+    expect(shouldUseCheapDistantTree("conifer", false, 4)).toBe(true);
+    expect(shouldUseCheapDistantTree("tree", true, 4)).toBe(false);
+  });
   it("derives stable chunk seeds from world, chunk, and terrain revision", () => {
     const a = procPlantChunkSeed("chunked-64-main", 8, -3, 0);
     const b = procPlantChunkSeed("chunked-64-main", 8, -3, 0);

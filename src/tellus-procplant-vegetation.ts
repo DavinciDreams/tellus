@@ -45,6 +45,7 @@ import {
   createProcPlantPetalGeometry,
   type ProcPlantEnvironment,
   type ProcPlantGenome,
+  type ProcPlantHabit,
   type ProcPlantInstance,
   type ProcPlantInstancedParts,
   type ProcPlantTemplate,
@@ -200,6 +201,15 @@ const GRASS_FIELD_SPACING_LOD0 = 0.34;
 const GRASS_FIELD_SPACING_LOD1 = 0.68;
 const GRASS_FIELD_SPACING_LOD2 = 1.18;
 const GRASS_FIELD_FULL_DENSITY_RING = 2;
+
+export const shouldUseCheapDistantTree = (
+  habit: ProcPlantHabit,
+  useDetailedTree: boolean,
+  baseScale: number,
+): boolean =>
+  !useDetailedTree &&
+  baseScale >= 1.2 &&
+  (habit === "tree" || habit === "conifer");
 
 const foliageDefaultsForTreeSpecies = (
   species: string,
@@ -1288,7 +1298,7 @@ export function createProcPlantVegetation(
         chunk.stats.plants++;
         continue;
       }
-      const useCheapDistantTree = !useDetailedTree && baseScale >= 1.2;
+      const useCheapDistantTree = shouldUseCheapDistantTree(genome.habit, useDetailedTree, baseScale);
       if (useCheapDistantTree) {
         const template = buildCheapTreeTemplate(genome.weberPenn?.species ?? genome.id);
         const scale = baseScale * PROC_TREE_FAR_SCALE * THREE.MathUtils.lerp(0.9, 1.2, rand());
