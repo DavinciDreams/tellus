@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { generateTreeData, type TreeData } from "./vendor/proc-tree/index";
+import type { TreeData } from "./vendor/proc-tree/index";
 import type { ProcPlantTemplate } from "./tellus-procplants";
 
 export type BranchSegmentPrototypeId = "taper-100" | "taper-75" | "taper-50" | "taper-25";
@@ -326,8 +326,199 @@ export function branchModuleTreeFromSpecies(
   seed: number,
   options: BranchModuleTreeOptions = {},
 ): BranchModuleTree {
-  return branchModuleTreeFromData(
-    generateTreeData(species, seed >>> 0, true, options.maxBranchDepth),
-    options,
-  );
+  const speciesId = species.toLowerCase();
+  const conifer = /fir|pine|douglas|larch|spruce|redwood/.test(speciesId);
+  const slender = /birch|aspen|poplar/.test(speciesId);
+  const spreading = /oak|sassafras|tupelo|acacia/.test(speciesId);
+  const weeping = /willow|weeping/.test(speciesId);
+  const blossom = /cherry|apple|magnolia/.test(speciesId);
+  let speciesHash = 2166136261;
+  for (let i = 0; i < speciesId.length; i++) {
+    speciesHash ^= speciesId.charCodeAt(i);
+    speciesHash = Math.imul(speciesHash, 16777619);
+  }
+  let randomState = (seed ^ speciesHash) >>> 0;
+  const random = () => {
+    randomState = (randomState + 0x6d2b79f5) >>> 0;
+    let value = randomState;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+  const maxDepth = Math.max(1, Math.min(4, Math.round(options.maxBranchDepth ?? 3)));
+  const moduleBudget = Math.max(6, Math.min(180, Math.round(options.maxStems ?? 72)));
+  const leafBudget = Math.max(0, Math.min(360, Math.round(options.maxLeaves ?? 180)));
+  const modules: BranchModuleInstance[] = [];
+  const segments: BranchSegmentInstance[] = [];
+
+  const addSegment = (
+    moduleId: number,
+    start: THREE.Vector3,
+    end: THREE.Vector3,
+    baseRadius: number,
+    tipRadius: number,
+  ): number => {
+    const direction = end.clone().sub(start);
+    const length = Math.max(1e-5, direction.length());
+    direction.divideScalar(length);
+    const matrix = new THREE.Matrix4().compose(
+      start,
+      new THREE.Quaternion().setFromUnitVectors(UNIT_Y, direction),
+      new THREE.Vector3(baseRadius, length, baseRadius),
+    );
+    const id = segments.length;
+    segments.push({
+      id,
+      moduleId,
+      prototypeId: prototypeForTaper(tipRadius / Math.max(baseRadius, 1e-5)),
+      start: start.clone(),
+      end: end.clone(),
+      baseRadius,
+      tipRadius,
+      matrix,
+    });
+    return id;
+  };
+
+  const addModule = (
+    parentModuleId: number | null,
+    depth: number,
+    start: THREE.Vector3,
+    initialDirection: THREE.Vector3,
+    length: number,
+    baseRadius: number,
+    segmentCount: number,
+  ): number => {
+    const id = modules.length;
+    const module: BranchModuleInstance = {
+      id,
+      parentModuleId,
+      depth,
+      childModuleIds: [],
+      segmentIds: [],
+    };
+    modules.push(module);
+    if (parentModuleId !== null) modules[parentModuleId]?.childModuleIds.push(id);
+    let point = start.clone();
+    let direction = initialDirection.clone().normalize();
+    for (let index = 0; index < segmentCount; index++) {
+      const segmentT = index / Math.max(1, segmentCount - 1);
+      const bend = (0.018 + depth * 0.014) * (0.35 + random());
+      direction.add(new THREE.Vector3(
+        (random() - 0.5) * bend,
+        (conifer && depth === 0 ? 0.025 : 0.008) - (weeping && depth > 0 ? 0.035 : 0),
+        (random() - 0.5) * bend,
+      )).normalize();
+      const step = length / segmentCount * (0.9 + random() * 0.2);
+      const end = point.clone().addScaledVector(direction, step);
+      const radiusA = Math.max(0.0025, baseRadius * (1 - segmentT * 0.68));
+      const radiusB = Math.max(0.0015, baseRadius * (1 - (index + 1) / segmentCount * 0.72));
+      module.segmentIds.push(addSegment(id, point, end, radiusA, radiusB));
+      point = end;
+    }
+    return id;
+  };
+
+  const trunkSegments = conifer ? 8 : slender ? 7 : 6;
+  addModule(null, 0, new THREE.Vector3(), UNIT_Y, 1, conifer ? 0.052 : spreading ? 0.068 : 0.058, trunkSegments);
+  const pending = [0];
+  while (pending.length > 0 && modules.length < moduleBudget) {
+    const parentId = pending.shift()!;
+    const parent = modules[parentId]!;
+    if (parent.depth >= maxDepth) continue;
+    const parentSegments = parent.segmentIds.map((id) => segments[id]!).filter(Boolean);
+    if (parentSegments.length === 0) continue;
+    const nextDepth = parent.depth + 1;
+    const desiredChildren = parent.depth === 0
+      ? conifer ? 11 : spreading ? 8 : slender ? 7 : 6
+      : Math.max(1, Math.round((conifer ? 3 : 2.4) - parent.depth * 0.45 + random()));
+    const childCount = Math.min(desiredChildren, moduleBudget - modules.length);
+    for (let child = 0; child < childCount; child++) {
+      const along = parent.depth === 0
+        ? 0.22 + (child + 0.35 + random() * 0.3) / Math.max(1, childCount) * 0.72
+        : 0.38 + random() * 0.58;
+      const segmentIndex = Math.min(
+        parentSegments.length - 1,
+        Math.floor(along * parentSegments.length),
+      );
+      const parentSegment = parentSegments[segmentIndex]!;
+      const localT = THREE.MathUtils.clamp(along * parentSegments.length - segmentIndex, 0.08, 0.96);
+      const start = parentSegment.start.clone().lerp(parentSegment.end, localT);
+      const yaw = parent.depth === 0
+        ? (child / Math.max(1, childCount)) * Math.PI * 2 + random() * 0.55
+        : Math.atan2(
+            parentSegment.end.z - parentSegment.start.z,
+            parentSegment.end.x - parentSegment.start.x,
+          ) + (random() - 0.5) * 1.8;
+      const vertical = conifer
+        ? 0.12 + nextDepth * 0.09
+        : weeping
+          ? -0.18 - nextDepth * 0.08
+          : 0.28 + random() * 0.28;
+      const horizontal = spreading ? 1.15 : slender ? 0.72 : conifer ? 0.92 : 0.9;
+      const direction = new THREE.Vector3(
+        Math.cos(yaw) * horizontal,
+        vertical,
+        Math.sin(yaw) * horizontal,
+      ).normalize();
+      if (nextDepth > 1) {
+        direction.lerp(parentSegment.end.clone().sub(parentSegment.start).normalize(), 0.28).normalize();
+      }
+      const depthScale = Math.pow(conifer ? 0.56 : 0.62, nextDepth - 1);
+      const branchLength = (conifer ? 0.28 : spreading ? 0.42 : 0.34) * depthScale * (0.82 + random() * 0.34);
+      const branchRadius = Math.max(0.003, parentSegment.baseRadius * (nextDepth === 1 ? 0.5 : 0.58));
+      const moduleId = addModule(
+        parentId,
+        nextDepth,
+        start,
+        direction,
+        branchLength,
+        branchRadius,
+        nextDepth >= maxDepth ? 2 : 3,
+      );
+      pending.push(moduleId);
+    }
+  }
+
+  const terminalSegmentIds = modules
+    .filter((module) => module.childModuleIds.length === 0 || module.depth >= Math.max(1, maxDepth - 1))
+    .flatMap((module) => module.segmentIds.slice(module.depth === 0 ? 2 : 0));
+  const leaves: AttachedLeafInstance[] = [];
+  const leafScale = (conifer ? 0.012 : slender ? 0.02 : 0.026) * (options.leafScaleMultiplier ?? 1);
+  for (let index = 0; index < leafBudget && terminalSegmentIds.length > 0; index++) {
+    const segmentId = terminalSegmentIds[index % terminalSegmentIds.length]!;
+    const segment = segments[segmentId]!;
+    const t = 0.18 + random() * 0.8;
+    const anchor = segment.start.clone().lerp(segment.end, t);
+    const branchDirection = segment.end.clone().sub(segment.start).normalize();
+    const azimuth = random() * Math.PI * 2;
+    const direction = new THREE.Vector3(Math.cos(azimuth), 0.35 + random() * 0.65, Math.sin(azimuth)).normalize();
+    if (conifer) direction.lerp(branchDirection, 0.45).normalize();
+    const right = new THREE.Vector3().crossVectors(
+      Math.abs(direction.y) < 0.92 ? UNIT_Y : new THREE.Vector3(1, 0, 0),
+      direction,
+    ).normalize();
+    const normal = right.clone().cross(direction).normalize();
+    const matrix = new THREE.Matrix4().makeBasis(right, direction, normal);
+    matrix.scale(new THREE.Vector3(leafScale, leafScale, leafScale));
+    matrix.setPosition(anchor);
+    leaves.push({
+      id: leaves.length,
+      segmentId,
+      t,
+      anchor,
+      direction,
+      right,
+      matrix,
+      isBlossom: blossom && index % 5 === 0,
+    });
+  }
+
+  return {
+    modules,
+    segments,
+    leaves,
+    sourceStemCount: modules.length,
+    normalizedHeight: 1,
+  };
 }
