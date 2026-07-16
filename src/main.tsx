@@ -1568,6 +1568,11 @@ function createTellusWorld(
           grassTriangles: 0,
           stemTriangles: 0,
           organDraws: 0,
+          branchSegments: 0,
+          attachedLeaves: 0,
+          branchLod0: 0,
+          branchLod1: 0,
+          branchLod2: 0,
           lod0: 0,
           lod1: 0,
           lod2: 0,
@@ -11868,6 +11873,10 @@ function DebugLiveRows({ worldRef, rxEnabled }: DebugLiveRowsProps): React.React
             procplants {ambientStats.procplants.chunks} chunks · {ambientStats.procplants.grassInstances} grass tufts ·{" "}
             {Math.round(ambientStats.procplants.grassTriangles)} grass tris · {ambientStats.procplants.plants} communities ·{" "}
             {ambientStats.procplants.organDraws} organ draws
+          </div>
+          <div className="debug-stats-row">
+            branches {ambientStats.procplants.branchSegments} segments · {ambientStats.procplants.attachedLeaves} attached leaves · tree LOD{" "}
+            {ambientStats.procplants.branchLod0}/{ambientStats.procplants.branchLod1}/{ambientStats.procplants.branchLod2}
           </div>
           <div className="debug-stats-row">
             plant work {ambientStats.procplants.lastUpdateMs} ms · build {ambientStats.procplants.lastBuildMs} ms /{" "}

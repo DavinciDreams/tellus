@@ -9,7 +9,13 @@ import {
   treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
 import { resolveEcologySample, type EcologySample } from "./tellus-ecology";
-import { treeTemplateFromSpecies } from "./tellus-tree-gen";
+import {
+  branchModuleLodView,
+  branchModuleTreeFromSpecies,
+  branchSegmentPrototypeTemplate,
+  type BranchModuleLodLevel,
+  type BranchModuleTree,
+} from "./tellus-branch-modules";
 import { buildRetroCutoutTreeTemplate } from "./tellus-veg-archetypes";
 import { loadBiomeAssetTemplate } from "./tellus-biome-asset-template";
 import {
@@ -74,6 +80,11 @@ export interface ProcPlantVegetationStats {
   grassTriangles: number;
   stemTriangles: number;
   organDraws: number;
+  branchSegments: number;
+  attachedLeaves: number;
+  branchLod0: number;
+  branchLod1: number;
+  branchLod2: number;
   lod0: number;
   lod1: number;
   lod2: number;
@@ -121,6 +132,11 @@ interface ChunkStats {
   grassTriangles: number;
   stemTriangles: number;
   organDraws: number;
+  branchSegments: number;
+  attachedLeaves: number;
+  branchLod0: number;
+  branchLod1: number;
+  branchLod2: number;
 }
 
 interface ActiveChunk {
@@ -201,56 +217,36 @@ const foliageDefaultsForTreeSpecies = (
   return { foliageMass: 0.62, foliageClusterDensity: 1.1, foliageTipBias: 0.55, foliageSpread: 0.2 };
 };
 
-const buildBiomeTreeTemplate = (
-  species: string,
-  seed: number,
-  options: BiomeTreeTemplateOptions = {},
-): ProcPlantTemplate =>
-  treeTemplateFromSpecies(species, seed, {
-    radialSegments: 3,
-    branchSamples: 1,
-    branchCaps: false,
-    maxBranchDepth: options.maxBranchDepth ?? 2,
-    maxStems: options.maxStems ?? 42,
-    maxLeaves: options.maxLeaves ?? 170,
-    leafScaleMultiplier: options.leafScaleMultiplier ?? 2,
-    foliageMass: options.foliageMass,
-    foliageClusterDensity: options.foliageClusterDensity,
-    foliageTipBias: options.foliageTipBias,
-    foliageSpread: options.foliageSpread,
-    swayFrom: 0.3,
-  });
-
-// Detailed L-system trees are the single most expensive thing built during chunk streaming — a full
-// genome→graph→geometry pass per tree. The old call site seeded every instance uniquely
+// Detailed L-system trees are the single most expensive thing built during chunk streaming: a full
+// genome-to-branch-graph pass per tree. The old call site seeded every instance uniquely
 // (`patch.seed ^ i`), so NOTHING was ever reused and each tree paid full cost; that was the main
 // source of the multi-hundred-ms (up to ~1.5s) procplants build stalls seen in the perf readout.
-// Memoize by species + option-signature + a small seed bucket. Templates are immutable read-only data
-// (templateToGeometry only reads them, exactly like buildCheapTreeTemplate already shares one template
-// per species), so a handful of variants per species keeps visual variety at a fraction of the cost.
+// Memoize connected branch graphs by species + option-signature + a small seed bucket. A handful of
+// variants preserves variety while every rendered segment reuses one of four small prototype meshes.
 const DETAILED_TREE_SEED_BUCKETS = 8;
-const detailedTreeTemplateCache = new Map<string, ProcPlantTemplate>();
-const buildBiomeTreeTemplateCached = (
+const branchModuleTreeCache = new Map<string, BranchModuleTree>();
+const buildBranchModuleTreeCached = (
   species: string,
   seed: number,
   options: BiomeTreeTemplateOptions = {},
-): ProcPlantTemplate => {
+): BranchModuleTree => {
   const bucket =
     ((Math.trunc(seed) % DETAILED_TREE_SEED_BUCKETS) + DETAILED_TREE_SEED_BUCKETS) %
     DETAILED_TREE_SEED_BUCKETS;
-  // Only the fields buildBiomeTreeTemplate actually reads affect the output, so keying on them is
-  // complete — different biomes/backends with distinct foliage still get distinct cached templates.
   const key =
     `${species}|${bucket}|${options.maxBranchDepth ?? ""}|${options.maxStems ?? ""}|` +
-    `${options.maxLeaves ?? ""}|${options.leafScaleMultiplier ?? ""}|${options.foliageMass ?? ""}|` +
-    `${options.foliageClusterDensity ?? ""}|${options.foliageTipBias ?? ""}|${options.foliageSpread ?? ""}`;
-  let template = detailedTreeTemplateCache.get(key);
-  if (!template) {
-    // Use the bucket as the seed so the cached variant is deterministic (0..N-1 distinct shapes).
-    template = buildBiomeTreeTemplate(species, bucket, options);
-    detailedTreeTemplateCache.set(key, template);
+    `${options.maxLeaves ?? ""}|${options.leafScaleMultiplier ?? ""}`;
+  let tree = branchModuleTreeCache.get(key);
+  if (!tree) {
+    tree = branchModuleTreeFromSpecies(species, bucket, {
+      maxBranchDepth: options.maxBranchDepth,
+      maxStems: options.maxStems,
+      maxLeaves: options.maxLeaves,
+      leafScaleMultiplier: options.leafScaleMultiplier,
+    });
+    branchModuleTreeCache.set(key, tree);
   }
-  return template;
+  return tree;
 };
 
 // Same story as the detailed trees: buildProcPlantInstancedParts (flowers/shrubs/ferns/succulents)
@@ -601,6 +597,11 @@ const emptyStats = (): ProcPlantVegetationStats => ({
   grassTriangles: 0,
   stemTriangles: 0,
   organDraws: 0,
+  branchSegments: 0,
+  attachedLeaves: 0,
+  branchLod0: 0,
+  branchLod1: 0,
+  branchLod2: 0,
   lod0: 0,
   lod1: 0,
   lod2: 0,
@@ -727,6 +728,7 @@ export function createProcPlantVegetation(
   let lastPlayerMovedAt = Number.NEGATIVE_INFINITY;
   let lastMovingBuildAt = Number.NEGATIVE_INFINITY;
   let buildPausedForMotion = false;
+  let currentFps = 60;
   let disposed = false;
   const active = new Map<string, ActiveChunk>();
   const manualPlacements = new Map<string, ProcPlantManualPlacement>();
@@ -962,6 +964,11 @@ export function createProcPlantVegetation(
       grassTriangles: 0,
       stemTriangles: 0,
       organDraws: 0,
+      branchSegments: 0,
+      attachedLeaves: 0,
+      branchLod0: 0,
+      branchLod1: 0,
+      branchLod2: 0,
     };
     chunk.rev = terrainRev;
     chunk.styleRev = PROCPLANT_RENDER_STYLE_REVISION;
@@ -1218,21 +1225,59 @@ export function createProcPlantVegetation(
         continue;
       }
       if (treeBackend?.kind === "lsystem") {
-        const template = useDetailedTree
-          ? buildBiomeTreeTemplateCached(treeBackend.species, patch!.seed ^ i, {
-              ...foliageDefaultsForTreeSpecies(treeBackend.species),
-              ...treeBackend,
-            })
-          : buildCheapTreeTemplate(treeBackend.species);
         const scaleMultiplier = fullDetailLod ? PROC_TREE_NEAR_SCALE : useDetailedTree ? treeScaleMultiplier : PROC_TREE_FAR_SCALE;
         const scale = baseScale * scaleMultiplier * THREE.MathUtils.lerp(0.9, 1.24, rand());
-        const matrix = new THREE.Matrix4()
+        const treeMatrix = new THREE.Matrix4()
           .makeRotationY(rand() * Math.PI * 2)
           .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
-          .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02 - templateMinY(template) * scale, z));
-        stemTemplates.push({ template, matrix });
+          .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02, z));
+        const moduleTree = buildBranchModuleTreeCached(treeBackend.species, patch!.seed ^ i, {
+          ...foliageDefaultsForTreeSpecies(treeBackend.species),
+          ...treeBackend,
+        });
+        const distanceRatio = THREE.MathUtils.clamp(distanceToPlayer / detailDistance, 0, 1);
+        const distanceLod: BranchModuleLodLevel = distanceRatio < 0.45 ? 0 : distanceRatio < 0.75 ? 1 : 2;
+        const computeLod: BranchModuleLodLevel = currentFps < 32 ? 2 : currentFps < 48 ? 1 : 0;
+        const structuralTree = branchModuleLodView(
+          moduleTree,
+          Math.max(distanceLod, computeLod) as BranchModuleLodLevel,
+        );
+        chunk.stats.branchSegments += structuralTree.segments.length;
+        chunk.stats.attachedLeaves += structuralTree.leaves.length;
+        if (structuralTree.level === 0) chunk.stats.branchLod0++;
+        else if (structuralTree.level === 1) chunk.stats.branchLod1++;
+        else chunk.stats.branchLod2++;
+        for (const segment of structuralTree.segments) {
+          const template = branchSegmentPrototypeTemplate(segment.prototypeId);
+          stemTemplates.push({
+            template,
+            matrix: treeMatrix.clone().multiply(segment.matrix),
+          });
+          chunk.stats.stemTriangles += template.idx.length / 3;
+        }
+        const leafKey = geometryKeyFor(genome, {
+          kind: "leaf",
+          matrix: new THREE.Matrix4(),
+          color: new THREE.Color(),
+          sway: 0,
+        });
+        let leafBucket = organBuckets.get(leafKey);
+        if (!leafBucket) {
+          leafBucket = { key: leafKey, geometry: organGeometryForKey(leafKey), instances: [] };
+          organBuckets.set(leafKey, leafBucket);
+        }
+        const leafA = new THREE.Color(genome.leaf.colorA);
+        const leafB = new THREE.Color(genome.leaf.colorB);
+        for (const leaf of structuralTree.leaves) {
+          leafBucket.instances.push({
+            kind: "leaf",
+            matrix: treeMatrix.clone().multiply(leaf.matrix),
+            color: leafA.clone().lerp(leafB, 0.35 + rand() * 0.4),
+            sway: 0.65 + rand() * 0.3,
+          });
+          chunk.stats.instances++;
+        }
         chunk.stats.plants++;
-        chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
       const useCheapDistantTree = !useDetailedTree && baseScale >= 1.2;
@@ -1368,6 +1413,7 @@ export function createProcPlantVegetation(
     if (disposed) return;
     const updateStartedAt = performance.now();
     builtLastUpdate = 0;
+    currentFps = fps;
     buildDeferred = options.shouldDeferBuild?.() ?? false;
     if (
       lastPlayerX === null ||
@@ -1433,6 +1479,11 @@ export function createProcPlantVegetation(
               grassTriangles: 0,
               stemTriangles: 0,
               organDraws: 0,
+              branchSegments: 0,
+              attachedLeaves: 0,
+              branchLod0: 0,
+              branchLod1: 0,
+              branchLod2: 0,
             },
           };
           chunksCreated++;
@@ -1529,6 +1580,11 @@ export function createProcPlantVegetation(
       out.grassTriangles += chunk.stats.grassTriangles;
       out.stemTriangles += chunk.stats.stemTriangles;
       out.organDraws += chunk.stats.organDraws;
+      out.branchSegments += chunk.stats.branchSegments;
+      out.attachedLeaves += chunk.stats.attachedLeaves;
+      out.branchLod0 += chunk.stats.branchLod0;
+      out.branchLod1 += chunk.stats.branchLod1;
+      out.branchLod2 += chunk.stats.branchLod2;
       if (chunk.lod === 0) out.lod0++;
       else if (chunk.lod === 1) out.lod1++;
       else out.lod2++;
