@@ -105,6 +105,7 @@ export interface ProcPlantVegetationStats {
   buildPausedForMotion: boolean;
   buildDeferred: boolean;
   deferredLodChunks: number;
+  deferredColdChunks: number;
   lodRefreshes: number;
 }
 
@@ -151,6 +152,7 @@ interface ActiveChunk {
   builtLod: 0 | 1 | 2 | null;
   rev: number;
   styleRev: number;
+  needsColdRefinement: boolean;
   lastNeededMs: number;
   group: THREE.Group;
   stats: ChunkStats;
@@ -262,7 +264,8 @@ const buildBranchModuleTreeCached = (
   species: string,
   seed: number,
   options: BiomeTreeTemplateOptions = {},
-): BranchModuleTree => {
+  allowColdBuild = true,
+): BranchModuleTree | null => {
   const bucket =
     ((Math.trunc(seed) % DETAILED_TREE_SEED_BUCKETS) + DETAILED_TREE_SEED_BUCKETS) %
     DETAILED_TREE_SEED_BUCKETS;
@@ -270,6 +273,7 @@ const buildBranchModuleTreeCached = (
     `${species}|${bucket}|${options.maxBranchDepth ?? ""}|${options.maxStems ?? ""}|` +
     `${options.maxLeaves ?? ""}|${options.leafScaleMultiplier ?? ""}`;
   let tree = branchModuleTreeCache.get(key);
+  if (!tree && !allowColdBuild) return null;
   if (!tree) {
     tree = branchModuleTreeFromSpecies(species, bucket, {
       maxBranchDepth: options.maxBranchDepth,
@@ -294,13 +298,15 @@ const buildProcPlantInstancedPartsCached = (
   genome: ProcPlantGenome,
   seed: number,
   env: ProcPlantEnvironment,
-): ProcPlantInstancedParts => {
+  allowColdBuild = true,
+): ProcPlantInstancedParts | null => {
   const bucket =
     ((Math.trunc(seed) % PLANT_SEED_BUCKETS) + PLANT_SEED_BUCKETS) % PLANT_SEED_BUCKETS;
   const q = (v: number) => Math.round(v * 4) / 4;
   const key =
     `${genome.id}|${bucket}|${q(env.light)}|${q(env.moisture)}|${q(env.crowding)}|${q(env.biomeWarmth)}`;
   let built = procPlantPartsCache.get(key);
+  if (!built && !allowColdBuild) return null;
   if (!built) {
     // Derive a well-spread but deterministic seed from the bucket so each bucket is a distinct shape.
     built = buildProcPlantInstancedParts(genome, ((bucket + 1) * 0x9e3779b1) >>> 0, env);
@@ -656,6 +662,7 @@ const emptyStats = (): ProcPlantVegetationStats => ({
   buildPausedForMotion: false,
   buildDeferred: false,
   deferredLodChunks: 0,
+  deferredColdChunks: 0,
   lodRefreshes: 0,
 });
 
@@ -1010,7 +1017,7 @@ export function createProcPlantVegetation(
     }
   }
 
-  const buildChunk = (chunk: ActiveChunk) => {
+  const buildChunk = (chunk: ActiveChunk, allowColdBuilds: boolean) => {
     disposeGroup(chunk.group);
     chunk.stats = {
       plants: 0,
@@ -1028,6 +1035,7 @@ export function createProcPlantVegetation(
     chunk.rev = terrainRev;
     chunk.builtLod = chunk.lod;
     chunk.styleRev = PROCPLANT_RENDER_STYLE_REVISION;
+    chunk.needsColdRefinement = false;
     const seed = procPlantChunkSeed(options.worldId, chunk.cx, chunk.cz, 0);
     const rand = mulberry32(seed);
     const plantCap = chunk.lod === 0
@@ -1307,7 +1315,17 @@ export function createProcPlantVegetation(
         const moduleTree = buildBranchModuleTreeCached(treeBackend.species, patch!.seed ^ i, {
           ...foliageDefaultsForTreeSpecies(treeBackend.species),
           ...treeBackend,
-        });
+        }, allowColdBuilds);
+        if (!moduleTree) {
+          // Never run a cold Weber-Penn generation pass in a movement frame. Keep the landscape
+          // populated with a cheap cached silhouette and refine this chunk after the player settles.
+          const template = buildCheapTreeTemplate(treeBackend.species);
+          stemTemplates.push({ template, matrix: treeMatrix });
+          chunk.stats.plants++;
+          chunk.stats.stemTriangles += template.idx.length / 3;
+          chunk.needsColdRefinement = true;
+          continue;
+        }
         const distanceRatio = THREE.MathUtils.clamp(distanceToPlayer / detailDistance, 0, 1);
         const distanceLod: BranchModuleLodLevel = distanceRatio < 0.45 ? 0 : distanceRatio < 0.75 ? 1 : 2;
         const computeLod: BranchModuleLodLevel = currentFps < 32 ? 2 : currentFps < 48 ? 1 : 0;
@@ -1366,7 +1384,11 @@ export function createProcPlantVegetation(
         chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
-      const built = buildProcPlantInstancedPartsCached(genome, renderSeed, environment);
+      const built = buildProcPlantInstancedPartsCached(genome, renderSeed, environment, allowColdBuilds);
+      if (!built) {
+        chunk.needsColdRefinement = true;
+        continue;
+      }
       const scaleBase = baseScale >= 1.2 ? baseScale * treeScaleMultiplier : baseScale;
       const scale = scaleBase * THREE.MathUtils.lerp(0.82, 1.22, rand());
       const matrix = new THREE.Matrix4()
@@ -1404,7 +1426,12 @@ export function createProcPlantVegetation(
         genome,
         placement.seed,
         defaultPlantEnvironment(),
+        allowColdBuilds,
       );
+      if (!built) {
+        chunk.needsColdRefinement = true;
+        continue;
+      }
       const matrix = new THREE.Matrix4()
         .makeRotationY(((placement.seed >>> 0) / 4294967296) * Math.PI * 2)
         .premultiply(new THREE.Matrix4().makeScale(placement.scale, placement.scale, placement.scale))
@@ -1544,6 +1571,7 @@ export function createProcPlantVegetation(
             builtLod: null,
             rev: -1,
             styleRev: 0,
+            needsColdRefinement: false,
             lastNeededMs: nowMs,
             group: new THREE.Group(),
             stats: {
@@ -1591,7 +1619,10 @@ export function createProcPlantVegetation(
     // refine one nearest mismatched chunk at a time so forests never disappear or rebuild in a burst.
     if (stationary && rebuildQueue.length === 0 && nowMs - lastLodRefreshAt >= 250) {
       const lodCandidate = [...active.values()]
-        .filter((chunk) => chunk.builtLod !== null && chunk.builtLod !== chunk.lod)
+        .filter((chunk) =>
+          chunk.needsColdRefinement ||
+          (chunk.builtLod !== null && chunk.builtLod !== chunk.lod)
+        )
         .sort((a, b) =>
           Math.hypot(a.cx - centerCx, a.cz - centerCz) - Math.hypot(b.cx - centerCx, b.cz - centerCz)
         )[0];
@@ -1629,7 +1660,7 @@ export function createProcPlantVegetation(
       const chunk = active.get(key);
       if (!chunk || chunk.rev === terrainRev) continue;
       const chunkBuildStartedAt = performance.now();
-      buildChunk(chunk);
+      buildChunk(chunk, stationary);
       const chunkBuildMs = performance.now() - chunkBuildStartedAt;
       lastBuildMs = chunkBuildMs;
       maxBuildMs = Math.max(maxBuildMs, chunkBuildMs);
@@ -1663,6 +1694,7 @@ export function createProcPlantVegetation(
     out.buildPausedForMotion = buildPausedForMotion;
     out.buildDeferred = buildDeferred;
     out.deferredLodChunks = 0;
+    out.deferredColdChunks = 0;
     out.lodRefreshes = lodRefreshes;
     for (const chunk of active.values()) {
       out.plants += chunk.stats.plants;
@@ -1677,6 +1709,7 @@ export function createProcPlantVegetation(
       out.branchLod1 += chunk.stats.branchLod1;
       out.branchLod2 += chunk.stats.branchLod2;
       if (chunk.builtLod !== null && chunk.builtLod !== chunk.lod) out.deferredLodChunks++;
+      if (chunk.needsColdRefinement) out.deferredColdChunks++;
       const renderedLod = chunk.builtLod ?? chunk.lod;
       if (renderedLod === 0) out.lod0++;
       else if (renderedLod === 1) out.lod1++;

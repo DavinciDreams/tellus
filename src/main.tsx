@@ -1591,6 +1591,7 @@ function createTellusWorld(
           buildPausedForMotion: false,
           buildDeferred: false,
           deferredLodChunks: 0,
+          deferredColdChunks: 0,
           lodRefreshes: 0,
         }),
         placeManualPlant: () => false,
@@ -11887,7 +11888,7 @@ function DebugLiveRows({ worldRef, rxEnabled }: DebugLiveRowsProps): React.React
             plant work {ambientStats.procplants.lastUpdateMs} ms · build {ambientStats.procplants.lastBuildMs} ms /{" "}
             {ambientStats.procplants.maxBuildMs} max · queue {ambientStats.procplants.queuedRebuilds} · LOD{" "}
             {ambientStats.procplants.lod0}/{ambientStats.procplants.lod1}/{ambientStats.procplants.lod2} · deferred LOD{" "}
-            {ambientStats.procplants.deferredLodChunks} · physics{" "}
+            {ambientStats.procplants.deferredLodChunks} · cold {ambientStats.procplants.deferredColdChunks} · physics{" "}
             {ambientStats.physicsBodies} · rapier {ambientStats.rapierSolids}
           </div>
         </>
