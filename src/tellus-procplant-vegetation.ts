@@ -188,7 +188,7 @@ const PROC_TREE_DETAIL_DISTANCE = 58;
 const PROC_TREE_DETAIL_DISTANCE_THIRD = 72;
 const PROC_GROUND_PLANT_DETAIL_DISTANCE = 34;
 const PROC_GROUND_PLANT_DETAIL_DISTANCE_THIRD = 42;
-const PROCPLANT_RENDER_STYLE_REVISION = 5;
+const PROCPLANT_RENDER_STYLE_REVISION = 6;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
 const BIOME_MIX_SERVER_REFRESH_FALLBACK_MS = 60_000;
 const LOW_FPS_BUILD_BUDGET = 1;
@@ -1018,6 +1018,12 @@ export function createProcPlantVegetation(
   }
 
   const buildChunk = (chunk: ActiveChunk, allowColdBuilds: boolean) => {
+    // A streamed chunk must become visible quickly while the player is travelling. Full-density grass
+    // and connected branch instances are retained for the settled build, but constructing all of their
+    // matrices in one movement frame causes a visible hitch even when every source template is cached.
+    // Travel builds therefore use the existing cheap tree silhouette and far-grass spacing, then mark
+    // themselves for the same gradual refinement path used by cold cache entries.
+    const travelBuild = !allowColdBuilds;
     disposeGroup(chunk.group);
     chunk.stats = {
       plants: 0,
@@ -1077,7 +1083,9 @@ export function createProcPlantVegetation(
       Math.abs(chunk.cx - Math.floor((lastPlayerX ?? chunk.cx * chunkSize) / chunkSize)),
       Math.abs(chunk.cz - Math.floor((lastPlayerZ ?? chunk.cz * chunkSize) / chunkSize)),
     );
-    const grassLod = fullDetailLod || grassRing <= GRASS_FIELD_FULL_DENSITY_RING
+    const grassLod = travelBuild
+      ? 2
+      : fullDetailLod || grassRing <= GRASS_FIELD_FULL_DENSITY_RING
       ? 0
       : chunk.lod === 1
         ? 1
@@ -1312,6 +1320,14 @@ export function createProcPlantVegetation(
           .makeRotationY(rand() * Math.PI * 2)
           .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
           .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02, z));
+        if (travelBuild) {
+          const template = buildCheapTreeTemplate(treeBackend.species);
+          stemTemplates.push({ template, matrix: treeMatrix });
+          chunk.stats.plants++;
+          chunk.stats.stemTriangles += template.idx.length / 3;
+          chunk.needsColdRefinement = true;
+          continue;
+        }
         const moduleTree = buildBranchModuleTreeCached(treeBackend.species, patch!.seed ^ i, {
           ...foliageDefaultsForTreeSpecies(treeBackend.species),
           ...treeBackend,
