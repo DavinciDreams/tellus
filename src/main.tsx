@@ -1590,6 +1590,8 @@ function createTellusWorld(
           builtLastUpdate: 0,
           buildPausedForMotion: false,
           buildDeferred: false,
+          deferredLodChunks: 0,
+          lodRefreshes: 0,
         }),
         placeManualPlant: () => false,
         replaceManualPlants: () => undefined,
@@ -11881,7 +11883,8 @@ function DebugLiveRows({ worldRef, rxEnabled }: DebugLiveRowsProps): React.React
           <div className="debug-stats-row">
             plant work {ambientStats.procplants.lastUpdateMs} ms · build {ambientStats.procplants.lastBuildMs} ms /{" "}
             {ambientStats.procplants.maxBuildMs} max · queue {ambientStats.procplants.queuedRebuilds} · LOD{" "}
-            {ambientStats.procplants.lod0}/{ambientStats.procplants.lod1}/{ambientStats.procplants.lod2} · physics{" "}
+            {ambientStats.procplants.lod0}/{ambientStats.procplants.lod1}/{ambientStats.procplants.lod2} · deferred LOD{" "}
+            {ambientStats.procplants.deferredLodChunks} · physics{" "}
             {ambientStats.physicsBodies} · rapier {ambientStats.rapierSolids}
           </div>
         </>

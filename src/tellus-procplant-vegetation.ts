@@ -102,6 +102,8 @@ export interface ProcPlantVegetationStats {
   builtLastUpdate: number;
   buildPausedForMotion: boolean;
   buildDeferred: boolean;
+  deferredLodChunks: number;
+  lodRefreshes: number;
 }
 
 export interface ProcPlantVegetationSystem {
@@ -144,6 +146,7 @@ interface ActiveChunk {
   cx: number;
   cz: number;
   lod: 0 | 1 | 2;
+  builtLod: 0 | 1 | 2 | null;
   rev: number;
   styleRev: number;
   lastNeededMs: number;
@@ -619,6 +622,8 @@ const emptyStats = (): ProcPlantVegetationStats => ({
   builtLastUpdate: 0,
   buildPausedForMotion: false,
   buildDeferred: false,
+  deferredLodChunks: 0,
+  lodRefreshes: 0,
 });
 
 const isFinitePlacementNumber = (value: unknown): value is number =>
@@ -729,6 +734,8 @@ export function createProcPlantVegetation(
   let lastMovingBuildAt = Number.NEGATIVE_INFINITY;
   let buildPausedForMotion = false;
   let currentFps = 60;
+  let lastLodRefreshAt = Number.NEGATIVE_INFINITY;
+  let lodRefreshes = 0;
   let disposed = false;
   const active = new Map<string, ActiveChunk>();
   const manualPlacements = new Map<string, ProcPlantManualPlacement>();
@@ -971,6 +978,7 @@ export function createProcPlantVegetation(
       branchLod2: 0,
     };
     chunk.rev = terrainRev;
+    chunk.builtLod = chunk.lod;
     chunk.styleRev = PROCPLANT_RENDER_STYLE_REVISION;
     const seed = procPlantChunkSeed(options.worldId, chunk.cx, chunk.cz, 0);
     const rand = mulberry32(seed);
@@ -1468,6 +1476,7 @@ export function createProcPlantVegetation(
             cx,
             cz,
             lod,
+            builtLod: null,
             rev: -1,
             styleRev: 0,
             lastNeededMs: nowMs,
@@ -1494,7 +1503,6 @@ export function createProcPlantVegetation(
         chunk.lastNeededMs = nowMs;
         if (chunk.lod !== lod) {
           chunk.lod = lod;
-          chunk.rev = -1;
         }
         if (
           chunk.rev !== terrainRev ||
@@ -1513,6 +1521,22 @@ export function createProcPlantVegetation(
     prioritizeRebuildQueue(centerCx, centerCz);
     const movementIntentActive = options.shouldPauseBuild?.() ?? false;
     const stationary = !movementIntentActive && (chunksBuilt === 0 || nowMs - lastPlayerMovedAt > 650);
+    // Ring changes do not invalidate visible vegetation while moving. The existing tree graph is
+    // still valid; only its ideal density changed. Once streaming catches up and the player settles,
+    // refine one nearest mismatched chunk at a time so forests never disappear or rebuild in a burst.
+    if (stationary && rebuildQueue.length === 0 && nowMs - lastLodRefreshAt >= 250) {
+      const lodCandidate = [...active.values()]
+        .filter((chunk) => chunk.builtLod !== null && chunk.builtLod !== chunk.lod)
+        .sort((a, b) =>
+          Math.hypot(a.cx - centerCx, a.cz - centerCz) - Math.hypot(b.cx - centerCx, b.cz - centerCz)
+        )[0];
+      if (lodCandidate) {
+        lodCandidate.rev = -1;
+        enqueue(lodCandidate.key, true);
+        lastLodRefreshAt = nowMs;
+        lodRefreshes++;
+      }
+    }
     buildPausedForMotion = !stationary && rebuildQueue.length > 0;
     // Continue filling ahead during travel, but start at most one chunk at a controlled cadence. The
     // shared/instanced geometry path above keeps each build small; throttling prevents several chunks
@@ -1573,6 +1597,8 @@ export function createProcPlantVegetation(
     out.builtLastUpdate = builtLastUpdate;
     out.buildPausedForMotion = buildPausedForMotion;
     out.buildDeferred = buildDeferred;
+    out.deferredLodChunks = 0;
+    out.lodRefreshes = lodRefreshes;
     for (const chunk of active.values()) {
       out.plants += chunk.stats.plants;
       out.instances += chunk.stats.instances;
@@ -1585,8 +1611,10 @@ export function createProcPlantVegetation(
       out.branchLod0 += chunk.stats.branchLod0;
       out.branchLod1 += chunk.stats.branchLod1;
       out.branchLod2 += chunk.stats.branchLod2;
-      if (chunk.lod === 0) out.lod0++;
-      else if (chunk.lod === 1) out.lod1++;
+      if (chunk.builtLod !== null && chunk.builtLod !== chunk.lod) out.deferredLodChunks++;
+      const renderedLod = chunk.builtLod ?? chunk.lod;
+      if (renderedLod === 0) out.lod0++;
+      else if (renderedLod === 1) out.lod1++;
       else out.lod2++;
     }
     return out;
