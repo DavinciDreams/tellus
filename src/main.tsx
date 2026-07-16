@@ -3311,10 +3311,13 @@ function createTellusWorld(
     });
   };
 
+  const THIRD_PERSON_ZOOM_MIN = 12;
+  const THIRD_PERSON_ZOOM_DEFAULT = 28;
+  const THIRD_PERSON_ZOOM_MAX = 42;
   let yaw = 0.72; // CAMERA orbit direction — changed only by right-drag look (and WASD's frame of reference)
   let avatarFacing = 0.72; // CHARACTER visual facing — turns toward actual movement, independent of camera
   let pitch = -0.28;
-  let zoom = 33;
+  let zoom = THIRD_PERSON_ZOOM_DEFAULT;
   // ── Camera mode: presentation-only (physics/movement untouched). "first" parks the main camera
   // at the LOCAL avatar's head (same eye math as the agent POV) and hides your own avatar+TV
   // locally — other players still see you (they render their own mesh from presence). Persists in
@@ -10480,7 +10483,7 @@ function createTellusWorld(
     container.style.cursor = moveModeThingId ? "move" : "";
   };
   const handleWheel = (event: WheelEvent) => {
-    zoom = clamp(zoom + event.deltaY * 0.01, 12, 58);
+    zoom = clamp(zoom + event.deltaY * 0.01, THIRD_PERSON_ZOOM_MIN, THIRD_PERSON_ZOOM_MAX);
   };
 
   window.addEventListener("resize", resize);
