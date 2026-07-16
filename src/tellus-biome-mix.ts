@@ -175,18 +175,38 @@ export const BIOME_MIX_STORAGE_EVENT = "tellus:biomeMixesChanged";
 export const entryFromBiomePatch = (
   patch: ProcPlantBiomePatch,
   index: number,
-): TellusBiomeMixEntry => ({
-  id: `${patch.primary}-${index + 1}`,
-  label: labelForProcPlantId(patch.primary),
-  source: "preset",
-  presetId: patch.primary,
-  weight: Math.max(0.01, "weight" in patch ? Number(patch.weight) || 1 : 1),
-  density: patch.density,
-  scale: patch.scale,
-  environment: environmentForBiomePatch(patch),
-  seed: patch.seed,
-  enabled: true,
-});
+): TellusBiomeMixEntry => patch.asset
+  ? {
+      id: `${patch.primary}-${index + 1}`,
+      label: labelForProcPlantId(patch.primary),
+      source: "asset",
+      asset: {
+        kind: "glb",
+        name: labelForProcPlantId(patch.primary),
+        libraryId: patch.asset.libraryId,
+        lodPreference: patch.asset.lodPreference,
+        color: patch.asset.color,
+        runtimeOnly: false,
+      },
+      weight: Math.max(0.01, "weight" in patch ? Number(patch.weight) || 1 : 1),
+      density: patch.density,
+      scale: patch.scale,
+      environment: environmentForBiomePatch(patch),
+      seed: patch.seed,
+      enabled: true,
+    }
+  : {
+      id: `${patch.primary}-${index + 1}`,
+      label: labelForProcPlantId(patch.primary),
+      source: "preset",
+      presetId: patch.primary,
+      weight: Math.max(0.01, "weight" in patch ? Number(patch.weight) || 1 : 1),
+      density: patch.density,
+      scale: patch.scale,
+      environment: environmentForBiomePatch(patch),
+      seed: patch.seed,
+      enabled: true,
+    };
 
 export const makeEcologyBiomeMix = (
   biome: EcologyBiomeId,

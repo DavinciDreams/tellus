@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   biomeMixRenderSignature,
   isAssetMixEntry,
+  makeTerrainPaintBiomeMix,
   normalizeBiomeMixDefinition,
   normalizeBiomeMixRegistry,
   serializeBiomeMixRegistryForPersistence,
@@ -9,6 +10,19 @@ import {
 import { ECOLOGY_TERRAIN_PAINT_MAP } from "./tellus-procplant-biomes";
 
 describe("Tellus biome mix normalization", () => {
+  it("represents lightweight global fern substitutes as instanced asset entries", () => {
+    const entries = [
+      ...makeTerrainPaintBiomeMix("forest-floor", 17).entries,
+      ...makeTerrainPaintBiomeMix("jungle-moss", 17).entries,
+    ];
+    const ferns = entries.filter(isAssetMixEntry);
+    expect(ferns.map((entry) => entry.asset.libraryId).sort()).toEqual([
+      "2b64b91a-cc16-4b03-afef-7f09cbf3a0cc",
+      "80b4a76f-27f4-4ba3-bb63-47c54f5995b9",
+    ].sort());
+    expect(ferns.every((entry) => entry.asset.lodPreference === "lod2")).toBe(true);
+  });
+
   it("does not treat server timestamps or hydrated templates as visual mix changes", () => {
     const base = normalizeBiomeMixRegistry({
       version: 1,

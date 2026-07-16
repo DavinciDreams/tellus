@@ -13,6 +13,7 @@ import {
   PROCPLANT_PLACEABLE_CATALOG,
   ECOLOGY_BIOME_OPTIONS,
   GLOBAL_DEFAULT_EXCLUDED_PROCPLANT_PRESETS,
+  GLOBAL_DEFAULT_FERN_ASSET_IDS,
   biomePatchForEcology,
   biomePatchForPaint,
   biomePatchesForEcologyBiome,
@@ -90,6 +91,14 @@ describe("procplant vegetation", () => {
       expect(GLOBAL_DEFAULT_EXCLUDED_PROCPLANT_PRESETS.has(patch.primary)).toBe(false);
       expect(patch.secondary && GLOBAL_DEFAULT_EXCLUDED_PROCPLANT_PRESETS.has(patch.secondary)).not.toBe(true);
     }
+    const fernPatches = [
+      ...biomePatchesForPaint("forest-floor", 17),
+      ...biomePatchesForPaint("jungle-moss", 17),
+    ].filter((patch) => Boolean(patch.asset));
+    expect(new Set(fernPatches.map((patch) => patch.asset?.libraryId))).toEqual(
+      new Set(GLOBAL_DEFAULT_FERN_ASSET_IDS),
+    );
+    expect(fernPatches.every((patch) => patch.asset?.lodPreference === "lod2")).toBe(true);
     expect(procPlantPlaceableById("phiFern")).toBeDefined();
     expect(procPlantPlaceableById("acaciaUmbrella")).toBeDefined();
     expect(procPlantPlaceableById("blueSpruce")).toBeDefined();

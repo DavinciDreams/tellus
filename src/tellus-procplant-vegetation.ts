@@ -5,6 +5,7 @@ import {
   biomePatchForEcology,
   biomePatchForPaint,
   environmentForBiomePatch,
+  GLOBAL_DEFAULT_FERN_ASSET_IDS,
   genomeForBiomePatch,
   treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
@@ -780,6 +781,7 @@ export function createProcPlantVegetation(
   organMaterial.userData.tellusProcplantShared = true;
   const stemGeometryCache = new Map<ProcPlantTemplate, THREE.BufferGeometry>();
   const organGeometryCache = new Map<string, THREE.BufferGeometry>();
+  const globalAssetTemplates = new Map<string, TellusBiomeAssetTemplate>();
   const stemGeometryForTemplate = (template: ProcPlantTemplate): THREE.BufferGeometry => {
     const cached = stemGeometryCache.get(template);
     if (cached) return cached;
@@ -877,6 +879,19 @@ export function createProcPlantVegetation(
     for (const key of active.keys()) enqueue(key);
   };
 
+  const hydrateGlobalAssetDefaults = () => {
+    if (typeof window === "undefined") return;
+    void Promise.all(GLOBAL_DEFAULT_FERN_ASSET_IDS.map(async (assetId) => {
+      const template = await loadBiomeAssetTemplate(assetId, "lod2");
+      if (!template || disposed) return false;
+      globalAssetTemplates.set(assetId, template);
+      return true;
+    })).then((hydrated) => {
+      if (disposed || !hydrated.some(Boolean)) return;
+      enqueueAllActive();
+    });
+  };
+
   const hydrateBiomeMixAssets = (registry: TellusBiomeMixRegistry) => {
     const entries = [...new Set([
       ...Object.values(registry.mixesByTerrainPaint),
@@ -915,6 +930,7 @@ export function createProcPlantVegetation(
   };
 
   hydrateBiomeMixAssets(activeBiomeMixRegistry);
+  hydrateGlobalAssetDefaults();
 
   const reloadActiveBiomeMixes = () => {
     applyBiomeMixRegistry(loadActiveBiomeMixRegistryForWorld(options.worldId));
@@ -1173,6 +1189,22 @@ export function createProcPlantVegetation(
         if (!template) continue;
         const baseScale = customEntry.scale;
         const scale = baseScale * THREE.MathUtils.lerp(0.82, 1.22, rand());
+        const matrix = new THREE.Matrix4()
+          .makeRotationY(rand() * Math.PI * 2)
+          .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
+          .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02 - templateMinY(template) * scale, z));
+        stemTemplates.push({ template, matrix });
+        chunk.stats.plants++;
+        chunk.stats.stemTriangles += template.idx.length / 3;
+        continue;
+      }
+      if (patch?.asset) {
+        const hydrated = globalAssetTemplates.get(patch.asset.libraryId);
+        const template = hydrated
+          ? procPlantTemplateFromAssetTemplate(hydrated, patch.asset.color)
+          : null;
+        if (!template) continue;
+        const scale = patch.scale * THREE.MathUtils.lerp(0.82, 1.22, rand());
         const matrix = new THREE.Matrix4()
           .makeRotationY(rand() * Math.PI * 2)
           .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
