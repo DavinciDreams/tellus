@@ -183,6 +183,8 @@ const PROC_TREE_MID_SCALE = 1.45;
 const PROC_TREE_FAR_SCALE = 1.15;
 const PROC_TREE_DETAIL_DISTANCE = 58;
 const PROC_TREE_DETAIL_DISTANCE_THIRD = 72;
+const PROC_GROUND_PLANT_DETAIL_DISTANCE = 34;
+const PROC_GROUND_PLANT_DETAIL_DISTANCE_THIRD = 42;
 const PROCPLANT_RENDER_STYLE_REVISION = 5;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
 const BIOME_MIX_SERVER_REFRESH_FALLBACK_MS = 60_000;
@@ -210,6 +212,23 @@ export const shouldUseCheapDistantTree = (
   !useDetailedTree &&
   baseScale >= 1.2 &&
   (habit === "tree" || habit === "conifer");
+
+export const shouldCullDistantGroundPlant = (
+  habit: ProcPlantHabit,
+  distanceToPlayer: number,
+  thirdPerson: boolean,
+): boolean => {
+  const groundHabit =
+    habit === "grass" ||
+    habit === "fern" ||
+    habit === "flower" ||
+    habit === "tropical" ||
+    habit === "vine";
+  const detailDistance = thirdPerson
+    ? PROC_GROUND_PLANT_DETAIL_DISTANCE_THIRD
+    : PROC_GROUND_PLANT_DETAIL_DISTANCE;
+  return groundHabit && distanceToPlayer > detailDistance;
+};
 
 const foliageDefaultsForTreeSpecies = (
   species: string,
@@ -1176,6 +1195,7 @@ export function createProcPlantVegetation(
         : chunk.lod === 1
           ? PROC_TREE_MID_SCALE
           : PROC_TREE_FAR_SCALE;
+      if (shouldCullDistantGroundPlant(genome.habit, distanceToPlayer, viewMode() === "third")) continue;
       if (genome.habit === "grass" && paint && grassCarpetPaints.has(paint)) continue;
       if (genome.habit === "grass") {
         const baseTuftCount = chunk.lod === 0

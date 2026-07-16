@@ -26,6 +26,7 @@ import {
 import {
   createProcPlantVegetation,
   procPlantChunkSeed,
+  shouldCullDistantGroundPlant,
   shouldUseCheapDistantTree,
 } from "./tellus-procplant-vegetation";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
@@ -56,6 +57,16 @@ describe("procplant vegetation", () => {
     expect(shouldUseCheapDistantTree("tree", false, 4)).toBe(true);
     expect(shouldUseCheapDistantTree("conifer", false, 4)).toBe(true);
     expect(shouldUseCheapDistantTree("tree", true, 4)).toBe(false);
+  });
+
+  it("culls small ground habits outside their useful silhouette range", () => {
+    expect(shouldCullDistantGroundPlant("tropical", 35, false)).toBe(true);
+    expect(shouldCullDistantGroundPlant("flower", 35, false)).toBe(true);
+    expect(shouldCullDistantGroundPlant("fern", 50, true)).toBe(true);
+    expect(shouldCullDistantGroundPlant("tropical", 30, false)).toBe(false);
+    expect(shouldCullDistantGroundPlant("shrub", 100, false)).toBe(false);
+    expect(shouldCullDistantGroundPlant("palm", 100, false)).toBe(false);
+    expect(shouldCullDistantGroundPlant("tree", 100, false)).toBe(false);
   });
   it("derives stable chunk seeds from world, chunk, and terrain revision", () => {
     const a = procPlantChunkSeed("chunked-64-main", 8, -3, 0);
