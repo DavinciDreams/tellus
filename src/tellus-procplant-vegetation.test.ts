@@ -30,6 +30,7 @@ import {
 } from "./tellus-ecology";
 import {
   createProcPlantVegetation,
+  procPlantTemplateFromAssetTemplate,
   procPlantChunkSeed,
   shouldCullDistantGroundPlant,
   shouldUseCheapDistantTree,
@@ -54,6 +55,24 @@ const templateBounds = (template: ProcPlantTemplate) => {
 };
 
 describe("procplant vegetation", () => {
+  it("uses global mix colors as flat overrides for black asset LOD materials", () => {
+    const color = new THREE.Color(0x4f8f3d);
+    const template = procPlantTemplateFromAssetTemplate({
+      version: 1,
+      vertexCount: 3,
+      positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+      normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+      colors: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+      indices: [0, 1, 2],
+    }, 0x4f8f3d);
+
+    for (let index = 0; index < template.col.length; index += 3) {
+      expect(template.col[index]).toBeCloseTo(color.r, 5);
+      expect(template.col[index + 1]).toBeCloseTo(color.g, 5);
+      expect(template.col[index + 2]).toBeCloseTo(color.b, 5);
+    }
+  });
+
   it("never replaces distant ground plants with a tree silhouette", () => {
     expect(shouldUseCheapDistantTree(procPlantPresets.desertRosette.habit, false, 1.25)).toBe(false);
     expect(shouldUseCheapDistantTree("flower", false, 4)).toBe(false);

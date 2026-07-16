@@ -343,7 +343,7 @@ const cheapTreeTemplateCache = new Map<string, ProcPlantTemplate>();
 const templateMinYCache = new WeakMap<ProcPlantTemplate, number>();
 const assetTemplateCache = new WeakMap<TellusBiomeAssetTemplate, Map<string, ProcPlantTemplate>>();
 
-const procPlantTemplateFromAssetTemplate = (
+export const procPlantTemplateFromAssetTemplate = (
   asset: TellusBiomeAssetTemplate,
   tintColor?: number,
 ): ProcPlantTemplate => {
@@ -353,10 +353,13 @@ const procPlantTemplateFromAssetTemplate = (
   const colors = new Float32Array(asset.colors);
   if (tintColor !== undefined) {
     const tint = new THREE.Color(tintColor);
+    // Asset LODs may have baked black materials when their original appearance came from a
+    // texture. A mix color is an explicit flat-color override, not a multiplier: multiplying
+    // cannot recover color from black and made otherwise valid instanced foliage render black.
     for (let i = 0; i < colors.length; i += 3) {
-      colors[i] *= tint.r;
-      colors[i + 1] *= tint.g;
-      colors[i + 2] *= tint.b;
+      colors[i] = tint.r;
+      colors[i + 1] = tint.g;
+      colors[i + 2] = tint.b;
     }
   }
   const template: ProcPlantTemplate = {
