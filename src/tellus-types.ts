@@ -620,6 +620,20 @@ declare global {
     tellusAgent?: {
       getState: (radius?: number) => unknown;
       getNearby: (radius?: number) => unknown;
+      getWildlife?: () => unknown;
+      configureWildlife?: (
+        animalId: string,
+        options?: { speciesProfileId?: string; herdId?: string; radiusMeters?: number; enabled?: boolean },
+      ) => unknown;
+      commandWildlife?: (args: {
+        animalId?: string;
+        herdId?: string;
+        intent: "idle" | "graze" | "wander" | "travel" | "flee" | "return" | "gather";
+        destination?: Vec3;
+        from?: Vec3;
+        durationSeconds?: number;
+        reason?: string;
+      }) => unknown;
       getActors?: (radius?: number) => unknown;
       getChat: (opts?: { radius?: number; channel?: WorldChatChannel; recipientId?: string }) => unknown;
       sayChat: (text: string, opts?: { channel?: WorldChatChannel; recipientId?: string; recipientName?: string }) => unknown;

@@ -13,6 +13,10 @@ import {
   biomeCellsFromWorldPatch,
   dedupePresenceForDisplay,
   repairGeneratedCloneModelLinks,
+  wildlifeCommandReceiptFromWorldPatch,
+  wildlifeConfiguredFromWorldPatch,
+  wildlifePatchFromWorldPatch,
+  wildlifeSnapshotFromWorldPatch,
 } from "./world-protocol";
 
 describe("dedupePresenceForDisplay", () => {
@@ -106,6 +110,133 @@ describe("procplant placement protocol", () => {
       id: "procplant-1",
       actorId: "visitor-1",
     })).toBe("procplant-1");
+  });
+});
+
+describe("wildlife protocol", () => {
+  const config = {
+    animalId: "deer-1",
+    enabled: true,
+    speciesProfileId: "deer",
+    movementMode: "ground",
+    herdId: "herd-1",
+    home: { kind: "circle", center: { x: 10, z: 20 }, radiusMeters: 45 },
+    seed: 42,
+    populationEligible: true,
+    revision: 1,
+  } as const;
+
+  it("validates configure and bounded command actions", () => {
+    expect(isWorldAction({
+      type: "wildlife.configure",
+      visitorId: "owner-1",
+      requestId: "configure-1",
+      config,
+    })).toBe(true);
+    expect(isWorldAction({
+      type: "wildlife.command",
+      visitorId: "agent-1",
+      requestId: "command-1",
+      selector: { herdId: "herd-1" },
+      intent: "travel",
+      destination: { x: 18, y: 0, z: 24 },
+      durationSeconds: 20,
+      reason: "move away from the path",
+    })).toBe(true);
+    expect(isWorldAction({
+      type: "wildlife.command",
+      visitorId: "agent-1",
+      requestId: "command-2",
+      selector: { herdId: "herd-1" },
+      intent: "travel",
+      durationSeconds: Number.POSITIVE_INFINITY,
+    })).toBe(false);
+  });
+
+  it("extracts validated snapshots and rejects an entire malformed delta", () => {
+    const state = {
+      animalId: "deer-1",
+      herdId: "herd-1",
+      state: "graze",
+      animationIntent: "graze",
+      position: { x: 10, y: 0, z: 20 },
+      rotationY: 0,
+      speedMetersPerSecond: 0,
+      startedAt: "2026-07-15T12:00:00.000Z",
+      controllerMode: "ambient",
+      revision: 3,
+    } as const;
+    const herd = {
+      herdId: "herd-1",
+      speciesProfileId: "deer",
+      movementMode: "ground",
+      memberIds: ["deer-1"],
+      state: "graze",
+      animationIntent: "graze",
+      home: config.home,
+      populationCap: 12,
+      seed: 42,
+      revision: 3,
+      updatedAt: "2026-07-15T12:00:00.000Z",
+    } as const;
+    expect(wildlifeSnapshotFromWorldPatch({
+      type: "world.snapshot",
+      wildlifeAnimals: [config],
+      wildlifeStates: [state],
+      wildlifeHerds: [herd],
+    })).toEqual({ animals: [config], states: [state], herds: [herd] });
+
+    const patch = {
+      type: "wildlife.patch",
+      seq: 9,
+      serverTime: "2026-07-15T12:00:01.000Z",
+      herdId: "herd-1",
+      animals: [{
+        id: "deer-1",
+        position: { x: 11, y: 0, z: 21 },
+        rotationY: 0.4,
+        state: "wander",
+        animationIntent: "walk",
+        speedMetersPerSecond: 1.1,
+        revision: 4,
+      }],
+    } as const;
+    expect(wildlifePatchFromWorldPatch(patch)).toEqual(patch);
+    expect(wildlifePatchFromWorldPatch({
+      ...patch,
+      animals: [...patch.animals, { ...patch.animals[0], id: "", revision: 5 }],
+    })).toBeNull();
+  });
+
+  it("extracts command receipts with non-negative counts", () => {
+    const frame = {
+      type: "wildlife.command.receipt",
+      receipt: {
+        requestId: "command-1",
+        status: "accepted",
+        matchedAnimals: 4,
+        matchedHerds: 1,
+        issuedBy: "agent-1",
+        acceptedAt: "2026-07-15T12:00:00.000Z",
+      },
+    } as const;
+    expect(wildlifeCommandReceiptFromWorldPatch(frame)).toEqual(frame.receipt);
+    expect(wildlifeCommandReceiptFromWorldPatch({
+      ...frame,
+      receipt: { ...frame.receipt, matchedAnimals: -1 },
+    })).toBeNull();
+  });
+
+  it("extracts live configuration changes", () => {
+    expect(wildlifeConfiguredFromWorldPatch({
+      type: "wildlife.configured",
+      wildlifeAnimals: [config],
+      actorId: "owner-1",
+    })).toEqual([config]);
+    expect(wildlifeConfiguredFromWorldPatch({
+      type: "wildlife.configured",
+      wildlifeAnimals: [{ ...config, animalId: "" }],
+    })).toBeNull();
   });
 });
 
