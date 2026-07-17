@@ -467,6 +467,28 @@ describe("procplant vegetation", () => {
     vegetation.dispose();
   });
 
+  it("still scatters a dense grass carpet when no server or custom biome mix is set", () => {
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-no-mix-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "grass",
+      bounds: { minX: -24, maxX: 24, minZ: -24, maxZ: 24 },
+      densityMultiplier: 1,
+    });
+
+    for (let i = 0; i < 20 && vegetation.stats().grassInstances === 0; i++) {
+      vegetation.update(0, 0, 1, 60, i * 16);
+    }
+    const stats = vegetation.stats();
+
+    expect(stats.grassInstances).toBeGreaterThan(0);
+    expect(stats.grassTriangles).toBeGreaterThan(stats.grassInstances);
+
+    vegetation.dispose();
+  });
+
   it("samples grass ecology once per biome region while preserving region boundaries", () => {
     const grassMix = (biome: EcologyBiomeId): TellusBiomeMixDefinition => ({
       version: 1,
