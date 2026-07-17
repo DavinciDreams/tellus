@@ -9548,7 +9548,10 @@ function createTellusWorld(
     perfDiagnostics.phases.miscMs = performance.now() - miscStartedAt;
     phaseStartedAt = performance.now();
     if (chunkRenderer) {
-      chunkRenderer.update(visitorPosition.x, visitorPosition.z); // current position owns eviction
+      const movingOnFoot = hasMovementKeyHeld() && !sailingThingId && !flying;
+      // current position owns eviction; movingOnFoot defers expensive LOD-upgrade rebuilds (see
+      // ChunkRenderer.update's doc comment) until the player settles.
+      chunkRenderer.update(visitorPosition.x, visitorPosition.z, movingOnFoot);
       chunkRenderer.ensureBaseChunk(visitorPosition.x, visitorPosition.z);
       if (chunkStreamProbe) {
         chunkRenderer.prefetch(chunkStreamProbe.x, chunkStreamProbe.z, 1);
@@ -9556,7 +9559,6 @@ function createTellusWorld(
           chunkRenderer.ensureBaseChunk(chunkStreamProbe.x, chunkStreamProbe.z);
         }
       }
-      const movingOnFoot = hasMovementKeyHeld() && !sailingThingId && !flying;
       const chunkStatsBeforeFlush = chunkRenderer.stats();
       const terrainOnlyActive = terrainOnlyDebug();
       const movingBuildBudget = terrainOnlyActive
