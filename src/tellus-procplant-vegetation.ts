@@ -840,9 +840,16 @@ export function createProcPlantVegetation(
   const applyBiomeMixRegistry = (registry: TellusBiomeMixRegistry) => {
     const signature = JSON.stringify(registry);
     if (signature === activeBiomeMixSignature) return false;
+    performance.mark("tellus:applyBiomeMixRegistry:enqueueAll:start");
     activeBiomeMixRegistry = registry;
     activeBiomeMixSignature = signature;
     enqueueAllActive();
+    performance.mark("tellus:applyBiomeMixRegistry:enqueueAll:end");
+    performance.measure(
+      "tellus:applyBiomeMixRegistry:enqueueAll",
+      "tellus:applyBiomeMixRegistry:enqueueAll:start",
+      "tellus:applyBiomeMixRegistry:enqueueAll:end",
+    );
     hydrateBiomeMixAssets(registry);
     return true;
   };

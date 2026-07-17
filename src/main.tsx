@@ -448,6 +448,7 @@ function createTellusWorld(
         procplantsMs: number;
         physicsMs: number;
         renderMs: number;
+        cameraMs: number;
         miscMs: number;
       };
       chunkTerrain: unknown;
@@ -504,6 +505,7 @@ function createTellusWorld(
       procplantsMs: 0,
       physicsMs: 0,
       renderMs: 0,
+      cameraMs: 0,
       miscMs: 0,
       maxMovementMs: 0,
       maxChunkTerrainMs: 0,
@@ -511,6 +513,7 @@ function createTellusWorld(
       maxProcplantsMs: 0,
       maxPhysicsMs: 0,
       maxRenderMs: 0,
+      maxCameraMs: 0,
       maxMiscMs: 0,
     },
     lastPlayer: null as Vec3 | null,
@@ -3006,6 +3009,7 @@ function createTellusWorld(
         procplantsMs: Math.round(perfDiagnostics.phases.procplantsMs * 10) / 10,
         physicsMs: Math.round(perfDiagnostics.phases.physicsMs * 10) / 10,
         renderMs: Math.round(perfDiagnostics.phases.renderMs * 10) / 10,
+        cameraMs: Math.round(perfDiagnostics.phases.cameraMs * 10) / 10,
         miscMs: Math.round(perfDiagnostics.phases.miscMs * 10) / 10,
         maxMovementMs: Math.round(perfDiagnostics.phases.maxMovementMs * 10) / 10,
         maxChunkTerrainMs: Math.round(perfDiagnostics.phases.maxChunkTerrainMs * 10) / 10,
@@ -3013,6 +3017,7 @@ function createTellusWorld(
         maxProcplantsMs: Math.round(perfDiagnostics.phases.maxProcplantsMs * 10) / 10,
         maxPhysicsMs: Math.round(perfDiagnostics.phases.maxPhysicsMs * 10) / 10,
         maxRenderMs: Math.round(perfDiagnostics.phases.maxRenderMs * 10) / 10,
+        maxCameraMs: Math.round(perfDiagnostics.phases.maxCameraMs * 10) / 10,
         maxMiscMs: Math.round(perfDiagnostics.phases.maxMiscMs * 10) / 10,
       },
     },
@@ -3110,6 +3115,7 @@ function createTellusWorld(
     perfDiagnostics.phases.maxProcplantsMs = 0;
     perfDiagnostics.phases.maxPhysicsMs = 0;
     perfDiagnostics.phases.maxRenderMs = 0;
+    perfDiagnostics.phases.maxCameraMs = 0;
     perfDiagnostics.phases.maxMiscMs = 0;
     perfDiagnostics.longTasks.count = 0;
     perfDiagnostics.longTasks.last = null;
@@ -3601,7 +3607,16 @@ function createTellusWorld(
       const chatMessages = worldChatFromWorldPatch(parsed);
       if (chatMessages) mergeWorldChatMessages(chatMessages);
       const remoteThings = generatedFromWorldPatch(parsed);
-      if (remoteThings) reconcileGeneratedSnapshot(remoteThings);
+      if (remoteThings) {
+        performance.mark("tellus:reconcileGeneratedSnapshot:start");
+        reconcileGeneratedSnapshot(remoteThings);
+        performance.mark("tellus:reconcileGeneratedSnapshot:end");
+        performance.measure(
+          "tellus:reconcileGeneratedSnapshot",
+          "tellus:reconcileGeneratedSnapshot:start",
+          "tellus:reconcileGeneratedSnapshot:end",
+        );
+      }
     } catch {
       // Best-effort freshness fallback; the websocket remains the primary realtime path.
     }
@@ -9460,7 +9475,16 @@ function createTellusWorld(
         externalSkybox.rotation.y += delta * rotationSpeed;
       }
     }
+    const cameraStartedAt = performance.now();
+    performance.mark("tellus:updateCamera:start");
     updateCamera();
+    performance.mark("tellus:updateCamera:end");
+    performance.measure("tellus:updateCamera", "tellus:updateCamera:start", "tellus:updateCamera:end");
+    perfDiagnostics.phases.cameraMs = performance.now() - cameraStartedAt;
+    perfDiagnostics.phases.maxCameraMs = Math.max(
+      perfDiagnostics.phases.maxCameraMs,
+      perfDiagnostics.phases.cameraMs,
+    );
     if (perfDiagnostics.lastPlayer) {
       perfDiagnostics.maxPlayerStep = Math.max(
         perfDiagnostics.maxPlayerStep,
@@ -9767,6 +9791,7 @@ function createTellusWorld(
           procplantsMs: Math.round(perfDiagnostics.phases.procplantsMs * 10) / 10,
           physicsMs: Math.round(perfDiagnostics.phases.physicsMs * 10) / 10,
           renderMs: Math.round(perfDiagnostics.phases.renderMs * 10) / 10,
+          cameraMs: Math.round(perfDiagnostics.phases.cameraMs * 10) / 10,
           miscMs: Math.round(perfDiagnostics.phases.miscMs * 10) / 10,
         },
         chunkTerrain: chunkRenderer?.stats() ?? null,
