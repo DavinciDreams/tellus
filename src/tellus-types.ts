@@ -586,6 +586,15 @@ declare global {
       procplants?: unknown;
       generatedAssets?: unknown;
       terrainTextures?: unknown;
+      friendsPresence?: {
+        pollIntervalMs: number;
+        lastAttemptAt: string | null;
+        lastSuccessAt: string | null;
+        lastFailureAt: string | null;
+        lastError: string | null;
+        onlineCount: number;
+        queryKind: "roster" | "batch" | null;
+      };
     };
     __tellusPerfReport?: () => unknown;
     __tellusPerfReset?: () => boolean;

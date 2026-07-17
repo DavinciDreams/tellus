@@ -186,6 +186,12 @@ import {
 } from "./tellus-asset-reuse";
 import { actorKindForVisitorId, friendlyVisitorName } from "./tellus-visitor-names";
 import {
+  fetchOnlinePresence,
+  presenceRegistryDiagnostics,
+  setPresencePollIntervalMs,
+  type RegistryPresence,
+} from "./tellus-presence-client";
+import {
   buildWorldThingRuntimeProfile,
   defaultScaleForRealisticKind,
   normalizeWorldThingAssetIdentity,
@@ -268,12 +274,14 @@ interface AgentStatus {
 
 interface OnlineContact {
   visitorId: string;
+  userId?: string;
   name: string;
   kind: "player" | "agent";
   worldId: string;
   position?: Vec3;
   online: boolean;
   currentWorld: boolean;
+  canMessage: boolean;
   lastSeenAt?: string;
 }
 
@@ -3202,6 +3210,7 @@ function createTellusWorld(
     vegetation: vegetation.stats(),
     procplants: procplants.stats(),
     generatedAssets: generatedAssetPerfStats(),
+    friendsPresence: presenceRegistryDiagnostics(),
     debug: {
       terrainOnly: terrainOnlyDebug(),
       lowGpu: lowGpuDebug(),
@@ -12062,7 +12071,8 @@ function App(): React.ReactElement {
     worldId?: string;
     position?: Vec3;
   } | null>(null);
-  const [crossWorldPresence, setCrossWorldPresence] = useState<Record<string, WorldPresence[]>>({});
+  const [registryPresence, setRegistryPresence] = useState<RegistryPresence[]>([]);
+  const [registryPresenceStatus, setRegistryPresenceStatus] = useState<"idle" | "loading" | "ready" | "unknown">("idle");
   const [portalTargetWorldId, setPortalTargetWorldId] = useState("");
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
   const [showFps, setShowFps] = useState(false);
@@ -15331,44 +15341,31 @@ function App(): React.ReactElement {
     if (!worldChatOpen || chatTab !== "dm") return;
     const controller = new AbortController();
     let cancelled = false;
-    const targetWorlds = worlds
-      .map(canonicalWorldId)
-      .filter((worldId) => worldId && worldId !== currentWorldId)
-      .slice(0, 12);
-    if (targetWorlds.length === 0) return () => controller.abort();
+    const pollIntervalMs = 10_000;
+    setPresencePollIntervalMs(pollIntervalMs);
 
-    const loadPresence = async () => {
-      const entries = await Promise.all(
-        targetWorlds.map(async (worldId) => {
-          try {
-            const res = await fetch(
-              worldApiUrl(`/api/world/${encodeURIComponent(worldId)}/state?userId=${encodeURIComponent(tellusUserId())}`),
-              { cache: "no-store", signal: controller.signal },
-            );
-            if (!res.ok) return [worldId, [] as WorldPresence[]] as const;
-            const parsed = await res.json();
-            return [worldId, (presenceFromWorldPatch(parsed) ?? []).filter(isLivePresence)] as const;
-          } catch {
-            return [worldId, [] as WorldPresence[]] as const;
-          }
-        }),
-      );
-      if (cancelled) return;
-      setCrossWorldPresence((prev) => {
-        const next: Record<string, WorldPresence[]> = { ...prev };
-        for (const [worldId, presence] of entries) next[worldId] = presence;
-        return next;
-      });
+    const loadPresence = async (initial = false) => {
+      if (initial) setRegistryPresenceStatus("loading");
+      try {
+        const entries = await fetchOnlinePresence(tellusUserId(), controller.signal);
+        if (cancelled) return;
+        setRegistryPresence(entries);
+        setRegistryPresenceStatus("ready");
+      } catch {
+        if (cancelled || controller.signal.aborted) return;
+        // Keep the last successful roster visible. A failed refresh means unknown, not offline.
+        setRegistryPresenceStatus("unknown");
+      }
     };
 
-    void loadPresence();
-    const interval = window.setInterval(() => void loadPresence(), 10000);
+    void loadPresence(true);
+    const interval = window.setInterval(() => void loadPresence(), pollIntervalMs);
     return () => {
       cancelled = true;
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [chatTab, currentWorldId, worldChatOpen, worlds.join("\n")]);
+  }, [chatTab, worldChatOpen, account?.accountId]);
   const doorInteriorOptions = WORLD_CREATION_TEMPLATES.filter((option) =>
     isInteriorWorldTemplate(option.id),
   );
@@ -15424,12 +15421,14 @@ function App(): React.ReactElement {
         : `${kind}:${presence.visitorId}`;
       const next: OnlineContact = {
         visitorId: presence.visitorId,
+        userId: presence.ownerUserId,
         name: actorName(presence),
         kind,
         worldId,
         position: presence.position,
         online: isLivePresence(presence),
         currentWorld,
+        canMessage: true,
         lastSeenAt: presence.lastSeenAt,
       };
       const prev = byKey.get(key);
@@ -15448,9 +15447,23 @@ function App(): React.ReactElement {
     };
 
     for (const visitor of [...remoteAgents, ...remotePlayers]) merge(visitor, currentWorldId, true);
-    for (const [worldId, presence] of Object.entries(crossWorldPresence)) {
-      if (worldId === currentWorldId) continue;
-      for (const visitor of presence) merge(visitor, worldId, false);
+    for (const presence of registryPresence) {
+      if (!presence.online || presence.userId === snapshot.userId || presence.userId === tellusUserId()) continue;
+      const key = `player:${presence.userId}`;
+      const existing = byKey.get(key);
+      if (existing?.currentWorld) continue;
+      byKey.set(key, {
+        visitorId: existing?.visitorId ?? `user:${presence.userId}`,
+        userId: presence.userId,
+        name: presence.name || existing?.name || presence.userId.slice(0, 12),
+        kind: "player",
+        worldId: canonicalWorldId(presence.worldId),
+        position: existing?.position,
+        online: true,
+        currentWorld: canonicalWorldId(presence.worldId) === currentWorldId,
+        canMessage: Boolean(existing?.canMessage),
+        lastSeenAt: presence.lastSeenAt,
+      });
     }
 
     if (agentStatus?.optedIn && agentStatus.visitorId) {
@@ -15465,6 +15478,7 @@ function App(): React.ReactElement {
         position: existing?.position,
         online: existing?.online ?? Boolean(agentStatus.enabled || agentStatus.ownerPresent || agentStatus.offlinePersistence),
         currentWorld: existing?.currentWorld ?? agentWorldId === currentWorldId,
+        canMessage: true,
         lastSeenAt: existing?.lastSeenAt || agentStatus.lastTickAt || undefined,
       });
     }
@@ -15484,7 +15498,7 @@ function App(): React.ReactElement {
     agentStatus?.ownerPresent,
     agentStatus?.visitorId,
     agentStatus?.worldId,
-    crossWorldPresence,
+    registryPresence,
     currentWorldId,
     remoteAgents,
     remotePlayers,
@@ -15505,9 +15519,13 @@ function App(): React.ReactElement {
     setWorldChatInput("");
   };
   const goToOnlineContact = (contact: OnlineContact) => {
-    if (!contact.position) return;
     if (contact.worldId === currentWorldId) {
-      worldRef.current?.warpTo(contact.position.x, contact.position.z);
+      if (contact.position) worldRef.current?.warpTo(contact.position.x, contact.position.z);
+      return;
+    }
+    if (!contact.position) {
+      sharedLocationRef.current = null;
+      switchWorld(canonicalWorldId(contact.worldId));
       return;
     }
     const nextLocation = {
@@ -15822,10 +15840,16 @@ function App(): React.ReactElement {
                 {worldChatChannel === "dm" && (
               <div className="mini-chat-dm-targets" aria-label="DM recipients">
                 {chatTargets.length === 0 ? (
-                  <span>No online players or agents found.</span>
+                  <span>
+                    {registryPresenceStatus === "loading"
+                      ? "Checking who is online…"
+                      : registryPresenceStatus === "unknown"
+                        ? "Online status is temporarily unavailable."
+                        : "No online players or agents found."}
+                  </span>
                 ) : (
                   <>
-                    <span>To</span>
+                    <span>{registryPresenceStatus === "unknown" ? "Status unknown" : "To"}</span>
                     <div>
                       {chatTargets.map((target) => (
                         <div
@@ -15836,6 +15860,8 @@ function App(): React.ReactElement {
                           <button
                             type="button"
                             className="mini-chat-contact-main"
+                            disabled={!target.canMessage}
+                            aria-label={target.canMessage ? `Message ${target.name}` : `${target.name} is in another world`}
                             onClick={() => setWorldChatDmTarget(target)}
                           >
                             <span className="presence-dot online" aria-hidden="true" />
@@ -15845,7 +15871,8 @@ function App(): React.ReactElement {
                           <button
                             type="button"
                             className="mini-chat-contact-go"
-                            disabled={!target.position}
+                            disabled={target.currentWorld && !target.position}
+                            aria-label={target.currentWorld ? `Go to ${target.name}` : `Travel to ${target.name}'s world`}
                             onClick={(event) => {
                               event.stopPropagation();
                               goToOnlineContact(target);
