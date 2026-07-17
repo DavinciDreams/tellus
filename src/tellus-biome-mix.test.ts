@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  biomeMixRenderSignature,
   isAssetMixEntry,
+  makeTerrainPaintBiomeMix,
   normalizeBiomeMixDefinition,
   normalizeBiomeMixRegistry,
   serializeBiomeMixRegistryForPersistence,
@@ -8,6 +10,71 @@ import {
 import { ECOLOGY_TERRAIN_PAINT_MAP } from "./tellus-procplant-biomes";
 
 describe("Tellus biome mix normalization", () => {
+  it("represents lightweight global fern substitutes as instanced asset entries", () => {
+    const entries = [
+      ...makeTerrainPaintBiomeMix("forest-floor", 17).entries,
+      ...makeTerrainPaintBiomeMix("jungle-moss", 17).entries,
+    ];
+    const ferns = entries.filter(isAssetMixEntry);
+    expect(ferns.map((entry) => entry.asset.libraryId).sort()).toEqual([
+      "2b64b91a-cc16-4b03-afef-7f09cbf3a0cc",
+      "80b4a76f-27f4-4ba3-bb63-47c54f5995b9",
+    ].sort());
+    expect(ferns.every((entry) => entry.asset.lodPreference === "lod2")).toBe(true);
+  });
+
+  it("does not treat server timestamps or hydrated templates as visual mix changes", () => {
+    const base = normalizeBiomeMixRegistry({
+      version: 1,
+      worldId: "chunked-stable-biome-refresh",
+      updatedAt: "2026-07-15T00:00:00.000Z",
+      mixesByEcologyBiome: {},
+      mixesByTerrainPaint: {
+        meadow: {
+          version: 1,
+          id: "stable-meadow",
+          label: "Stable Meadow",
+          source: "terrain-paint",
+          terrainPaint: "meadow",
+          seed: 1,
+          density: 1,
+          diversity: 1,
+          targetVerticesPerChunk: 12_000,
+          entries: [{
+            id: "meadow-asset",
+            label: "Meadow Asset",
+            source: "asset",
+            asset: { kind: "glb", name: "meadow.glb", libraryId: "asset-1" },
+            weight: 1,
+            density: 1,
+            scale: 1,
+            environment: { light: 0.8, moisture: 0.5, crowding: 0.4, biomeWarmth: 0.6 },
+            seed: 2,
+            enabled: true,
+          }],
+        },
+      },
+    }, "chunked-stable-biome-refresh");
+    const refreshed = structuredClone(base);
+    refreshed.updatedAt = "2026-07-15T00:01:00.000Z";
+    const entry = refreshed.mixesByTerrainPaint.meadow?.entries[0];
+    if (entry && isAssetMixEntry(entry)) {
+      entry.asset.template = {
+        version: 1,
+        vertexCount: 3,
+        positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+        colors: [1, 1, 1, 1, 1, 1, 1, 1, 1],
+        indices: [0, 1, 2],
+      };
+    }
+
+    expect(biomeMixRenderSignature(refreshed)).toBe(biomeMixRenderSignature(base));
+
+    refreshed.mixesByTerrainPaint.meadow!.density = 0.5;
+    expect(biomeMixRenderSignature(refreshed)).not.toBe(biomeMixRenderSignature(base));
+  });
+
   it("keeps procplants ez-tree and GLB asset entries from exported mixes", () => {
     const mix = normalizeBiomeMixDefinition({
       version: 1,

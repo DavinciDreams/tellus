@@ -26,6 +26,13 @@ export interface ProcPlantBiomePatch {
   scale: number;
   environment: ProcPlantEnvironment;
   treeBackend?: ProcPlantTreeBackend;
+  asset?: ProcPlantBiomeAsset;
+}
+
+export interface ProcPlantBiomeAsset {
+  libraryId: string;
+  lodPreference: "lod2" | "lod3";
+  color?: number;
 }
 
 export interface ProcPlantTreeBackend {
@@ -59,10 +66,16 @@ export const ASSET_BACKED_PROCPLANT_MODEL_IDS = [
   "78f6d91e-7382-4760-903c-c1b73b9c38cd",
   "cae23ae2-7392-4ace-baec-cfaf09423ae8",
   "2b64b91a-cc16-4b03-afef-7f09cbf3a0cc",
+  "80b4a76f-27f4-4ba3-bb63-47c54f5995b9",
   "c2c100e2-df7c-4da7-96e3-b4dbe33645d9",
   "73fd0d30-9023-4c85-922c-7e56e6cd10e8",
   "f75adff3-7810-44ac-9c86-e183c19eb616",
   "124d6b49-4d5e-4b05-bc81-848ef6f7377a",
+] as const;
+
+export const GLOBAL_DEFAULT_FERN_ASSET_IDS = [
+  "2b64b91a-cc16-4b03-afef-7f09cbf3a0cc",
+  "80b4a76f-27f4-4ba3-bb63-47c54f5995b9",
 ] as const;
 
 export const ASSET_BACKED_PROCPLANT_MODEL_ID_SET = new Set<string>(ASSET_BACKED_PROCPLANT_MODEL_IDS);
@@ -190,6 +203,48 @@ export type ProcPlantBiomeCandidate = Omit<ProcPlantBiomePatch, "version" | "see
 };
 
 const TEXTURED_TREE_REPLACED_AUTO_PRESETS = new Set(["foldedPalm"]);
+export const GLOBAL_DEFAULT_EXCLUDED_PROCPLANT_PRESETS: ReadonlySet<string> = new Set([
+  "phiFern",
+  "acaciaUmbrella",
+  "blueSpruce",
+]);
+
+const globalDefaultCandidate = (
+  entry: ProcPlantBiomeCandidate,
+): ProcPlantBiomeCandidate | null => {
+  if (entry.primary === "phiFern") {
+    const warmFern = entry.environment.biomeWarmth >= 0.72;
+    return {
+      ...entry,
+      primary: warmFern ? "compactStylizedFern" : "compactFern",
+      secondary: undefined,
+      hybrid: 0,
+      treeBackend: undefined,
+      asset: {
+        libraryId: warmFern
+          ? GLOBAL_DEFAULT_FERN_ASSET_IDS[1]
+          : GLOBAL_DEFAULT_FERN_ASSET_IDS[0],
+        lodPreference: "lod2",
+        color: warmFern ? 0x4f8f3d : 0x477b3f,
+      },
+    };
+  }
+  if (
+    TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.primary) ||
+    GLOBAL_DEFAULT_EXCLUDED_PROCPLANT_PRESETS.has(entry.primary)
+  ) return null;
+  if (entry.secondary && GLOBAL_DEFAULT_EXCLUDED_PROCPLANT_PRESETS.has(entry.secondary)) {
+    return { ...entry, secondary: undefined, hybrid: 0 };
+  }
+  return entry;
+};
+
+const globalDefaultPaintCandidates = (
+  paint: TerrainPaintKind,
+): ProcPlantBiomeCandidate[] =>
+  (PAINT_BIOMES[paint] ?? [])
+    .map(globalDefaultCandidate)
+    .filter((entry): entry is ProcPlantBiomeCandidate => entry !== null);
 
 const candidate = (
   primary: string,
@@ -350,10 +405,7 @@ export const biomePatchForPaint = (
   seed: number,
 ): ProcPlantBiomePatch | null => {
   if (!paint) return null;
-  const base = pickCandidate(
-    (PAINT_BIOMES[paint] ?? []).filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.primary)),
-    seed,
-  );
+  const base = pickCandidate(globalDefaultPaintCandidates(paint), seed);
   if (!base) return null;
   return patchFromCandidate(base, seed);
 };
@@ -363,8 +415,7 @@ export const biomePatchesForPaint = (
   seed: number,
 ): ProcPlantBiomePatch[] =>
   paint
-    ? (PAINT_BIOMES[paint] ?? [])
-        .filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.primary))
+    ? globalDefaultPaintCandidates(paint)
         .map((entry, index) => patchFromCandidate(entry, seed ^ ((index + 1) * 0x9e3779b1)))
     : [];
 
@@ -375,9 +426,10 @@ export const biomePatchForEcology = (
   const community = resolveEcologyCommunity(ecology, 6);
   const candidates = community
     .filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.presetId))
-    .map((entry) => patchFromEcologyPreset(entry.presetId, ecology, entry.score));
+    .map((entry) => globalDefaultCandidate(patchFromEcologyPreset(entry.presetId, ecology, entry.score)))
+    .filter((entry): entry is ProcPlantBiomeCandidate => entry !== null);
   const fallback = ecology.terrainPaint
-    ? (PAINT_BIOMES[ecology.terrainPaint] ?? []).filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.primary))
+    ? globalDefaultPaintCandidates(ecology.terrainPaint)
     : [];
   const base = pickCandidate(candidates.length > 0 ? candidates : fallback, seed);
   if (!base) return null;
@@ -392,9 +444,10 @@ export const biomePatchesForEcology = (
   const community = resolveEcologyCommunity(ecology, limit);
   const candidates = community
     .filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.presetId))
-    .map((entry) => patchFromEcologyPreset(entry.presetId, ecology, entry.score));
+    .map((entry) => globalDefaultCandidate(patchFromEcologyPreset(entry.presetId, ecology, entry.score)))
+    .filter((entry): entry is ProcPlantBiomeCandidate => entry !== null);
   const fallback = ecology.terrainPaint
-    ? (PAINT_BIOMES[ecology.terrainPaint] ?? []).filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.primary))
+    ? globalDefaultPaintCandidates(ecology.terrainPaint)
     : [];
   return (candidates.length > 0 ? candidates : fallback).map((entry, index) =>
     patchFromCandidate(entry, seed ^ ((index + 1) * 0x85ebca6b)),

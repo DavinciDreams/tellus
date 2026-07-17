@@ -280,6 +280,11 @@ export interface ChunkRenderer {
   reloadChunk(chunkX: number, chunkZ: number): void;
   /** Rebuild already-loaded chunks when the active terrain template/land-shape changes. */
   rebuildTerrain(): void;
+  /**
+   * Return and clear the terrain regions whose rendered surface changed since the previous call.
+   * Consumers use this to rebuild only vegetation that overlaps newly streamed or edited chunks.
+   */
+  consumeChangedRegions(): Array<{ minX: number; maxX: number; minZ: number; maxZ: number }>;
   /** Optimistic local paint for immediate feedback while the authoritative chunk patch round-trips. */
   applyLocalPaint(kind: TerrainPaintKind, worldX: number, worldZ: number, radius: number): void;
   /** Rebuild chunks whose data arrived since last frame — call once/frame next to flushTerrain(). */
@@ -341,6 +346,7 @@ export function createChunkRenderer(
   const lodOf = new Map<string, number>(); // intended lod for a pending fetch
   const retryAt = new Map<string, number>(); // failed fetches; retried while the chunk remains wanted
   const localPaintOverrides = new Map<string, Map<number, number>>();
+  const changedSurfaceChunks = new Set<string>();
   // Chunks whose ring shrank (wanting MORE detail) while the player was moving on foot — a full
   // near-ring rebuild is up to 4225 vertices with per-vertex color/skirt work (tens of ms), which blows
   // a moving frame's budget outright since a single synchronous build can't be preempted once started.
@@ -488,8 +494,31 @@ export function createChunkRenderer(
           continue;
         }
         if (inflight.has(k) && lodOf.get(k) === lod) continue;
-        if (ready.has(k) && lodOf.get(k) === lod) continue;
+        if (ready.has(k)) {
+          // Fresh server data already awaits a build. Apply the currently wanted LOD to that data
+          // instead of issuing a second request just because the player crossed a chunk boundary.
+          lodOf.set(k, lod);
+          continue;
+        }
         if (queuedFetches.has(k) && lodOf.get(k) === lod) continue;
+        if (a && a.revision >= 0 && !inflight.has(k)) {
+          // LOD is a local rendering choice; the active chunk already owns all authoritative height
+          // and paint arrays. Reusing them avoids refetching and JSON-decoding thousands of values for
+          // every near/far-ring transition while retaining exactly the same resulting geometry.
+          queuedFetches.delete(k);
+          ready.set(k, {
+            cx: a.cx,
+            cz: a.cz,
+            revision: a.revision,
+            segments: CHUNK_SEGMENTS,
+            sculptOffsets: a.sculptOffsets,
+            paint: a.paint,
+            heightMode: a.heightMode,
+          });
+          lodOf.set(k, lod);
+          localLodRebuilds++;
+          continue;
+        }
         const retry = retryAt.get(k);
         if (retry !== undefined && retry > now) continue;
         deferredLodUpgrades.delete(k);
@@ -499,14 +528,32 @@ export function createChunkRenderer(
   };
 
   // Replays LOD upgrades deferred while the player was moving on foot, once they've settled — one
-  // admission per call, drained by flush()'s existing per-frame build budget/network-start budget, so
-  // a burst of deferred upgrades still can't dump multiple expensive rebuilds at once.
+  // admission per call, drained by flush()'s existing per-frame build budget, so a burst of deferred
+  // upgrades still can't dump multiple expensive rebuilds at once.
   const applyDeferredLodUpgrades = () => {
     if (deferredLodUpgrades.size === 0) return;
     const [k, lod] = deferredLodUpgrades.entries().next().value as [string, number];
     deferredLodUpgrades.delete(k);
     const a = active.get(k);
     if (!a || a.lodSegments === lod || inflight.has(k)) return;
+    if (a.revision >= 0) {
+      // The active chunk already owns all authoritative height/paint data (same reuse path
+      // scheduleAround takes for an ordinary LOD swap) — re-tessellate in memory instead of a network
+      // round-trip.
+      queuedFetches.delete(k);
+      ready.set(k, {
+        cx: a.cx,
+        cz: a.cz,
+        revision: a.revision,
+        segments: CHUNK_SEGMENTS,
+        sculptOffsets: a.sculptOffsets,
+        paint: a.paint,
+        heightMode: a.heightMode,
+      });
+      lodOf.set(k, lod);
+      localLodRebuilds++;
+      return;
+    }
     const ring = Number.isFinite(centerCx)
       ? Math.max(Math.abs(a.cx - centerCx), Math.abs(a.cz - centerCz))
       : 0;
@@ -614,8 +661,14 @@ export function createChunkRenderer(
   const buildOrUpdate = (k: string, data: ChunkData, lodSegments: number) => {
     const mergedData = chunkDataWithLocalPaint(k, data);
     const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
-    const geometry = createChunkTerrainGeometry(mergedData, lodSegments);
     const existing = active.get(k);
+    // A pure LOD swap changes only tessellation, not the surface sampled by vegetation. New chunks,
+    // authoritative replacements of provisional chunks, and new server revisions do change it.
+    const surfaceChanged =
+      !existing ||
+      existing.revision !== mergedData.revision ||
+      existing.heightMode !== mergedData.heightMode;
+    const geometry = createChunkTerrainGeometry(mergedData, lodSegments);
     if (existing) {
       existing.mesh.geometry.dispose();
       existing.mesh.geometry = geometry;
@@ -626,6 +679,7 @@ export function createChunkRenderer(
       existing.paint = mergedData.paint;
       existing.heightMode = mergedData.heightMode;
       existing.mesh.visible = isInVisibleRing(existing.cx, existing.cz);
+      if (surfaceChanged) changedSurfaceChunks.add(k);
       return;
     }
     const mesh = new THREE.Mesh(geometry, material);
@@ -645,6 +699,21 @@ export function createChunkRenderer(
       paint: mergedData.paint,
       heightMode: mergedData.heightMode,
     });
+    changedSurfaceChunks.add(k);
+  };
+
+  const consumeChangedRegions = () => {
+    const regions = [...changedSurfaceChunks].map((k) => {
+      const [cx, cz] = k.split(",").map(Number);
+      return {
+        minX: cx * CHUNK_SPAN,
+        maxX: (cx + 1) * CHUNK_SPAN,
+        minZ: cz * CHUNK_SPAN,
+        maxZ: (cz + 1) * CHUNK_SPAN,
+      };
+    });
+    changedSurfaceChunks.clear();
+    return regions;
   };
 
   const rebuildTerrain = () => {
@@ -786,6 +855,9 @@ export function createChunkRenderer(
         },
         a.lodSegments,
       );
+      // Local paint keeps the same server revision, but it can change both plant selection and
+      // exclusion rules, so explicitly mark this chunk's ecology surface dirty.
+      changedSurfaceChunks.add(k);
     }
   };
 
@@ -851,6 +923,7 @@ export function createChunkRenderer(
       a.mesh.geometry.dispose();
     }
     active.clear();
+    changedSurfaceChunks.clear();
     material.dispose();
     scene.remove(group);
   };
@@ -877,6 +950,7 @@ export function createChunkRenderer(
     setFetchStartBudget,
     reloadChunk,
     rebuildTerrain,
+    consumeChangedRegions,
     applyLocalPaint,
     flush,
     sampleHeight,

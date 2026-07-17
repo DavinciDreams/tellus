@@ -301,6 +301,29 @@ describe("createChunkRenderer lifecycle", () => {
     r.dispose();
   });
 
+  it("reports only surface-changing chunk regions and ignores pure LOD rebuilds", async () => {
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    r.update(CHUNK_SPAN * 10 + 1, CHUNK_SPAN * 10 + 1);
+    await resolveAll();
+    r.flush();
+    expect(r.consumeChangedRegions()).toHaveLength(25);
+    expect(r.consumeChangedRegions()).toEqual([]);
+
+    // Crossing one chunk changes several terrain LODs, but only the newly streamed column has a new
+    // surface. Existing chunks must not force unrelated procplant cells to rebuild.
+    r.update(CHUNK_SPAN * 11 + 1, CHUNK_SPAN * 10 + 1);
+    // Only the five genuinely new chunks should hit the network. Existing chunks changing LOD reuse
+    // their authoritative in-memory height/paint data.
+    expect(pending.size).toBe(5);
+    await resolveAll();
+    r.flush();
+    const changed = r.consumeChangedRegions();
+    expect(changed).toHaveLength(5);
+    expect(changed.every((region) => region.minX === 13 * CHUNK_SPAN)).toBe(true);
+    r.dispose();
+  });
+
   it("defers LOD-upgrade rebuilds while moving on foot, then replays them once stationary", async () => {
     const scene = new THREE.Scene();
     const r = createChunkRenderer(scene);

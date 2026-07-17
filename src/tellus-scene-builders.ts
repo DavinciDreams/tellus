@@ -932,8 +932,11 @@ export function fitModelToHeight(model: THREE.Object3D, targetHeight: number): T
   model.scale.setScalar(scale);
   model.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
   model.traverse((child) => {
-    child.frustumCulled = false;
     if (!(child instanceof THREE.Mesh)) return;
+    // Static and rigidly animated meshes have reliable transformed geometry bounds, so let the
+    // renderer skip them outside both the player and ocean-reflection camera frustums. Skinned
+    // vertices can sweep beyond their rest-pose bounds, so those meshes keep the conservative path.
+    child.frustumCulled = !(child instanceof THREE.SkinnedMesh);
     child.castShadow = true;
     child.receiveShadow = true;
   });

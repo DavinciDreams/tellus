@@ -561,6 +561,114 @@ function createTellusWorld(
   let rendererContextLostCount = 0;
   let rendererContextRestoredCount = 0;
   let rendererContextLastEvent = "";
+  type WebGlGpuTimerExtension = {
+    TIME_ELAPSED_EXT: number;
+    GPU_DISJOINT_EXT: number;
+  };
+  type WebGlGpuTimer = {
+    gl: WebGL2RenderingContext;
+    extension: WebGlGpuTimerExtension;
+    active: WebGLQuery | null;
+    pending: WebGLQuery[];
+    lastMs: number;
+    maxMs: number;
+    totalMs: number;
+    samples: number;
+    failed: boolean;
+  };
+  let webGlGpuTimer: WebGlGpuTimer | null = null;
+
+  const initializeWebGlGpuTimer = () => {
+    if (!(renderer instanceof THREE.WebGLRenderer)) return;
+    const context = renderer.getContext();
+    if (!(context instanceof WebGL2RenderingContext)) return;
+    const extension = context.getExtension("EXT_disjoint_timer_query_webgl2") as
+      | WebGlGpuTimerExtension
+      | null;
+    if (!extension) return;
+    webGlGpuTimer = {
+      gl: context,
+      extension,
+      active: null,
+      pending: [],
+      lastMs: 0,
+      maxMs: 0,
+      totalMs: 0,
+      samples: 0,
+      failed: false,
+    };
+  };
+
+  const pollWebGlGpuTimer = () => {
+    const timer = webGlGpuTimer;
+    if (!timer || timer.failed) return;
+    try {
+      if (timer.gl.getParameter(timer.extension.GPU_DISJOINT_EXT)) {
+        for (const query of timer.pending) timer.gl.deleteQuery(query);
+        timer.pending.length = 0;
+        return;
+      }
+      while (timer.pending.length > 0) {
+        const query = timer.pending[0]!;
+        if (!timer.gl.getQueryParameter(query, timer.gl.QUERY_RESULT_AVAILABLE)) break;
+        timer.pending.shift();
+        const elapsedNanoseconds = Number(
+          timer.gl.getQueryParameter(query, timer.gl.QUERY_RESULT),
+        );
+        timer.gl.deleteQuery(query);
+        if (!Number.isFinite(elapsedNanoseconds)) continue;
+        const elapsedMs = elapsedNanoseconds / 1_000_000;
+        timer.lastMs = elapsedMs;
+        timer.maxMs = Math.max(timer.maxMs, elapsedMs);
+        timer.totalMs += elapsedMs;
+        timer.samples++;
+      }
+    } catch {
+      timer.failed = true;
+    }
+  };
+
+  const beginWebGlGpuTimer = (frame: number): boolean => {
+    const timer = webGlGpuTimer;
+    if (!timer || timer.failed) return false;
+    pollWebGlGpuTimer();
+    // Timer queries are diagnostic and can themselves add driver overhead. Sample roughly once per
+    // second at the target frame rate instead of wrapping every draw.
+    if (frame % 60 !== 0 || timer.active || timer.pending.length >= 3) return false;
+    try {
+      const query = timer.gl.createQuery();
+      if (!query) return false;
+      timer.gl.beginQuery(timer.extension.TIME_ELAPSED_EXT, query);
+      timer.active = query;
+      return true;
+    } catch {
+      timer.failed = true;
+      return false;
+    }
+  };
+
+  const endWebGlGpuTimer = () => {
+    const timer = webGlGpuTimer;
+    if (!timer?.active || timer.failed) return;
+    try {
+      timer.gl.endQuery(timer.extension.TIME_ELAPSED_EXT);
+      timer.pending.push(timer.active);
+      timer.active = null;
+    } catch {
+      timer.failed = true;
+      timer.active = null;
+    }
+  };
+
+  const disposeWebGlGpuTimer = () => {
+    const timer = webGlGpuTimer;
+    if (!timer) return;
+    if (timer.active) timer.gl.deleteQuery(timer.active);
+    for (const query of timer.pending) timer.gl.deleteQuery(query);
+    timer.pending.length = 0;
+    timer.active = null;
+    webGlGpuTimer = null;
+  };
 
   const generated: GeneratedThing[] = [];
   const logs: TellusLog[] = [];
@@ -610,6 +718,16 @@ function createTellusWorld(
     disabled: boolean; // a failure here disables the whole group, reverting to regular meshes
   }
   const instancePools = new Map<string, InstancePool>();
+  const refreshInstancePoolBounds = (pool: InstancePool) => {
+    let drawCount = 0;
+    for (const slot of pool.slotToThing.keys()) drawCount = Math.max(drawCount, slot + 1);
+    for (const instanced of pool.instanced) {
+      // Only submit the occupied slot range. Recycled holes inside it remain zero-scale matrices.
+      instanced.count = drawCount;
+      instanced.instanceMatrix.needsUpdate = true;
+      instanced.computeBoundingSphere();
+    }
+  };
   const generatedAssetPerfStats = () => {
     let instancedThings = 0;
     let instancedDraws = 0;
@@ -620,6 +738,8 @@ function createTellusWorld(
     let visibleMeshes = 0;
     let childMeshes = 0;
     let visibleChildMeshes = 0;
+    let frustumCulledChildMeshes = 0;
+    let alwaysRenderedChildMeshes = 0;
     let visibleBuildingLodProxies = 0;
     const materialKeys = new Set<string>();
     for (const mesh of generatedMeshes.values()) {
@@ -628,7 +748,11 @@ function createTellusWorld(
         const effectivelyVisible = parentVisible && child.visible;
         if (!(child instanceof THREE.Mesh) || child instanceof THREE.InstancedMesh) return;
         childMeshes++;
-        if (effectivelyVisible) visibleChildMeshes++;
+        if (effectivelyVisible) {
+          visibleChildMeshes++;
+          if (child.frustumCulled) frustumCulledChildMeshes++;
+          else alwaysRenderedChildMeshes++;
+        }
         if (effectivelyVisible && child.userData.generatedBuildingLodProxy) visibleBuildingLodProxies++;
         const materials = Array.isArray(child.material) ? child.material : [child.material];
         for (const material of materials) materialKeys.add(material.uuid);
@@ -683,6 +807,8 @@ function createTellusWorld(
       meshes: {
         childMeshes,
         visibleChildMeshes,
+        frustumCulledChildMeshes,
+        alwaysRenderedChildMeshes,
         visibleBuildingLodProxies,
         uniqueMaterials: materialKeys.size,
       },
@@ -691,6 +817,10 @@ function createTellusWorld(
         pools: instancePools.size,
         instancedThings,
         instancedDraws,
+        frustumCulledDraws: [...instancePools.values()].reduce(
+          (total, pool) => total + pool.instanced.filter((mesh) => mesh.frustumCulled).length,
+          0,
+        ),
         disabledUrls: instancingDisabledUrls.size,
       },
     };
@@ -1446,6 +1576,11 @@ function createTellusWorld(
           grassTriangles: 0,
           stemTriangles: 0,
           organDraws: 0,
+          branchSegments: 0,
+          attachedLeaves: 0,
+          branchLod0: 0,
+          branchLod1: 0,
+          branchLod2: 0,
           lod0: 0,
           lod1: 0,
           lod2: 0,
@@ -1463,6 +1598,9 @@ function createTellusWorld(
           builtLastUpdate: 0,
           buildPausedForMotion: false,
           buildDeferred: false,
+          deferredLodChunks: 0,
+          deferredColdChunks: 0,
+          lodRefreshes: 0,
         }),
         placeManualPlant: () => false,
         replaceManualPlants: () => undefined,
@@ -2993,6 +3131,19 @@ function createTellusWorld(
         reflectionSkips,
       },
       programs: info.programs?.length ?? 0,
+      gpuTiming: webGlGpuTimer
+        ? {
+            supported: true,
+            failed: webGlGpuTimer.failed,
+            lastMs: Math.round(webGlGpuTimer.lastMs * 10) / 10,
+            averageMs: webGlGpuTimer.samples > 0
+              ? Math.round((webGlGpuTimer.totalMs / webGlGpuTimer.samples) * 10) / 10
+              : 0,
+            maxMs: Math.round(webGlGpuTimer.maxMs * 10) / 10,
+            samples: webGlGpuTimer.samples,
+            pending: webGlGpuTimer.pending.length,
+          }
+        : { supported: false },
       scene: {
         visibleMeshes,
         visibleShadowCasters,
@@ -3128,6 +3279,12 @@ function createTellusWorld(
     perfDiagnostics.heartbeat.lastGapMs = 0;
     perfDiagnostics.heartbeat.maxGapMs = 0;
     perfDiagnostics.heartbeat.count = 0;
+    if (webGlGpuTimer) {
+      webGlGpuTimer.lastMs = 0;
+      webGlGpuTimer.maxMs = 0;
+      webGlGpuTimer.totalMs = 0;
+      webGlGpuTimer.samples = 0;
+    }
     recentLongTasks.length = 0;
     return true;
   };
@@ -3166,10 +3323,13 @@ function createTellusWorld(
     });
   };
 
+  const THIRD_PERSON_ZOOM_MIN = 12;
+  const THIRD_PERSON_ZOOM_DEFAULT = 28;
+  const THIRD_PERSON_ZOOM_MAX = 42;
   let yaw = 0.72; // CAMERA orbit direction — changed only by right-drag look (and WASD's frame of reference)
   let avatarFacing = 0.72; // CHARACTER visual facing — turns toward actual movement, independent of camera
   let pitch = -0.28;
-  let zoom = 33;
+  let zoom = THIRD_PERSON_ZOOM_DEFAULT;
   // ── Camera mode: presentation-only (physics/movement untouched). "first" parks the main camera
   // at the LOCAL avatar's head (same eye math as the agent POV) and hides your own avatar+TV
   // locally — other players still see you (they render their own mesh from presence). Persists in
@@ -4730,7 +4890,7 @@ function createTellusWorld(
       if (subMeshes.length === 0) return null;
       for (const sub of subMeshes) {
         const inst = new THREE.InstancedMesh(sub.geometry, sub.material, capacity);
-        inst.frustumCulled = false;
+        inst.frustumCulled = true;
         inst.castShadow = true;
         inst.receiveShadow = true;
         inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -4740,7 +4900,7 @@ function createTellusWorld(
           inst.setMatrixAt(i, INSTANCE_ZERO_MATRIX);
         }
         inst.instanceMatrix.needsUpdate = true;
-        inst.count = capacity;
+        inst.count = 0;
         instanced.push(inst);
       }
       for (const inst of instanced) scene.add(inst);
@@ -4776,7 +4936,7 @@ function createTellusWorld(
       const tmp = new THREE.Matrix4();
       for (const old of oldInstanced) {
         const inst = new THREE.InstancedMesh(old.geometry, old.material, newCapacity);
-        inst.frustumCulled = false;
+        inst.frustumCulled = true;
         inst.castShadow = true;
         inst.receiveShadow = true;
         inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -4800,6 +4960,7 @@ function createTellusWorld(
       }
       pool.instanced = newInstanced;
       pool.capacity = newCapacity;
+      refreshInstancePoolBounds(pool);
       return true;
     } catch (error) {
       for (const inst of newInstanced) {
@@ -4852,6 +5013,7 @@ function createTellusWorld(
       }
       pool.slotToThing.set(slot, thing.id);
       pool.thingToSlot.set(thing.id, slot);
+      refreshInstancePoolBounds(pool);
       mesh.visible = false;
       return true;
     } catch (error) {
@@ -4874,6 +5036,7 @@ function createTellusWorld(
         pool.thingToSlot.delete(thingId);
         pool.slotToThing.delete(slot);
         pool.freeSlots.push(slot);
+        refreshInstancePoolBounds(pool);
       } catch (error) {
         disableInstancePool(pool.modelUrl, error);
       }
@@ -5263,8 +5426,8 @@ function createTellusWorld(
         }
         for (let j = 0; j < pool.subMeshCount; j += 1) {
           pool.instanced[j].setMatrixAt(slot, subMeshes[j].matrixWorld);
-          pool.instanced[j].instanceMatrix.needsUpdate = true;
         }
+        refreshInstancePoolBounds(pool);
       } catch (error) {
         disableInstancePool(pool.modelUrl, error);
       }
@@ -9428,7 +9591,7 @@ function createTellusWorld(
     }
   };
 
-  const animate = async () => {
+  const animate = () => {
     if (destroyed || !renderer) return;
     const now = performance.now();
     const frameStartedAt = now;
@@ -9561,14 +9724,18 @@ function createTellusWorld(
       }
       const chunkStatsBeforeFlush = chunkRenderer.stats();
       const terrainOnlyActive = terrainOnlyDebug();
-      const movingBuildBudget = terrainOnlyActive
-        ? 1
-        : (chunkStatsBeforeFlush.ready > 2 ? 2 : 1);
+      // One terrain upload per moving frame keeps chunk crossings below the frame budget. This does
+      // not reduce geometry or draw distance; look-ahead prefetching still prepares the same chunks.
+      const movingBuildBudget = 1;
       chunkRenderer.flush(
         movingOnFoot ? movingBuildBudget : terrainOnlyActive ? 4 : 3,
-        movingOnFoot ? (terrainOnlyActive ? 3 : 6) : terrainOnlyActive ? 14 : 9,
+        movingOnFoot ? 4 : terrainOnlyActive ? 14 : 9,
         movingOnFoot ? (terrainOnlyActive ? 2 : 3) : 6,
       );
+      const changedTerrainRegions = chunkRenderer.consumeChangedRegions();
+      if (changedTerrainRegions.length > 0) {
+        procplants.notifyRegionsChanged(changedTerrainRegions);
+      }
       // When the active chunk set changes (chunks streamed in/out), defer placed-asset grounding until
       // movement is idle. Treating streaming like a terrain edit used to invalidate all vegetation and
       // walk every generated thing on the boundary frame, which made every chunk crossing hitch.
@@ -9578,8 +9745,6 @@ function createTellusWorld(
       if (activeChunks !== lastActiveChunkCount || provisionalChunks !== lastProvisionalChunkCount) {
         lastActiveChunkCount = activeChunks;
         lastProvisionalChunkCount = provisionalChunks;
-        vegetation.notifyTerrainChanged();
-        procplants.notifyTerrainChanged();
         if (!chunkStreamGroundingPending && chunkStreamGroundingQueue.length === 0) {
           chunkStreamGroundingPending = true;
           for (const thing of generated) {
@@ -9773,8 +9938,13 @@ function createTellusWorld(
         if (renderer.shadowMap.enabled && perfDiagnostics.frames % shadowEveryDebug() === 0) {
           sun.shadow.needsUpdate = true;
         }
-        renderPortalPreview();
-        renderer.render(scene, camera);
+        const gpuTimerActive = beginWebGlGpuTimer(perfDiagnostics.frames);
+        try {
+          renderPortalPreview();
+          renderer.render(scene, camera);
+        } finally {
+          if (gpuTimerActive) endWebGlGpuTimer();
+        }
       }
       perfDiagnostics.phases.renderMs = performance.now() - phaseStartedAt;
       perfDiagnostics.phases.maxRenderMs = Math.max(
@@ -10387,7 +10557,7 @@ function createTellusWorld(
     container.style.cursor = moveModeThingId ? "move" : "";
   };
   const handleWheel = (event: WheelEvent) => {
-    zoom = clamp(zoom + event.deltaY * 0.01, 12, 58);
+    zoom = clamp(zoom + event.deltaY * 0.01, THIRD_PERSON_ZOOM_MIN, THIRD_PERSON_ZOOM_MAX);
   };
 
   window.addEventListener("resize", resize);
@@ -10415,6 +10585,7 @@ function createTellusWorld(
         await renderer.init();
       } else {
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        initializeWebGlGpuTimer();
         addLog({
           agentId: "world",
           agentName: "Tellus",
@@ -11550,6 +11721,7 @@ function createTellusWorld(
       transformControls?.dispose();
       disposeWallDoorPlacementGhost();
       disposePortalPreview();
+      disposeWebGlGpuTimer();
       renderer?.dispose();
       if (renderer?.domElement.parentElement === container) {
         container.removeChild(renderer.domElement);
@@ -11734,6 +11906,85 @@ function BuildingMaterialTile({
 
 // One avatar-picker grid tile: store thumbnail when it loads, else a colored-initial fallback
 // ("classic" has no store thumbnail and always renders the initial tile). Click = select.
+interface DebugFpsValueProps {
+  worldRef: React.RefObject<TellusWorldApi | null>;
+}
+
+function DebugFpsValue({ worldRef }: DebugFpsValueProps): React.ReactElement {
+  const [fps, setFps] = useState(() => worldRef.current?.getFps() ?? 0);
+
+  useEffect(() => {
+    const refresh = () => setFps(worldRef.current?.getFps() ?? 0);
+    refresh();
+    const id = window.setInterval(refresh, 250);
+    return () => window.clearInterval(id);
+  }, [worldRef]);
+
+  return <strong>{fps}</strong>;
+}
+
+interface DebugLiveRowsProps {
+  worldRef: React.RefObject<TellusWorldApi | null>;
+  rxEnabled: boolean;
+}
+
+function DebugLiveRows({ worldRef, rxEnabled }: DebugLiveRowsProps): React.ReactElement {
+  const [p2pStats, setP2pStats] = useState<MeshStats | null>(null);
+  const [ambientStats, setAmbientStats] = useState<ReturnType<
+    TellusWorldApi["getAmbientStats"]
+  > | null>(null);
+
+  useEffect(() => {
+    const refresh = () => {
+      setP2pStats(worldRef.current?.getP2pStats() ?? null);
+      setAmbientStats(worldRef.current?.getAmbientStats() ?? null);
+    };
+    refresh();
+    const id = window.setInterval(refresh, 1000);
+    return () => window.clearInterval(id);
+  }, [worldRef]);
+
+  return (
+    <>
+      {ambientStats && (
+        <>
+          <div className="debug-stats-row">
+            procplants {ambientStats.procplants.chunks} chunks · {ambientStats.procplants.grassInstances} grass tufts ·{" "}
+            {Math.round(ambientStats.procplants.grassTriangles)} grass tris · {ambientStats.procplants.plants} communities ·{" "}
+            {ambientStats.procplants.organDraws} organ draws
+          </div>
+          <div className="debug-stats-row">
+            branches {ambientStats.procplants.branchSegments} segments · {ambientStats.procplants.attachedLeaves} attached leaves · tree LOD{" "}
+            {ambientStats.procplants.branchLod0}/{ambientStats.procplants.branchLod1}/{ambientStats.procplants.branchLod2}
+          </div>
+          <div className="debug-stats-row">
+            plant work {ambientStats.procplants.lastUpdateMs} ms · build {ambientStats.procplants.lastBuildMs} ms /{" "}
+            {ambientStats.procplants.maxBuildMs} max · queue {ambientStats.procplants.queuedRebuilds} · LOD{" "}
+            {ambientStats.procplants.lod0}/{ambientStats.procplants.lod1}/{ambientStats.procplants.lod2} · deferred LOD{" "}
+            {ambientStats.procplants.deferredLodChunks} · cold {ambientStats.procplants.deferredColdChunks} · physics{" "}
+            {ambientStats.physicsBodies} · rapier {ambientStats.rapierSolids}
+          </div>
+        </>
+      )}
+      {ambientStats?.chunkTerrain && (
+        <div className="debug-stats-row">
+          terrain chunks {ambientStats.chunkTerrain.visible} visible / {ambientStats.chunkTerrain.active} cached ·{" "}
+          {ambientStats.chunkTerrain.pending} pending · {ambientStats.chunkTerrain.failed} failed
+        </div>
+      )}
+      <div className="debug-stats-row">
+        P2P {p2pStats?.tx ? "TX on" : "TX off"} ·{" "}
+        {(p2pStats?.rx ?? rxEnabled) ? "RX on" : "RX off"} · {p2pStats?.rxStreams ?? 0}/16 streams
+      </div>
+      {(p2pStats?.peers ?? []).slice(0, 4).map((peer) => (
+        <div key={peer.id} className="debug-stats-row">
+          {peer.id.slice(0, 6)} {peer.state} · {Math.round(peer.kbps)} kbps
+        </div>
+      ))}
+    </>
+  );
+}
+
 function App(): React.ReactElement {
   const { askConfirm, askPrompt, dialogs } = useDialogs();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -11813,7 +12064,6 @@ function App(): React.ReactElement {
   const [portalTargetWorldId, setPortalTargetWorldId] = useState("");
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
   const [showFps, setShowFps] = useState(false);
-  const [fps, setFps] = useState(0);
   const [debugModeFlags, setDebugModeFlags] = useState<string[]>(() => readDebugModeFlags());
   const brandClicksRef = useRef<number[]>([]);
   const handleBrandTripleClick = () => {
@@ -11859,10 +12109,6 @@ function App(): React.ReactElement {
   const [selectedMic, setSelectedMic] = useState<string>("");
   const [selectedCam, setSelectedCam] = useState<string>("");
   const [p2pError, setP2pError] = useState<string | null>(null);
-  const [p2pStats, setP2pStats] = useState<MeshStats | null>(null);
-  const [ambientStats, setAmbientStats] = useState<ReturnType<
-    TellusWorldApi["getAmbientStats"]
-  > | null>(null);
   // ── Camera mode (1st/3rd person; the world layer owns the actual camera + persistence) ──
   const [cameraMode, setCameraModeState] = useState<"first" | "third">(() => {
     try {
@@ -12074,16 +12320,6 @@ function App(): React.ReactElement {
     setSelectedCam(id);
     void worldRef.current?.setP2pDevices(selectedMic || undefined, id || undefined).then(attachSelfPreview);
   };
-
-  // Sample mesh stats while the social panel OR the debug overlay is open (≈1Hz).
-  useEffect(() => {
-    if (!worldChatOpen && !showFps) return;
-    const id = window.setInterval(() => {
-      setP2pStats(worldRef.current?.getP2pStats() ?? null);
-      setAmbientStats(worldRef.current?.getAmbientStats() ?? null);
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [worldChatOpen, showFps]);
 
   // ── "Your Agent" panel handlers (self-contained; pure fetch against the Hyades world agent API) ──
   const fetchAgentStatus = useCallback(async (signal?: AbortSignal): Promise<AgentStatus | null> => {
@@ -14605,13 +14841,6 @@ function App(): React.ReactElement {
       .filter((thing): thing is WorldGeneratedThing => thing !== null);
   };
 
-  useEffect(() => {
-    if (!showFps) return;
-    const id = window.setInterval(() => {
-      setFps(worldRef.current?.getFps() ?? 0);
-    }, 250);
-    return () => window.clearInterval(id);
-  }, [showFps]);
 
   useEffect(() => {
     window.__tellusSnapshot = () => snapshot;
@@ -15435,7 +15664,7 @@ function App(): React.ReactElement {
     <div className="debug-stats-panel" aria-label="Tellus debug stats">
       <div className="debug-stats-grid">
         <span>FPS</span>
-        <strong>{fps}</strong>
+        <DebugFpsValue worldRef={worldRef} />
         <span>Items</span>
         <strong>{debugGeneratedStats.total}</strong>
         <span>Ready</span>
@@ -15453,27 +15682,7 @@ function App(): React.ReactElement {
         <span>Agents</span>
         <strong>{remoteAgents.length}</strong>
       </div>
-      {ambientStats && (
-        <>
-          <div className="debug-stats-row">
-            procplants {ambientStats.procplants.chunks} chunks · {ambientStats.procplants.grassInstances} grass tufts ·{" "}
-            {Math.round(ambientStats.procplants.grassTriangles)} grass tris · {ambientStats.procplants.plants} communities ·{" "}
-            {ambientStats.procplants.organDraws} organ draws
-          </div>
-          <div className="debug-stats-row">
-            plant work {ambientStats.procplants.lastUpdateMs} ms · build {ambientStats.procplants.lastBuildMs} ms /{" "}
-            {ambientStats.procplants.maxBuildMs} max · queue {ambientStats.procplants.queuedRebuilds} · LOD{" "}
-            {ambientStats.procplants.lod0}/{ambientStats.procplants.lod1}/{ambientStats.procplants.lod2} · physics{" "}
-            {ambientStats.physicsBodies} · rapier {ambientStats.rapierSolids}
-          </div>
-        </>
-      )}
-      {ambientStats?.chunkTerrain && (
-        <div className="debug-stats-row">
-          terrain chunks {ambientStats.chunkTerrain.visible} visible / {ambientStats.chunkTerrain.active} cached ·{" "}
-          {ambientStats.chunkTerrain.pending} pending · {ambientStats.chunkTerrain.failed} failed
-        </div>
-      )}
+      <DebugLiveRows worldRef={worldRef} rxEnabled={rxEnabled} />
       {isChunkedWorldId(activeWorldId ?? "") && (() => {
         const side = 2 * chunkLoadRadius + 1;
         return (
@@ -15495,10 +15704,6 @@ function App(): React.ReactElement {
           </div>
         );
       })()}
-      <div className="debug-stats-row">
-        P2P {p2pStats?.tx ? "TX on" : "TX off"} ·{" "}
-        {(p2pStats?.rx ?? rxEnabled) ? "RX on" : "RX off"} · {p2pStats?.rxStreams ?? 0}/16 streams
-      </div>
       {selectedRuntimeProfile && activeSelectedThing && (
         <div className="debug-object-profile">
           <strong>{activeSelectedThing.prompt}</strong>
@@ -15515,11 +15720,6 @@ function App(): React.ReactElement {
           )}
         </div>
       )}
-      {(p2pStats?.peers ?? []).slice(0, 4).map((peer) => (
-        <div key={peer.id} className="debug-stats-row">
-          {peer.id.slice(0, 6)} {peer.state} · {Math.round(peer.kbps)} kbps
-        </div>
-      ))}
       <div className="debug-stats-hint">triple-click logo or press ` to hide</div>
     </div>
   ) : null;
