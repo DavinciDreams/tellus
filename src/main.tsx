@@ -723,6 +723,11 @@ function createTellusWorld(
   };
   let selectedThingId: string | undefined;
   let sailingThingId: string | undefined;
+  // Throttles the ridden mount's live-terrain-raycast ground-snap check (see PET_GROUND_RAYCAST_INTERVAL_MS
+  // for why footprintGroundY is expensive per-call). Reset (via mountGroundCheckThingId mismatch) whenever
+  // the ridden thing changes, so a freshly-mounted thing isn't stuck waiting out a stale throttle window.
+  let mountGroundCheckNextAt = 0;
+  let mountGroundCheckThingId: string | undefined;
   let externalSkybox: THREE.Object3D | null = null;
   let activeSkyboxUrl = "";
   let skyboxLoadSeq = 0;
@@ -6609,6 +6614,7 @@ function createTellusWorld(
     if (selectedThingId === id) selectedThingId = undefined;
     syncTransformControls();
     if (sailingThingId === id) sailingThingId = undefined;
+    petGroundRaycastState.delete(id);
     reevaluateInstanceGroup(removedModelUrl); // group may now drop below 2 → pop the survivor out
     saveGeneratedPlacementSnapshot();
     publish();
@@ -6702,6 +6708,16 @@ function createTellusWorld(
   const localPetThings = (): GeneratedThing[] =>
     generated.filter((thing) => thing.petOwnerId === petOwnerId && thing.id !== sailingThingId);
 
+  // footprintGroundY(At) raycasts the LIVE rendered terrain mesh up to 9x (a center sample + an 8-point
+  // footprint ring) per call — expensive at 60fps, and this cost MULTIPLIES per followed pet (a rider with
+  // 3 dogs and a parrot pays it 4x/frame on top of the mount's own check below). Throttle each tracked
+  // entity to its own ~180ms raycast cadence (staggered by index so N pets don't all re-raycast on the
+  // same frame) and hold the last resolved ground Y between raycasts — the analytic groundedPosition
+  // fallback still runs every frame so movement stays smooth, only the expensive mesh-precision correction
+  // is rate-limited.
+  const PET_GROUND_RAYCAST_INTERVAL_MS = 180;
+  const petGroundRaycastState = new Map<string, { nextAt: number; lastY: number | null }>();
+
   const petFollowTarget = (thing: GeneratedThing, index: number): Vec3 => {
     const row = Math.floor(index / 2);
     const side = index % 2 === 0 ? -1 : 1;
@@ -6717,9 +6733,21 @@ function createTellusWorld(
     if (mode === "air" || mode === "water") {
       return movedVehiclePositionForCurrentWorld(thing, x, z, thing.position);
     }
-    const liveGround = footprintGroundYAt(thing, x, z, visitorPosition.y);
-    return liveGround !== null && Number.isFinite(liveGround)
-      ? { x, y: liveGround, z }
+    const nowMs = performance.now();
+    let state = petGroundRaycastState.get(thing.id);
+    if (!state) {
+      // Stagger first-raycast timing by index so a pack of pets doesn't all pay the raycast on the
+      // same frame the moment they're first followed.
+      state = { nextAt: nowMs + (index % 6) * (PET_GROUND_RAYCAST_INTERVAL_MS / 6), lastY: null };
+      petGroundRaycastState.set(thing.id, state);
+    }
+    if (nowMs >= state.nextAt) {
+      state.nextAt = nowMs + PET_GROUND_RAYCAST_INTERVAL_MS;
+      const liveGround = footprintGroundYAt(thing, x, z, visitorPosition.y);
+      state.lastY = liveGround !== null && Number.isFinite(liveGround) ? liveGround : null;
+    }
+    return state.lastY !== null
+      ? { x, y: state.lastY, z }
       : groundedPositionForCurrentSurface(x, z, thing.position);
   };
 
@@ -7396,6 +7424,7 @@ function createTellusWorld(
     thing.petOwnerId = isPet ? petOwnerId : undefined;
     petLastPublishAt.delete(id);
     petAnimationModes.delete(id);
+    petGroundRaycastState.delete(id);
     if (isPet) {
       uninstanceThing(id);
       syncPetsToOwner(0, false);
@@ -9655,8 +9684,13 @@ function createTellusWorld(
       }
     }
     if (sailingThingId) {
+      if (mountGroundCheckThingId !== sailingThingId) {
+        mountGroundCheckThingId = sailingThingId;
+        mountGroundCheckNextAt = 0; // freshly mounted — don't wait out a stale throttle window
+      }
       const mounted = thingById(sailingThingId);
-      if (mounted && !isFreeMovingVehicle(mounted)) {
+      if (mounted && !isFreeMovingVehicle(mounted) && now >= mountGroundCheckNextAt) {
+        mountGroundCheckNextAt = now + PET_GROUND_RAYCAST_INTERVAL_MS;
         const liveGround = footprintGroundY(mounted);
         if (liveGround !== null && Number.isFinite(liveGround) && liveGround > mounted.position.y + 0.05) {
           mounted.position = { ...mounted.position, y: liveGround };
@@ -9681,7 +9715,10 @@ function createTellusWorld(
         sendPresenceUpdate();
       }
     }
+    performance.mark("tellus:syncPetsToOwner:start");
     syncPetsToOwner(delta);
+    performance.mark("tellus:syncPetsToOwner:end");
+    performance.measure("tellus:syncPetsToOwner", "tellus:syncPetsToOwner:start", "tellus:syncPetsToOwner:end");
     // Keep the minimap view-cone from driving React during camera-only motion. Presence still carries yaw-ish
     // movement updates when the player actually moves; a future minimap overlay can subscribe outside React.
     if (Math.abs(yaw - lastConeYaw) > 0.02 && now - lastConePublishMs > 1000) {
