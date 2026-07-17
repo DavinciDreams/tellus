@@ -1350,4 +1350,3 @@ declared complete:
 9. **Rendering: deer VAT/animated-impostor pipeline and instanced mid/far representation.**
 10. **Hyades: per-world latest-wins wildlife aggregator for multi-herd fan-in.**
 11. **Ecology: habitat scoring and bounded population maintenance.**
-

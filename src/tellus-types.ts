@@ -625,6 +625,12 @@ declare global {
         animalId: string,
         options?: { speciesProfileId?: string; herdId?: string; radiusMeters?: number; enabled?: boolean },
       ) => unknown;
+      populateDeerHerd?: (options?: {
+        count?: number;
+        herdId?: string;
+        radiusMeters?: number;
+        center?: { x: number; z: number };
+      }) => unknown;
       commandWildlife?: (args: {
         animalId?: string;
         herdId?: string;

@@ -158,6 +158,11 @@ import {
 import { WildlifeInterpolationBuffer, type WildlifePresentationPose } from "./tellus-wildlife-interpolation";
 import { planWildlifeLod, type WildlifeLodAssignment, type WildlifeRenderTier } from "./tellus-wildlife-lod";
 import { WildlifeProxyRenderer } from "./tellus-wildlife-proxies";
+import {
+  DEER_WILDLIFE_PROFILE,
+  wildlifeClipNameForIntent,
+  wildlifeSpeciesProfile,
+} from "./tellus-wildlife-species";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, ProceduralAssetPlacement, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood, WaterSettings, WaterStyle } from "./tellus-types";
 import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
@@ -772,6 +777,7 @@ function createTellusWorld(
     ignoreExplicit?: boolean;
     movementHints?: string[];
     preferSit?: boolean;
+    preferredClipName?: string;
   };
   const generatedAnimationMixers = new Map<string, GeneratedAnimationState>();
   // Placed VRM things (auton/Atlantean store models) animate through a real VRM rig — a VRMA idle clip
@@ -5504,6 +5510,12 @@ function createTellusWorld(
     options: GeneratedClipOptions = {},
   ): THREE.AnimationClip | undefined => {
     if (clips.length === 0) return undefined;
+    const preferred = options.preferredClipName?.trim();
+    const preferredClip = preferred
+      ? clips.find((clip) => clip.name === preferred) ??
+        clips.find((clip) => clip.name.toLowerCase() === preferred.toLowerCase())
+      : undefined;
+    if (preferredClip) return preferredClip;
     const wanted = options.ignoreExplicit ? "" : thing?.animation?.trim();
     const wantedClip = wanted
       ? clips.find((c) => c.name === wanted) ??
@@ -10073,7 +10085,15 @@ function createTellusWorld(
           mesh.position.set(pose.position.x, pose.position.y, pose.position.z);
           mesh.rotation.y = pose.rotationY;
           if (assignment.tier === "full" && wildlifeLastIntents.get(pose.id) !== pose.animationIntent) {
-            playGeneratedClip(pose.id, mesh, pose.animationIntent);
+            const config = wildlifeConfigs.get(pose.id);
+            const preferredClipName = config
+              ? wildlifeClipNameForIntent(
+                  config.speciesProfileId,
+                  pose.animationIntent,
+                  generatedModelClips(mesh).map((clip) => clip.name),
+                )
+              : undefined;
+            playGeneratedClip(pose.id, mesh, pose.animationIntent, null, { preferredClipName });
             wildlifeLastIntents.set(pose.id, pose.animationIntent);
           }
         }
@@ -11212,6 +11232,39 @@ function createTellusWorld(
       })
       .filter((actor) => actor.distance <= radius)
       .sort((a, b) => a.distance - b.distance);
+  const configureWildlife = (
+    animalId: string,
+    options: { speciesProfileId?: string; herdId?: string; radiusMeters?: number; enabled?: boolean } = {},
+  ) => {
+    const thing = thingById(animalId);
+    if (!thing) return { ok: false, error: `unknown generated animal id '${animalId}'` };
+    if (worldSocket?.readyState !== WebSocket.OPEN) return { ok: false, error: "world socket is not connected" };
+    const current = wildlifeConfigs.get(animalId);
+    const profile = wildlifeSpeciesProfile(options.speciesProfileId?.trim() || current?.speciesProfileId || "deer");
+    const config: WildlifeAnimalConfig = {
+      animalId,
+      enabled: options.enabled ?? true,
+      speciesProfileId: profile?.id ?? "deer",
+      movementMode: profile?.movementMode ?? current?.movementMode ?? "ground",
+      herdId: options.herdId?.trim() || current?.herdId || "deer-default",
+      home: {
+        kind: "circle",
+        center: current?.home?.center ?? { x: thing.position.x, z: thing.position.z },
+        radiusMeters: clamp(options.radiusMeters ?? current?.home?.radiusMeters ?? 48, 2, 2_000),
+      },
+      seed: current?.seed ?? Math.abs([...animalId].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) | 0, 17)),
+      populationEligible: current?.populationEligible ?? true,
+      revision: current?.revision ?? 0,
+    };
+    worldSocket.send(JSON.stringify({
+      type: "wildlife.configure",
+      visitorId,
+      requestId: makeId("wildlife-configure"),
+      config,
+    }));
+    return { ok: true, config };
+  };
+
   const tellusAgent = {
     getNearby(radius = 30) {
       return generated
@@ -11235,36 +11288,41 @@ function createTellusWorld(
         renderTier: wildlifeTiers.get(config.animalId) ?? "culled",
       }));
     },
-    configureWildlife(
-      animalId: string,
-      options: { speciesProfileId?: string; herdId?: string; radiusMeters?: number; enabled?: boolean } = {},
+    configureWildlife,
+    populateDeerHerd(
+      options: { count?: number; herdId?: string; radiusMeters?: number; center?: { x: number; z: number } } = {},
     ) {
-      const thing = thingById(animalId);
-      if (!thing) return { ok: false, error: `unknown generated animal id '${animalId}'` };
       if (worldSocket?.readyState !== WebSocket.OPEN) return { ok: false, error: "world socket is not connected" };
-      const current = wildlifeConfigs.get(animalId);
-      const config: WildlifeAnimalConfig = {
-        animalId,
-        enabled: options.enabled ?? true,
-        speciesProfileId: options.speciesProfileId?.trim() || current?.speciesProfileId || "deer",
-        movementMode: current?.movementMode ?? "ground",
-        herdId: options.herdId?.trim() || current?.herdId || "deer-default",
-        home: {
-          kind: "circle",
-          center: current?.home?.center ?? { x: thing.position.x, z: thing.position.z },
-          radiusMeters: clamp(options.radiusMeters ?? current?.home?.radiusMeters ?? 48, 2, 2_000),
-        },
-        seed: current?.seed ?? Math.abs([...animalId].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) | 0, 17)),
-        populationEligible: current?.populationEligible ?? true,
-        revision: current?.revision ?? 0,
-      };
-      worldSocket.send(JSON.stringify({
-        type: "wildlife.configure",
-        visitorId,
-        requestId: makeId("wildlife-configure"),
-        config,
-      }));
-      return { ok: true, config };
+      const count = Math.round(clamp(options.count ?? 6, 1, DEER_WILDLIFE_PROFILE.populationCap));
+      const herdId = options.herdId?.trim() || `deer-${makeId("herd").slice(-8)}`;
+      const center = options.center ?? { x: visitorPosition.x, z: visitorPosition.z };
+      const homeRadius = clamp(options.radiusMeters ?? 48, 8, 2_000);
+      const members: string[] = [];
+      for (let index = 0; index < count; index += 1) {
+        const angle = index * Math.PI * (3 - Math.sqrt(5));
+        const distance = 3 + Math.sqrt(index / Math.max(1, count - 1)) * Math.min(10, homeRadius * 0.25);
+        const x = center.x + Math.cos(angle) * distance;
+        const z = center.z + Math.sin(angle) * distance;
+        const thing = addLibraryAsset({
+          id: "tellus-deer-stag",
+          name: DEER_WILDLIFE_PROFILE.label,
+          description: "low-poly stag deer wildlife",
+          modelUrl: DEER_WILDLIFE_PROFILE.modelUrl,
+          source: "generated",
+        }, {
+          creatorId: "visitor",
+          ownerUserId: userId,
+          location: { x, y: terrainHeight(x, z), z },
+          scale: DEER_WILDLIFE_PROFILE.defaultScale,
+        });
+        members.push(thing.id);
+        configureWildlife(thing.id, {
+          speciesProfileId: DEER_WILDLIFE_PROFILE.id,
+          herdId,
+          radiusMeters: homeRadius,
+        });
+      }
+      return { ok: true, herdId, members };
     },
     commandWildlife(args: {
       animalId?: string;

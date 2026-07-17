@@ -1,18 +1,29 @@
-import { readdir, writeFile } from "node:fs/promises";
-import { extname, resolve } from "node:path";
+import { readdir, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, relative, resolve } from "node:path";
 import { NodeIO } from "@gltf-transform/core";
+import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
+import { MeshoptDecoder } from "meshoptimizer";
 
-const args = Object.fromEntries(process.argv.slice(2).map((arg) => {
-  const [key, ...rest] = arg.replace(/^--/, "").split("=");
-  return [key, rest.join("=") || true];
-}));
-if (typeof args.input !== "string") {
-  throw new Error("usage: bun run wildlife:audit --input=<pack directory> [--output=wildlife-pack-audit.json]");
+const args = {};
+for (let index = 2; index < process.argv.length; index++) {
+  const token = process.argv[index];
+  if (!token.startsWith("--")) continue;
+  const [key, ...inline] = token.slice(2).split("=");
+  if (inline.length > 0) args[key] = inline.join("=");
+  else if (process.argv[index + 1] && !process.argv[index + 1].startsWith("--")) args[key] = process.argv[++index];
+  else args[key] = true;
+}
+if (typeof args.input !== "string" && typeof args.file !== "string") {
+  throw new Error("usage: bun run wildlife:audit (--input=<pack directory> | --file=<asset.gltf|asset.glb>) [--output=wildlife-pack-audit.json]");
 }
 
-const input = resolve(args.input);
+const selectedFile = typeof args.file === "string" ? resolve(args.file) : null;
+const input = selectedFile ? dirname(selectedFile) : resolve(args.input);
 const output = resolve(typeof args.output === "string" ? args.output : "wildlife-pack-audit.json");
-const io = new NodeIO();
+await MeshoptDecoder.ready;
+const io = new NodeIO()
+  .registerExtensions(ALL_EXTENSIONS)
+  .registerDependencies({ "meshopt.decoder": MeshoptDecoder });
 
 async function collect(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -27,7 +38,8 @@ async function collect(directory) {
 
 function inferredIntent(name) {
   const value = name.toLowerCase();
-  if (/graz|eat|feed/.test(value)) return "graze";
+  const tokens = value.split(/[^a-z0-9]+/).filter(Boolean);
+  if (tokens.some((token) => ["graze", "grazing", "eat", "eating", "feed", "feeding"].includes(token))) return "graze";
   if (/gallop|run|sprint|flee/.test(value)) return "run";
   if (/walk|trot|canter/.test(value)) return "walk";
   if (/idle|stand|breath|look/.test(value)) return "idle";
@@ -37,10 +49,16 @@ function inferredIntent(name) {
 }
 
 const assets = [];
-for (const file of await collect(input)) {
+for (const file of selectedFile ? [selectedFile] : await collect(input)) {
   try {
     const document = await io.read(file);
     const root = document.getRoot();
+    const primitives = root.listMeshes().flatMap((mesh) => mesh.listPrimitives());
+    const vertices = primitives.reduce((sum, primitive) => sum + (primitive.getAttribute("POSITION")?.getCount() ?? 0), 0);
+    const triangles = primitives.reduce((sum, primitive) => {
+      const elementCount = primitive.getIndices()?.getCount() ?? primitive.getAttribute("POSITION")?.getCount() ?? 0;
+      return sum + Math.floor(elementCount / 3);
+    }, 0);
     const clips = root.listAnimations().map((animation) => ({
       name: animation.getName() || "unnamed",
       intent: inferredIntent(animation.getName() || ""),
@@ -55,9 +73,12 @@ for (const file of await collect(input)) {
         alpha: material.getBaseColorFactor()[3],
       }));
     assets.push({
-      file: file.slice(input.length + 1).replaceAll("\\", "/"),
+      file: (selectedFile ? basename(file) : relative(input, file)).replaceAll("\\", "/"),
+      bytes: (await stat(file)).size,
       meshes: root.listMeshes().length,
-      primitives: root.listMeshes().reduce((sum, mesh) => sum + mesh.listPrimitives().length, 0),
+      primitives: primitives.length,
+      vertices,
+      triangles,
       skins: root.listSkins().length,
       clips,
       transparentMaterials,
@@ -67,7 +88,7 @@ for (const file of await collect(input)) {
     });
   } catch (error) {
     assets.push({
-      file: file.slice(input.length + 1).replaceAll("\\", "/"),
+      file: (selectedFile ? basename(file) : relative(input, file)).replaceAll("\\", "/"),
       error: error instanceof Error ? error.message : String(error),
       readyForDeerSlice: false,
     });
