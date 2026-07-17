@@ -30,9 +30,9 @@ import {
 } from "./tellus-ecology";
 import {
   createProcPlantVegetation,
+  groundPlantDistanceDensity,
   procPlantTemplateFromAssetTemplate,
   procPlantChunkSeed,
-  shouldCullDistantGroundPlant,
   shouldUseCheapDistantTree,
 } from "./tellus-procplant-vegetation";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
@@ -83,14 +83,14 @@ describe("procplant vegetation", () => {
     expect(shouldUseCheapDistantTree("tree", true, 4)).toBe(false);
   });
 
-  it("culls small ground habits outside their useful silhouette range", () => {
-    expect(shouldCullDistantGroundPlant("tropical", 35, false)).toBe(true);
-    expect(shouldCullDistantGroundPlant("flower", 35, false)).toBe(true);
-    expect(shouldCullDistantGroundPlant("fern", 50, true)).toBe(true);
-    expect(shouldCullDistantGroundPlant("tropical", 30, false)).toBe(false);
-    expect(shouldCullDistantGroundPlant("shrub", 100, false)).toBe(false);
-    expect(shouldCullDistantGroundPlant("palm", 100, false)).toBe(false);
-    expect(shouldCullDistantGroundPlant("tree", 100, false)).toBe(false);
+  it("reduces distant ground-plant density without removing the population", () => {
+    expect(groundPlantDistanceDensity("tropical", 30, false)).toBe(1);
+    expect(groundPlantDistanceDensity("flower", 50, false)).toBeLessThan(1);
+    expect(groundPlantDistanceDensity("flower", 50, false)).toBeGreaterThan(0.22);
+    expect(groundPlantDistanceDensity("fern", 200, true)).toBeCloseTo(0.22, 5);
+    expect(groundPlantDistanceDensity("shrub", 100, false)).toBe(1);
+    expect(groundPlantDistanceDensity("palm", 100, false)).toBe(1);
+    expect(groundPlantDistanceDensity("tree", 100, false)).toBe(1);
   });
   it("keeps expensive authored-only plants out of global biome defaults", () => {
     const paints = [
@@ -773,6 +773,72 @@ describe("procplant vegetation", () => {
     expect(after.queuedRebuilds).toBe(0);
     expect(after.plants).toBeGreaterThan(0);
     expect(after.stemTriangles + after.grassTriangles).toBeGreaterThan(0);
+
+    vegetation.dispose();
+  });
+
+  it("refines sparse travel grass after movement stops", () => {
+    let moving = true;
+    const vegetation = createProcPlantVegetation({
+      scene: new THREE.Scene(),
+      worldId: "chunked-travel-grass-refinement-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -32, maxX: 32, minZ: -32, maxZ: 32 },
+      chunkSize: 16,
+      maxRing: 1,
+      densityMultiplier: 1,
+      shouldPauseBuild: () => moving,
+      biomeMixRegistry: {
+        version: 1,
+        worldId: "chunked-travel-grass-refinement-test",
+        updatedAt: new Date(0).toISOString(),
+        mixesByEcologyBiome: {},
+        mixesByTerrainPaint: {
+          meadow: {
+            version: 1,
+            id: "travel-grass",
+            label: "Travel Grass",
+            source: "terrain-paint",
+            terrainPaint: "meadow",
+            targetTerrainPaint: "meadow",
+            seed: 1,
+            density: 1,
+            diversity: 1,
+            targetVerticesPerChunk: 12_000,
+            entries: [{
+              id: "travel-fur-grass",
+              label: "Fur Grass",
+              source: "preset",
+              presetId: "furGrass",
+              weight: 1,
+              density: 1,
+              scale: 1,
+              environment: { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
+              seed: 2,
+              enabled: true,
+            }],
+          },
+        },
+      },
+    });
+
+    vegetation.update(0, 0, 1, 60, 0);
+    for (let i = 1; i < 30 && vegetation.stats().queuedRebuilds > 0; i++) {
+      vegetation.update(0, 0, 1, 60, i * 150);
+    }
+    const travel = vegetation.stats();
+    expect(travel.queuedRebuilds).toBe(0);
+    expect(travel.deferredColdChunks).toBeGreaterThan(0);
+    expect(travel.grassInstances).toBeGreaterThan(0);
+
+    moving = false;
+    for (let i = 0; i < 30 && vegetation.stats().deferredColdChunks > 0; i++) {
+      vegetation.update(0, 0, 1, 60, 5_000 + i * 300);
+    }
+    const refined = vegetation.stats();
+    expect(refined.deferredColdChunks).toBe(0);
+    expect(refined.grassInstances).toBeGreaterThan(travel.grassInstances);
 
     vegetation.dispose();
   });

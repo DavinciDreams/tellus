@@ -188,7 +188,10 @@ const PROC_TREE_DETAIL_DISTANCE = 58;
 const PROC_TREE_DETAIL_DISTANCE_THIRD = 72;
 const PROC_GROUND_PLANT_DETAIL_DISTANCE = 34;
 const PROC_GROUND_PLANT_DETAIL_DISTANCE_THIRD = 42;
-const PROCPLANT_RENDER_STYLE_REVISION = 6;
+const PROC_GROUND_PLANT_FADE_DISTANCE = 72;
+const PROC_GROUND_PLANT_FADE_DISTANCE_THIRD = 96;
+const PROC_GROUND_PLANT_MIN_DENSITY = 0.22;
+const PROCPLANT_RENDER_STYLE_REVISION = 7;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
 const BIOME_MIX_SERVER_REFRESH_FALLBACK_MS = 60_000;
 const LOW_FPS_BUILD_BUDGET = 1;
@@ -216,21 +219,26 @@ export const shouldUseCheapDistantTree = (
   baseScale >= 1.2 &&
   (habit === "tree" || habit === "conifer");
 
-export const shouldCullDistantGroundPlant = (
+export const groundPlantDistanceDensity = (
   habit: ProcPlantHabit,
   distanceToPlayer: number,
   thirdPerson: boolean,
-): boolean => {
+): number => {
   const groundHabit =
     habit === "grass" ||
     habit === "fern" ||
     habit === "flower" ||
     habit === "tropical" ||
     habit === "vine";
+  if (!groundHabit) return 1;
   const detailDistance = thirdPerson
     ? PROC_GROUND_PLANT_DETAIL_DISTANCE_THIRD
     : PROC_GROUND_PLANT_DETAIL_DISTANCE;
-  return groundHabit && distanceToPlayer > detailDistance;
+  const fadeDistance = thirdPerson
+    ? PROC_GROUND_PLANT_FADE_DISTANCE_THIRD
+    : PROC_GROUND_PLANT_FADE_DISTANCE;
+  const fade = THREE.MathUtils.smoothstep(distanceToPlayer, detailDistance, fadeDistance);
+  return THREE.MathUtils.lerp(1, PROC_GROUND_PLANT_MIN_DENSITY, fade);
 };
 
 const foliageDefaultsForTreeSpecies = (
@@ -1041,7 +1049,10 @@ export function createProcPlantVegetation(
     chunk.rev = terrainRev;
     chunk.builtLod = chunk.lod;
     chunk.styleRev = PROCPLANT_RENDER_STYLE_REVISION;
-    chunk.needsColdRefinement = false;
+    // Travel mode deliberately uses sparse grass and tree silhouettes. Mark every such chunk for a
+    // settled rebuild, even when all source templates were already warm in cache; otherwise grass-only
+    // chunks could remain permanently at the streaming density after movement stopped.
+    chunk.needsColdRefinement = travelBuild;
     const seed = procPlantChunkSeed(options.worldId, chunk.cx, chunk.cz, 0);
     const rand = mulberry32(seed);
     const plantCap = chunk.lod === 0
@@ -1246,7 +1257,12 @@ export function createProcPlantVegetation(
         : chunk.lod === 1
           ? PROC_TREE_MID_SCALE
           : PROC_TREE_FAR_SCALE;
-      if (shouldCullDistantGroundPlant(genome.habit, distanceToPlayer, viewMode() === "third")) continue;
+      const distanceDensity = groundPlantDistanceDensity(
+        genome.habit,
+        distanceToPlayer,
+        viewMode() === "third",
+      );
+      if (distanceDensity < 1 && rand() > distanceDensity) continue;
       if (genome.habit === "grass" && paint && grassCarpetPaints.has(paint)) continue;
       if (genome.habit === "grass") {
         const baseTuftCount = chunk.lod === 0
