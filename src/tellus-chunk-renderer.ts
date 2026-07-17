@@ -265,8 +265,11 @@ interface ActiveChunk {
 }
 
 export interface ChunkRenderer {
-  /** Per-frame from animate(); re-evaluates the load/evict ring only when the center chunk changes. */
-  update(worldX: number, worldZ: number): void;
+  /** Per-frame from animate(); re-evaluates the load/evict ring only when the center chunk changes.
+   * movingOnFoot defers expensive LOD-UPGRADE rebuilds (a chunk's ring shrank, wanting MORE detail —
+   * up to a full 4225-vertex retessellation) until the player settles; LOD-downgrades (less detail,
+   * cheaper, fewer triangles) still apply immediately either way. See scheduleAround(). */
+  update(worldX: number, worldZ: number, movingOnFoot?: boolean): void;
   /** Fetch a small ring ahead of movement without changing the eviction/active center. */
   prefetch(worldX: number, worldZ: number, radius?: number): void;
   /** Render a temporary procedural-base chunk immediately so movement never waits on chunk fetch. */
@@ -311,6 +314,7 @@ export interface ChunkRenderer {
     provisional: number;
     currentProvisional: boolean;
     localLodRebuilds: number;
+    deferredLodUpgrades: number;
   };
   dispose(): void;
 }
@@ -343,6 +347,12 @@ export function createChunkRenderer(
   const retryAt = new Map<string, number>(); // failed fetches; retried while the chunk remains wanted
   const localPaintOverrides = new Map<string, Map<number, number>>();
   const changedSurfaceChunks = new Set<string>();
+  // Chunks whose ring shrank (wanting MORE detail) while the player was moving on foot — a full
+  // near-ring rebuild is up to 4225 vertices with per-vertex color/skirt work (tens of ms), which blows
+  // a moving frame's budget outright since a single synchronous build can't be preempted once started.
+  // Deferred here and replayed once the player is stationary, mirroring the procplant "coarse now,
+  // refine when settled" pattern (tellus-procplant-vegetation.ts) instead of forcing the upgrade mid-stride.
+  const deferredLodUpgrades = new Map<string, number>(); // chunk key -> wanted (higher-detail) lod
   let centerCx = NaN;
   let centerCz = NaN;
   let disposed = false;
@@ -450,6 +460,7 @@ export function createChunkRenderer(
     ready.delete(k);
     lodOf.delete(k);
     retryAt.delete(k);
+    deferredLodUpgrades.delete(k);
     const a = active.get(k);
     if (a) {
       group.remove(a.mesh);
@@ -458,7 +469,7 @@ export function createChunkRenderer(
     }
   };
 
-  const scheduleAround = (cx: number, cz: number, radius: number, now: number) => {
+  const scheduleAround = (cx: number, cz: number, radius: number, now: number, movingOnFoot: boolean) => {
     const bounds = getChunkedWorldChunks(); // {w,h} in chunks, or null until the manifest loads
     for (let dz = -radius; dz <= radius; dz++) {
       for (let dx = -radius; dx <= radius; dx++) {
@@ -470,7 +481,18 @@ export function createChunkRenderer(
         const lod = lodForRing(ring);
         const k = key(tcx, tcz);
         const a = active.get(k);
-        if (a && a.lodSegments === lod) continue; // already at right detail
+        if (a && a.lodSegments === lod) {
+          deferredLodUpgrades.delete(k); // no longer wanted (e.g. player backtracked out of the ring)
+          continue; // already at right detail
+        }
+        if (a && movingOnFoot && lod > a.lodSegments) {
+          // Upgrade (more detail than currently active) while moving: a full near-ring rebuild is up
+          // to 4225 vertices with per-vertex color/skirt work — far more than a moving frame's budget,
+          // and a single synchronous build can't be preempted once started. Defer; replayed by
+          // applyDeferredLodUpgrades() once the player is stationary.
+          deferredLodUpgrades.set(k, lod);
+          continue;
+        }
         if (inflight.has(k) && lodOf.get(k) === lod) continue;
         if (ready.has(k)) {
           // Fresh server data already awaits a build. Apply the currently wanted LOD to that data
@@ -499,16 +521,56 @@ export function createChunkRenderer(
         }
         const retry = retryAt.get(k);
         if (retry !== undefined && retry > now) continue;
+        deferredLodUpgrades.delete(k);
         queueChunkFetch(tcx, tcz, lod, ring);
       }
     }
   };
 
-  const update = (worldX: number, worldZ: number) => {
+  // Replays LOD upgrades deferred while the player was moving on foot, once they've settled — one
+  // admission per call, drained by flush()'s existing per-frame build budget, so a burst of deferred
+  // upgrades still can't dump multiple expensive rebuilds at once.
+  const applyDeferredLodUpgrades = () => {
+    if (deferredLodUpgrades.size === 0) return;
+    const [k, lod] = deferredLodUpgrades.entries().next().value as [string, number];
+    deferredLodUpgrades.delete(k);
+    const a = active.get(k);
+    if (!a || a.lodSegments === lod || inflight.has(k)) return;
+    if (a.revision >= 0) {
+      // The active chunk already owns all authoritative height/paint data (same reuse path
+      // scheduleAround takes for an ordinary LOD swap) — re-tessellate in memory instead of a network
+      // round-trip.
+      queuedFetches.delete(k);
+      ready.set(k, {
+        cx: a.cx,
+        cz: a.cz,
+        revision: a.revision,
+        segments: CHUNK_SEGMENTS,
+        sculptOffsets: a.sculptOffsets,
+        paint: a.paint,
+        heightMode: a.heightMode,
+      });
+      lodOf.set(k, lod);
+      localLodRebuilds++;
+      return;
+    }
+    const ring = Number.isFinite(centerCx)
+      ? Math.max(Math.abs(a.cx - centerCx), Math.abs(a.cz - centerCz))
+      : 0;
+    queueChunkFetch(a.cx, a.cz, lod, ring);
+    localLodRebuilds++;
+  };
+
+  const update = (worldX: number, worldZ: number, movingOnFoot = false) => {
     if (disposed) return;
     const cx = Math.floor(worldX / CHUNK_SPAN);
     const cz = Math.floor(worldZ / CHUNK_SPAN);
     const now = Date.now();
+    // The player settling is exactly the moment deferred LOD upgrades should catch up, and that can
+    // happen without the center cell changing (cell-change is what the early return below gates on) —
+    // so this runs unconditionally, one admission per update() call, drained by flush()'s existing
+    // per-frame build budget same as any other chunk.
+    if (!movingOnFoot) applyDeferredLodUpgrades();
     const hasDueRetry = [...retryAt].some(([k, at]) => {
       if (at > now) return false;
       const parts = k.split(",");
@@ -522,13 +584,13 @@ export function createChunkRenderer(
     updateChunkVisibility();
 
     // Ensure chunks within the load radius are fetched (skip already-active at the right LOD).
-    scheduleAround(cx, cz, loadRadius, now);
+    scheduleAround(cx, cz, loadRadius, now, movingOnFoot);
     pumpQueuedFetches(fetchStartBudget);
 
     // Evict anything beyond the keep radius (Chebyshev distance). Scan ready.keys() too: a chunk whose
     // fetch already resolved sits in `ready` (not active, not inflight) and would otherwise leak — the next
     // flush() would build it as an orphan mesh outside the keep window.
-    for (const k of [...active.keys(), ...inflight.keys(), ...ready.keys(), ...retryAt.keys()]) {
+    for (const k of [...active.keys(), ...inflight.keys(), ...ready.keys(), ...retryAt.keys(), ...deferredLodUpgrades.keys()]) {
       const parts = k.split(",");
       const kcx = Number(parts[0]);
       const kcz = Number(parts[1]);
@@ -540,7 +602,9 @@ export function createChunkRenderer(
     if (disposed) return;
     const cx = Math.floor(worldX / CHUNK_SPAN);
     const cz = Math.floor(worldZ / CHUNK_SPAN);
-    scheduleAround(cx, cz, Math.max(0, Math.min(2, Math.round(radius))), Date.now());
+    // Look-ahead prep, not a per-frame moving-camera call — never defer here, so the chunks the
+    // player is about to reach are ready at full detail.
+    scheduleAround(cx, cz, Math.max(0, Math.min(2, Math.round(radius))), Date.now(), false);
     pumpQueuedFetches(fetchStartBudget);
   };
 
@@ -853,6 +917,7 @@ export function createChunkRenderer(
     queuedFetches.clear();
     ready.clear();
     lodOf.clear();
+    deferredLodUpgrades.clear();
     for (const a of active.values()) {
       group.remove(a.mesh);
       a.mesh.geometry.dispose();
@@ -908,6 +973,7 @@ export function createChunkRenderer(
         Number.isFinite(centerCx) &&
         (active.get(key(centerCx, centerCz))?.revision ?? 0) < 0,
       localLodRebuilds,
+      deferredLodUpgrades: deferredLodUpgrades.size,
     }),
     dispose,
   };
