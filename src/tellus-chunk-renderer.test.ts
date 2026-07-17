@@ -301,6 +301,37 @@ describe("createChunkRenderer lifecycle", () => {
     r.dispose();
   });
 
+  it("defers LOD-upgrade rebuilds while moving on foot, then replays them once stationary", async () => {
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    r.update(CHUNK_SPAN * 10 + 1, CHUNK_SPAN * 10 + 1);
+    await resolveAll();
+    r.flush();
+
+    // Cross one chunk while "moving on foot": several already-active chunks want MORE detail (their
+    // ring shrank), which would normally be a synchronous near-ring rebuild (up to 4225 verts). These
+    // must be deferred, not admitted into ready/flushed immediately.
+    r.update(CHUNK_SPAN * 11 + 1, CHUNK_SPAN * 10 + 1, true);
+    await resolveAll(); // only the genuinely new column fetches; deferred upgrades never hit the network
+    r.flush();
+    const movingStats = r.stats();
+    expect(movingStats.deferredLodUpgrades).toBeGreaterThan(0);
+    const deferredCount = movingStats.deferredLodUpgrades;
+
+    // Still moving: further update() calls at the same position must not force the deferred upgrades
+    // through either.
+    r.update(CHUNK_SPAN * 11 + 1, CHUNK_SPAN * 10 + 1, true);
+    r.flush();
+    expect(r.stats().deferredLodUpgrades).toBe(deferredCount);
+
+    // Player settles: one deferred upgrade is admitted and drained per update()+flush() pair, matching
+    // the existing per-frame build budget rather than dumping them all at once.
+    r.update(CHUNK_SPAN * 11 + 1, CHUNK_SPAN * 10 + 1, false);
+    r.flush(1);
+    expect(r.stats().deferredLodUpgrades).toBe(deferredCount - 1);
+    r.dispose();
+  });
+
   it("retries failed chunk fetches even when the player remains in the same center chunk", async () => {
     let now = 1_000;
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
