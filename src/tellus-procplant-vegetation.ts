@@ -19,6 +19,8 @@ import {
   isAssetMixEntry,
   loadActiveBiomeMixRegistryForWorld,
   loadActiveBiomeMixRegistryFromServer,
+  makeEcologyBiomeMix,
+  makeTerrainPaintBiomeMix,
   type TellusBiomeMixDefinition,
   type TellusBiomeAssetTemplate,
   type TellusBiomeMixEntry,
@@ -957,6 +959,15 @@ export function createProcPlantVegetation(
     const attempts = plantCap * 5;
     const grassCarpetPaints = new Set<TerrainPaintKind>();
     const ecologyMixByRegion = new Map<string, TellusBiomeMixDefinition | undefined>();
+    const defaultMixByPaint = new Map<TerrainPaintKind, TellusBiomeMixDefinition>();
+    const defaultMixForPaint = (paint: TerrainPaintKind): TellusBiomeMixDefinition => {
+      let mix = defaultMixByPaint.get(paint);
+      if (!mix) {
+        mix = makeTerrainPaintBiomeMix(paint, seed);
+        defaultMixByPaint.set(paint, mix);
+      }
+      return mix;
+    };
     const ecologyMixAt = (
       x: number,
       z: number,
@@ -1012,8 +1023,8 @@ export function createProcPlantVegetation(
         const paint = options.samplePaint(x, z);
         if (!paint || paint === "stone" || paint === "brick") continue;
         const mix = ecologyMixAt(x, z, height, paint, cellSeed) ??
-          activeBiomeMixRegistry.mixesByTerrainPaint[paint];
-        if (!mix) continue;
+          activeBiomeMixRegistry.mixesByTerrainPaint[paint] ??
+          defaultMixForPaint(paint);
         const grassEntries = mix.entries
           .filter((entry) => entry.enabled && !isAssetMixEntry(entry))
           .map((entry) => ({ entry, genome: genomeForMixEntry(entry) }))
