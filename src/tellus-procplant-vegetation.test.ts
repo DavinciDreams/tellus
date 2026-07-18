@@ -5,6 +5,8 @@ import {
   buildProcPlantInstancedParts,
   buildProcPlantTemplate,
   buildProcPlantRuntimePackage,
+  createProcPlantConiferSprayGeometry,
+  createProcPlantLeafGeometry,
   procPlantPresets,
   resolveProcPlantCommunity,
   type ProcPlantTemplate,
@@ -94,6 +96,55 @@ describe("procplant vegetation", () => {
 
     expect(conifer.pos.length).toBe(knownConifer.pos.length);
     expect(conifer.pos.length).not.toBe(broadleaf.pos.length);
+  });
+
+  it("gives branch-module conifers a needle-spray foliage mesh instead of a flat broadleaf leaf card", () => {
+    const scene = new THREE.Scene();
+    const alpineEcology = resolveEcologySample({
+      seed: 1,
+      x: 0,
+      z: 0,
+      height: 40,
+      slope: 0.4,
+      terrainPaint: "snow",
+    });
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-conifer-spray-test",
+      sampleHeight: () => 40,
+      samplePaint: () => "snow",
+      sampleEcology: () => alpineEcology,
+      bounds: { minX: -64, maxX: 64, minZ: -64, maxZ: 64 },
+      densityMultiplier: 4,
+    });
+
+    // Biome trees (treeBackend: {kind: "lsystem", ...}) only build the detailed branch-module tree
+    // (vs. a cheap travel silhouette that never increments branchSegments) once the player has been
+    // stationary for >650ms — hold a fixed position and advance the clock well past that threshold.
+    for (let i = 0; i < 40 && vegetation.stats().branchSegments === 0; i++) {
+      vegetation.update(0, 0, 1, 60, 1000 + i * 900);
+    }
+    expect(vegetation.stats().branchSegments).toBeGreaterThan(0);
+
+    const sprayGeometry = createProcPlantConiferSprayGeometry();
+    const meshes: THREE.InstancedMesh[] = [];
+    scene.traverse((child) => {
+      if (child instanceof THREE.InstancedMesh) meshes.push(child);
+    });
+    const hasSprayMesh = meshes.some(
+      (mesh) => mesh.geometry.getAttribute("position").count === sprayGeometry.getAttribute("position").count,
+    );
+    const hasFlatLeafCardOfWrongShape = meshes.some((mesh) => {
+      const count = mesh.geometry.getAttribute("position").count;
+      // A "fan"/"ovate"/etc leaf card from createProcPlantLeafGeometry has a much smaller, odd
+      // (2*segments+2) vertex count than the multi-plate conifer spray mesh.
+      return count === createProcPlantLeafGeometry("fan", 1, 0, 0).getAttribute("position").count;
+    });
+
+    expect(hasSprayMesh).toBe(true);
+    expect(hasFlatLeafCardOfWrongShape).toBe(false);
+
+    vegetation.dispose();
   });
 
   it("reduces distant ground-plant density without removing the population", () => {

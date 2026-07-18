@@ -484,6 +484,10 @@ export function branchModuleTreeFromSpecies(
     .filter((module) => module.childModuleIds.length === 0 || module.depth >= Math.max(1, maxDepth - 1))
     .flatMap((module) => module.segmentIds.slice(module.depth === 0 ? 2 : 0));
   const leaves: AttachedLeafInstance[] = [];
+  // Both createProcPlantLeafGeometry() and createProcPlantConiferSprayGeometry() build their meshes at
+  // a similar ~1-unit natural scale (a unit-tall leaf spine vs. ~1-1.2-unit needle plates), so the same
+  // per-species scale applies whichever foliage mesh the render site (tellus-procplant-vegetation.ts)
+  // ends up choosing based on genome.branchModules?.foliageSource.
   const leafScale = (conifer ? 0.012 : slender ? 0.02 : 0.026) * (options.leafScaleMultiplier ?? 1);
   for (let index = 0; index < leafBudget && terminalSegmentIds.length > 0; index++) {
     const segmentId = terminalSegmentIds[index % terminalSegmentIds.length]!;

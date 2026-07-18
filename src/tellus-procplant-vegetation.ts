@@ -563,6 +563,9 @@ const templateToGeometry = (
 };
 
 const geometryKeyFor = (genome: ProcPlantGenome, instance: ProcPlantInstance): string => {
+  if (instance.kind === "coniferSpray") {
+    return "coniferSpray";
+  }
   if (instance.kind === "leaf") {
     const leaf = genome.leaf;
     return `leaf:${leaf.shape}:${leaf.widthRatio.toFixed(3)}:${leaf.serration.toFixed(3)}:${leaf.curl.toFixed(3)}`;
@@ -571,6 +574,15 @@ const geometryKeyFor = (genome: ProcPlantGenome, instance: ProcPlantInstance): s
     return `grassBlade:${genome.leaf.widthRatio.toFixed(3)}:${genome.leaf.curl.toFixed(3)}`;
   }
   return instance.kind;
+};
+
+// A branch-module tree's foliage should render as clustered conifer needle sprays, not flat
+// broadleaf-shaped leaf cards, whenever the genome calls for it — matching the Weber-Penn foliage-fill
+// path's own foliageSource handling (see buildBranchModuleGraphTemplate in tellus-procplants.ts).
+const branchModuleFoliageIsConiferSpray = (genome: ProcPlantGenome): boolean => {
+  const source = genome.branchModules?.foliageSource;
+  if (source) return source === "conifer-spray";
+  return genome.habit === "conifer";
 };
 
 const createGrassCarpetGeometry = (bladeCount: number): THREE.BufferGeometry => {
@@ -1401,8 +1413,10 @@ export function createProcPlantVegetation(
           });
           chunk.stats.stemTriangles += template.idx.length / 3;
         }
+        const useConiferSpray = branchModuleFoliageIsConiferSpray(genome);
+        const foliageKind: "leaf" | "coniferSpray" = useConiferSpray ? "coniferSpray" : "leaf";
         const leafKey = geometryKeyFor(genome, {
-          kind: "leaf",
+          kind: foliageKind,
           matrix: new THREE.Matrix4(),
           color: new THREE.Color(),
           sway: 0,
@@ -1416,7 +1430,7 @@ export function createProcPlantVegetation(
         const leafB = new THREE.Color(genome.leaf.colorB);
         for (const leaf of structuralTree.leaves) {
           leafBucket.instances.push({
-            kind: "leaf",
+            kind: foliageKind,
             matrix: treeMatrix.clone().multiply(leaf.matrix),
             color: leafA.clone().lerp(leafB, 0.35 + rand() * 0.4),
             sway: 0.65 + rand() * 0.3,
