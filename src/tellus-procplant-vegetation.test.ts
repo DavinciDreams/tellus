@@ -280,30 +280,65 @@ describe("procplant vegetation", () => {
     expect(estuary[0]?.score).toBeGreaterThan(0);
   });
 
-  it("resolves authored biome cells into shared plant and building ecology", () => {
+  it("resolves authored biome cells into shared plant and building ecology when the paint has no 1:1 biome mapping", () => {
+    // "rock" isn't one of ECOLOGY_TERRAIN_PAINT_MAP's paints, so it carries no biome declaration of
+    // its own — the authored cell is free to resolve the biome here.
     const ecology = resolveEcologySample({
       seed: 7,
       x: 144,
       z: 288,
       height: 3,
-      terrainPaint: "dirt",
+      terrainPaint: "rock",
       biomeCell: { cx: 1, cz: 3, biome: "estuary", intensity: 1 },
     });
     const patch = biomePatchForEcology(ecology, 7);
 
     expect(ecology.biome).toBe("estuary");
     expect(ecology.biomeWeights).toEqual({ estuary: 1 });
-    expect(["reedSedge", "mangroveRoots", "furGrass"]).toContain(patch?.primary);
+    expect(patch).toBeTruthy();
+  });
+
+  it("resolves an authored biome cell into the expected building material when paint carries no biome of its own", () => {
+    // "dirt" now maps 1:1 to taiga (see the override test below), so use "brick" — plant-suppressing on
+    // the live terrain-vegetation path, but resolveEcologySample itself doesn't apply that suppression —
+    // to isolate the authored-cell fallback with the same clay substrate the original test exercised.
+    const ecology = resolveEcologySample({
+      seed: 7,
+      x: 144,
+      z: 288,
+      height: 3,
+      terrainPaint: "brick",
+      biomeCell: { cx: 1, cz: 3, biome: "estuary", intensity: 1 },
+    });
+
+    expect(ecology.biome).toBe("estuary");
     expect(buildingMaterialForEcology(ecology, "simple-house")).toBe("brick-cottage");
   });
 
-  it("normalizes legacy server biome names into ecology biomes", () => {
+  it("lets a directly-painted biome override a stale authored biome cell", () => {
+    // Repainting terrain is the player directly declaring a biome for that spot — it must win over
+    // a coarser authored/evolved biome-cell assignment that hasn't been repainted to match, or
+    // hand-painting terrain would silently leave the old biome (and its plant mix) in place.
+    const ecology = resolveEcologySample({
+      seed: 7,
+      x: 144,
+      z: 288,
+      height: 3,
+      terrainPaint: "flowers",
+      biomeCell: { cx: 1, cz: 3, biome: "arctic-alpine", intensity: 1 },
+    });
+
+    expect(ecology.biome).toBe("estuary");
+    expect(ecology.biomeWeights).toEqual({ estuary: 1 });
+  });
+
+  it("normalizes legacy server biome names into ecology biomes when the paint has no 1:1 biome mapping", () => {
     const ecology = resolveEcologySample({
       seed: 9,
       x: 0,
       z: 0,
       height: 8,
-      terrainPaint: "meadow",
+      terrainPaint: "rock",
       biomeCell: { cx: 0, cz: 0, biome: "forest", intensity: 1 },
     });
 

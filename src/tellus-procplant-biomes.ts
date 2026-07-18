@@ -2,11 +2,15 @@ import * as THREE from "three";
 import type { TerrainPaintKind } from "./tellus-types";
 import {
   ECOLOGY_BIOMES,
+  ECOLOGY_TERRAIN_PAINT_MAP,
   resolveEcologyCommunity,
   resolveEcologySample,
   type EcologyBiomeId,
   type EcologySample,
 } from "./tellus-ecology";
+// Re-exported for existing importers — ECOLOGY_TERRAIN_PAINT_MAP's canonical home is tellus-ecology.ts,
+// which also derives the reverse (paint -> biome) map used to resolve a painted spot's ecology biome.
+export { ECOLOGY_TERRAIN_PAINT_MAP };
 import {
   defaultPlantEnvironment,
   hybridizePlantGenomes,
@@ -338,19 +342,6 @@ const TREE_BACKEND_BY_PRESET: Partial<Record<string, ProcPlantTreeBackend>> = {
   blueSpruce: { kind: "lsystem", species: "smallPine", leafScaleMultiplier: 4.2, maxLeaves: 205, maxStems: 54, maxBranchDepth: 2, foliageMass: 1.18, foliageTipBias: 0.28, foliageSpread: 0.14 },
   alpineFir: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 4.35, maxLeaves: 210, maxStems: 44, maxBranchDepth: 2 },
   redwoodSpire: { kind: "lsystem", species: "douglasFir", leafScaleMultiplier: 3.9, maxLeaves: 205, maxStems: 44, maxBranchDepth: 2, foliageMass: 1.02, foliageTipBias: 0.32 },
-};
-
-export const ECOLOGY_TERRAIN_PAINT_MAP: Record<EcologyBiomeId, TerrainPaintKind> = {
-  "tropical-rain-forest": "jungle-moss",
-  "temperate-rain-forest": "forest-floor",
-  grassland: "grass",
-  desert: "desert-sand",
-  coastal: "beach",
-  taiga: "dirt",
-  estuary: "flowers",
-  tundra: "gravel",
-  "arctic-alpine": "snow",
-  savanna: "meadow",
 };
 
 const patchFromCandidate = (candidate: ProcPlantBiomeCandidate, seed: number): ProcPlantBiomePatch => ({
