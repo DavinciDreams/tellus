@@ -6,6 +6,40 @@
 
 import "./tokens.css";
 import "./components.css";
+import "./Toggle.css";
+import "./Checkbox.css";
+import "./Radio.css";
+import "./Slider.css";
+import "./Segmented.css";
+import "./Card.css";
+import "./Tooltip.css";
+import "./Menu.css";
+import "./Toast.css";
+import "./Progress.css";
+import "./Skeleton.css";
+import "./EmptyState.css";
+import "./RadialMenu.css";
+import "./Dock.css";
+import "./PresenceRoster.css";
+import "./Avatar.css";
+import "./AgentCard.css";
+import "./GenerationCard.css";
+import "./PortalCard.css";
+import "./AssetTile.css";
+import "./ChatThread.css";
+import "./Sheet.css";
+import "./Popover.css";
+import "./InlineAlert.css";
+import "./CommandPalette.css";
+import "./SearchField.css";
+import "./NumberStepper.css";
+import "./Accordion.css";
+import "./Breadcrumb.css";
+import "./ChipInput.css";
+import "./VoiceButton.css";
+import "./Compass.css";
+import "./MinimapFrame.css";
+import "./LogFeed.css";
 
 export { Button } from "./Button";
 export type { ButtonProps, ButtonVariant, ButtonSize } from "./Button";
@@ -52,3 +86,108 @@ export type {
 
 export { useDialogs } from "./useDialogs";
 export type { UseDialogs, AskConfirmOptions, AskPromptOptions } from "./useDialogs";
+
+/* ── Wave 2: core component vocabulary ── */
+export { Toggle } from "./Toggle";
+export type { ToggleProps } from "./Toggle";
+
+export { Checkbox } from "./Checkbox";
+export type { CheckboxProps } from "./Checkbox";
+
+export { RadioGroup, Radio } from "./Radio";
+export type { RadioGroupProps, RadioProps } from "./Radio";
+
+export { Slider } from "./Slider";
+export type { SliderProps } from "./Slider";
+
+export { Segmented } from "./Segmented";
+export type { SegmentedProps, SegmentedOption } from "./Segmented";
+
+export { Card } from "./Card";
+export type { CardProps } from "./Card";
+
+export { Tooltip } from "./Tooltip";
+export type { TooltipProps, TooltipPlacement } from "./Tooltip";
+
+export { Menu, MenuItem, MenuSeparator } from "./Menu";
+export type { MenuProps, MenuItemProps, MenuSeparatorProps, MenuAlign } from "./Menu";
+
+export { useToasts } from "./Toast";
+export type { UseToasts, ToastOptions, ToastTone } from "./Toast";
+
+export { Progress, Spinner } from "./Progress";
+export type { ProgressProps, SpinnerProps, ProgressTone } from "./Progress";
+
+export { Skeleton } from "./Skeleton";
+export type { SkeletonProps, SkeletonVariant } from "./Skeleton";
+
+export { EmptyState } from "./EmptyState";
+export type { EmptyStateProps } from "./EmptyState";
+
+/* ── Wave 3: the world layer (Tellus's differentiators) ── */
+export { RadialMenu } from "./RadialMenu";
+export type { RadialMenuProps, RadialMenuItem } from "./RadialMenu";
+
+export { Dock } from "./Dock";
+export type { DockProps, DockItem } from "./Dock";
+
+export { PresenceRoster } from "./PresenceRoster";
+export type { PresenceRosterProps, PresenceBeing } from "./PresenceRoster";
+
+export { Avatar } from "./Avatar";
+export type { AvatarProps, AvatarKind, AvatarSize, AvatarStatus } from "./Avatar";
+
+export { AgentCard } from "./AgentCard";
+export type { AgentCardProps, AgentCardStatus } from "./AgentCard";
+
+export { GenerationCard } from "./GenerationCard";
+export type { GenerationCardProps, GenerationCardStatus } from "./GenerationCard";
+
+export { PortalCard } from "./PortalCard";
+export type { PortalCardProps } from "./PortalCard";
+
+export { AssetTile } from "./AssetTile";
+export type { AssetTileProps } from "./AssetTile";
+
+export { ChatThread } from "./ChatThread";
+export type { ChatThreadProps, ChatMessage, ChatMessageKind } from "./ChatThread";
+
+export { Sheet } from "./Sheet";
+export type { SheetProps, SheetSide } from "./Sheet";
+
+export { Popover } from "./Popover";
+export type { PopoverProps, PopoverAlign, PopoverPlacement } from "./Popover";
+
+export { InlineAlert } from "./InlineAlert";
+export type { InlineAlertProps, InlineAlertTone } from "./InlineAlert";
+
+/* ── Wave 4: command surface, remaining inputs & world instruments ── */
+export { CommandPalette } from "./CommandPalette";
+export type { CommandPaletteProps, CommandItem } from "./CommandPalette";
+
+export { SearchField } from "./SearchField";
+export type { SearchFieldProps } from "./SearchField";
+
+export { NumberStepper } from "./NumberStepper";
+export type { NumberStepperProps } from "./NumberStepper";
+
+export { Accordion } from "./Accordion";
+export type { AccordionProps, AccordionItem } from "./Accordion";
+
+export { Breadcrumb } from "./Breadcrumb";
+export type { BreadcrumbProps, BreadcrumbItem } from "./Breadcrumb";
+
+export { ChipInput } from "./ChipInput";
+export type { ChipInputProps } from "./ChipInput";
+
+export { VoiceButton } from "./VoiceButton";
+export type { VoiceButtonProps, VoiceButtonState } from "./VoiceButton";
+
+export { Compass } from "./Compass";
+export type { CompassProps } from "./Compass";
+
+export { MinimapFrame } from "./MinimapFrame";
+export type { MinimapFrameProps } from "./MinimapFrame";
+
+export { LogFeed } from "./LogFeed";
+export type { LogFeedProps, LogEntry, LogKind } from "./LogFeed";

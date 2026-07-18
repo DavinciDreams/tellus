@@ -1,0 +1,135 @@
+/* Dock — the reimagined bottom dock that replaces the flat 10-button toolbelt.
+   Gold-on-forest-green glass bar with clear hierarchy: ONE emphasized primary
+   tile + a secondary group of icon tiles. All values are tokens; every selector
+   is scoped under .ds-scope. */
+
+.ds-scope .ds-dock {
+  display: inline-flex;
+  align-items: stretch;
+  gap: var(--ds-space-6);
+  box-sizing: border-box;
+  z-index: var(--z-toolbar);
+  padding: var(--ds-space-4);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-xl);
+  background: var(--ds-bg-strong);
+  box-shadow: var(--ds-elevation-3);
+  backdrop-filter: var(--ds-glass-strong);
+  -webkit-backdrop-filter: var(--ds-glass-strong);
+  font-family: var(--ds-font-sans);
+}
+
+/* ---- Slots ---- */
+.ds-scope .ds-dock__primary {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.ds-scope .ds-dock__group {
+  display: inline-flex;
+  align-items: stretch;
+  gap: var(--ds-space-2);
+  padding-left: var(--ds-space-6);
+  /* gold hairline divider between the focal action and the secondary group */
+  border-left: 1px solid var(--ds-border-soft);
+}
+
+/* ---- Item (shared) ---- */
+.ds-scope .ds-dock__item {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-space-2);
+  box-sizing: border-box;
+  min-width: var(--ds-control-h);
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-md);
+  background: transparent;
+  color: var(--ds-muted);
+  font-family: inherit;
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  line-height: var(--ds-leading-tight);
+  text-transform: none; /* sentence-case labels, as authored */
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--ds-transition),
+    border-color var(--ds-transition),
+    color var(--ds-transition);
+}
+
+.ds-scope .ds-dock__item:hover {
+  color: var(--ds-text);
+  background: var(--ds-bg-soft);
+  border-color: var(--ds-border-soft);
+}
+
+/* Active (secondary) item: gold border + subtle fill */
+.ds-scope .ds-dock__item--active,
+.ds-scope .ds-dock__item--active:hover {
+  color: var(--ds-text);
+  background: var(--ds-bg-soft);
+  border-color: var(--ds-gold);
+}
+
+.ds-scope .ds-dock__item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.ds-scope .ds-dock__item-label {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---- Primary tile: larger, gold-gradient, the focal action ---- */
+.ds-scope .ds-dock__item--primary {
+  flex-direction: row;
+  gap: var(--ds-space-4);
+  height: 100%;
+  padding: 0 var(--ds-space-8);
+  border-color: var(--ds-gold);
+  border-radius: var(--ds-radius-lg);
+  background: linear-gradient(180deg, var(--ds-gold-bright), var(--ds-gold));
+  color: var(--ds-forest-900);
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-bold);
+  box-shadow: var(--ds-elevation-1);
+}
+
+.ds-scope .ds-dock__item--primary:hover {
+  color: var(--ds-forest-900);
+  border-color: var(--ds-gold-bright);
+  background: linear-gradient(180deg, var(--ds-gold-300), var(--ds-gold-bright));
+}
+
+.ds-scope .ds-dock__item--primary .ds-dock__item-icon {
+  color: var(--ds-forest-900);
+}
+
+/* ---- Badge: small count/dot at the top-right of a tile ---- */
+.ds-scope .ds-dock__badge {
+  position: absolute;
+  top: calc(-1 * var(--ds-space-1));
+  right: calc(-1 * var(--ds-space-1));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 var(--ds-space-1);
+  border: 1px solid var(--ds-bg-strong);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-danger);
+  color: var(--ds-forest-900);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-bold);
+  line-height: 1;
+}

@@ -1,0 +1,120 @@
+/* src/design-system/Card.css
+   Card — a content item (an asset, a world, a message).
+   A LIGHTER surface than Panel (which is chrome): --ds-bg-soft fill,
+   --ds-border-soft hairline, --ds-radius-lg, --ds-elevation-1.
+   No side-stripe borders. Sentence-case content.
+   All selectors scoped under .ds-scope; tokens only, no raw hex. */
+
+.ds-scope .ds-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--ds-bg-soft);
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-elevation-1);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-normal);
+  overflow: hidden; /* keeps media flush to the rounded corners */
+  transition:
+    transform var(--ds-transition),
+    border-color var(--ds-transition),
+    box-shadow var(--ds-transition);
+}
+
+/* ---- INTERACTIVE ---- */
+.ds-scope .ds-card--interactive {
+  cursor: pointer;
+}
+
+.ds-scope .ds-card--interactive:hover {
+  transform: translateY(-2px);
+  border-color: var(--ds-border);
+  box-shadow: var(--ds-elevation-2);
+}
+
+.ds-scope .ds-card--interactive:focus-visible {
+  outline: none;
+  border-color: var(--ds-border);
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* ---- MEDIA (edge-to-edge, top, rounded top corners) ---- */
+.ds-scope .ds-card__media {
+  position: relative;
+  margin: 0;
+  border-top-left-radius: var(--ds-radius-lg);
+  border-top-right-radius: var(--ds-radius-lg);
+  overflow: hidden;
+  line-height: 0; /* strip inline-image descender gap */
+}
+
+.ds-scope .ds-card__media > img,
+.ds-scope .ds-card__media > video,
+.ds-scope .ds-card__media > canvas,
+.ds-scope .ds-card__media > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* ---- HEADER ---- */
+.ds-scope .ds-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ds-space-6);
+  padding: var(--ds-space-8) var(--ds-space-8) 0;
+}
+
+.ds-scope .ds-card__title {
+  margin: 0;
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-lg);
+  font-weight: var(--ds-weight-heavy);
+  line-height: var(--ds-leading-tight);
+  color: var(--ds-text);
+}
+
+.ds-scope .ds-card__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  flex: none;
+}
+
+/* ---- BODY ---- */
+.ds-scope .ds-card__body {
+  padding: var(--ds-space-8);
+  color: var(--ds-text);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* When a header sits directly above the body, tighten the seam. */
+.ds-scope .ds-card__header + .ds-card__body {
+  padding-top: var(--ds-space-6);
+}
+
+/* ---- FLUSH (padded=false) ---- */
+.ds-scope .ds-card--flush .ds-card__body {
+  padding: 0;
+}
+
+/* ---- FOOTER ---- */
+.ds-scope .ds-card__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-6) var(--ds-space-8) var(--ds-space-8);
+  border-top: 1px solid var(--ds-border-soft);
+  color: var(--ds-muted);
+  font-size: var(--ds-text-sm);
+}
+
+.ds-scope .ds-card--flush .ds-card__footer {
+  padding-left: var(--ds-space-8);
+  padding-right: var(--ds-space-8);
+}

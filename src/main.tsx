@@ -211,7 +211,8 @@ import {
 } from "./tellus-world-options";
 import { AssetTile, AvatarTile } from "./tellus-picker-tiles";
 import { FirstRunCoach } from "./onboarding/FirstRunCoach";
-import { useDialogs } from "./design-system";
+import { useDialogs, CommandPalette, Dock } from "./design-system";
+import type { CommandItem, DockItem } from "./design-system";
 import {
   animationMetadataHasBlockingIssue,
   inferAnimationIntentFromText,
@@ -11987,6 +11988,7 @@ function DebugLiveRows({ worldRef, rxEnabled }: DebugLiveRowsProps): React.React
 
 function App(): React.ReactElement {
   const { askConfirm, askPrompt, dialogs } = useDialogs();
+  const [cmdkOpen, setCmdkOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const worldRef = useRef<TellusWorldApi | null>(null);
   const pendingPortalTransfersRef = useRef<Record<string, PendingPortalTransfer>>({});
@@ -15660,6 +15662,47 @@ function App(): React.ReactElement {
     }
   };
 
+  // ⌘K / Ctrl+K opens the command palette — reach any action by name.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setCmdkOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const paletteCommands: CommandItem[] = [
+    { id: "create", label: "Create something", icon: <Send size={16} />, hint: "⌘K then type", group: "Create", keywords: "generate make new prompt", onRun: focusCreatePrompt },
+    { id: "assets", label: `Open ${assetPrimaryLabel.toLowerCase()}`, icon: <Building2 size={16} />, group: "Create", keywords: "assets objects things drawer", onRun: toggleAssetDrawer },
+    { id: "terrain", label: "Shape terrain", icon: <Mountain size={16} />, group: "Create", keywords: "sculpt ground height", onRun: () => toggleToolPanel("terrain") },
+    { id: "move", label: "Move the selected object", icon: <RotateCw size={16} />, group: "Create", keywords: "transform rotate gizmo mesh", onRun: showMeshToolbar },
+    { id: "chat", label: "Open world chat", icon: <MessageCircle size={16} />, group: "Connect", keywords: "talk message say", onRun: () => { setChatTab("world"); setWorldChatOpen(true); } },
+    { id: "agent", label: "Talk to an agent", icon: <Bot size={16} />, group: "Connect", keywords: "ai assistant omega", onRun: () => { setChatTab("agent"); setWorldChatOpen(true); } },
+    { id: "avatar", label: "Change your avatar", icon: <PersonStanding size={16} />, group: "Connect", keywords: "appearance character look", onRun: () => openAssetDrawerTab("avatar") },
+    { id: "travel", label: "Travel to another world", icon: <Plane size={16} />, group: "Navigate", keywords: "portal go teleport", onRun: () => { setTravelMenuOpen(true); setWorldMenuOpen(false); } },
+    { id: "portals", label: "Open the portal list", icon: <Globe2 size={16} />, group: "Navigate", keywords: "gates doors", onRun: () => setPortalsPanelOpen(true) },
+    { id: "world", label: "World settings", icon: <Globe2 size={16} />, group: "Navigate", keywords: "rename delete world menu", onRun: () => { setWorldMenuOpen(true); setTravelMenuOpen(false); } },
+    { id: "map", label: "Open the map", icon: <MapIcon size={16} />, hint: "M", group: "Navigate", keywords: "minimap overview", onRun: () => setWorldMapOpen(true) },
+  ];
+
+  // The bottom toolbelt, migrated onto the design-system Dock — one emphasized
+  // primary (Create) + a secondary group, wired to the existing HUD handlers.
+  const toolbeltItems: DockItem[] = [
+    { id: "create", label: "Create", icon: <Send size={18} />, primary: true, active: createPromptOpen, onSelect: focusCreatePrompt },
+    { id: "assets", label: assetPrimaryLabel, icon: assetPrimaryTab === "building" ? <Building2 size={18} /> : <Box size={18} />, active: assetPanelOpen && assetPanelTab === assetPrimaryTab, onSelect: toggleAssetDrawer },
+    { id: "chat", label: "Chat", icon: <MessageCircle size={18} />, active: worldChatOpen && chatTab !== "agent", onSelect: () => { setChatTab("world"); setWorldChatOpen((open) => (chatTab === "agent" ? true : !open)); } },
+    { id: "travel", label: "Travel", icon: <Plane size={18} />, active: travelMenuOpen, onSelect: () => { setTravelMenuOpen((open) => !open); setWorldMenuOpen(false); } },
+    { id: "world", label: "World", icon: <Globe2 size={18} />, active: worldMenuOpen, onSelect: () => { setWorldMenuOpen((open) => !open); setTravelMenuOpen(false); } },
+    { id: "map", label: "Map", icon: <MapIcon size={18} />, active: worldMapOpen, onSelect: () => setWorldMapOpen((open) => !open) },
+    { id: "terrain", label: "Terrain", icon: <Mountain size={18} />, active: isToolOpen("terrain"), onSelect: () => toggleToolPanel("terrain") },
+    { id: "move", label: "Move", icon: <RotateCw size={18} />, active: !!activeSelectedThing, onSelect: showMeshToolbar },
+    { id: "agent", label: "Agent", icon: <Bot size={18} />, active: agentPanelOpen, onSelect: () => { setChatTab("agent"); setWorldChatOpen((open) => (chatTab === "agent" ? !open : true)); } },
+    { id: "avatar", label: "Avatar", icon: <PersonStanding size={18} />, active: assetPanelOpen && assetPanelTab === "avatar", onSelect: () => openAssetDrawerTab("avatar") },
+  ];
+
   const debugPanel = showFps ? (
     <div className="debug-stats-panel" aria-label="Tellus debug stats">
       <div className="debug-stats-grid">
@@ -16648,108 +16691,9 @@ function App(): React.ReactElement {
           </div>
         </aside>
         )}
-        <aside className="world-left-toolbelt" aria-label="Toolbelt">
-          <button
-            type="button"
-            className={createPromptOpen ? "toolbelt-button primary active" : "toolbelt-button primary"}
-            title={createPromptOpen ? "Hide create prompt" : "Create"}
-            onClick={focusCreatePrompt}
-          >
-            <Send size={18} />
-            <span>Create</span>
-          </button>
-          <button
-            type="button"
-            className={assetPanelOpen && assetPanelTab === assetPrimaryTab ? "toolbelt-button active" : "toolbelt-button"}
-            title={assetPrimaryLabel}
-            onClick={toggleAssetDrawer}
-          >
-            {assetPrimaryTab === "building" ? <Building2 size={18} /> : <Box size={18} />}
-            <span>{assetPrimaryLabel}</span>
-          </button>
-          <button
-            type="button"
-            className={worldChatOpen ? "toolbelt-button active" : "toolbelt-button"}
-            title="World chat"
-            onClick={() => setWorldChatOpen((open) => !open)}
-          >
-            <MessageCircle size={18} />
-            <span>Chat</span>
-          </button>
-          <button
-            type="button"
-            className={travelMenuOpen ? "toolbelt-button active" : "toolbelt-button"}
-            title="Travel"
-            onClick={() => {
-              setTravelMenuOpen((open) => !open);
-              setWorldMenuOpen(false);
-            }}
-          >
-            <Plane size={18} />
-            <span>Travel</span>
-          </button>
-          <button
-            type="button"
-            className={worldMenuOpen ? "toolbelt-button active" : "toolbelt-button"}
-            title="World menu"
-            onClick={() => {
-              setWorldMenuOpen((open) => !open);
-              setTravelMenuOpen(false);
-            }}
-          >
-            <Globe2 size={18} />
-            <span>World</span>
-          </button>
-          <button
-            type="button"
-            className={worldMapOpen ? "toolbelt-button active" : "toolbelt-button"}
-            title="Map"
-            onClick={() => setWorldMapOpen((open) => !open)}
-          >
-            <MapIcon size={18} />
-            <span>Map</span>
-          </button>
-          {/* View (1st/3rd person) lives on the 'V' hotkey — no toolbar button (it opened no menu). */}
-          <button
-            type="button"
-            className={isToolOpen("terrain") ? "toolbelt-button active" : "toolbelt-button"}
-            title="Terrain"
-            onClick={() => toggleToolPanel("terrain")}
-          >
-            <Mountain size={18} />
-            <span>Terrain</span>
-          </button>
-          <button
-            type="button"
-            className={activeSelectedThing ? "toolbelt-button active" : "toolbelt-button"}
-            title={activeSelectedThing ? "Hide move controls" : "Move selected asset"}
-            onClick={showMeshToolbar}
-          >
-            <RotateCw size={18} />
-            <span>Move</span>
-          </button>
-          <button
-            type="button"
-            className={agentPanelOpen ? "toolbelt-button active" : "toolbelt-button"}
-            title="Your Agent"
-            onClick={() => {
-              setChatTab("agent");
-              setWorldChatOpen((open) => (chatTab === "agent" ? !open : true));
-            }}
-          >
-            <Bot size={18} />
-            <span>Agent</span>
-          </button>
-          <button
-            type="button"
-            className={assetPanelOpen && assetPanelTab === "avatar" ? "toolbelt-button active" : "toolbelt-button"}
-            title="Avatar"
-            onClick={() => openAssetDrawerTab("avatar")}
-          >
-            <PersonStanding size={18} />
-            <span>Avatar</span>
-          </button>
-        </aside>
+        <div className="ds-scope tellus-dock-mount">
+          <Dock items={toolbeltItems} aria-label="Toolbelt" />
+        </div>
         {/* The login dialog is a true modal (fullscreen dimmed overlay, z-index 70) ABOVE all panels. */}
         {false && (
           <aside
@@ -18813,6 +18757,14 @@ function App(): React.ReactElement {
 
       <FirstRunCoach />
       {dialogs}
+      <div className="ds-scope">
+        <CommandPalette
+          open={cmdkOpen}
+          onClose={() => setCmdkOpen(false)}
+          commands={paletteCommands}
+          placeholder="Search actions…  (⌘K)"
+        />
+      </div>
     </main>
   );
 }

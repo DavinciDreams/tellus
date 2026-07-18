@@ -108,7 +108,67 @@
   /* ---- FOCUS RING (single source of truth for ALL interactive focus) ---- */
   --ds-focus-ring-color: var(--ds-gold-bright);
   --ds-focus-ring: 0 0 0 2px rgb(9 34 30 / 92%), 0 0 0 4px var(--ds-focus-ring-color);
+
+  /* ---- COLOR RAMPS (charts, subtle tints, data-viz — identity-consistent) ---- */
+  --ds-forest-900: #06110d;
+  --ds-forest-800: #09221e;
+  --ds-forest-700: #0e2a22;
+  --ds-forest-600: #113a2c;
+  --ds-forest-500: #1c4a34;
+  --ds-forest-400: #2a5c3e;
+  --ds-forest-300: #3d7150;
+  --ds-gold-700:   #8a6d24;
+  --ds-gold-600:   #b8912f;
+  --ds-gold-500:   #dcbc60;
+  --ds-gold-400:   #f2d98b;
+  --ds-gold-300:   #f8e9b8;
+  --ds-leaf:        var(--ds-green);
+  --ds-leaf-bright: #d3e6a4;
+  --ds-info:        #7fc4e6;
+  --ds-info-bg:     rgb(127 196 230 / 15%);
+  --ds-info-border: rgb(127 196 230 / 44%);
+  --ds-success-border: rgb(101 239 143 / 42%);
+  --ds-warn-border:    rgb(242 217 139 / 44%);
+
+  /* ---- ELEVATION (tier 4 = highest overlays) ---- */
+  --ds-elevation-4: 0 32px 90px rgb(0 0 0 / 58%), var(--ds-inset);
+
+  /* ---- GLASS TIERS (deliberate; soft for rails, strong for panels) ---- */
+  --ds-glass-soft:   blur(8px) saturate(1.03);
+  --ds-glass-strong: blur(18px) saturate(1.08);
+
+  /* ---- MOTION (extended: named easings + slower duration for choreography) ---- */
+  --ds-duration-slower: 360ms;
+  --ds-ease-in:       cubic-bezier(0.4, 0, 1, 1);
+  --ds-ease-emphasis: cubic-bezier(0.2, 0.9, 0.3, 1.08); /* a hair of overshoot for arrivals */
+
+  /* ---- ADAPTIVE SCRIM (sits behind text floating over the live world) ---- */
+  --ds-scrim-soft:   rgb(6 20 15 / 34%);
+  --ds-scrim-strong: rgb(6 20 15 / 62%);
+
+  /* ---- DENSITY (control + row heights; overridden by [data-density]) ---- */
+  --ds-control-h:    36px;   /* comfortable default */
+  --ds-control-h-sm: 30px;
+  --ds-row-h:        40px;
 }
+
+/* Compact density — opt in with <div class="ds-scope" data-density="compact"> */
+.ds-scope[data-density="compact"] {
+  --ds-control-h: 30px;
+  --ds-control-h-sm: 26px;
+  --ds-row-h: 34px;
+  --ds-space-8: 12px;
+  --ds-space-7: 10px;
+  --ds-space-6: 10px;
+}
+
+/* ---- NAMED MOTION KEYFRAMES (the system's choreography signatures) ----
+   ds-spin + ds-pulse already live in components.css. These add the arrival,
+   departure, generation-bloom, and skeleton-shimmer signatures. */
+@keyframes ds-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes ds-dissolve { from { opacity: 1; } to { opacity: 0; } }
+@keyframes ds-bloom { 0% { opacity: 0; transform: scale(0.4); } 30% { opacity: 0.9; } 100% { opacity: 0; transform: scale(1.7); } }
+@keyframes ds-shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 
 /* Reduced-motion path — REQUIRED. Neutralizes durations + non-essential animation. */
 @media (prefers-reduced-motion: reduce) {

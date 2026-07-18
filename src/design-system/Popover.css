@@ -1,0 +1,102 @@
+/* src/design-system/Popover.css
+   Non-modal floating glass panel for the Tellus HUD design system.
+   Token-only; every selector is scoped under .ds-scope. */
+
+.ds-scope .ds-popover {
+  position: relative;
+  display: inline-block;
+}
+
+/* ---- TRIGGER ---- */
+.ds-scope .ds-popover__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-2) var(--ds-space-4);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-md);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-md);
+  font-weight: var(--ds-weight-regular);
+  cursor: pointer;
+  transition: var(--ds-transition);
+  transition-property: background-color, border-color, color;
+}
+
+.ds-scope .ds-popover__trigger:hover {
+  background: var(--ds-bg-soft);
+}
+
+.ds-scope .ds-popover__trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+.ds-scope .ds-popover--open .ds-popover__trigger {
+  background: var(--ds-bg-soft);
+  border-color: var(--ds-border-soft);
+}
+
+/* ---- PANEL ---- */
+.ds-scope .ds-popover__panel {
+  position: absolute;
+  z-index: var(--z-overlay);
+  min-width: 220px;
+  max-width: min(92vw, 380px);
+  padding: var(--ds-space-8);
+  background: var(--ds-bg-strong);
+  border: 1px solid var(--ds-gold);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-elevation-3);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-tight);
+  -webkit-backdrop-filter: var(--ds-glass-strong);
+  backdrop-filter: var(--ds-glass-strong);
+  animation: ds-rise var(--ds-duration-base) var(--ds-ease-out);
+}
+
+.ds-scope .ds-popover__panel:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-elevation-3), var(--ds-focus-ring);
+}
+
+/* ---- PLACEMENT (vertical) ---- */
+.ds-scope .ds-popover__panel--bottom {
+  top: calc(100% + var(--ds-space-3));
+}
+
+.ds-scope .ds-popover__panel--top {
+  bottom: calc(100% + var(--ds-space-3));
+}
+
+/* ---- ALIGN (horizontal) ---- */
+.ds-scope .ds-popover__panel--start {
+  left: 0;
+}
+
+.ds-scope .ds-popover__panel--center {
+  left: 50%;
+  transform: translateX(-50%);
+  /* ds-rise animates transform to `none`, which would drop this centering
+     mid-animation; use a composed entrance that keeps the -50% offset. */
+  animation-name: ds-popover-rise-center;
+}
+
+@keyframes ds-popover-rise-center {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.ds-scope .ds-popover__panel--end {
+  right: 0;
+}

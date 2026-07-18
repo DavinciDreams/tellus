@@ -1,0 +1,128 @@
+/* LogFeed — a scrolling stream of world/agent events.
+   House feel: gold-on-forest-green, compact, mono timestamps. Each kind carries
+   a distinct MARKER glyph (agent ✦, world ◍, you •, system ⚙) AND the actor
+   text; color only reinforces (never color-only signalling). Agent entries are
+   accented gold via the inline marker + actor — NOT a side-stripe border.
+   Every selector is .ds-scope-prefixed; only tokens, no raw hex. */
+
+.ds-scope .ds-logfeed {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ds-bg);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-elevation-1);
+  font-family: var(--ds-font-sans);
+  color: var(--ds-text);
+  overflow: hidden;
+}
+
+/* Head — title bar over the stream. */
+.ds-scope .ds-logfeed__head {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: var(--ds-space-3) var(--ds-space-5);
+  background: var(--ds-bg-strong);
+  border-bottom: 1px solid var(--ds-border-soft);
+}
+
+.ds-scope .ds-logfeed__title {
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-bold);
+  color: var(--ds-gold);
+}
+
+/* List — scrollable, forest well, compact rows. */
+.ds-scope .ds-logfeed__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: var(--ds-space-3);
+  list-style: none;
+  overflow-y: auto;
+}
+
+/* An entry — marker, meta stack, time; a single compact row. */
+.ds-scope .ds-logfeed__entry {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-radius: var(--ds-radius-sm);
+  animation: ds-rise var(--ds-transition) both;
+}
+
+.ds-scope .ds-logfeed__entry--agent {
+  background: var(--ds-forest-800);
+}
+
+/* Marker — glyph per kind; color reinforces the glyph, never replaces it. */
+.ds-scope .ds-logfeed__marker {
+  flex: 0 0 auto;
+  width: 1em;
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-normal);
+  text-align: center;
+  color: var(--ds-muted);
+}
+
+.ds-scope .ds-logfeed__entry--world .ds-logfeed__marker {
+  color: var(--ds-leaf);
+}
+
+.ds-scope .ds-logfeed__entry--agent .ds-logfeed__marker {
+  color: var(--ds-gold-bright);
+}
+
+.ds-scope .ds-logfeed__entry--you .ds-logfeed__marker {
+  color: var(--ds-text);
+}
+
+/* Meta — actor + text, wraps within the row. */
+.ds-scope .ds-logfeed__meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-normal);
+  color: var(--ds-text);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.ds-scope .ds-logfeed__actor {
+  margin-right: var(--ds-space-2);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-muted);
+}
+
+.ds-scope .ds-logfeed__entry--agent .ds-logfeed__actor {
+  color: var(--ds-gold);
+  font-weight: var(--ds-weight-bold);
+}
+
+.ds-scope .ds-logfeed__text {
+  color: var(--ds-text);
+}
+
+/* Time — mono, muted, tiny, pinned to the row end. */
+.ds-scope .ds-logfeed__time {
+  flex: 0 0 auto;
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  line-height: var(--ds-leading-normal);
+  color: var(--ds-muted);
+}
+
+/* Empty — quiet centred note in the forest well. */
+.ds-scope .ds-logfeed__empty {
+  margin: 0;
+  padding: var(--ds-space-8) var(--ds-space-5);
+  text-align: center;
+  font-size: var(--ds-text-sm);
+  color: var(--ds-muted);
+}

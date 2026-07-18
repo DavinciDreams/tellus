@@ -1,0 +1,84 @@
+/* EmptyState — a calm, centered "nothing here yet" placeholder.
+   House feel: generous whitespace, a gold-tinted icon medallion, sentence-case
+   title, muted description. NOT a card (no fill, no border, no side-stripe). */
+
+.ds-scope .ds-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--ds-space-6);
+  padding: var(--ds-space-12) var(--ds-space-8);
+  font-family: var(--ds-font-sans);
+}
+
+.ds-scope .ds-empty--compact {
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-8) var(--ds-space-6);
+}
+
+/* Gold-tinted icon medallion: a soft round well, gold glyph inside. */
+.ds-scope .ds-empty__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: var(--ds-space-1);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-bg-strong);
+  border: 1px solid var(--ds-border);
+  box-shadow: var(--ds-elevation-1);
+  color: var(--ds-gold);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.ds-scope .ds-empty__icon > svg {
+  width: 24px;
+  height: 24px;
+}
+
+.ds-scope .ds-empty--compact .ds-empty__icon {
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+}
+
+.ds-scope .ds-empty--compact .ds-empty__icon > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ds-scope .ds-empty__title {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--ds-text);
+  font-size: var(--ds-text-xl);
+  font-weight: var(--ds-weight-heavy);
+  line-height: var(--ds-leading-tight);
+  text-wrap: balance;
+}
+
+.ds-scope .ds-empty--compact .ds-empty__title {
+  font-size: var(--ds-text-lg);
+}
+
+.ds-scope .ds-empty__desc {
+  margin: 0;
+  max-width: 40ch;
+  color: var(--ds-muted);
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-leading-normal);
+  text-wrap: pretty;
+}
+
+.ds-scope .ds-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-space-4);
+  margin-top: var(--ds-space-2);
+}

@@ -1,0 +1,168 @@
+/* src/design-system/RadialMenu.css
+   The "Field Kit" — a radial command surface for the Tellus HUD design system.
+   Token-only; every selector is scoped under .ds-scope. Gold-on-forest glass. */
+
+/* ---- OVERLAY (full-viewport, self-scoped) ---- */
+.ds-scope.ds-radial {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  font-family: var(--ds-font-sans);
+  color: var(--ds-text);
+}
+
+/* ---- SCRIM (click closes) ---- */
+.ds-scope .ds-radial__scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--ds-scrim-strong);
+  backdrop-filter: var(--ds-glass-soft);
+  cursor: pointer;
+}
+
+/* ---- RING (the dashed glass circle) ---- */
+.ds-scope .ds-radial__ring {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 200px;
+  height: 200px;
+  border: 1px dashed var(--ds-border-soft);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-bg);
+  backdrop-filter: var(--ds-glass-strong);
+  box-shadow: var(--ds-elevation-4);
+  transform-origin: center;
+  animation: ds-bloom-in var(--ds-duration-base) var(--ds-ease-emphasis);
+}
+
+.ds-scope .ds-radial__ring:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring), var(--ds-elevation-4);
+}
+
+/* Bloom the whole surface in from small — scale 0.6 -> 1 with a hair of overshoot.
+   Neutralized globally under prefers-reduced-motion via the .ds-scope reset. */
+@keyframes ds-bloom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ---- HUB (centre, gold gradient) ---- */
+.ds-scope .ds-radial__hub {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-pill);
+  background: linear-gradient(160deg, var(--ds-gold-bright), var(--ds-gold));
+  color: var(--ds-forest-900);
+  box-shadow: var(--ds-elevation-2);
+}
+
+.ds-scope .ds-radial__hub svg {
+  width: var(--ds-space-10);
+  height: var(--ds-space-10);
+}
+
+/* ---- ITEM (tile positioned around the ring by inline transform) ---- */
+.ds-scope .ds-radial__item {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ds-space-2);
+  width: 64px;
+  padding: var(--ds-space-3) var(--ds-space-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-lg);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  cursor: pointer;
+  transition: var(--ds-transition);
+  transition-property: background-color, border-color, color, transform;
+}
+
+.ds-scope .ds-radial__item:hover {
+  background: var(--ds-bg-soft);
+  border-color: var(--ds-border-soft);
+}
+
+.ds-scope .ds-radial__item:focus-visible {
+  outline: none;
+  background: var(--ds-bg-soft);
+  border-color: var(--ds-border-soft);
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* ---- ITEM ICON TILE ---- */
+.ds-scope .ds-radial__item-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--ds-space-12);
+  height: var(--ds-space-12);
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-strong);
+  color: var(--ds-gold-bright);
+  box-shadow: var(--ds-elevation-1);
+  transition: var(--ds-transition);
+  transition-property: background-color, border-color, color;
+}
+
+.ds-scope .ds-radial__item:hover .ds-radial__item-icon,
+.ds-scope .ds-radial__item:focus-visible .ds-radial__item-icon {
+  border-color: var(--ds-border);
+  color: var(--ds-gold-bright);
+}
+
+.ds-scope .ds-radial__item-icon svg {
+  width: var(--ds-space-8);
+  height: var(--ds-space-8);
+}
+
+/* ---- ITEM LABEL (sentence case, dense) ---- */
+.ds-scope .ds-radial__item-label {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-regular);
+  line-height: var(--ds-leading-tight);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- DISABLED ITEM (not color-only: dimmed + no-cursor + no hover lift) ---- */
+.ds-scope .ds-radial__item[aria-disabled="true"] {
+  color: var(--ds-muted);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ds-scope .ds-radial__item[aria-disabled="true"] .ds-radial__item-icon {
+  color: var(--ds-muted);
+}
+
+.ds-scope .ds-radial__item[aria-disabled="true"]:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+.ds-scope .ds-radial__item[aria-disabled="true"]:hover .ds-radial__item-icon {
+  border-color: var(--ds-border-soft);
+  color: var(--ds-muted);
+}

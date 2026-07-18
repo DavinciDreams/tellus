@@ -1,0 +1,121 @@
+.ds-scope .ds-stepper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-normal);
+  color: var(--ds-text);
+}
+
+.ds-scope .ds-stepper--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ds-scope .ds-stepper__label {
+  color: var(--ds-text);
+  font-weight: var(--ds-weight-medium);
+}
+
+/* Control row: minus button, input (+ optional suffix), plus button.
+   One continuous full border wraps the group; internal seams divide the cells. */
+.ds-scope .ds-stepper__control {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--ds-control-h);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-input-bg);
+  box-shadow: var(--ds-inset);
+  overflow: hidden;
+}
+
+.ds-scope .ds-stepper__btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ds-control-h);
+  padding: 0;
+  border: 0;
+  background: var(--ds-bg-soft);
+  color: var(--ds-gold);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-lg);
+  font-weight: var(--ds-weight-bold);
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--ds-transition),
+    color var(--ds-transition);
+}
+
+.ds-scope .ds-stepper__btn--minus {
+  border-right: 1px solid var(--ds-border-soft);
+}
+
+.ds-scope .ds-stepper__btn--plus {
+  border-left: 1px solid var(--ds-border-soft);
+}
+
+.ds-scope .ds-stepper__btn:hover:not(:disabled) {
+  background: var(--ds-bg-strong);
+  color: var(--ds-gold-bright);
+}
+
+.ds-scope .ds-stepper__btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+.ds-scope .ds-stepper__btn:disabled {
+  cursor: not-allowed;
+  color: var(--ds-muted);
+  opacity: 0.5;
+}
+
+.ds-scope .ds-stepper__input {
+  width: 4ch;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 0 var(--ds-space-3);
+  border: 0;
+  background: transparent;
+  color: var(--ds-text);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-md);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.ds-scope .ds-stepper__input::placeholder {
+  color: var(--ds-input-placeholder);
+}
+
+.ds-scope .ds-stepper__input:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+.ds-scope .ds-stepper__input:disabled {
+  cursor: not-allowed;
+}
+
+.ds-scope .ds-stepper__input::-webkit-outer-spin-button,
+.ds-scope .ds-stepper__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.ds-scope .ds-stepper__suffix {
+  display: inline-flex;
+  align-items: center;
+  padding-right: var(--ds-space-3);
+  color: var(--ds-muted);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  font-variant-numeric: tabular-nums;
+}

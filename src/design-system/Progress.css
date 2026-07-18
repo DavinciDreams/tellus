@@ -1,0 +1,144 @@
+/* Progress — linear determinate/indeterminate bar + Spinner.
+   Gold fill on a --ds-input-bg track, pill radii, calm motion.
+   Tone maps the fill color; indeterminate sweeps via ds-progress-sweep.
+   Spinner uses the GLOBAL ds-spin keyframe. */
+
+.ds-scope .ds-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  width: 100%;
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text);
+  /* tone -> fill color (gold default) */
+  --ds-progress-fill: var(--ds-gold);
+}
+
+.ds-scope .ds-progress--gold {
+  --ds-progress-fill: var(--ds-gold);
+}
+.ds-scope .ds-progress--success {
+  --ds-progress-fill: var(--ds-success);
+}
+.ds-scope .ds-progress--warn {
+  --ds-progress-fill: var(--ds-warn);
+}
+.ds-scope .ds-progress--danger {
+  --ds-progress-fill: var(--ds-danger);
+}
+.ds-scope .ds-progress--info {
+  --ds-progress-fill: var(--ds-info);
+}
+
+/* Header row: label left, value right */
+.ds-scope .ds-progress__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ds-space-4);
+}
+
+.ds-scope .ds-progress__label {
+  color: var(--ds-text);
+  font-weight: var(--ds-weight-medium);
+}
+
+.ds-scope .ds-progress__value {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ds-muted);
+}
+
+/* Track — honest dark inset, pill shaped */
+.ds-scope .ds-progress__track {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-input-bg);
+  box-shadow: var(--ds-inset);
+  overflow: hidden;
+}
+
+.ds-scope .ds-progress--sm .ds-progress__track {
+  height: 6px;
+}
+
+.ds-scope .ds-progress--md .ds-progress__track {
+  height: 8px;
+}
+
+/* Determinate fill — width set inline; gentle gold gradient */
+.ds-scope .ds-progress__fill {
+  height: 100%;
+  width: 0%;
+  border-radius: var(--ds-radius-pill);
+  background: linear-gradient(
+    90deg,
+    var(--ds-progress-fill),
+    var(--ds-gold-bright)
+  );
+  transition: width var(--ds-duration-slow) var(--ds-ease-out);
+}
+
+/* Indeterminate — a sweeping segment across the track */
+.ds-scope .ds-progress--indeterminate .ds-progress__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  transition: none;
+  animation: ds-progress-sweep var(--ds-duration-slower) var(--ds-ease-standard)
+    infinite;
+}
+
+@keyframes ds-progress-sweep {
+  0% {
+    left: -40%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-scope .ds-progress--indeterminate .ds-progress__fill {
+    animation-duration: calc(var(--ds-duration-slower) * 3);
+  }
+}
+
+/* Spinner — spinning gold ring on a faint track, global ds-spin keyframe */
+.ds-scope .ds-spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  border-radius: var(--ds-radius-pill);
+  border: 2px solid var(--ds-border-soft);
+  border-top-color: var(--ds-gold);
+  animation: ds-spin var(--ds-duration-slow) linear infinite;
+  vertical-align: middle;
+}
+
+.ds-scope .ds-spinner--sm {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+.ds-scope .ds-spinner--md {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+}
+
+.ds-scope .ds-spinner--lg {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-scope .ds-spinner {
+    animation-duration: calc(var(--ds-duration-slow) * 3);
+  }
+}

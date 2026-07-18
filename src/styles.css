@@ -5747,3 +5747,23 @@ button.terrain-scatter-tile {
     transform: rotate(360deg);
   }
 }
+
+/* Design-system Dock mount — positions the migrated toolbelt where the old
+   .world-left-toolbelt sat (bottom-center). The Dock itself provides the glass
+   bar; this wrapper only positions it. .ds-scope stays on this small wrapper so
+   it never restyles the surrounding legacy HUD. */
+.tellus-dock-mount {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 50;
+  max-width: calc(100vw - 24px);
+  overflow-x: auto;
+  scrollbar-width: none;
+  pointer-events: auto;
+}
+.tellus-dock-mount::-webkit-scrollbar { display: none; }
+ @media (max-width: 640px) {
+   .tellus-dock-mount { bottom: 8px; max-width: calc(100vw - 12px); }
+ }

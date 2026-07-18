@@ -1,0 +1,102 @@
+.ds-scope .ds-agentcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-6);
+  padding: var(--ds-space-8);
+  background: var(--ds-bg-soft);
+  backdrop-filter: blur(var(--ds-glass-blur));
+  -webkit-backdrop-filter: blur(var(--ds-glass-blur));
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-elevation-2);
+  color: var(--ds-text);
+  font-family: var(--ds-font-sans);
+  line-height: var(--ds-leading-normal);
+}
+
+.ds-scope .ds-agentcard__head {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-6);
+}
+
+.ds-scope .ds-agentcard__avatar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--ds-radius-md);
+  background: linear-gradient(
+    145deg,
+    var(--ds-gold-bright),
+    var(--ds-gold-700)
+  );
+  color: var(--ds-forest-900);
+  font-size: var(--ds-text-xl);
+  font-weight: var(--ds-weight-heavy);
+  line-height: 1;
+  box-shadow: var(--ds-elevation-1), inset 0 1px 0 var(--ds-inset);
+}
+
+.ds-scope .ds-agentcard__id {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  min-width: 0;
+  margin-right: auto;
+}
+
+.ds-scope .ds-agentcard__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ds-text-lg);
+  font-weight: var(--ds-weight-heavy);
+  color: var(--ds-gold-bright);
+}
+
+.ds-scope .ds-agentcard__activity {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  margin: 0;
+  font-size: var(--ds-text-sm);
+  color: var(--ds-muted);
+}
+
+.ds-scope .ds-agentcard__pulse {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-gold);
+  box-shadow: 0 0 0 0 var(--ds-gold);
+  animation: ds-pulse 1.6s ease-in-out infinite;
+}
+
+.ds-scope .ds-agentcard__activity-text {
+  min-width: 0;
+}
+
+.ds-scope .ds-agentcard__body {
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text);
+}
+
+.ds-scope .ds-agentcard__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-4);
+  padding-top: var(--ds-space-4);
+  border-top: 1px solid var(--ds-border-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-scope .ds-agentcard__pulse {
+    animation: none;
+  }
+}

@@ -4,7 +4,7 @@
    demos of every component. Dogfoods the system: the page chrome is built from the
    same design tokens, and the icons are the same lucide set the app HUD uses. */
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Bot,
@@ -32,8 +32,46 @@ import {
   Tabs,
   Toolbar,
   useDialogs,
+  Toggle,
+  Checkbox,
+  RadioGroup,
+  Radio,
+  Slider,
+  Segmented,
+  Card,
+  Tooltip,
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  useToasts,
+  Progress,
+  Spinner,
+  Skeleton,
+  EmptyState,
+  RadialMenu,
+  Dock,
+  PresenceRoster,
+  Avatar,
+  AgentCard,
+  GenerationCard,
+  PortalCard,
+  AssetTile,
+  ChatThread,
+  Sheet,
+  Popover,
+  InlineAlert,
+  CommandPalette,
+  SearchField,
+  NumberStepper,
+  Accordion,
+  Breadcrumb,
+  ChipInput,
+  VoiceButton,
+  Compass,
+  MinimapFrame,
+  LogFeed,
 } from "./design-system";
-import type { BadgeTone, PresenceStatus } from "./design-system";
+import type { BadgeTone, PresenceStatus, PresenceBeing, ChatMessage, GenerationCardStatus } from "./design-system";
 import { FirstRunCoach } from "./onboarding/FirstRunCoach";
 import "./styleguide.css";
 
@@ -171,6 +209,14 @@ const NAV = [
   ["status", "Status"],
   ["toolbar", "Toolbar"],
   ["overlays", "Overlays"],
+  ["controls", "Controls"],
+  ["cards", "Cards"],
+  ["menus", "Menus & tips"],
+  ["feedback", "Feedback"],
+  ["fieldkit", "Field Kit"],
+  ["world", "World layer"],
+  ["command", "Command & inputs"],
+  ["instruments", "Instruments"],
   ["onboarding", "Onboarding"],
   ["principles", "Principles"],
 ] as const;
@@ -204,6 +250,35 @@ function StyleGuide() {
   const [selectedTool, setSelectedTool] = useState("create");
   const [dialogResult, setDialogResult] = useState<string>("");
   const { askConfirm, askPrompt, dialogs } = useDialogs();
+  const { toast, viewport: toastViewport } = useToasts();
+  const [toggleOn, setToggleOn] = useState(true);
+  const [checkboxOn, setCheckboxOn] = useState(true);
+  const [radioVal, setRadioVal] = useState("meadow");
+  const [sliderVal, setSliderVal] = useState(48);
+  const [segVal, setSegVal] = useState("stated");
+  const [radialOpen, setRadialOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [dockActive, setDockActive] = useState("create");
+  const [selectedAsset, setSelectedAsset] = useState("moss-stone");
+  const [genStatus, setGenStatus] = useState<GenerationCardStatus>("generating");
+  const [chatLog, setChatLog] = useState<ChatMessage[]>([
+    { id: "m1", author: "Willow", kind: "human", text: "who else is here?", time: "14:02" },
+    { id: "m2", author: "Omega", kind: "agent", text: "I'm shaping a birch grove near the north ridge. Come look.", time: "14:02" },
+    { id: "m3", author: "You", kind: "you", text: "on my way", time: "14:03" },
+  ]);
+  const chatSeq = useRef(3);
+  const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [searchVal, setSearchVal] = useState("");
+  const [numVal, setNumVal] = useState(4);
+  const [chips, setChips] = useState<string[]>(["moss", "birch", "lantern"]);
+  const [voiceState, setVoiceState] = useState<"idle" | "listening" | "muted">("idle");
+
+  const beings: PresenceBeing[] = [
+    { id: "b1", name: "Willow", kind: "human", status: "online", activity: "exploring the north ridge" },
+    { id: "b2", name: "Omega", kind: "agent", status: "busy", activity: "weaving a birch grove" },
+    { id: "b3", name: "Cartographer", kind: "agent", status: "idle", activity: "waiting for a request" },
+    { id: "b4", name: "Jun", kind: "human", status: "offline", activity: "last seen 2h ago" },
+  ];
 
   const inkContrast = useMemo(
     () => INK.map((c) => ({ ...c, ratio: contrast(c.value, "rgb(17 47 38 / 84%)") })),
@@ -637,6 +712,434 @@ function StyleGuide() {
           </Panel>
         </Section>
 
+        {/* ---------------- CONTROLS ---------------- */}
+        <Section id="controls" title="Controls" note="Form controls — every one keyboard-operable, focus-visible, and label-associated.">
+          <div className="sg-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Toggle · Checkbox</span>
+              <div className="sg-stack">
+                <Toggle checked={toggleOn} onChange={setToggleOn} label="Keep my agent active while I'm away" />
+                <Toggle checked={!toggleOn} onChange={(v) => setToggleOn(!v)} label="Ambient world sounds" size="sm" />
+                <Checkbox checked={checkboxOn} onChange={setCheckboxOn} label="Show contradictions inline" />
+                <Checkbox checked={false} onChange={() => {}} indeterminate label="Include archived worlds" />
+                <Checkbox checked={false} onChange={() => {}} disabled label="Disabled option" />
+              </div>
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Radio group</span>
+              <RadioGroup aria-label="Starting biome" value={radioVal} onChange={setRadioVal}>
+                <Radio value="meadow" label="Meadow" />
+                <Radio value="dunes" label="Dunes" />
+                <Radio value="alpine" label="Alpine" />
+                <Radio value="wetland" label="Wetland (coming soon)" disabled />
+              </RadioGroup>
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Slider</span>
+              <Slider label="Terrain roughness" value={sliderVal} onChange={setSliderVal} showValue formatValue={(v) => `${v}%`} />
+              <Slider label="Time of day" value={100 - sliderVal} onChange={(v) => setSliderVal(100 - v)} min={0} max={100} showValue />
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Segmented</span>
+              <Segmented
+                aria-label="Evidence view"
+                value={segVal}
+                onChange={setSegVal}
+                options={[
+                  { value: "stated", label: "Stated" },
+                  { value: "interpreted", label: "Interpreted" },
+                  { value: "all", label: "All" },
+                ]}
+              />
+              <span className="sg-section__note">Selected: <b style={{ color: "var(--ds-text)" }}>{segVal}</b> — arrow keys move between segments.</span>
+            </div>
+          </div>
+        </Section>
+
+        {/* ---------------- CARDS ---------------- */}
+        <Section id="cards" title="Cards" note="Content surfaces (a world, an asset, a being) — distinct from Panel, which is chrome.">
+          <div className="sg-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+            <Card
+              title="Stars at Night"
+              headerActions={<Badge tone="success">live</Badge>}
+              footer={<span className="sg-section__note">3 here · 128 assets</span>}
+            >
+              <p className="sg-section__note">A chunked world at golden hour. Two agents currently weaving.</p>
+            </Card>
+            <Card interactive title="+ New world" onClick={() => toast({ message: "Would open the world creator.", tone: "neutral" })}>
+              <p className="sg-section__note">An interactive card — hover, then click (fires a toast).</p>
+            </Card>
+            <Card title="Crooked apple tree" footer={<Button size="sm" variant="ghost">Place</Button>}>
+              <p className="sg-section__note">Generated asset · golden moss · 4.2k tris.</p>
+            </Card>
+          </div>
+        </Section>
+
+        {/* ---------------- MENUS & TIPS ---------------- */}
+        <Section id="menus" title="Menus &amp; tips" note="Dropdown menu (roving-focus, Esc, click-outside) and hover/focus tooltips.">
+          <div className="sg-row">
+            <Menu
+              aria-label="World actions"
+              trigger="World actions ▾"
+            >
+              <MenuItem icon={<Sparkles size={15} />} onSelect={() => toast({ message: "Renaming…", tone: "neutral" })}>Rename world</MenuItem>
+              <MenuItem icon={<MapIcon size={15} />} onSelect={() => toast({ message: "Sharing…", tone: "info" })}>Share link</MenuItem>
+              <MenuSeparator />
+              <MenuItem danger onSelect={() => toast({ message: "Deleted.", tone: "danger" })}>Delete world</MenuItem>
+            </Menu>
+            <Tooltip content="Speak an object into being">
+              <Button variant="primary" leadingIcon={<Sparkles size={16} />}>Create</Button>
+            </Tooltip>
+            <Tooltip content="Map (M)" placement="bottom">
+              <IconButton aria-label="Map" icon={<MapIcon size={18} />} />
+            </Tooltip>
+            <Tooltip content="Move (V)" placement="right">
+              <IconButton aria-label="Move" icon={<MoreHorizontal size={18} />} />
+            </Tooltip>
+          </div>
+        </Section>
+
+        {/* ---------------- FEEDBACK ---------------- */}
+        <Section id="feedback" title="Feedback" note="Toasts, progress, spinners, skeletons, and empty states.">
+          <div className="sg-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Toast — fire a notification</span>
+              <div className="sg-row">
+                <Button variant="secondary" onClick={() => toast({ title: "Saved", message: "Your world was saved.", tone: "success" })}>Success</Button>
+                <Button variant="secondary" onClick={() => toast({ title: "Heads up", message: "You're near the portal limit.", tone: "warn" })}>Warn</Button>
+                <Button variant="secondary" onClick={() => toast({ title: "Couldn't reach the world", message: "Retrying…", tone: "danger" })}>Danger</Button>
+                <Button variant="secondary" onClick={() => toast({ message: "An agent joined the world.", tone: "info" })}>Info</Button>
+              </div>
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Progress · Spinner</span>
+              <Progress value={sliderVal} showValue label="Generating" />
+              <Progress tone="success" value={100} label="Complete" showValue />
+              <Progress label="Weaving terrain" />
+              <div className="sg-row" style={{ alignItems: "center" }}>
+                <Spinner size="sm" /> <Spinner size="md" /> <Spinner size="lg" />
+              </div>
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Skeleton — loading placeholder</span>
+              <div className="sg-row" style={{ alignItems: "flex-start" }}>
+                <Skeleton variant="circle" width={44} height={44} />
+                <div className="sg-stack" style={{ flex: 1, gap: 8 }}>
+                  <Skeleton variant="text" width="70%" />
+                  <Skeleton variant="text" lines={2} />
+                </div>
+              </div>
+              <Skeleton variant="block" height={64} />
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Empty state</span>
+              <EmptyState
+                icon={<Sparkles size={24} />}
+                title="Nothing here yet"
+                description="This world is a blank slate. Describe something and watch it appear."
+                action={<Button variant="primary" leadingIcon={<Sparkles size={16} />}>Create the first thing</Button>}
+              />
+            </div>
+          </div>
+        </Section>
+
+        {/* ---------------- NAV & OVERLAYS (Field Kit) ---------------- */}
+        <Section
+          id="fieldkit"
+          title="Field Kit &amp; navigation"
+          note="The reimagined command surface: a radial menu that opens under the cursor, a dock with real hierarchy, drawers, popovers, and inline messages — the chrome recedes so the world leads."
+        >
+          <div className="sg-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Radial menu — the Field Kit</span>
+              <span className="sg-section__note">
+                Opens where you are, not on a fixed toolbar. Arrow keys orbit the ring; Enter acts; Esc closes.
+              </span>
+              <div className="sg-row">
+                <Button variant="primary" leadingIcon={<Sparkles size={16} />} onClick={() => setRadialOpen(true)}>
+                  Open the Field Kit
+                </Button>
+              </div>
+              <RadialMenu
+                open={radialOpen}
+                onClose={() => setRadialOpen(false)}
+                centerIcon={<Sparkles size={20} />}
+                aria-label="Field kit"
+                items={[
+                  { id: "create", label: "Create", icon: <Sparkles size={18} />, onSelect: () => toast({ message: "Create", tone: "info" }) },
+                  { id: "shape", label: "Shape", icon: <Mountain size={18} />, onSelect: () => toast({ message: "Shape terrain", tone: "info" }) },
+                  { id: "build", label: "Build", icon: <Building2 size={18} />, onSelect: () => toast({ message: "Build", tone: "info" }) },
+                  { id: "connect", label: "Connect", icon: <MessageCircle size={18} />, onSelect: () => toast({ message: "Connect", tone: "info" }) },
+                  { id: "travel", label: "Travel", icon: <Plane size={18} />, onSelect: () => toast({ message: "Travel", tone: "info" }) },
+                  { id: "map", label: "Map", icon: <MapIcon size={18} />, onSelect: () => toast({ message: "Map", tone: "info" }) },
+                ]}
+              />
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Dock — one primary, a secondary group</span>
+              <Dock
+                aria-label="World actions"
+                items={[
+                  { id: "create", label: "Create", icon: <Sparkles size={18} />, primary: true, onSelect: () => setDockActive("create") },
+                  { id: "shape", label: "Shape", icon: <Mountain size={18} />, active: dockActive === "shape", onSelect: () => setDockActive("shape") },
+                  { id: "chat", label: "Chat", icon: <MessageCircle size={18} />, active: dockActive === "chat", badge: 3, onSelect: () => setDockActive("chat") },
+                  { id: "travel", label: "Travel", icon: <Plane size={18} />, active: dockActive === "travel", onSelect: () => setDockActive("travel") },
+                  { id: "map", label: "Map", icon: <MapIcon size={18} />, active: dockActive === "map", onSelect: () => setDockActive("map") },
+                ]}
+              />
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Drawer &middot; popover</span>
+              <div className="sg-row">
+                <Button variant="secondary" onClick={() => setSheetOpen(true)}>Open a drawer</Button>
+                <Popover
+                  aria-label="World settings"
+                  trigger={<span>Popover</span>}
+                >
+                  <div className="sg-stack" style={{ gap: 8, minWidth: 200 }}>
+                    <strong>Quick settings</strong>
+                    <Toggle checked={toggleOn} onChange={setToggleOn} label="Show other players" />
+                    <Toggle checked={checkboxOn} onChange={setCheckboxOn} label="Ambient sound" />
+                  </div>
+                </Popover>
+              </div>
+              <Sheet
+                open={sheetOpen}
+                onClose={() => setSheetOpen(false)}
+                side="right"
+                title="World settings"
+                footer={<Button variant="primary" onClick={() => setSheetOpen(false)}>Done</Button>}
+              >
+                <div className="sg-stack" style={{ gap: 12 }}>
+                  <Field id="sg-sheet-name" label="World name" defaultValue="Stars at Night" />
+                  <Field id="sg-sheet-biome" as="select" label="Biome" defaultValue="meadow">
+                    <option value="meadow">Meadow</option>
+                    <option value="forest">Forest</option>
+                    <option value="desert">Desert</option>
+                  </Field>
+                  <Toggle checked={toggleOn} onChange={setToggleOn} label="Let visitors build" />
+                </div>
+              </Sheet>
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Inline alert — full borders, tone icon, never a side-stripe</span>
+              <div className="sg-stack" style={{ gap: 8 }}>
+                <InlineAlert tone="info" title="An agent joined">Omega is now in this world.</InlineAlert>
+                <InlineAlert tone="success">Your world was saved.</InlineAlert>
+                <InlineAlert tone="warn" title="Near the portal limit">You can place 2 more portals.</InlineAlert>
+                <InlineAlert tone="danger" title="Couldn't reach the world" onDismiss={() => undefined}>
+                  We&rsquo;ll keep retrying in the background.
+                </InlineAlert>
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* ---------------- THE WORLD LAYER ---------------- */}
+        <Section
+          id="world"
+          title="The world layer"
+          note="The components no control panel has — presence, agents, creation, portals, chat. This is where Tellus stops feeling like software and starts feeling like a place."
+        >
+          <div className="sg-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Presence roster — who is here now</span>
+              <PresenceRoster beings={beings} onSelect={(id) => toast({ message: `Focus ${id}`, tone: "info" })} />
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Agent card &middot; avatars</span>
+              <AgentCard
+                name="Omega"
+                status="busy"
+                activity="weaving a birch grove near the north ridge"
+                description="A resident agent. Builds, explores, and answers when spoken to."
+                actions={<><Button size="sm" variant="secondary">Watch</Button><Button size="sm" variant="ghost">Message</Button></>}
+              />
+              <div className="sg-row" style={{ alignItems: "center", marginTop: 12 }}>
+                <Avatar name="Willow" kind="human" status="online" />
+                <Avatar name="Jun" kind="human" size="sm" status="offline" />
+                <Avatar kind="agent" status="busy" />
+                <Avatar kind="agent" size="lg" name="Omega" />
+              </div>
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Creation bloom — describe &rarr; bloom &rarr; place</span>
+              <div className="sg-row" style={{ marginBottom: 8 }}>
+                <Segmented
+                  value={genStatus}
+                  onChange={(v) => setGenStatus(v as GenerationCardStatus)}
+                  options={[
+                    { value: "generating", label: "Generating" },
+                    { value: "ready", label: "Ready" },
+                    { value: "failed", label: "Failed" },
+                  ]}
+                  aria-label="Generation state"
+                />
+              </div>
+              <GenerationCard
+                prompt="a crooked apple tree with golden moss"
+                status={genStatus}
+                variants={
+                  <div className="sg-row">
+                    <AssetTile name="Variant A" meta="3.1k tris" selected={selectedAsset === "a"} onClick={() => setSelectedAsset("a")} />
+                    <AssetTile name="Variant B" meta="4.2k tris" selected={selectedAsset === "b"} onClick={() => setSelectedAsset("b")} />
+                  </div>
+                }
+                onPlace={() => toast({ title: "Placed", message: "Your creation is in the world.", tone: "success" })}
+                onDiscard={() => toast({ message: "Discarded.", tone: "info" })}
+                onRetry={() => setGenStatus("generating")}
+              />
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Asset library &middot; portals</span>
+              <div className="sg-row" style={{ flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                <AssetTile name="Moss stone" meta="2.4k tris" selected={selectedAsset === "moss-stone"} onClick={() => setSelectedAsset("moss-stone")} />
+                <AssetTile name="Birch" meta="5.0k tris" selected={selectedAsset === "birch"} onClick={() => setSelectedAsset("birch")} />
+                <AssetTile name="Lantern" meta="1.1k tris" selected={selectedAsset === "lantern"} onClick={() => setSelectedAsset("lantern")} />
+              </div>
+              <PortalCard
+                label="North ridge gate"
+                targetWorld="Stars at Night"
+                coords="64, 0, -128"
+                onTravel={() => toast({ message: "Travelling…", tone: "info" })}
+                onDelete={() => toast({ message: "Portal removed.", tone: "info" })}
+              />
+            </div>
+
+            <div className="sg-demo" style={{ gridColumn: "1 / -1" }}>
+              <span className="sg-demo__label">Chat — humans &amp; agents share one thread</span>
+              <div style={{ height: 280, maxWidth: 520 }}>
+                <ChatThread
+                  messages={chatLog}
+                  placeholder="Say something to the world…"
+                  onSend={(text) => {
+                    chatSeq.current += 1;
+                    setChatLog((log) => [
+                      ...log,
+                      { id: `m${chatSeq.current}`, author: "You", kind: "you", text },
+                    ]);
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* ---------------- COMMAND & INPUTS ---------------- */}
+        <Section
+          id="command"
+          title="Command &amp; inputs"
+          note="A ⌘K palette to reach any action by name, plus the remaining input vocabulary — search, steppers, tags, disclosure, trails, voice."
+        >
+          <div className="sg-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Command palette (⌘K)</span>
+              <span className="sg-section__note">Type to filter every action; arrows choose, Enter runs, Esc closes.</span>
+              <div className="sg-row">
+                <Button variant="secondary" onClick={() => setCmdkOpen(true)}>Open the command palette</Button>
+              </div>
+              <CommandPalette
+                open={cmdkOpen}
+                onClose={() => setCmdkOpen(false)}
+                commands={[
+                  { id: "create", label: "Create something", icon: <Sparkles size={16} />, hint: "C", group: "Create", keywords: "generate make new", onRun: () => toast({ message: "Create", tone: "info" }) },
+                  { id: "shape", label: "Shape terrain", icon: <Mountain size={16} />, group: "Create", onRun: () => toast({ message: "Shape", tone: "info" }) },
+                  { id: "build", label: "Place a building", icon: <Building2 size={16} />, group: "Create", onRun: () => toast({ message: "Build", tone: "info" }) },
+                  { id: "travel", label: "Travel to another world", icon: <Plane size={16} />, group: "Navigate", keywords: "portal go", onRun: () => toast({ message: "Travel", tone: "info" }) },
+                  { id: "map", label: "Open the map", icon: <MapIcon size={16} />, hint: "M", group: "Navigate", onRun: () => toast({ message: "Map", tone: "info" }) },
+                  { id: "invite", label: "Invite someone", icon: <MessageCircle size={16} />, group: "Connect", onRun: () => toast({ message: "Invite", tone: "info" }) },
+                ]}
+              />
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Search &middot; number stepper</span>
+              <SearchField value={searchVal} onChange={setSearchVal} label="Search worlds" placeholder="Search worlds…" />
+              <div style={{ marginTop: 12 }}>
+                <NumberStepper value={numVal} onChange={setNumVal} min={0} max={12} label="Portals allowed" suffix="max" />
+              </div>
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Chip input &middot; voice</span>
+              <ChipInput value={chips} onChange={setChips} label="Tags" placeholder="Add a tag…" />
+              <div className="sg-row" style={{ alignItems: "center", marginTop: 12 }}>
+                <VoiceButton
+                  state={voiceState}
+                  label
+                  onToggle={() => setVoiceState((s) => (s === "idle" ? "listening" : s === "listening" ? "muted" : "idle"))}
+                />
+                <span className="sg-section__note">Tap to cycle idle → listening → muted.</span>
+              </div>
+            </div>
+
+            <div className="sg-demo">
+              <span className="sg-demo__label">Accordion &middot; breadcrumb</span>
+              <Breadcrumb
+                items={[
+                  { id: "worlds", label: "Worlds", onClick: () => undefined },
+                  { id: "stars", label: "Stars at Night", onClick: () => undefined },
+                  { id: "ridge", label: "North ridge" },
+                ]}
+              />
+              <div style={{ marginTop: 12 }}>
+                <Accordion
+                  items={[
+                    { id: "a1", title: "What is this world?", content: "A shared, living place you can shape by describing what you want.", defaultOpen: true },
+                    { id: "a2", title: "Who else is here?", content: "Other people and resident AI agents. You'll see them in the presence roster." },
+                    { id: "a3", title: "Can I undo things?", content: "Yes — creation is never final. Every change can be reversed." },
+                  ]}
+                />
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* ---------------- WORLD INSTRUMENTS ---------------- */}
+        <Section
+          id="instruments"
+          title="World instruments"
+          note="The read-outs that keep you oriented — a compass for facing, a framed minimap for place, and a live activity feed of what humans and agents are doing."
+        >
+          <div className="sg-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Compass</span>
+              <div className="sg-row" style={{ alignItems: "center", gap: 16 }}>
+                <Compass heading={0} />
+                <Compass heading={45} />
+                <Compass heading={200} />
+              </div>
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Minimap frame</span>
+              <MinimapFrame
+                title="North ridge"
+                stageLabel="Minimap of the north ridge"
+                onZoomIn={() => undefined}
+                onZoomOut={() => undefined}
+                footer={<span style={{ fontFamily: "var(--ds-font-mono)" }}>64, 0, -128</span>}
+              />
+            </div>
+            <div className="sg-demo">
+              <span className="sg-demo__label">Activity feed</span>
+              <LogFeed
+                entries={[
+                  { id: "l1", kind: "agent", actor: "Omega", text: "placed a birch grove", time: "14:04" },
+                  { id: "l2", kind: "you", actor: "You", text: "arrived at the north ridge", time: "14:03" },
+                  { id: "l3", kind: "world", text: "dusk is falling", time: "14:01" },
+                  { id: "l4", kind: "system", text: "world saved", time: "14:00" },
+                ]}
+              />
+            </div>
+          </div>
+        </Section>
+
         {/* ---------------- ONBOARDING ---------------- */}
         <Section
           id="onboarding"
@@ -683,6 +1186,7 @@ function StyleGuide() {
         </footer>
       </div>
       {dialogs}
+      {toastViewport}
     </div>
   );
 }

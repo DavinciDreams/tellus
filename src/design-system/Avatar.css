@@ -1,0 +1,120 @@
+/* Avatar — player/agent avatar for the Tellus HUD design system.
+   All selectors are scoped under .ds-scope and reference only --ds-* tokens
+   (no raw hex). House feel: gold-on-forest-green. Agent avatars carry a gold
+   gradient (✦ sparkle); humans carry a cool teal/leaf gradient (initials).
+   Shape is a soft square (--ds-radius-lg) per house style — only size sm is a
+   full circle (--ds-radius-pill). */
+
+.ds-scope .ds-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--ds-radius-lg);
+  border: 1px solid var(--ds-border-soft);
+  background: var(--ds-bg-soft);
+  color: var(--ds-forest-900);
+  font-family: var(--ds-font-sans);
+  font-weight: var(--ds-weight-heavy);
+  line-height: 1;
+  overflow: visible; /* let the status dot bleed past the corner */
+  box-shadow: var(--ds-elevation-1);
+  user-select: none;
+  transition: border-color var(--ds-transition), transform var(--ds-transition);
+}
+
+/* ---- sizes ---- */
+.ds-scope .ds-avatar--sm {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ds-radius-pill); /* sm = full circle */
+  font-size: var(--ds-text-xs);
+}
+.ds-scope .ds-avatar--md {
+  width: 36px;
+  height: 36px;
+  font-size: var(--ds-text-sm);
+}
+.ds-scope .ds-avatar--lg {
+  width: 48px;
+  height: 48px;
+  font-size: var(--ds-text-lg);
+}
+.ds-scope .ds-avatar--xl {
+  width: 64px;
+  height: 64px;
+  font-size: var(--ds-text-xl);
+}
+
+/* ---- kind: colored gradient + ink ---- */
+.ds-scope .ds-avatar--agent {
+  background: linear-gradient(180deg, var(--ds-gold-bright), var(--ds-gold));
+  border-color: var(--ds-border);
+  color: var(--ds-forest-900);
+}
+.ds-scope .ds-avatar--human {
+  /* "teal" approximated with the cool green/leaf → forest tokens */
+  background: linear-gradient(180deg, var(--ds-leaf), var(--ds-forest-600));
+  border-color: var(--ds-border);
+  color: var(--ds-text);
+}
+
+/* ---- image ---- */
+.ds-scope .ds-avatar__img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  display: block;
+}
+
+/* ---- initials / sparkle ---- */
+.ds-scope .ds-avatar__initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: none; /* letters are already capitals; not tracked-uppercase */
+  letter-spacing: 0;
+}
+.ds-scope .ds-avatar--agent .ds-avatar__initials {
+  font-family: var(--ds-font-serif); /* mythic accent for the ✦ glyph */
+}
+
+/* ---- status dot (bottom-right) ---- */
+.ds-scope .ds-avatar__status {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--ds-radius-pill);
+  border: 2px solid var(--ds-bg);
+  background: var(--ds-muted);
+  box-sizing: border-box;
+}
+.ds-scope .ds-avatar--sm .ds-avatar__status {
+  width: 8px;
+  height: 8px;
+}
+.ds-scope .ds-avatar--xl .ds-avatar__status {
+  width: 13px;
+  height: 13px;
+}
+
+.ds-scope .ds-avatar__status--online {
+  background: var(--ds-success);
+}
+.ds-scope .ds-avatar__status--idle {
+  /* gold ring */
+  background: var(--ds-forest-800);
+  box-shadow: inset 0 0 0 2px var(--ds-gold);
+}
+.ds-scope .ds-avatar__status--busy {
+  background: var(--ds-warn);
+}
+.ds-scope .ds-avatar__status--offline {
+  background: var(--ds-muted);
+}
