@@ -175,6 +175,14 @@ interface BiomeTreeTemplateOptions {
   foliageClusterDensity?: number;
   foliageTipBias?: number;
   foliageSpread?: number;
+  gnarliness?: number;
+  droop?: number;
+  spread?: number;
+  tropism?: number;
+  branchDensity?: number;
+  branchAngle?: number;
+  vigor?: number;
+  collisionBias?: number;
 }
 
 const DEFAULT_CHUNK_SIZE = 16;
@@ -281,7 +289,9 @@ const buildBranchModuleTreeCached = (
     DETAILED_TREE_SEED_BUCKETS;
   const key =
     `${species}|${bucket}|${options.maxBranchDepth ?? ""}|${options.maxStems ?? ""}|` +
-    `${options.maxLeaves ?? ""}|${options.leafScaleMultiplier ?? ""}`;
+    `${options.maxLeaves ?? ""}|${options.leafScaleMultiplier ?? ""}|${options.gnarliness ?? ""}|` +
+    `${options.droop ?? ""}|${options.spread ?? ""}|${options.tropism ?? ""}|${options.branchDensity ?? ""}|` +
+    `${options.branchAngle ?? ""}|${options.vigor ?? ""}|${options.collisionBias ?? ""}`;
   let tree = branchModuleTreeCache.get(key);
   if (!tree && !allowColdBuild) return null;
   if (!tree) {
@@ -290,6 +300,14 @@ const buildBranchModuleTreeCached = (
       maxStems: options.maxStems,
       maxLeaves: options.maxLeaves,
       leafScaleMultiplier: options.leafScaleMultiplier,
+      gnarliness: options.gnarliness,
+      droop: options.droop,
+      spread: options.spread,
+      tropism: options.tropism,
+      branchDensity: options.branchDensity,
+      branchAngle: options.branchAngle,
+      vigor: options.vigor,
+      collisionBias: options.collisionBias,
     });
     branchModuleTreeCache.set(key, tree);
   }
@@ -1381,6 +1399,14 @@ export function createProcPlantVegetation(
         }
         const moduleTree = buildBranchModuleTreeCached(treeBackend.species, patch!.seed ^ i, {
           ...foliageDefaultsForTreeSpecies(treeBackend.species),
+          gnarliness: genome.branchModules?.gnarliness,
+          droop: genome.branchModules?.droop,
+          spread: genome.branchModules?.spread,
+          tropism: genome.branchModules?.tropism,
+          branchDensity: genome.branchModules?.branchDensity,
+          branchAngle: genome.branchModules?.branchAngle,
+          vigor: genome.branchModules?.vigor,
+          collisionBias: genome.branchModules?.collisionBias,
           ...treeBackend,
         }, allowColdBuilds);
         if (!moduleTree) {

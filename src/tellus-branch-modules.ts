@@ -56,6 +56,27 @@ export interface BranchModuleTreeOptions {
   maxStems?: number;
   maxLeaves?: number;
   leafScaleMultiplier?: number;
+  /** Per-segment direction jitter multiplier — twisted/windblown growth vs. straight limbs. Default 1. */
+  gnarliness?: number;
+  /** Downward pull on branch growth direction, generalized beyond the "weeping" species heuristic.
+   * 0 = no extra droop (species default only), 1 = strong weeping-willow-like droop. Default 0. */
+  droop?: number;
+  /** Multiplies how far branches spread horizontally from the trunk. Default 1. */
+  spread?: number;
+  /** Consistent bias applied to every branch's growth direction, independent of local branch angle —
+   * positive pulls toward vertical (upward phototropism/gravitropism), negative pulls outward/downward.
+   * Default 0. */
+  tropism?: number;
+  /** Multiplies how many child branches each module spawns. Default 1. */
+  branchDensity?: number;
+  /** Multiplies the angle branches diverge from their parent's direction. Default 1. */
+  branchAngle?: number;
+  /** Multiplies branch length and reduces per-generation taper — a higher-vigor tree grows longer,
+   * less-tapered limbs at each depth. Default 1. */
+  vigor?: number;
+  /** Light proxy for sibling-branch crowding avoidance: spreads a depth level's children further apart
+   * in yaw so they overlap less, without true geometric collision checking. Default 0. */
+  collisionBias?: number;
 }
 
 const UNIT_Y = new THREE.Vector3(0, 1, 0);
@@ -348,6 +369,14 @@ export function branchModuleTreeFromSpecies(
   const maxDepth = Math.max(1, Math.min(4, Math.round(options.maxBranchDepth ?? 3)));
   const moduleBudget = Math.max(6, Math.min(180, Math.round(options.maxStems ?? 72)));
   const leafBudget = Math.max(0, Math.min(360, Math.round(options.maxLeaves ?? 180)));
+  const gnarliness = THREE.MathUtils.clamp(options.gnarliness ?? 1, 0, 3);
+  const droop = THREE.MathUtils.clamp(options.droop ?? 0, 0, 2);
+  const spreadMul = THREE.MathUtils.clamp(options.spread ?? 1, 0.3, 2.5);
+  const tropism = THREE.MathUtils.clamp(options.tropism ?? 0, -1, 1);
+  const branchDensityMul = THREE.MathUtils.clamp(options.branchDensity ?? 1, 0.3, 2.5);
+  const branchAngleMul = THREE.MathUtils.clamp(options.branchAngle ?? 1, 0.3, 2);
+  const vigor = THREE.MathUtils.clamp(options.vigor ?? 1, 0.4, 2);
+  const collisionBias = THREE.MathUtils.clamp(options.collisionBias ?? 0, 0, 1.5);
   const modules: BranchModuleInstance[] = [];
   const segments: BranchSegmentInstance[] = [];
 
@@ -403,10 +432,15 @@ export function branchModuleTreeFromSpecies(
     let direction = initialDirection.clone().normalize();
     for (let index = 0; index < segmentCount; index++) {
       const segmentT = index / Math.max(1, segmentCount - 1);
-      const bend = (0.018 + depth * 0.014) * (0.35 + random());
+      const bend = (0.018 + depth * 0.014) * (0.35 + random()) * gnarliness;
+      // weeping species keep their own stronger built-in droop; droop generalizes the same downward
+      // pull to any species so a non-weeping genome can still be tuned toward a drooping silhouette.
+      const droopPull = (droop * (0.02 + depth * 0.02)) + (weeping && depth > 0 ? 0.035 : 0);
+      // tropism is a constant bias applied every segment, independent of depth or species — positive
+      // steadily reorients growth upward (phototropism), negative pulls it back down/outward.
       direction.add(new THREE.Vector3(
         (random() - 0.5) * bend,
-        (conifer && depth === 0 ? 0.025 : 0.008) - (weeping && depth > 0 ? 0.035 : 0),
+        (conifer && depth === 0 ? 0.025 : 0.008) - droopPull + tropism * 0.02,
         (random() - 0.5) * bend,
       )).normalize();
       const step = length / segmentCount * (0.9 + random() * 0.2);
@@ -429,10 +463,16 @@ export function branchModuleTreeFromSpecies(
     const parentSegments = parent.segmentIds.map((id) => segments[id]!).filter(Boolean);
     if (parentSegments.length === 0) continue;
     const nextDepth = parent.depth + 1;
-    const desiredChildren = parent.depth === 0
-      ? conifer ? 11 : spreading ? 8 : slender ? 7 : 6
-      : Math.max(1, Math.round((conifer ? 3 : 2.4) - parent.depth * 0.45 + random()));
+    const desiredChildren = Math.max(1, Math.round(
+      (parent.depth === 0
+        ? conifer ? 11 : spreading ? 8 : slender ? 7 : 6
+        : Math.max(1, (conifer ? 3 : 2.4) - parent.depth * 0.45 + random())) * branchDensityMul,
+    ));
     const childCount = Math.min(desiredChildren, moduleBudget - modules.length);
+    // collisionBias approximates sibling-crowding avoidance without real geometric checks: it widens
+    // the yaw gap enforced between a depth level's children, spreading them further apart around the
+    // parent so branches visually overlap less as the tree fills in.
+    const collisionYawPad = collisionBias * 0.4;
     for (let child = 0; child < childCount; child++) {
       const along = parent.depth === 0
         ? 0.22 + (child + 0.35 + random() * 0.3) / Math.max(1, childCount) * 0.72
@@ -444,28 +484,31 @@ export function branchModuleTreeFromSpecies(
       const parentSegment = parentSegments[segmentIndex]!;
       const localT = THREE.MathUtils.clamp(along * parentSegments.length - segmentIndex, 0.08, 0.96);
       const start = parentSegment.start.clone().lerp(parentSegment.end, localT);
+      const yawSpread = 1 + collisionYawPad;
       const yaw = parent.depth === 0
-        ? (child / Math.max(1, childCount)) * Math.PI * 2 + random() * 0.55
+        ? (child / Math.max(1, childCount)) * Math.PI * 2 * yawSpread + random() * 0.55
         : Math.atan2(
             parentSegment.end.z - parentSegment.start.z,
             parentSegment.end.x - parentSegment.start.x,
-          ) + (random() - 0.5) * 1.8;
-      const vertical = conifer
+          ) + (random() - 0.5) * 1.8 * yawSpread;
+      const vertical = (conifer
         ? 0.12 + nextDepth * 0.09
         : weeping
           ? -0.18 - nextDepth * 0.08
-          : 0.28 + random() * 0.28;
-      const horizontal = spreading ? 1.15 : slender ? 0.72 : conifer ? 0.92 : 0.9;
+          : 0.28 + random() * 0.28) - droop * 0.22 + tropism * 0.16;
+      const horizontal = (spreading ? 1.15 : slender ? 0.72 : conifer ? 0.92 : 0.9) * spreadMul;
       const direction = new THREE.Vector3(
         Math.cos(yaw) * horizontal,
-        vertical,
+        vertical * branchAngleMul,
         Math.sin(yaw) * horizontal,
       ).normalize();
       if (nextDepth > 1) {
         direction.lerp(parentSegment.end.clone().sub(parentSegment.start).normalize(), 0.28).normalize();
       }
-      const depthScale = Math.pow(conifer ? 0.56 : 0.62, nextDepth - 1);
-      const branchLength = (conifer ? 0.28 : spreading ? 0.42 : 0.34) * depthScale * (0.82 + random() * 0.34);
+      // Higher vigor grows longer limbs that taper more slowly across generations (a well-fed tree
+      // keeps investing in branch length instead of shrinking fast); lower vigor tapers off faster.
+      const depthScale = Math.pow((conifer ? 0.56 : 0.62) * THREE.MathUtils.lerp(1.18, 0.88, THREE.MathUtils.clamp((vigor - 0.4) / 1.6, 0, 1)), nextDepth - 1);
+      const branchLength = (conifer ? 0.28 : spreading ? 0.42 : 0.34) * depthScale * (0.82 + random() * 0.34) * vigor;
       const branchRadius = Math.max(0.003, parentSegment.baseRadius * (nextDepth === 1 ? 0.5 : 0.58));
       const moduleId = addModule(
         parentId,

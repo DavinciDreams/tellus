@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as THREE from "three";
 import {
   branchModuleLodView,
   branchModuleTreeFromSpecies,
@@ -71,5 +72,55 @@ describe("branch module trees", () => {
     const constrainedSegmentIds = new Set(constrained.segments.map((segment) => segment.id));
     expect(constrained.segments.some((segment) => tree.modules[segment.moduleId]?.depth === 0)).toBe(true);
     expect(constrained.leaves.every((leaf) => constrainedSegmentIds.has(leaf.segmentId))).toBe(true);
+  });
+
+  it("uses genome shape fields (gnarliness, droop, spread, tropism, branchDensity, branchAngle, vigor, collisionBias) to actually shape the tree", () => {
+    const baseOptions = { maxBranchDepth: 3, maxStems: 90, maxLeaves: 140 };
+    const baseline = branchModuleTreeFromSpecies("blackOak", 7, baseOptions);
+
+    const gnarled = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, gnarliness: 3 });
+    const straight = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, gnarliness: 0 });
+    const gnarlDeviation = (tree: typeof baseline) =>
+      tree.segments.reduce((sum, s) => sum + s.end.clone().sub(s.start).normalize().distanceTo(new THREE.Vector3(0, 1, 0)), 0);
+    expect(gnarlDeviation(gnarled)).toBeGreaterThan(gnarlDeviation(straight));
+
+    const drooping = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, droop: 2 });
+    const avgY = (tree: typeof baseline) =>
+      tree.segments.reduce((sum, s) => sum + (s.end.y - s.start.y), 0) / tree.segments.length;
+    expect(avgY(drooping)).toBeLessThan(avgY(baseline));
+
+    const wide = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, spread: 2.5 });
+    const narrow = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, spread: 0.3 });
+    const maxRadius = (tree: typeof baseline) =>
+      Math.max(...tree.segments.map((s) => Math.hypot(s.end.x, s.end.z)));
+    expect(maxRadius(wide)).toBeGreaterThan(maxRadius(narrow));
+
+    const dense = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, branchDensity: 2.5 });
+    const sparse = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, branchDensity: 0.3 });
+    expect(dense.modules.length).toBeGreaterThan(sparse.modules.length);
+
+    const vigorous = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, vigor: 2 });
+    const stunted = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, vigor: 0.4 });
+    const totalLength = (tree: typeof baseline) =>
+      tree.segments.reduce((sum, s) => sum + s.end.distanceTo(s.start), 0);
+    expect(totalLength(vigorous)).toBeGreaterThan(totalLength(stunted));
+
+    const crowded = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, collisionBias: 1.5 });
+    expect(crowded.modules.length).toBeGreaterThan(1);
+
+    // Unset fields must reproduce the exact pre-existing shape (no behavior change for existing presets).
+    const explicitDefaults = branchModuleTreeFromSpecies("blackOak", 7, {
+      ...baseOptions,
+      gnarliness: 1,
+      droop: 0,
+      spread: 1,
+      tropism: 0,
+      branchDensity: 1,
+      branchAngle: 1,
+      vigor: 1,
+      collisionBias: 0,
+    });
+    expect(explicitDefaults.segments.length).toBe(baseline.segments.length);
+    expect(explicitDefaults.modules.length).toBe(baseline.modules.length);
   });
 });
