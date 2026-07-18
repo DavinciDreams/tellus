@@ -92,6 +92,30 @@ export const ECOLOGY_BIOMES: EcologyBiomeId[] = [
   "arctic-alpine",
 ];
 
+export const ECOLOGY_TERRAIN_PAINT_MAP: Record<EcologyBiomeId, TerrainPaintKind> = {
+  "tropical-rain-forest": "jungle-moss",
+  "temperate-rain-forest": "forest-floor",
+  grassland: "grass",
+  desert: "desert-sand",
+  coastal: "beach",
+  taiga: "dirt",
+  estuary: "flowers",
+  tundra: "gravel",
+  "arctic-alpine": "snow",
+  savanna: "meadow",
+};
+
+// Each of these paints maps 1:1 to exactly one ecology biome (the reverse of
+// ECOLOGY_TERRAIN_PAINT_MAP) — a player who paints one of these is directly declaring the
+// biome for that spot, and that declaration must win over a coarser authored/evolved biome-cell
+// assignment. Paints without a 1:1 biome (rock, dirt is shared with taiga's authored default,
+// stone, brick) intentionally fall through to the authored cell / heuristic weighting instead.
+const TERRAIN_PAINT_ECOLOGY_MAP: Partial<Record<TerrainPaintKind, EcologyBiomeId>> = Object.fromEntries(
+  (Object.entries(ECOLOGY_TERRAIN_PAINT_MAP) as [EcologyBiomeId, TerrainPaintKind][]).map(
+    ([biome, paint]) => [paint, biome],
+  ),
+);
+
 const clamp01 = (value: number) => THREE.MathUtils.clamp(value, 0, 1);
 
 const hash01 = (x: number, z: number, seed: number): number => {
@@ -165,6 +189,10 @@ export const resolveEcologySample = (input: EcologySampleInput): EcologySample =
   const light = clamp01(0.78 + slope * 0.1 - moisture * 0.12);
   const weights: Partial<Record<EcologyBiomeId, number>> = {};
   const authoredBiome = normalizeEcologyBiomeId(input.biomeCell?.becoming ?? input.biomeCell?.biome);
+  // A paint with a 1:1 biome mapping (snow, jungle-moss, forest-floor, ...) is the player directly
+  // declaring the biome for this spot — it must win over a coarser authored/evolved biome-cell
+  // assignment, or repainting terrain silently leaves the old biome (and its plant mix) in place.
+  const paintedBiome = paint ? TERRAIN_PAINT_ECOLOGY_MAP[paint] : undefined;
 
   if (salinity > 0.35) addWeight(weights, coastal ? "coastal" : "estuary", salinity);
   if (moisture > 0.76 && elevation < 0.32) addWeight(weights, warmth > 0.62 ? "tropical-rain-forest" : "temperate-rain-forest", moisture);
@@ -179,7 +207,10 @@ export const resolveEcologySample = (input: EcologySampleInput): EcologySample =
   if (paint === "rock") addWeight(weights, elevation > 0.45 || warmth < 0.32 ? "arctic-alpine" : "desert", 0.52);
   if (paint === "grass" || paint === "flowers" || paint === "meadow") addWeight(weights, "grassland", 0.55);
 
-  if (authoredBiome) {
+  if (paintedBiome) {
+    for (const id of ECOLOGY_BIOMES) delete weights[id];
+    weights[paintedBiome] = 1;
+  } else if (authoredBiome) {
     for (const id of ECOLOGY_BIOMES) delete weights[id];
     weights[authoredBiome] = 1;
   }
