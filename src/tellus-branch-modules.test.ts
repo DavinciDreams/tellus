@@ -123,4 +123,47 @@ describe("branch module trees", () => {
     expect(explicitDefaults.segments.length).toBe(baseline.segments.length);
     expect(explicitDefaults.modules.length).toBe(baseline.modules.length);
   });
+
+  it("gives shrub, palm-ish, and vine-ish archetypes real distinct shapes instead of the generic broadleaf default", () => {
+    const options = { maxBranchDepth: 3, maxStems: 90, maxLeaves: 140 };
+    const broadleaf = branchModuleTreeFromSpecies("genericTree", 5, { ...options, palette: "decurrent-broadleaf" });
+    const shrub = branchModuleTreeFromSpecies("genericTree", 5, { ...options, palette: "shrub" });
+    const palm = branchModuleTreeFromSpecies("genericTree", 5, { ...options, palette: "palm-ish" });
+    const vine = branchModuleTreeFromSpecies("genericTree", 5, { ...options, palette: "vine-ish" });
+
+    // Palms don't branch structurally past the trunk — every module beyond depth 0 should be a
+    // first-generation frond, never a second generation growing off a frond.
+    const palmMaxDepth = Math.max(...palm.modules.map((m) => m.depth));
+    expect(palmMaxDepth).toBeLessThanOrEqual(1);
+    expect(broadleaf.modules.some((m) => m.depth >= 2)).toBe(true);
+
+    // Shrubs start branching almost at ground level (very short trunk before the first branch point).
+    const shrubTrunk = shrub.modules.find((m) => m.depth === 0)!;
+    const broadleafTrunk = broadleaf.modules.find((m) => m.depth === 0)!;
+    const trunkHeight = (tree: typeof shrub, trunk: typeof shrubTrunk) =>
+      Math.max(...trunk.segmentIds.map((id) => tree.segments[id]!.end.y));
+    expect(trunkHeight(shrub, shrubTrunk)).toBeLessThan(trunkHeight(broadleaf, broadleafTrunk));
+
+    // Vines lean toward a thinner, longer, more downward-drooping growth than upright broadleaf.
+    const avgRadius = (tree: typeof vine) =>
+      tree.segments.reduce((sum, s) => sum + s.baseRadius, 0) / tree.segments.length;
+    expect(avgRadius(vine)).toBeLessThan(avgRadius(broadleaf));
+
+    // All four archetypes must still produce valid, internally-consistent trees.
+    for (const tree of [broadleaf, shrub, palm, vine]) {
+      expect(tree.segments.length).toBeGreaterThan(0);
+      expect(tree.leaves.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("lets an explicit palette override species-name guessing", () => {
+    // "oakTree" would normally guess decurrent-broadleaf via the species regex; forcing palette to
+    // excurrent-conifer should produce the conifer's tighter, upward-swept trunk instead.
+    const guessed = branchModuleTreeFromSpecies("oakTree", 9, { maxBranchDepth: 2, maxStems: 60, maxLeaves: 80 });
+    const forced = branchModuleTreeFromSpecies("oakTree", 9, {
+      maxBranchDepth: 2, maxStems: 60, maxLeaves: 80, palette: "excurrent-conifer",
+    });
+    const trunkSegments = (tree: typeof guessed) => tree.modules.find((m) => m.depth === 0)!.segmentIds.length;
+    expect(trunkSegments(forced)).not.toBe(trunkSegments(guessed));
+  });
 });

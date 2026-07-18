@@ -77,7 +77,95 @@ export interface BranchModuleTreeOptions {
   /** Light proxy for sibling-branch crowding avoidance: spreads a depth level's children further apart
    * in yaw so they overlap less, without true geometric collision checking. Default 0. */
   collisionBias?: number;
+  /** Explicit growth archetype — the same 6 values as ProcPlantGenome.branchModules.palette. When set,
+   * this overrides the species-name regex guess below; presets that don't set it keep working exactly
+   * as before via that regex. */
+  palette?: BranchModuleArchetype;
 }
+
+export type BranchModuleArchetype =
+  | "excurrent-conifer"
+  | "decurrent-broadleaf"
+  | "weeping"
+  | "shrub"
+  | "palm-ish"
+  | "vine-ish";
+
+interface ArchetypeShape {
+  /** Trunk segment count and starting radius. */
+  trunkSegments: number;
+  trunkRadius: number;
+  /** How many first-generation limbs branch directly off the trunk. */
+  firstGenChildren: number;
+  /** How many limbs each later-generation module spawns (before depth falloff). */
+  laterGenChildren: number;
+  /** Per-segment upward push at the trunk, and how it decays/grows with depth. */
+  trunkLift: number;
+  depthLift: number;
+  /** Downward pull applied at depth > 0, before the genome's own droop field adds more. */
+  archetypeDroop: number;
+  /** Outward reach multiplier for branch direction. */
+  horizontalReach: number;
+  /** Per-generation length/radius falloff base (lower = tapers off faster). */
+  depthFalloff: number;
+  /** Base length for first-generation branches, before vigor/depth scaling. */
+  baseBranchLength: number;
+  /** Natural leaf-card scale for this archetype (conifers get a smaller card; the actual mesh may be
+   * swapped for a needle spray at the render site based on foliageSource). */
+  leafScale: number;
+  /** Segment count for non-terminal branch modules (conifers need more segments for their sweep). */
+  branchSegmentCount: number;
+}
+
+// One config per named archetype — the params captured here reproduce the exact shapes the previous
+// per-flag branching produced for excurrent-conifer/decurrent-broadleaf/weeping, plus 3 new archetypes
+// (shrub, palm-ish, vine-ish) that previously had no distinct growth pattern at all and fell through to
+// the generic broadleaf default regardless of habit.
+const ARCHETYPE_SHAPES: Record<BranchModuleArchetype, ArchetypeShape> = {
+  "excurrent-conifer": {
+    trunkSegments: 8, trunkRadius: 0.052, firstGenChildren: 11, laterGenChildren: 3,
+    trunkLift: 0.025, depthLift: 0.09, archetypeDroop: 0, horizontalReach: 0.92,
+    depthFalloff: 0.56, baseBranchLength: 0.28, leafScale: 0.012, branchSegmentCount: 3,
+  },
+  "decurrent-broadleaf": {
+    trunkSegments: 6, trunkRadius: 0.058, firstGenChildren: 6, laterGenChildren: 2.4,
+    trunkLift: 0.008, depthLift: 0, archetypeDroop: 0, horizontalReach: 0.9,
+    depthFalloff: 0.62, baseBranchLength: 0.34, leafScale: 0.026, branchSegmentCount: 3,
+  },
+  weeping: {
+    trunkSegments: 6, trunkRadius: 0.058, firstGenChildren: 6, laterGenChildren: 2.4,
+    trunkLift: 0.008, depthLift: 0, archetypeDroop: 0.18, horizontalReach: 0.9,
+    depthFalloff: 0.62, baseBranchLength: 0.34, leafScale: 0.026, branchSegmentCount: 3,
+  },
+  // Bushy, no single dominant leader — many low, short limbs starting near ground level.
+  shrub: {
+    trunkSegments: 4, trunkRadius: 0.05, firstGenChildren: 9, laterGenChildren: 2.6,
+    trunkLift: 0.004, depthLift: 0, archetypeDroop: 0, horizontalReach: 1.05,
+    depthFalloff: 0.66, baseBranchLength: 0.24, leafScale: 0.03, branchSegmentCount: 2,
+  },
+  // Single tall unbranched trunk, foliage only at the very top — palms don't branch structurally at
+  // all, so first-gen children model fronds directly rather than sub-branches.
+  "palm-ish": {
+    trunkSegments: 10, trunkRadius: 0.046, firstGenChildren: 9, laterGenChildren: 0,
+    trunkLift: 0.045, depthLift: 0, archetypeDroop: 0.06, horizontalReach: 1.2,
+    depthFalloff: 0.5, baseBranchLength: 0.32, leafScale: 0.05, branchSegmentCount: 2,
+  },
+  // Thin, long, minimally-branched trailing/climbing growth.
+  "vine-ish": {
+    trunkSegments: 9, trunkRadius: 0.026, firstGenChildren: 4, laterGenChildren: 1.6,
+    trunkLift: 0.01, depthLift: -0.02, archetypeDroop: 0.12, horizontalReach: 0.75,
+    depthFalloff: 0.72, baseBranchLength: 0.4, leafScale: 0.022, branchSegmentCount: 3,
+  },
+};
+
+const archetypeFromSpeciesName = (speciesId: string): BranchModuleArchetype => {
+  if (/fir|pine|douglas|larch|spruce|redwood/.test(speciesId)) return "excurrent-conifer";
+  if (/willow|weeping/.test(speciesId)) return "weeping";
+  if (/shrub|bush|hedge/.test(speciesId)) return "shrub";
+  if (/palm/.test(speciesId)) return "palm-ish";
+  if (/vine|ivy|creeper/.test(speciesId)) return "vine-ish";
+  return "decurrent-broadleaf";
+};
 
 const UNIT_Y = new THREE.Vector3(0, 1, 0);
 const prototypeTemplates = new Map<BranchSegmentPrototypeId, ProcPlantTemplate>();
@@ -348,10 +436,14 @@ export function branchModuleTreeFromSpecies(
   options: BranchModuleTreeOptions = {},
 ): BranchModuleTree {
   const speciesId = species.toLowerCase();
-  const conifer = /fir|pine|douglas|larch|spruce|redwood/.test(speciesId);
-  const slender = /birch|aspen|poplar/.test(speciesId);
-  const spreading = /oak|sassafras|tupelo|acacia/.test(speciesId);
-  const weeping = /willow|weeping/.test(speciesId);
+  const archetype = options.palette ?? archetypeFromSpeciesName(speciesId);
+  const shape = ARCHETYPE_SHAPES[archetype];
+  const conifer = archetype === "excurrent-conifer";
+  const weeping = archetype === "weeping";
+  // Sub-variants within decurrent-broadleaf — narrower species-name hints that tweak proportions
+  // without warranting their own archetype (they don't change the branching *pattern*, just scale).
+  const slender = archetype === "decurrent-broadleaf" && /birch|aspen|poplar/.test(speciesId);
+  const spreading = archetype === "decurrent-broadleaf" && /oak|sassafras|tupelo|acacia/.test(speciesId);
   const blossom = /cherry|apple|magnolia/.test(speciesId);
   let speciesHash = 2166136261;
   for (let i = 0; i < speciesId.length; i++) {
@@ -453,8 +545,9 @@ export function branchModuleTreeFromSpecies(
     return id;
   };
 
-  const trunkSegments = conifer ? 8 : slender ? 7 : 6;
-  addModule(null, 0, new THREE.Vector3(), UNIT_Y, 1, conifer ? 0.052 : spreading ? 0.068 : 0.058, trunkSegments);
+  const trunkSegments = slender ? 7 : shape.trunkSegments;
+  const trunkRadius = spreading ? 0.068 : shape.trunkRadius;
+  addModule(null, 0, new THREE.Vector3(), UNIT_Y, 1, trunkRadius, trunkSegments);
   const pending = [0];
   while (pending.length > 0 && modules.length < moduleBudget) {
     const parentId = pending.shift()!;
@@ -463,11 +556,15 @@ export function branchModuleTreeFromSpecies(
     const parentSegments = parent.segmentIds.map((id) => segments[id]!).filter(Boolean);
     if (parentSegments.length === 0) continue;
     const nextDepth = parent.depth + 1;
+    const firstGenChildren = spreading ? 8 : slender ? 7 : shape.firstGenChildren;
     const desiredChildren = Math.max(1, Math.round(
       (parent.depth === 0
-        ? conifer ? 11 : spreading ? 8 : slender ? 7 : 6
-        : Math.max(1, (conifer ? 3 : 2.4) - parent.depth * 0.45 + random())) * branchDensityMul,
+        ? firstGenChildren
+        : Math.max(1, shape.laterGenChildren - parent.depth * 0.45 + random())) * branchDensityMul,
     ));
+    // palm-ish trees don't branch structurally past the trunk — desiredChildren models fronds at the
+    // crown, so later generations should stop rather than keep subdividing.
+    if (archetype === "palm-ish" && parent.depth > 0) continue;
     const childCount = Math.min(desiredChildren, moduleBudget - modules.length);
     // collisionBias approximates sibling-crowding avoidance without real geometric checks: it widens
     // the yaw gap enforced between a depth level's children, spreading them further apart around the
@@ -491,12 +588,19 @@ export function branchModuleTreeFromSpecies(
             parentSegment.end.z - parentSegment.start.z,
             parentSegment.end.x - parentSegment.start.x,
           ) + (random() - 0.5) * 1.8 * yawSpread;
-      const vertical = (conifer
-        ? 0.12 + nextDepth * 0.09
+      // Base vertical lean per archetype: conifers sweep gently upward with depth, weeping/vine trail
+      // downward, palms angle fronds outward-and-up from the crown, everything else (broadleaf, shrub)
+      // reaches up-and-out at a loose random angle. shape.archetypeDroop and the genome's own droop/
+      // tropism fields then adjust this base lean, same as before.
+      const baseVertical = conifer
+        ? shape.trunkLift + nextDepth * shape.depthLift
         : weeping
           ? -0.18 - nextDepth * 0.08
-          : 0.28 + random() * 0.28) - droop * 0.22 + tropism * 0.16;
-      const horizontal = (spreading ? 1.15 : slender ? 0.72 : conifer ? 0.92 : 0.9) * spreadMul;
+          : archetype === "palm-ish"
+            ? shape.trunkLift
+            : 0.28 + random() * 0.28;
+      const vertical = baseVertical - shape.archetypeDroop * nextDepth * 0.09 - droop * 0.22 + tropism * 0.16;
+      const horizontal = (spreading ? 1.15 : slender ? 0.72 : shape.horizontalReach) * spreadMul;
       const direction = new THREE.Vector3(
         Math.cos(yaw) * horizontal,
         vertical * branchAngleMul,
@@ -507,8 +611,8 @@ export function branchModuleTreeFromSpecies(
       }
       // Higher vigor grows longer limbs that taper more slowly across generations (a well-fed tree
       // keeps investing in branch length instead of shrinking fast); lower vigor tapers off faster.
-      const depthScale = Math.pow((conifer ? 0.56 : 0.62) * THREE.MathUtils.lerp(1.18, 0.88, THREE.MathUtils.clamp((vigor - 0.4) / 1.6, 0, 1)), nextDepth - 1);
-      const branchLength = (conifer ? 0.28 : spreading ? 0.42 : 0.34) * depthScale * (0.82 + random() * 0.34) * vigor;
+      const depthScale = Math.pow(shape.depthFalloff * THREE.MathUtils.lerp(1.18, 0.88, THREE.MathUtils.clamp((vigor - 0.4) / 1.6, 0, 1)), nextDepth - 1);
+      const branchLength = (spreading ? 0.42 : shape.baseBranchLength) * depthScale * (0.82 + random() * 0.34) * vigor;
       const branchRadius = Math.max(0.003, parentSegment.baseRadius * (nextDepth === 1 ? 0.5 : 0.58));
       const moduleId = addModule(
         parentId,
@@ -517,7 +621,7 @@ export function branchModuleTreeFromSpecies(
         direction,
         branchLength,
         branchRadius,
-        nextDepth >= maxDepth ? 2 : 3,
+        nextDepth >= maxDepth ? 2 : shape.branchSegmentCount,
       );
       pending.push(moduleId);
     }
@@ -531,7 +635,7 @@ export function branchModuleTreeFromSpecies(
   // a similar ~1-unit natural scale (a unit-tall leaf spine vs. ~1-1.2-unit needle plates), so the same
   // per-species scale applies whichever foliage mesh the render site (tellus-procplant-vegetation.ts)
   // ends up choosing based on genome.branchModules?.foliageSource.
-  const leafScale = (conifer ? 0.012 : slender ? 0.02 : 0.026) * (options.leafScaleMultiplier ?? 1);
+  const leafScale = (slender ? 0.02 : shape.leafScale) * (options.leafScaleMultiplier ?? 1);
   for (let index = 0; index < leafBudget && terminalSegmentIds.length > 0; index++) {
     const segmentId = terminalSegmentIds[index % terminalSegmentIds.length]!;
     const segment = segments[segmentId]!;

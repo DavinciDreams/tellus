@@ -14,6 +14,7 @@ import {
   branchModuleLodView,
   branchModuleTreeFromSpecies,
   branchSegmentPrototypeTemplate,
+  type BranchModuleArchetype,
   type BranchModuleLodLevel,
   type BranchModuleTree,
 } from "./tellus-branch-modules";
@@ -183,6 +184,7 @@ interface BiomeTreeTemplateOptions {
   branchAngle?: number;
   vigor?: number;
   collisionBias?: number;
+  palette?: BranchModuleArchetype;
 }
 
 const DEFAULT_CHUNK_SIZE = 16;
@@ -291,7 +293,7 @@ const buildBranchModuleTreeCached = (
     `${species}|${bucket}|${options.maxBranchDepth ?? ""}|${options.maxStems ?? ""}|` +
     `${options.maxLeaves ?? ""}|${options.leafScaleMultiplier ?? ""}|${options.gnarliness ?? ""}|` +
     `${options.droop ?? ""}|${options.spread ?? ""}|${options.tropism ?? ""}|${options.branchDensity ?? ""}|` +
-    `${options.branchAngle ?? ""}|${options.vigor ?? ""}|${options.collisionBias ?? ""}`;
+    `${options.branchAngle ?? ""}|${options.vigor ?? ""}|${options.collisionBias ?? ""}|${options.palette ?? ""}`;
   let tree = branchModuleTreeCache.get(key);
   if (!tree && !allowColdBuild) return null;
   if (!tree) {
@@ -308,6 +310,7 @@ const buildBranchModuleTreeCached = (
       branchAngle: options.branchAngle,
       vigor: options.vigor,
       collisionBias: options.collisionBias,
+      palette: options.palette,
     });
     branchModuleTreeCache.set(key, tree);
   }
@@ -1399,6 +1402,7 @@ export function createProcPlantVegetation(
         }
         const moduleTree = buildBranchModuleTreeCached(treeBackend.species, patch!.seed ^ i, {
           ...foliageDefaultsForTreeSpecies(treeBackend.species),
+          palette: genome.branchModules?.palette,
           gnarliness: genome.branchModules?.gnarliness,
           droop: genome.branchModules?.droop,
           spread: genome.branchModules?.spread,
