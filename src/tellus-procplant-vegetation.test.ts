@@ -29,6 +29,7 @@ import {
   worldBiomeCellCoordinates,
 } from "./tellus-ecology";
 import {
+  buildCheapTreeTemplate,
   createProcPlantVegetation,
   groundPlantDistanceDensity,
   procPlantTemplateFromAssetTemplate,
@@ -81,6 +82,18 @@ describe("procplant vegetation", () => {
     expect(shouldUseCheapDistantTree("tree", false, 4)).toBe(true);
     expect(shouldUseCheapDistantTree("conifer", false, 4)).toBe(true);
     expect(shouldUseCheapDistantTree("tree", true, 4)).toBe(false);
+  });
+
+  it("gives a custom conifer genome the conifer cutout silhouette even when its id doesn't look like a species name", () => {
+    // A mutation genome exported from the biome mixer can have any id (e.g. "branchModules-excurrent-conifer"),
+    // not a recognizable species name like "balsamFir" — habit must be the authoritative signal for the
+    // cheap/distant silhouette, or a real conifer silently falls back to the generic broadleaf lollipop shape.
+    const conifer = buildCheapTreeTemplate("branchModules-excurrent-conifer", "conifer");
+    const knownConifer = buildCheapTreeTemplate("balsamFir", "conifer");
+    const broadleaf = buildCheapTreeTemplate("someUnrecognizedTreeId", "tree");
+
+    expect(conifer.pos.length).toBe(knownConifer.pos.length);
+    expect(conifer.pos.length).not.toBe(broadleaf.pos.length);
   });
 
   it("reduces distant ground-plant density without removing the population", () => {

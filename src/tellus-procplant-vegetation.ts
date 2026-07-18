@@ -402,10 +402,15 @@ const templateMinY = (template: ProcPlantTemplate): number => {
   return y;
 };
 
-const buildCheapTreeTemplate = (species: string): ProcPlantTemplate => {
-  const cached = cheapTreeTemplateCache.get(species);
+export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit): ProcPlantTemplate => {
+  const cacheKey = habit === "conifer" ? `${species}|conifer` : species;
+  const cached = cheapTreeTemplateCache.get(cacheKey);
   if (cached) return cached;
-  const conifer = /fir|pine|douglas|larch|spruce/i.test(species);
+  // The regex is a best-effort species-name guess for presets (balsamFir, douglasFir, ...); habit is the
+  // authoritative signal and must win for custom/mutation genomes whose id doesn't follow that convention
+  // (e.g. a mixer-authored "branchModules-excurrent-conifer") — otherwise a real conifer silently falls
+  // through to the generic broadleaf trunk+icosahedron silhouette at distance.
+  const conifer = habit === "conifer" || /fir|pine|douglas|larch|spruce/i.test(species);
   if (conifer) {
     const template = buildRetroCutoutTreeTemplate(hashString(species), undefined, {
       height: /small/i.test(species) ? 0.98 : /douglas|redwood/i.test(species) ? 1.36 : 1.18,
@@ -413,7 +418,7 @@ const buildCheapTreeTemplate = (species: string): ProcPlantTemplate => {
       planes: /small/i.test(species) ? 3 : 4,
       trunkRadius: /small/i.test(species) ? 0.052 : 0.058,
     });
-    cheapTreeTemplateCache.set(species, template);
+    cheapTreeTemplateCache.set(cacheKey, template);
     return template;
   }
   const trunk = new THREE.CylinderGeometry(0.055, 0.085, 0.78, 6);
@@ -454,7 +459,7 @@ const buildCheapTreeTemplate = (species: string): ProcPlantTemplate => {
     sway,
     idx,
   };
-  cheapTreeTemplateCache.set(species, template);
+  cheapTreeTemplateCache.set(cacheKey, template);
   return template;
 };
 
@@ -1355,7 +1360,7 @@ export function createProcPlantVegetation(
           .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
           .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02, z));
         if (travelBuild) {
-          const template = buildCheapTreeTemplate(treeBackend.species);
+          const template = buildCheapTreeTemplate(treeBackend.species, genome.habit);
           stemTemplates.push({ template, matrix: treeMatrix });
           chunk.stats.plants++;
           chunk.stats.stemTriangles += template.idx.length / 3;
@@ -1369,7 +1374,7 @@ export function createProcPlantVegetation(
         if (!moduleTree) {
           // Never run a cold Weber-Penn generation pass in a movement frame. Keep the landscape
           // populated with a cheap cached silhouette and refine this chunk after the player settles.
-          const template = buildCheapTreeTemplate(treeBackend.species);
+          const template = buildCheapTreeTemplate(treeBackend.species, genome.habit);
           stemTemplates.push({ template, matrix: treeMatrix });
           chunk.stats.plants++;
           chunk.stats.stemTriangles += template.idx.length / 3;
@@ -1423,7 +1428,7 @@ export function createProcPlantVegetation(
       }
       const useCheapDistantTree = shouldUseCheapDistantTree(genome.habit, useDetailedTree, baseScale);
       if (useCheapDistantTree) {
-        const template = buildCheapTreeTemplate(genome.weberPenn?.species ?? genome.id);
+        const template = buildCheapTreeTemplate(genome.weberPenn?.species ?? genome.id, genome.habit);
         const scale = baseScale * PROC_TREE_FAR_SCALE * THREE.MathUtils.lerp(0.9, 1.2, rand());
         const matrix = new THREE.Matrix4()
           .makeRotationY(rand() * Math.PI * 2)
