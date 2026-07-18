@@ -168,6 +168,10 @@ const archetypeFromSpeciesName = (speciesId: string): BranchModuleArchetype => {
 };
 
 const UNIT_Y = new THREE.Vector3(0, 1, 0);
+// Real branching (and phyllotaxis generally) never lands multiple limbs at the exact same height in an
+// even radial spoke pattern — that mechanical regularity is what makes a procedural tree read as fake.
+// The golden angle spaces successive branches so no two ever repeat the same azimuth within many turns.
+const BRANCH_GOLDEN_ANGLE = THREE.MathUtils.degToRad(137.50776405);
 const prototypeTemplates = new Map<BranchSegmentPrototypeId, ProcPlantTemplate>();
 
 const prototypeForTaper = (tipRatio: number): BranchSegmentPrototypeId => {
@@ -570,10 +574,16 @@ export function branchModuleTreeFromSpecies(
     // the yaw gap enforced between a depth level's children, spreading them further apart around the
     // parent so branches visually overlap less as the tree fills in.
     const collisionYawPad = collisionBias * 0.4;
+    // A fixed evenly-spaced "along" term (child/childCount) put every depth-0 branch at one of a small
+    // number of exact heights, and an evenly-divided yaw put them all at one of a small number of exact
+    // azimuths — together that reproduces a mechanical stacked-wheel silhouette (flat branch "tiers"
+    // evenly spun around the trunk) rather than a real tree's irregular canopy. Real randomization
+    // (not a small perturbation on an even grid) plus golden-angle azimuth spacing removes both patterns
+    // while keeping branches spread across the trunk's height and around its circumference on average.
     for (let child = 0; child < childCount; child++) {
       const along = parent.depth === 0
-        ? 0.22 + (child + 0.35 + random() * 0.3) / Math.max(1, childCount) * 0.72
-        : 0.38 + random() * 0.58;
+        ? 0.2 + random() * 0.74
+        : 0.32 + random() * 0.62;
       const segmentIndex = Math.min(
         parentSegments.length - 1,
         Math.floor(along * parentSegments.length),
@@ -583,7 +593,7 @@ export function branchModuleTreeFromSpecies(
       const start = parentSegment.start.clone().lerp(parentSegment.end, localT);
       const yawSpread = 1 + collisionYawPad;
       const yaw = parent.depth === 0
-        ? (child / Math.max(1, childCount)) * Math.PI * 2 * yawSpread + random() * 0.55
+        ? child * BRANCH_GOLDEN_ANGLE * yawSpread + random() * 0.4
         : Math.atan2(
             parentSegment.end.z - parentSegment.start.z,
             parentSegment.end.x - parentSegment.start.x,

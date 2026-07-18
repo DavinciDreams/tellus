@@ -166,4 +166,24 @@ describe("branch module trees", () => {
     const trunkSegments = (tree: typeof guessed) => tree.modules.find((m) => m.depth === 0)!.segmentIds.length;
     expect(trunkSegments(forced)).not.toBe(trunkSegments(guessed));
   });
+
+  it("spaces branches irregularly instead of an evenly-tiered wagon-wheel pattern", () => {
+    // The old formula placed every trunk branch at (child/childCount)*height and yaw evenly divided
+    // around a full circle — a small random perturbation on top of an even grid still reads as a
+    // mechanically regular stack of flat branch "tiers" once rendered. Real irregular spacing should
+    // have gap sizes whose standard deviation is comparable to (not tiny relative to) the mean gap.
+    const tree = branchModuleTreeFromSpecies("cambridgeOak", 1, {
+      maxBranchDepth: 3, maxStems: 90, maxLeaves: 320,
+    });
+    const depth1 = tree.modules.filter((m) => m.depth === 1);
+    expect(depth1.length).toBeGreaterThan(3);
+    const heights = depth1
+      .map((m) => tree.segments[m.segmentIds[0]!]!.start.y)
+      .sort((a, b) => a - b);
+    const gaps = heights.slice(1).map((h, i) => h - heights[i]!);
+    const meanGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    const variance = gaps.reduce((sum, g) => sum + (g - meanGap) ** 2, 0) / gaps.length;
+    const coefficientOfVariation = Math.sqrt(variance) / meanGap;
+    expect(coefficientOfVariation).toBeGreaterThan(0.4);
+  });
 });
