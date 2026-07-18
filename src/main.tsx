@@ -4641,7 +4641,32 @@ function createTellusWorld(
         }
       }
       const wildlifePatch = wildlifePatchFromWorldPatch(parsed);
-      if (wildlifePatch) wildlifeInterpolation.applyPatch(wildlifePatch);
+      if (wildlifePatch) {
+        // Hyades keeps durable configuration on the per-herd grain. A client which was already connected when
+        // another owner configured the herd may see its first semantic patch before a fresh snapshot; hydrate a
+        // conservative deer config so the authoritative movement is still rendered and animated immediately.
+        for (const animal of wildlifePatch.animals) {
+          if (wildlifeConfigs.has(animal.id)) continue;
+          const thing = thingById(animal.id);
+          wildlifeConfigs.set(animal.id, {
+            animalId: animal.id,
+            enabled: true,
+            speciesProfileId: DEER_WILDLIFE_PROFILE.id,
+            movementMode: DEER_WILDLIFE_PROFILE.movementMode,
+            herdId: wildlifePatch.herdId,
+            home: {
+              kind: "circle",
+              center: { x: thing?.position.x ?? animal.position.x, z: thing?.position.z ?? animal.position.z },
+              radiusMeters: 48,
+            },
+            seed: Math.abs([...animal.id].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) | 0, 17)),
+            populationEligible: true,
+            revision: animal.revision,
+          });
+          uninstanceThing(animal.id);
+        }
+        wildlifeInterpolation.applyPatch(wildlifePatch);
+      }
       const configuredWildlife = wildlifeConfiguredFromWorldPatch(parsed);
       if (configuredWildlife) {
         for (const config of configuredWildlife) {
