@@ -7,6 +7,7 @@ import {
   buildProcPlantRuntimePackage,
   createProcPlantConiferSprayGeometry,
   createProcPlantLeafGeometry,
+  defaultPlantEnvironment,
   procPlantPresets,
   resolveProcPlantCommunity,
   type ProcPlantTemplate,
@@ -156,6 +157,17 @@ describe("procplant vegetation", () => {
     expect(groundPlantDistanceDensity("palm", 100, false)).toBe(1);
     expect(groundPlantDistanceDensity("tree", 100, false)).toBe(1);
   });
+  it("gives shrub-habit presets enough branch structure and density to read as a bush, not a single stalk", () => {
+    const understoryShrub = buildProcPlantTemplate(procPlantPresets.understoryShrub, 1, defaultPlantEnvironment());
+    const roseBush = buildProcPlantTemplate(procPlantPresets.roseBush, 1, defaultPlantEnvironment());
+    // A single unbranched stalk would produce roughly genome.nodeCount stems; a real bush needs several
+    // multiples of that from repeated branching off the main stem.
+    expect(understoryShrub.stats.stems).toBeGreaterThan(procPlantPresets.understoryShrub.nodeCount * 3);
+    expect(understoryShrub.stats.leaves).toBeGreaterThan(50);
+    expect(roseBush.stats.stems).toBeGreaterThan(procPlantPresets.roseBush.nodeCount * 3);
+    expect(roseBush.stats.leaves).toBeGreaterThan(50);
+  });
+
   it("keeps expensive authored-only plants out of global biome defaults", () => {
     const paints = [
       "meadow", "flowers", "grass", "beach", "dirt", "forest-floor", "desert-sand",

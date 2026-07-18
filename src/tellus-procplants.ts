@@ -954,12 +954,12 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
   understoryShrub: {
     id: "understoryShrub",
     habit: "shrub",
-    nodeCount: 15,
+    nodeCount: 22,
     internode: { base: 0.14, tip: 0.08, curve: 1.15 },
     phyllotaxisAngle: GOLDEN_ANGLE,
-    branchChance: { base: 0.36, tip: 0.12, curve: 1.6 },
-    branchAngle: { mean: 0.64, spread: 0.22, depthDecay: 0.68 },
-    apicalDominance: 0.48,
+    branchChance: { base: 0.56, tip: 0.24, curve: 1.4 },
+    branchAngle: { mean: 0.64, spread: 0.22, depthDecay: 0.8 },
+    apicalDominance: 0.32,
     leaf: {
       shape: "ovate",
       length: { base: 0.28, tip: 0.18, curve: 1 },
@@ -1173,12 +1173,12 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
   roseBush: {
     id: "roseBush",
     habit: "shrub",
-    nodeCount: 16,
+    nodeCount: 22,
     internode: { base: 0.12, tip: 0.07, curve: 1.22 },
     phyllotaxisAngle: GOLDEN_ANGLE,
-    branchChance: { base: 0.42, tip: 0.16, curve: 1.45 },
-    branchAngle: { mean: 0.58, spread: 0.22, depthDecay: 0.74 },
-    apicalDominance: 0.34,
+    branchChance: { base: 0.6, tip: 0.26, curve: 1.3 },
+    branchAngle: { mean: 0.58, spread: 0.22, depthDecay: 0.84 },
+    apicalDominance: 0.24,
     leaf: {
       shape: "round",
       length: { base: 0.2, tip: 0.13, curve: 1 },
@@ -1888,8 +1888,12 @@ export const buildProcPlantGraph = (
         curve(genome.branchChance, t) *
         branchShadePenalty *
         Math.pow(genome.branchAngle.depthDecay, depth);
+      // Shrubs read as bushy only with several branch generations off the main stem; a depth cap of 2
+      // (fine for cheap ground-cover graphs) left every shrub-habit preset looking like a single sparse
+      // stalk with one or two side branches instead of a dense mound.
+      const maxBranchDepthForHabit = genome.habit === "shrub" ? 4 : 2;
       if (
-        depth < 2 &&
+        depth < maxBranchDepthForHabit &&
         i > 2 &&
         i < count - 1 &&
         rng() < branchChance * (1 - genome.apicalDominance * t)
