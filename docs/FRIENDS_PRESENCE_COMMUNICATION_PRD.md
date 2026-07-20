@@ -22,6 +22,9 @@ This project has three independent, sequential increments:
 
 Only increment 1 is scoped in detail here. Increments 2 and 3 are described at a goals/non-goals level so their dependencies are visible, but each gets its own PRD before implementation.
 
+Phase 2's implementation-ready relationship contract is now specified in
+[`FRIENDS_RELATIONSHIPS_PHASE_2_PRD.md`](./FRIENDS_RELATIONSHIPS_PHASE_2_PRD.md).
+
 ## 2. Problem statement
 
 Messaging, a friends list, cross-world presence, and P2P calling all fail (or can't exist) for the same root reason: **there was no cross-world identity/presence layer.** That gap is now closed on the Hyades side; Tellus has not caught up.
