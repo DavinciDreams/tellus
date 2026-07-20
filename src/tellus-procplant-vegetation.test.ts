@@ -5,6 +5,9 @@ import {
   buildProcPlantInstancedParts,
   buildProcPlantTemplate,
   buildProcPlantRuntimePackage,
+  createProcPlantConiferSprayGeometry,
+  createProcPlantLeafGeometry,
+  defaultPlantEnvironment,
   procPlantPresets,
   resolveProcPlantCommunity,
   type ProcPlantTemplate,
@@ -96,6 +99,55 @@ describe("procplant vegetation", () => {
     expect(conifer.pos.length).not.toBe(broadleaf.pos.length);
   });
 
+  it("gives branch-module conifers a needle-spray foliage mesh instead of a flat broadleaf leaf card", () => {
+    const scene = new THREE.Scene();
+    const alpineEcology = resolveEcologySample({
+      seed: 1,
+      x: 0,
+      z: 0,
+      height: 40,
+      slope: 0.4,
+      terrainPaint: "snow",
+    });
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-conifer-spray-test",
+      sampleHeight: () => 40,
+      samplePaint: () => "snow",
+      sampleEcology: () => alpineEcology,
+      bounds: { minX: -64, maxX: 64, minZ: -64, maxZ: 64 },
+      densityMultiplier: 4,
+    });
+
+    // Biome trees (treeBackend: {kind: "lsystem", ...}) only build the detailed branch-module tree
+    // (vs. a cheap travel silhouette that never increments branchSegments) once the player has been
+    // stationary for >650ms — hold a fixed position and advance the clock well past that threshold.
+    for (let i = 0; i < 40 && vegetation.stats().branchSegments === 0; i++) {
+      vegetation.update(0, 0, 1, 60, 1000 + i * 900);
+    }
+    expect(vegetation.stats().branchSegments).toBeGreaterThan(0);
+
+    const sprayGeometry = createProcPlantConiferSprayGeometry();
+    const meshes: THREE.InstancedMesh[] = [];
+    scene.traverse((child) => {
+      if (child instanceof THREE.InstancedMesh) meshes.push(child);
+    });
+    const hasSprayMesh = meshes.some(
+      (mesh) => mesh.geometry.getAttribute("position").count === sprayGeometry.getAttribute("position").count,
+    );
+    const hasFlatLeafCardOfWrongShape = meshes.some((mesh) => {
+      const count = mesh.geometry.getAttribute("position").count;
+      // A "fan"/"ovate"/etc leaf card from createProcPlantLeafGeometry has a much smaller, odd
+      // (2*segments+2) vertex count than the multi-plate conifer spray mesh.
+      return count === createProcPlantLeafGeometry("fan", 1, 0, 0).getAttribute("position").count;
+    });
+
+    expect(hasSprayMesh).toBe(true);
+    expect(hasFlatLeafCardOfWrongShape).toBe(false);
+
+    vegetation.dispose();
+  });
+
   it("reduces distant ground-plant density without removing the population", () => {
     expect(groundPlantDistanceDensity("tropical", 30, false)).toBe(1);
     expect(groundPlantDistanceDensity("flower", 50, false)).toBeLessThan(1);
@@ -105,6 +157,17 @@ describe("procplant vegetation", () => {
     expect(groundPlantDistanceDensity("palm", 100, false)).toBe(1);
     expect(groundPlantDistanceDensity("tree", 100, false)).toBe(1);
   });
+  it("gives shrub-habit presets enough branch structure and density to read as a bush, not a single stalk", () => {
+    const understoryShrub = buildProcPlantTemplate(procPlantPresets.understoryShrub, 1, defaultPlantEnvironment());
+    const roseBush = buildProcPlantTemplate(procPlantPresets.roseBush, 1, defaultPlantEnvironment());
+    // A single unbranched stalk would produce roughly genome.nodeCount stems; a real bush needs several
+    // multiples of that from repeated branching off the main stem.
+    expect(understoryShrub.stats.stems).toBeGreaterThan(procPlantPresets.understoryShrub.nodeCount * 3);
+    expect(understoryShrub.stats.leaves).toBeGreaterThan(50);
+    expect(roseBush.stats.stems).toBeGreaterThan(procPlantPresets.roseBush.nodeCount * 3);
+    expect(roseBush.stats.leaves).toBeGreaterThan(50);
+  });
+
   it("keeps expensive authored-only plants out of global biome defaults", () => {
     const paints = [
       "meadow", "flowers", "grass", "beach", "dirt", "forest-floor", "desert-sand",
