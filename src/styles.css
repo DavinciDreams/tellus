@@ -1097,6 +1097,15 @@ textarea::placeholder {
   text-overflow: ellipsis;
 }
 
+.mini-chat-contact-main:disabled {
+  cursor: default;
+  opacity: 0.78;
+}
+
+.mini-chat-contact-main:disabled small {
+  color: var(--hud-gold);
+}
+
 .mini-chat-contact-go {
   color: var(--hud-gold-bright);
   padding-inline: 7px;
