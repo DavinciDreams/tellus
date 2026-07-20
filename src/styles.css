@@ -1055,6 +1055,127 @@ textarea::placeholder {
   text-transform: uppercase;
 }
 
+.mini-chat-friends {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(0 0 0 / 18%);
+  padding: 7px;
+}
+
+.mini-chat-friends-heading,
+.mini-chat-friends-empty,
+.mini-chat-friend-group li,
+.mini-chat-friend-list li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.mini-chat-friends-heading {
+  justify-content: space-between;
+  color: var(--hud-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.mini-chat-friends h3,
+.mini-chat-friends h4,
+.mini-chat-friends p,
+.mini-chat-friends ul {
+  margin: 0;
+}
+
+.mini-chat-friends h3 {
+  color: var(--hud-gold-bright);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.mini-chat-friends h4 {
+  color: var(--hud-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.mini-chat-friends ul {
+  display: grid;
+  gap: 5px;
+  padding: 0;
+  list-style: none;
+}
+
+.mini-chat-friend-group {
+  display: grid;
+  gap: 4px;
+}
+
+.mini-chat-friend-group li,
+.mini-chat-friend-list li {
+  min-width: 0;
+  border-top: 1px solid rgb(255 244 185 / 8%);
+  padding-top: 5px;
+}
+
+.mini-chat-friend-group li > span,
+.mini-chat-friend-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--hud-text);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-chat-friend-name {
+  display: grid;
+}
+
+.mini-chat-friend-name small,
+.mini-chat-friend-group small {
+  color: var(--hud-muted);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.mini-chat-friend-actions,
+.mini-chat-friend-group li > div {
+  display: flex;
+  gap: 4px;
+}
+
+.mini-chat-friends button {
+  border: 1px solid var(--hud-border-soft);
+  background: rgb(0 0 0 / 20%);
+  color: var(--hud-gold-bright);
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 800;
+  padding: 4px 6px;
+  text-transform: uppercase;
+}
+
+.mini-chat-friends button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.mini-chat-friends-empty {
+  justify-content: space-between;
+  color: var(--hud-muted);
+  font-size: 9px;
+}
+
+.mini-chat-friends-notice {
+  color: var(--hud-text);
+  font-size: 9px;
+}
+
+.mini-chat-friends-notice.error {
+  color: #ffad9f;
+}
+
 .mini-chat-dm-targets > div {
   display: flex;
   gap: 5px;
@@ -1127,6 +1248,13 @@ textarea::placeholder {
 .presence-dot.online {
   background: #65ef8f;
   color: #65ef8f;
+}
+
+.presence-dot.offline {
+  border: 1px solid var(--hud-muted);
+  background: transparent;
+  color: var(--hud-muted);
+  box-shadow: none;
 }
 
 .mini-chat-dm-targets small {

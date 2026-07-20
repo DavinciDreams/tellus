@@ -172,7 +172,7 @@ import {
 import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
 import { generateInteriorRoom, normalizeInteriorBiomeMaterial, type InteriorBiomeMaterial } from "./tellus-building";
 import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
-import { AuthControls, PremiumUpsellChip, useTellusAuth } from "./tellus-auth-ui";
+import { AuthControls, PremiumUpsellChip, openTellusAccountPanel, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
 import { buildAgentMapLocation, resolveAgentMoveTarget } from "./tellus-agent-location";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, shouldIgnoreDefaultTellusTemplate, templateForWorldId, templateSuppressesAutoVegetation } from "./tellus-world-templates";
@@ -186,11 +186,22 @@ import {
 } from "./tellus-asset-reuse";
 import { actorKindForVisitorId, friendlyVisitorName } from "./tellus-visitor-names";
 import {
-  fetchOnlinePresence,
+  fetchPresenceForUsers,
   presenceRegistryDiagnostics,
   setPresencePollIntervalMs,
   type RegistryPresence,
 } from "./tellus-presence-client";
+import {
+  EMPTY_FRIENDS_SNAPSHOT,
+  acceptFriendRequest,
+  declineFriendRequest,
+  fetchFriends,
+  friendsDiagnostics,
+  removeFriend,
+  sendFriendRequest,
+  setFriendsRefreshIntervalMs,
+  type FriendsSnapshot,
+} from "./tellus-friends-client";
 import {
   buildWorldThingRuntimeProfile,
   defaultScaleForRealisticKind,
@@ -277,12 +288,15 @@ interface OnlineContact {
   userId?: string;
   name: string;
   kind: "player" | "agent";
-  worldId: string;
+  worldId?: string;
   position?: Vec3;
   online: boolean;
   currentWorld: boolean;
   canMessage: boolean;
   lastSeenAt?: string;
+  isFriend?: boolean;
+  friendSinceMs?: number;
+  presenceKnown?: boolean;
 }
 
 // One turn of the server-side agent's recent conversation. "assistant" = the agent speaking; "tool" = a tool
@@ -3210,7 +3224,7 @@ function createTellusWorld(
     vegetation: vegetation.stats(),
     procplants: procplants.stats(),
     generatedAssets: generatedAssetPerfStats(),
-    friendsPresence: presenceRegistryDiagnostics(),
+    friendsPresence: { ...presenceRegistryDiagnostics(), relationships: friendsDiagnostics() },
     debug: {
       terrainOnly: terrainOnlyDebug(),
       lowGpu: lowGpuDebug(),
@@ -12073,6 +12087,10 @@ function App(): React.ReactElement {
   } | null>(null);
   const [registryPresence, setRegistryPresence] = useState<RegistryPresence[]>([]);
   const [registryPresenceStatus, setRegistryPresenceStatus] = useState<"idle" | "loading" | "ready" | "unknown">("idle");
+  const [friendsSnapshot, setFriendsSnapshot] = useState<FriendsSnapshot>(EMPTY_FRIENDS_SNAPSHOT);
+  const [friendsStatus, setFriendsStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [friendsNotice, setFriendsNotice] = useState<{ kind: "status" | "error"; text: string } | null>(null);
+  const [friendMutationsBusy, setFriendMutationsBusy] = useState<ReadonlySet<string>>(() => new Set());
   const [portalTargetWorldId, setPortalTargetWorldId] = useState("");
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
   const [showFps, setShowFps] = useState(false);
@@ -15337,27 +15355,79 @@ function App(): React.ReactElement {
     return friendlyVisitorName(visitor.visitorId, visitor.name, snapshot.visitorId);
   };
   const currentWorldId = activeWorldId ?? runtimeConfig.worldId;
+  const refreshFriends = useCallback(async (signal?: AbortSignal, showLoading = false) => {
+    if (!account?.accountId) return false;
+    if (showLoading) setFriendsStatus("loading");
+    try {
+      const next = await fetchFriends(signal);
+      setFriendsSnapshot(next);
+      setFriendsStatus("ready");
+      setFriendsNotice((current) => current?.kind === "error" ? null : current);
+      return true;
+    } catch (error) {
+      if (signal?.aborted) return;
+      setFriendsStatus("error");
+      setFriendsNotice({ kind: "error", text: error instanceof Error ? error.message : "Friends are temporarily unavailable." });
+      return false;
+    }
+  }, [account?.accountId]);
+
   useEffect(() => {
+    if (!account?.accountId) return;
+    const controller = new AbortController();
+    void refreshFriends(controller.signal, true);
+    return () => controller.abort();
+  }, [account?.accountId, refreshFriends]);
+
+  useEffect(() => {
+    if (!account?.accountId) {
+      setFriendsSnapshot(EMPTY_FRIENDS_SNAPSHOT);
+      setFriendsStatus("idle");
+      setRegistryPresence([]);
+      setRegistryPresenceStatus("idle");
+      setFriendsNotice(null);
+      setFriendMutationsBusy(new Set());
+      return;
+    }
     if (!worldChatOpen || chatTab !== "dm") return;
+    const controller = new AbortController();
+    const refreshIntervalMs = 60_000;
+    setFriendsRefreshIntervalMs(refreshIntervalMs);
+    void refreshFriends(controller.signal, true);
+    const interval = window.setInterval(() => void refreshFriends(controller.signal), refreshIntervalMs);
+    const onFocus = () => void refreshFriends(controller.signal);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [account?.accountId, chatTab, refreshFriends, worldChatOpen]);
+
+  const friendUserIds = useMemo(() => friendsSnapshot.friends.map((friend) => friend.userId), [friendsSnapshot.friends]);
+  useEffect(() => {
+    if (!account?.accountId || !worldChatOpen || chatTab !== "dm") return;
+    if (friendUserIds.length === 0) {
+      setRegistryPresence([]);
+      setRegistryPresenceStatus("ready");
+      return;
+    }
     const controller = new AbortController();
     let cancelled = false;
     const pollIntervalMs = 10_000;
     setPresencePollIntervalMs(pollIntervalMs);
-
     const loadPresence = async (initial = false) => {
       if (initial) setRegistryPresenceStatus("loading");
       try {
-        const entries = await fetchOnlinePresence(tellusUserId(), controller.signal);
+        const entries = await fetchPresenceForUsers(account.accountId, friendUserIds, controller.signal);
         if (cancelled) return;
         setRegistryPresence(entries);
         setRegistryPresenceStatus("ready");
       } catch {
         if (cancelled || controller.signal.aborted) return;
-        // Keep the last successful roster visible. A failed refresh means unknown, not offline.
         setRegistryPresenceStatus("unknown");
       }
     };
-
     void loadPresence(true);
     const interval = window.setInterval(() => void loadPresence(), pollIntervalMs);
     return () => {
@@ -15365,7 +15435,37 @@ function App(): React.ReactElement {
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [chatTab, worldChatOpen, account?.accountId]);
+  }, [account?.accountId, chatTab, friendUserIds.join("\n"), worldChatOpen]);
+
+  const mutateFriendship = useCallback(async (
+    action: "request" | "accept" | "decline" | "remove",
+    userId: string,
+  ) => {
+    const busyKey = `${action}:${userId}`;
+    setFriendMutationsBusy((current) => new Set(current).add(busyKey));
+    setFriendsNotice(null);
+    try {
+      const result = action === "request"
+        ? await sendFriendRequest(userId)
+        : action === "accept"
+          ? await acceptFriendRequest(userId)
+          : action === "decline"
+            ? await declineFriendRequest(userId)
+            : await removeFriend(userId);
+      const refreshed = await refreshFriends();
+      if (!refreshed) return;
+      const actionLabel = action === "request" ? "Friend request updated" : action === "accept" ? "Friend added" : action === "decline" ? "Request declined" : "Friendship updated";
+      setFriendsNotice({ kind: "status", text: `${actionLabel}. ${result.outcome}.` });
+    } catch (error) {
+      setFriendsNotice({ kind: "error", text: error instanceof Error ? error.message : "The friendship update failed." });
+    } finally {
+      setFriendMutationsBusy((current) => {
+        const next = new Set(current);
+        next.delete(busyKey);
+        return next;
+      });
+    }
+  }, [refreshFriends]);
   const doorInteriorOptions = WORLD_CREATION_TEMPLATES.filter((option) =>
     isInteriorWorldTemplate(option.id),
   );
@@ -15447,22 +15547,31 @@ function App(): React.ReactElement {
     };
 
     for (const visitor of [...remoteAgents, ...remotePlayers]) merge(visitor, currentWorldId, true);
-    for (const presence of registryPresence) {
-      if (!presence.online || presence.userId === snapshot.userId || presence.userId === tellusUserId()) continue;
-      const key = `player:${presence.userId}`;
+    const presenceByUser = new Map(registryPresence.map((entry) => [entry.userId, entry]));
+    for (const friend of friendsSnapshot.friends) {
+      if (friend.userId === snapshot.userId || friend.userId === account?.accountId) continue;
+      const key = `player:${friend.userId}`;
       const existing = byKey.get(key);
-      if (existing?.currentWorld) continue;
+      const presence = presenceByUser.get(friend.userId);
+      const presenceWorldId = presence?.worldId ? canonicalWorldId(presence.worldId) : undefined;
+      const currentWorld = existing?.currentWorld ?? presenceWorldId === currentWorldId;
+      const locallyPresent = Boolean(existing?.currentWorld && existing.online);
+      const presenceKnown = locallyPresent || registryPresenceStatus === "ready";
+      const online = locallyPresent || Boolean(registryPresenceStatus === "ready" && presence?.online);
       byKey.set(key, {
-        visitorId: existing?.visitorId ?? `user:${presence.userId}`,
-        userId: presence.userId,
-        name: presence.name || existing?.name || presence.userId.slice(0, 12),
+        visitorId: existing?.visitorId ?? `user:${friend.userId}`,
+        userId: friend.userId,
+        name: presence?.name || existing?.name || friend.userId.slice(0, 12),
         kind: "player",
-        worldId: canonicalWorldId(presence.worldId),
+        worldId: existing?.worldId ?? presenceWorldId,
         position: existing?.position,
-        online: true,
-        currentWorld: canonicalWorldId(presence.worldId) === currentWorldId,
-        canMessage: Boolean(existing?.canMessage),
-        lastSeenAt: presence.lastSeenAt,
+        online,
+        currentWorld,
+        canMessage: Boolean(existing?.canMessage && currentWorld && online),
+        lastSeenAt: existing?.lastSeenAt || presence?.lastSeenAt,
+        isFriend: true,
+        friendSinceMs: friend.sinceMs,
+        presenceKnown,
       });
     }
 
@@ -15484,8 +15593,10 @@ function App(): React.ReactElement {
     }
 
     return [...byKey.values()]
-      .filter((contact) => contact.online)
+      .filter((contact) => contact.isFriend || contact.online)
       .sort((a, b) => {
+        if (a.isFriend !== b.isFriend) return a.isFriend ? -1 : 1;
+        if (a.online !== b.online) return a.online ? -1 : 1;
         if (a.currentWorld !== b.currentWorld) return a.currentWorld ? -1 : 1;
         if (a.kind !== b.kind) return a.kind === "agent" ? -1 : 1;
         return a.name.localeCompare(b.name);
@@ -15499,12 +15610,22 @@ function App(): React.ReactElement {
     agentStatus?.visitorId,
     agentStatus?.worldId,
     registryPresence,
+    registryPresenceStatus,
+    friendsSnapshot.friends,
+    account?.accountId,
     currentWorldId,
     remoteAgents,
     remotePlayers,
     snapshot.userId,
     snapshot.visitorId,
   ]);
+  const friendContacts = chatTargets.filter((contact) => contact.isFriend);
+  const nearbyContacts = chatTargets.filter((contact) => !contact.isFriend && contact.currentWorld);
+  const relationshipUserIds = useMemo(() => new Set([
+    ...friendsSnapshot.friends.map((entry) => entry.userId),
+    ...friendsSnapshot.pendingIncoming.map((entry) => entry.userId),
+    ...friendsSnapshot.pendingOutgoing.map((entry) => entry.userId),
+  ]), [friendsSnapshot]);
   const openDirectChatFor = (visitor: { visitorId: string; name?: string; position?: Vec3 }) => {
     const target = {
       visitorId: visitor.visitorId,
@@ -15519,6 +15640,7 @@ function App(): React.ReactElement {
     setWorldChatInput("");
   };
   const goToOnlineContact = (contact: OnlineContact) => {
+    if (!contact.worldId || !contact.online) return;
     if (contact.worldId === currentWorldId) {
       if (contact.position) worldRef.current?.warpTo(contact.position.x, contact.position.z);
       return;
@@ -15838,24 +15960,94 @@ function App(): React.ReactElement {
             {chatTab !== "agent" && (
               <>
                 {worldChatChannel === "dm" && (
-              <div className="mini-chat-dm-targets" aria-label="DM recipients">
-                {chatTargets.length === 0 ? (
-                  <span>
-                    {registryPresenceStatus === "loading"
-                      ? "Checking who is online…"
-                      : registryPresenceStatus === "unknown"
-                        ? "Online status is temporarily unavailable."
-                        : "No online players or agents found."}
-                  </span>
+              <>
+              <section className="mini-chat-friends" aria-labelledby="mini-chat-friends-title">
+                <div className="mini-chat-friends-heading">
+                  <h3 id="mini-chat-friends-title">Friends</h3>
+                  {account && friendsStatus === "loading" && <span>Refreshing...</span>}
+                </div>
+                {!account ? (
+                  <div className="mini-chat-friends-empty">
+                    <span>Sign in to add friends and see when they are online.</span>
+                    <button type="button" onClick={openTellusAccountPanel}>Sign in</button>
+                  </div>
                 ) : (
                   <>
-                    <span>{registryPresenceStatus === "unknown" ? "Status unknown" : "To"}</span>
+                    {friendsNotice && (
+                      <p className={`mini-chat-friends-notice ${friendsNotice.kind}`} role={friendsNotice.kind === "error" ? "alert" : "status"} aria-live="polite">
+                        {friendsNotice.text}
+                      </p>
+                    )}
+                    {friendsSnapshot.pendingIncoming.length > 0 && (
+                      <div className="mini-chat-friend-group">
+                        <h4>Requests</h4>
+                        <ul>
+                          {friendsSnapshot.pendingIncoming.map((request) => (
+                            <li key={request.userId}>
+                              <span title={request.userId}>{request.userId.slice(0, 16)}</span>
+                              <div>
+                                <button type="button" disabled={friendMutationsBusy.has(`accept:${request.userId}`)} onClick={() => void mutateFriendship("accept", request.userId)}>Accept</button>
+                                <button type="button" disabled={friendMutationsBusy.has(`decline:${request.userId}`)} onClick={() => void mutateFriendship("decline", request.userId)}>Decline</button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {friendContacts.length > 0 ? (
+                      <ul className="mini-chat-friend-list">
+                        {friendContacts.map((target) => {
+                          const statusText = !target.presenceKnown
+                            ? registryPresenceStatus === "loading" ? "Checking status" : "Status unknown"
+                            : target.online
+                              ? target.currentWorld ? "Online - here" : `Online - ${target.worldId ? worldDisplayName(target.worldId) : "another world"}`
+                              : "Offline";
+                          return (
+                            <li key={target.userId ?? target.visitorId} className={worldChatDmTarget?.visitorId === target.visitorId ? "active" : ""}>
+                              <span className={`presence-dot ${target.online ? "online" : "offline"}`} aria-hidden="true" />
+                              <span className="mini-chat-friend-name" title={target.userId}>{target.name}<small>{statusText}</small></span>
+                              <div className="mini-chat-friend-actions">
+                                <button type="button" disabled={!target.canMessage} onClick={() => setWorldChatDmTarget(target)}>Message</button>
+                                <button type="button" disabled={!target.online || !target.worldId || (target.currentWorld && !target.position)} onClick={() => goToOnlineContact(target)}>Go</button>
+                                <button type="button" disabled={friendMutationsBusy.has(`remove:${target.userId}`)} onClick={() => void mutateFriendship("remove", target.userId!)}>Remove</button>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : friendsStatus === "ready" && friendsSnapshot.pendingIncoming.length === 0 ? (
+                      <p className="mini-chat-friends-empty">No friends yet. Add someone who is here with you.</p>
+                    ) : friendsStatus === "error" ? (
+                      <p className="mini-chat-friends-empty">Your friends list is temporarily unavailable.</p>
+                    ) : null}
+                    {friendsSnapshot.pendingOutgoing.length > 0 && (
+                      <div className="mini-chat-friend-group">
+                        <h4>Sent</h4>
+                        <ul>
+                          {friendsSnapshot.pendingOutgoing.map((request) => (
+                            <li key={request.userId}>
+                              <span title={request.userId}>{request.userId.slice(0, 16)} <small>Pending</small></span>
+                              <button type="button" disabled={friendMutationsBusy.has(`remove:${request.userId}`)} onClick={() => void mutateFriendship("remove", request.userId)}>Cancel</button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+              <div className="mini-chat-dm-targets" aria-label="Nearby DM recipients">
+                {nearbyContacts.length === 0 ? (
+                  <span>No other players or agents are nearby.</span>
+                ) : (
+                  <>
+                    <span>Nearby</span>
                     <div>
-                      {chatTargets.map((target) => (
+                      {nearbyContacts.map((target) => (
                         <div
                           key={target.visitorId}
                           className={`mini-chat-contact ${worldChatDmTarget?.visitorId === target.visitorId ? "active" : ""}`}
-                          title={`${target.name} in ${worldDisplayName(target.worldId)}`}
+                          title={`${target.name} nearby`}
                         >
                           <button
                             type="button"
@@ -15866,8 +16058,19 @@ function App(): React.ReactElement {
                           >
                             <span className="presence-dot online" aria-hidden="true" />
                             <span>{target.name}</span>
-                            <small>{target.currentWorld ? "here" : worldDisplayName(target.worldId)}</small>
+                            <small>here</small>
                           </button>
+                          {account && target.kind === "player" && target.userId && !relationshipUserIds.has(target.userId) && (
+                            <button
+                              type="button"
+                              className="mini-chat-contact-go"
+                              disabled={friendMutationsBusy.has(`request:${target.userId}`)}
+                              aria-label={`Add ${target.name} as a friend`}
+                              onClick={() => void mutateFriendship("request", target.userId!)}
+                            >
+                              Add friend
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="mini-chat-contact-go"
@@ -15886,6 +16089,7 @@ function App(): React.ReactElement {
                   </>
                 )}
               </div>
+              </>
             )}
             <div className="mini-chat-log" role="log" aria-live="polite">
               {visibleWorldChat.slice(-24).map((message) => (
