@@ -167,6 +167,102 @@ describe("branch module trees", () => {
     expect(trunkSegments(forced)).not.toBe(trunkSegments(guessed));
   });
 
+  it("shapes broadleaf scaffolds from wide lower limbs into steep upper leaders", () => {
+    const tree = branchModuleTreeFromSpecies("cambridgeOak", 11, {
+      maxBranchDepth: 3, maxStems: 90, maxLeaves: 220,
+    });
+    const primaries = tree.modules
+      .filter((module) => module.depth === 1)
+      .map((module) => tree.segments[module.segmentIds[0]!]!)
+      .sort((a, b) => a.start.y - b.start.y);
+    expect(primaries.length).toBeGreaterThan(4);
+    const split = Math.floor(primaries.length / 2);
+    const angleFromVertical = (segment: (typeof primaries)[number]) => Math.acos(THREE.MathUtils.clamp(
+      segment.end.clone().sub(segment.start).normalize().dot(new THREE.Vector3(0, 1, 0)),
+      -1,
+      1,
+    ));
+    const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+    const lowerAngle = average(primaries.slice(0, split).map(angleFromVertical));
+    const upperAngle = average(primaries.slice(split).map(angleFromVertical));
+    expect(lowerAngle).toBeGreaterThan(upperAngle + THREE.MathUtils.degToRad(8));
+    expect(upperAngle).toBeLessThan(THREE.MathUtils.degToRad(55));
+  });
+
+  it("makes broadleaf secondary forks inherit their parent limb direction", () => {
+    const tree = branchModuleTreeFromSpecies("cambridgeOak", 13, {
+      maxBranchDepth: 3, maxStems: 90, maxLeaves: 220,
+    });
+    const inheritedDots = tree.modules
+      .filter((module) => module.depth === 2 && module.parentModuleId !== null)
+      .map((module) => {
+        const child = tree.segments[module.segmentIds[0]!]!;
+        const parent = tree.modules[module.parentModuleId!]!;
+        const closestParent = parent.segmentIds
+          .map((id) => tree.segments[id]!)
+          .sort((a, b) => a.start.distanceToSquared(child.start) - b.start.distanceToSquared(child.start))[0]!;
+        return child.end.clone().sub(child.start).normalize().dot(
+          closestParent.end.clone().sub(closestParent.start).normalize(),
+        );
+      });
+    expect(inheritedDots.length).toBeGreaterThan(3);
+    expect(inheritedDots.every((dot) => dot > 0.35)).toBe(true);
+  });
+
+  it("offers rounded, columnar, umbrella, and spreading broadleaf crown presets", () => {
+    const options = {
+      palette: "decurrent-broadleaf" as const,
+      maxBranchDepth: 3,
+      maxStems: 90,
+      maxLeaves: 180,
+    };
+    const rounded = branchModuleTreeFromSpecies("genericTree", 17, { ...options, broadleafCrown: "rounded" });
+    const columnar = branchModuleTreeFromSpecies("genericTree", 17, { ...options, broadleafCrown: "columnar" });
+    const umbrella = branchModuleTreeFromSpecies("genericTree", 17, { ...options, broadleafCrown: "umbrella" });
+    const spreadingTree = branchModuleTreeFromSpecies("genericTree", 17, { ...options, broadleafCrown: "spreading" });
+    const crownWidth = (tree: typeof rounded) => Math.max(
+      ...tree.segments.flatMap((segment) => [
+        Math.hypot(segment.start.x, segment.start.z),
+        Math.hypot(segment.end.x, segment.end.z),
+      ]),
+    );
+    const lowestPrimary = (tree: typeof rounded) => Math.min(
+      ...tree.modules
+        .filter((module) => module.depth === 1)
+        .map((module) => tree.segments[module.segmentIds[0]!]!.start.y),
+    );
+
+    expect(crownWidth(columnar)).toBeLessThan(crownWidth(rounded));
+    expect(crownWidth(umbrella)).toBeGreaterThan(crownWidth(columnar) * 1.35);
+    expect(crownWidth(spreadingTree)).toBeGreaterThan(crownWidth(rounded));
+    expect(lowestPrimary(umbrella)).toBeGreaterThan(lowestPrimary(rounded) + 0.15);
+  });
+
+  it("varies broadleaf card proportions without changing conifer foliage proportions", () => {
+    const broadleaf = branchModuleTreeFromSpecies("genericTree", 21, {
+      palette: "decurrent-broadleaf", maxBranchDepth: 2, maxStems: 60, maxLeaves: 80,
+    });
+    const scales = broadleaf.leaves.map((leaf) => {
+      const scale = new THREE.Vector3();
+      leaf.matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+      return scale.x / scale.y;
+    });
+    expect(Math.max(...scales) - Math.min(...scales)).toBeGreaterThan(0.2);
+
+    const baseConifer = branchModuleTreeFromSpecies("douglasFir", 21, {
+      palette: "excurrent-conifer", maxBranchDepth: 2, maxStems: 60, maxLeaves: 80,
+    });
+    const ignoredCrownOption = branchModuleTreeFromSpecies("douglasFir", 21, {
+      palette: "excurrent-conifer", broadleafCrown: "umbrella", maxBranchDepth: 2, maxStems: 60, maxLeaves: 80,
+    });
+    expect(ignoredCrownOption.segments.map((segment) => segment.end.toArray())).toEqual(
+      baseConifer.segments.map((segment) => segment.end.toArray()),
+    );
+    expect(ignoredCrownOption.leaves.map((leaf) => leaf.matrix.toArray())).toEqual(
+      baseConifer.leaves.map((leaf) => leaf.matrix.toArray()),
+    );
+  });
+
   it("spaces branches irregularly instead of an evenly-tiered wagon-wheel pattern", () => {
     // The old formula placed every trunk branch at (child/childCount)*height and yaw evenly divided
     // around a full circle — a small random perturbation on top of an even grid still reads as a

@@ -155,7 +155,7 @@ export interface ProcPlantGenome {
     leafColor?: number;
   };
   tree?: {
-    crown: "rounded" | "columnar" | "umbrella" | "propRoot";
+    crown: "rounded" | "columnar" | "umbrella" | "spreading" | "propRoot";
     crownStart: number;
     leafClusterScale: number;
     exposedTrunk: number;
@@ -4290,6 +4290,10 @@ const buildBranchModuleGraphTemplate = (
   const crowding = THREE.MathUtils.clamp(env.crowding, 0, 1);
   const lightVector = new THREE.Vector3(0.22, 1, 0.16).normalize();
   const realism = treeRealismTraits({ ...genome, weberPenn: undefined });
+  const crownShape = genome.tree?.crown === "propRoot" ? "spreading" : genome.tree?.crown ?? "rounded";
+  const crownStartForShape = crownShape === "umbrella" ? 0.58 : crownShape === "columnar" ? 0.34 : crownShape === "spreading" ? 0.2 : 0.24;
+  const crownReach = crownShape === "umbrella" ? 1.24 : crownShape === "spreading" ? 1.16 : crownShape === "columnar" ? 0.72 : 1;
+  const crownDeparture = crownShape === "umbrella" ? Math.PI / 2.15 : crownShape === "spreading" ? Math.PI / 2.3 : crownShape === "columnar" ? Math.PI / 3.35 : Math.PI / 2.65;
   const barkColor = new THREE.Color(options.barkColor);
   const baseRadius = options.palette === "shrub" ? 0.036 : options.palette === "vine-ish" ? 0.014 : 0.058;
   const trunkCount = options.palette === "shrub" ? 3 : 1;
@@ -4333,7 +4337,11 @@ const buildBranchModuleGraphTemplate = (
       );
       segments.push([previous.index, node.index]);
       previous = node;
-      const crownStart = options.palette === "excurrent-conifer" ? 0.12 : options.palette === "palm-ish" ? 0.76 : 0.22;
+      const crownStart = options.palette === "excurrent-conifer"
+        ? 0.12
+        : options.palette === "palm-ish"
+          ? 0.76
+          : genome.tree?.crownStart ?? crownStartForShape;
       if (t > crownStart && options.palette !== "palm-ish") {
         const starterCount = options.palette === "excurrent-conifer"
           ? 1
@@ -4345,7 +4353,7 @@ const buildBranchModuleGraphTemplate = (
             node,
             direction: dir,
             depth: 1,
-            length: length * (options.palette === "excurrent-conifer" ? 1.15 : options.palette === "weeping" ? 1.9 : 1.75),
+            length: length * (options.palette === "excurrent-conifer" ? 1.15 : options.palette === "weeping" ? 1.9 : 1.75 * crownReach),
             vigor: options.vigor * (1 - t * 0.18) * (0.88 + starter * 0.04),
             t,
           });
@@ -4386,7 +4394,7 @@ const buildBranchModuleGraphTemplate = (
         options.palette === "excurrent-conifer" ? Math.PI / 2.05 + depthT * 0.38 :
         options.palette === "weeping" ? Math.PI / 2.2 :
         options.palette === "vine-ish" ? Math.PI / 3.8 :
-        Math.PI / 2.65;
+        module.depth === 1 && options.palette === "decurrent-broadleaf" ? crownDeparture : Math.PI / 2.65;
       const direction = rotateFromAxis(module.direction, yaw, baseAngle * options.branchAngle * options.spread)
         .add(lightVector.clone().multiplyScalar(options.tropism * shade * 0.12))
         .add(new THREE.Vector3(0, -options.droop * (0.12 + depthT * 0.18), 0))

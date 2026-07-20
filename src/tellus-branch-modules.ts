@@ -81,6 +81,8 @@ export interface BranchModuleTreeOptions {
    * this overrides the species-name regex guess below; presets that don't set it keep working exactly
    * as before via that regex. */
   palette?: BranchModuleArchetype;
+  /** Broadleaf silhouette preset. Ignored by conifers and the non-tree archetypes. */
+  broadleafCrown?: BroadleafCrownShape;
 }
 
 export type BranchModuleArchetype =
@@ -90,6 +92,8 @@ export type BranchModuleArchetype =
   | "shrub"
   | "palm-ish"
   | "vine-ish";
+
+export type BroadleafCrownShape = "rounded" | "columnar" | "umbrella" | "spreading";
 
 interface ArchetypeShape {
   /** Trunk segment count and starting radius. */
@@ -116,6 +120,55 @@ interface ArchetypeShape {
   /** Segment count for non-terminal branch modules (conifers need more segments for their sweep). */
   branchSegmentCount: number;
 }
+
+interface BroadleafCrownPreset {
+  crownStart: number;
+  lowerDepartureAngle: number;
+  upperDepartureAngle: number;
+  horizontalReach: number;
+  primaryLength: number;
+  primaryCount: number;
+  trunkSegments: number;
+}
+
+const BROADLEAF_CROWN_PRESETS: Record<BroadleafCrownShape, BroadleafCrownPreset> = {
+  rounded: {
+    crownStart: 0.24,
+    lowerDepartureAngle: 61,
+    upperDepartureAngle: 29,
+    horizontalReach: 1,
+    primaryLength: 1,
+    primaryCount: 7,
+    trunkSegments: 6,
+  },
+  columnar: {
+    crownStart: 0.34,
+    lowerDepartureAngle: 43,
+    upperDepartureAngle: 19,
+    horizontalReach: 0.66,
+    primaryLength: 0.78,
+    primaryCount: 8,
+    trunkSegments: 7,
+  },
+  umbrella: {
+    crownStart: 0.58,
+    lowerDepartureAngle: 72,
+    upperDepartureAngle: 55,
+    horizontalReach: 1.28,
+    primaryLength: 1.16,
+    primaryCount: 8,
+    trunkSegments: 7,
+  },
+  spreading: {
+    crownStart: 0.2,
+    lowerDepartureAngle: 69,
+    upperDepartureAngle: 36,
+    horizontalReach: 1.2,
+    primaryLength: 1.14,
+    primaryCount: 8,
+    trunkSegments: 6,
+  },
+};
 
 // One config per named archetype — the params captured here reproduce the exact shapes the previous
 // per-flag branching produced for excurrent-conifer/decurrent-broadleaf/weeping, plus 3 new archetypes
@@ -443,11 +496,15 @@ export function branchModuleTreeFromSpecies(
   const archetype = options.palette ?? archetypeFromSpeciesName(speciesId);
   const shape = ARCHETYPE_SHAPES[archetype];
   const conifer = archetype === "excurrent-conifer";
+  const broadleaf = archetype === "decurrent-broadleaf";
   const weeping = archetype === "weeping";
   // Sub-variants within decurrent-broadleaf — narrower species-name hints that tweak proportions
   // without warranting their own archetype (they don't change the branching *pattern*, just scale).
   const slender = archetype === "decurrent-broadleaf" && /birch|aspen|poplar/.test(speciesId);
   const spreading = archetype === "decurrent-broadleaf" && /oak|sassafras|tupelo|acacia/.test(speciesId);
+  const broadleafCrown: BroadleafCrownShape = options.broadleafCrown ??
+    (slender ? "columnar" : spreading ? "spreading" : "rounded");
+  const crownPreset = BROADLEAF_CROWN_PRESETS[broadleafCrown];
   const blossom = /cherry|apple|magnolia/.test(speciesId);
   let speciesHash = 2166136261;
   for (let i = 0; i < speciesId.length; i++) {
@@ -549,7 +606,7 @@ export function branchModuleTreeFromSpecies(
     return id;
   };
 
-  const trunkSegments = slender ? 7 : shape.trunkSegments;
+  const trunkSegments = broadleaf ? crownPreset.trunkSegments : slender ? 7 : shape.trunkSegments;
   const trunkRadius = spreading ? 0.068 : shape.trunkRadius;
   addModule(null, 0, new THREE.Vector3(), UNIT_Y, 1, trunkRadius, trunkSegments);
   const pending = [0];
@@ -560,7 +617,7 @@ export function branchModuleTreeFromSpecies(
     const parentSegments = parent.segmentIds.map((id) => segments[id]!).filter(Boolean);
     if (parentSegments.length === 0) continue;
     const nextDepth = parent.depth + 1;
-    const firstGenChildren = spreading ? 8 : slender ? 7 : shape.firstGenChildren;
+    const firstGenChildren = broadleaf ? crownPreset.primaryCount : shape.firstGenChildren;
     const desiredChildren = Math.max(1, Math.round(
       (parent.depth === 0
         ? firstGenChildren
@@ -582,7 +639,9 @@ export function branchModuleTreeFromSpecies(
     // while keeping branches spread across the trunk's height and around its circumference on average.
     for (let child = 0; child < childCount; child++) {
       const along = parent.depth === 0
-        ? 0.2 + random() * 0.74
+        ? broadleaf
+          ? crownPreset.crownStart + random() * (0.95 - crownPreset.crownStart)
+          : 0.2 + random() * 0.74
         : 0.32 + random() * 0.62;
       const segmentIndex = Math.min(
         parentSegments.length - 1,
@@ -591,6 +650,7 @@ export function branchModuleTreeFromSpecies(
       const parentSegment = parentSegments[segmentIndex]!;
       const localT = THREE.MathUtils.clamp(along * parentSegments.length - segmentIndex, 0.08, 0.96);
       const start = parentSegment.start.clone().lerp(parentSegment.end, localT);
+      const parentDirection = parentSegment.end.clone().sub(parentSegment.start).normalize();
       const yawSpread = 1 + collisionYawPad;
       const yaw = parent.depth === 0
         ? child * BRANCH_GOLDEN_ANGLE * yawSpread + random() * 0.4
@@ -611,19 +671,90 @@ export function branchModuleTreeFromSpecies(
             : 0.28 + random() * 0.28;
       const vertical = baseVertical - shape.archetypeDroop * nextDepth * 0.09 - droop * 0.22 + tropism * 0.16;
       const horizontal = (spreading ? 1.15 : slender ? 0.72 : shape.horizontalReach) * spreadMul;
-      const direction = new THREE.Vector3(
-        Math.cos(yaw) * horizontal,
-        vertical * branchAngleMul,
-        Math.sin(yaw) * horizontal,
-      ).normalize();
-      if (nextDepth > 1) {
-        direction.lerp(parentSegment.end.clone().sub(parentSegment.start).normalize(), 0.28).normalize();
+      let direction: THREE.Vector3;
+      if (broadleaf && parent.depth === 0) {
+        // Weber-Penn-style primary limbs vary their down-angle over the crown: broad lower scaffolds
+        // give way to steep upper co-dominant leaders. Constructing the direction from a true angle to
+        // vertical avoids the near-horizontal wagon-wheel branches produced by independent XZ/Y weights.
+        const crownT = THREE.MathUtils.clamp(
+          (along - crownPreset.crownStart) / (0.95 - crownPreset.crownStart),
+          0,
+          1,
+        );
+        const lowerAngle = crownPreset.lowerDepartureAngle;
+        const upperAngle = crownPreset.upperDepartureAngle;
+        const angleJitter = (random() - 0.5) * (spreading ? 14 : 12);
+        const departureAngle = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(
+          (THREE.MathUtils.lerp(lowerAngle, upperAngle, crownT) + angleJitter) * branchAngleMul - tropism * 7 + droop * 6,
+          16,
+          78,
+        ));
+        const radial = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+        direction = radial.multiplyScalar(Math.sin(departureAngle) * spreadMul)
+          .addScaledVector(UNIT_Y, Math.cos(departureAngle))
+          .normalize();
+      } else if (broadleaf) {
+        // Secondary and tertiary branches diverge in the parent's local frame rather than resetting to
+        // a world-space yaw. This preserves directional inheritance and creates nested forks instead of
+        // horizontal rungs attached to an otherwise unrelated parent limb.
+        const reference = Math.abs(parentDirection.y) < 0.92
+          ? UNIT_Y
+          : new THREE.Vector3(1, 0, 0);
+        const side = new THREE.Vector3().crossVectors(parentDirection, reference).normalize();
+        const around = new THREE.Vector3().crossVectors(side, parentDirection).normalize();
+        const localAzimuth = child * BRANCH_GOLDEN_ANGLE * yawSpread + random() * 0.7;
+        const radial = side.multiplyScalar(Math.cos(localAzimuth))
+          .addScaledVector(around, Math.sin(localAzimuth))
+          .normalize();
+        const baseForkAngle = nextDepth === 2 ? 38 : 29;
+        const forkAngle = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(
+          (baseForkAngle + (random() - 0.5) * 14) * branchAngleMul,
+          14,
+          62,
+        ));
+        direction = parentDirection.clone().multiplyScalar(Math.cos(forkAngle))
+          .addScaledVector(radial, Math.sin(forkAngle))
+          .addScaledVector(UNIT_Y, tropism * 0.08 - droop * 0.07)
+          .normalize();
+      } else {
+        direction = new THREE.Vector3(
+          Math.cos(yaw) * horizontal,
+          vertical * branchAngleMul,
+          Math.sin(yaw) * horizontal,
+        ).normalize();
+        if (nextDepth > 1) {
+          direction.lerp(parentDirection, 0.28).normalize();
+        }
       }
       // Higher vigor grows longer limbs that taper more slowly across generations (a well-fed tree
       // keeps investing in branch length instead of shrinking fast); lower vigor tapers off faster.
       const depthScale = Math.pow(shape.depthFalloff * THREE.MathUtils.lerp(1.18, 0.88, THREE.MathUtils.clamp((vigor - 0.4) / 1.6, 0, 1)), nextDepth - 1);
-      const branchLength = (spreading ? 0.42 : shape.baseBranchLength) * depthScale * (0.82 + random() * 0.34) * vigor;
-      const branchRadius = Math.max(0.003, parentSegment.baseRadius * (nextDepth === 1 ? 0.5 : 0.58));
+      const crownT = broadleaf && parent.depth === 0
+        ? THREE.MathUtils.clamp(
+            (along - crownPreset.crownStart) / (0.95 - crownPreset.crownStart),
+            0,
+            1,
+          )
+        : 0.5;
+      // The crown envelope keeps middle/lower scaffold limbs substantial while shortening the upper
+      // leaders enough to round the canopy. It changes transforms only, not module or instance count.
+      const crownEnvelope = broadleafCrown === "umbrella"
+        ? 0.76 + THREE.MathUtils.smoothstep(crownT, 0, 1) * 0.34
+        : broadleafCrown === "columnar"
+          ? 0.72 + Math.sin(crownT * Math.PI) * 0.2
+          : 0.72 + Math.sin(crownT * Math.PI) * 0.38;
+      const crownLengthScale = broadleaf && parent.depth === 0
+        ? crownEnvelope * crownPreset.primaryLength * crownPreset.horizontalReach
+        : 1;
+      const branchLength = (spreading ? 0.42 : shape.baseBranchLength) * depthScale *
+        (0.82 + random() * 0.34) * vigor * crownLengthScale;
+      const primaryRadiusScale = broadleaf && parent.depth === 0
+        ? THREE.MathUtils.lerp(0.56, 0.4, crownT)
+        : 0.5;
+      const branchRadius = Math.max(
+        0.003,
+        parentSegment.baseRadius * (nextDepth === 1 ? primaryRadiusScale : 0.58),
+      );
       const moduleId = addModule(
         parentId,
         nextDepth,
@@ -661,7 +792,16 @@ export function branchModuleTreeFromSpecies(
     ).normalize();
     const normal = right.clone().cross(direction).normalize();
     const matrix = new THREE.Matrix4().makeBasis(right, direction, normal);
-    matrix.scale(new THREE.Vector3(leafScale, leafScale, leafScale));
+    // Keep one shared leaf geometry per authored genome, but vary its aspect per instance so a crown
+    // does not read as hundreds of stamped copies. This changes only instance matrices and therefore
+    // adds neither geometry nor draw calls. Conifer sprays retain their authored uniform proportions.
+    const leafWidthVariation = broadleaf ? 0.76 + random() * 0.48 : 1;
+    const leafLengthVariation = broadleaf ? 0.86 + random() * 0.34 : 1;
+    matrix.scale(new THREE.Vector3(
+      leafScale * leafWidthVariation,
+      leafScale * leafLengthVariation,
+      leafScale,
+    ));
     matrix.setPosition(anchor);
     leaves.push({
       id: leaves.length,

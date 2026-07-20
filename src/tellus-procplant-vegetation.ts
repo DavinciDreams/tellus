@@ -185,6 +185,7 @@ interface BiomeTreeTemplateOptions {
   vigor?: number;
   collisionBias?: number;
   palette?: BranchModuleArchetype;
+  broadleafCrown?: "rounded" | "columnar" | "umbrella" | "spreading";
 }
 
 const DEFAULT_CHUNK_SIZE = 16;
@@ -293,7 +294,8 @@ const buildBranchModuleTreeCached = (
     `${species}|${bucket}|${options.maxBranchDepth ?? ""}|${options.maxStems ?? ""}|` +
     `${options.maxLeaves ?? ""}|${options.leafScaleMultiplier ?? ""}|${options.gnarliness ?? ""}|` +
     `${options.droop ?? ""}|${options.spread ?? ""}|${options.tropism ?? ""}|${options.branchDensity ?? ""}|` +
-    `${options.branchAngle ?? ""}|${options.vigor ?? ""}|${options.collisionBias ?? ""}|${options.palette ?? ""}`;
+    `${options.branchAngle ?? ""}|${options.vigor ?? ""}|${options.collisionBias ?? ""}|${options.palette ?? ""}|` +
+    `${options.broadleafCrown ?? ""}`;
   let tree = branchModuleTreeCache.get(key);
   if (!tree && !allowColdBuild) return null;
   if (!tree) {
@@ -311,6 +313,7 @@ const buildBranchModuleTreeCached = (
       vigor: options.vigor,
       collisionBias: options.collisionBias,
       palette: options.palette,
+      broadleafCrown: options.broadleafCrown,
     });
     branchModuleTreeCache.set(key, tree);
   }
@@ -1411,6 +1414,7 @@ export function createProcPlantVegetation(
           branchAngle: genome.branchModules?.branchAngle,
           vigor: genome.branchModules?.vigor,
           collisionBias: genome.branchModules?.collisionBias,
+          broadleafCrown: genome.tree?.crown === "propRoot" ? "spreading" : genome.tree?.crown,
           ...treeBackend,
         }, allowColdBuilds);
         if (!moduleTree) {
@@ -1456,14 +1460,21 @@ export function createProcPlantVegetation(
           leafBucket = { key: leafKey, geometry: organGeometryForKey(leafKey), instances: [] };
           organBuckets.set(leafKey, leafBucket);
         }
-        const leafA = new THREE.Color(genome.leaf.colorA);
+        const authoredLeafColor = genome.branchModules?.leafColor;
+        const leafA = new THREE.Color(authoredLeafColor ?? genome.leaf.colorA);
         const leafB = new THREE.Color(genome.leaf.colorB);
+        const treeHue = (hash01(renderSeed * 0.754877666) - 0.5) * 0.045;
+        const treeLight = (hash01(renderSeed * 1.324717957) - 0.5) * 0.1;
+        leafA.offsetHSL(treeHue, 0, treeLight);
+        leafB.offsetHSL(treeHue * 0.7, 0, treeLight * 0.75);
         for (const leaf of structuralTree.leaves) {
+          const leafTone = hash01(renderSeed ^ Math.imul(leaf.id + 1, 2654435761));
+          const leafLight = (leafTone - 0.5) * 0.075;
           leafBucket.instances.push({
             kind: foliageKind,
             matrix: treeMatrix.clone().multiply(leaf.matrix),
-            color: leafA.clone().lerp(leafB, 0.35 + rand() * 0.4),
-            sway: 0.65 + rand() * 0.3,
+            color: leafA.clone().lerp(leafB, 0.2 + leafTone * 0.62).offsetHSL(0, 0, leafLight),
+            sway: 0.65 + hash01(renderSeed + leaf.id * 31.17) * 0.3,
           });
           chunk.stats.instances++;
         }

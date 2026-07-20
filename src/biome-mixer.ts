@@ -28,6 +28,7 @@ import {
   GOLDEN_ANGLE_RADIANS,
   procPlantPresets,
   procPlantPresetIds,
+  type LeafShapeKind,
   type ProcPlantGenome,
 } from "./tellus-procplants";
 import { SPECIES, type SpeciesId } from "./vendor/proc-tree/index";
@@ -61,6 +62,27 @@ let currentMix = makeEcologyBiomeMix("taiga");
 let selectedEntryId = currentMix.entries[0]?.id ?? "";
 let selectedPresetId = "blueSpruce";
 let selectedWeberPennSpecies = "balsamFir";
+const branchModulePalettes = [
+  "excurrent-conifer",
+  "decurrent-broadleaf",
+  "weeping",
+  "shrub",
+  "palm-ish",
+  "vine-ish",
+] as const;
+type BranchModulePalette = typeof branchModulePalettes[number];
+type BranchCrownShape = "rounded" | "columnar" | "umbrella" | "spreading";
+const branchModuleLeafShapes: LeafShapeKind[] = [
+  "lanceolate",
+  "ovate",
+  "cordate",
+  "palmate",
+  "spatulate",
+  "fan",
+  "linear",
+  "round",
+];
+let selectedBranchModulePalette: BranchModulePalette = "decurrent-broadleaf";
 let selectedImportedAssetId = "";
 let selectedStoreAssetId = "";
 let selectedStoreAssetLod: TellusBiomeAssetLodPreference = "lod2";
@@ -149,6 +171,13 @@ root.innerHTML = `
             <select id="preset-select"></select>
           </label>
           <button type="button" id="add-preset-button">Add</button>
+        </div>
+        <div class="add-row">
+          <label>
+            Add branch tree
+            <select id="branch-module-select"></select>
+          </label>
+          <button type="button" id="add-branch-module-button">Add</button>
         </div>
         <div class="add-row">
           <label>
@@ -528,6 +557,7 @@ const entryEditor = document.querySelector<HTMLDivElement>("#entry-editor")!;
 const mixTitle = document.querySelector<HTMLHeadingElement>("#mix-title")!;
 const mixCount = document.querySelector<HTMLSpanElement>("#mix-count")!;
 const presetSelect = document.querySelector<HTMLSelectElement>("#preset-select")!;
+const branchModuleSelect = document.querySelector<HTMLSelectElement>("#branch-module-select")!;
 const weberPennSelect = document.querySelector<HTMLSelectElement>("#weber-penn-select")!;
 const fileInput = document.querySelector<HTMLInputElement>("#file-input")!;
 const glbInput = document.querySelector<HTMLInputElement>("#glb-input")!;
@@ -566,6 +596,10 @@ presetSelect.innerHTML = procPlantPresetIds.map(
   (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
 ).join("");
 presetSelect.value = selectedPresetId;
+branchModuleSelect.innerHTML = branchModulePalettes.map(
+  (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
+).join("");
+branchModuleSelect.value = selectedBranchModulePalette;
 weberPennSelect.innerHTML = weberPennSpeciesIds.map(
   (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
 ).join("");
@@ -1022,6 +1056,85 @@ const templatePresetForSpecies = (species: SpeciesId): string => {
   if (id.includes("tupelo")) return "mangroveRoots";
   if (id.includes("sassafras")) return "acaciaUmbrella";
   return "oakCanopy";
+};
+
+const branchModuleTemplateForPalette = (palette: BranchModulePalette): ProcPlantGenome => {
+  if (palette === "excurrent-conifer") return procPlantPresets.blueSpruce;
+  if (palette === "weeping") return procPlantPresets.birchGrove;
+  if (palette === "shrub") return procPlantPresets.understoryShrub;
+  if (palette === "palm-ish") return procPlantPresets.foldedPalm;
+  if (palette === "vine-ish") return procPlantPresets.vincaVine;
+  return procPlantPresets.oakCanopy;
+};
+
+const defaultBranchCrown = (palette: BranchModulePalette): BranchCrownShape =>
+  palette === "weeping" ? "columnar" : palette === "palm-ish" ? "umbrella" : palette === "shrub" ? "spreading" : "rounded";
+
+const makeBranchModuleGenome = (palette: BranchModulePalette, seed: number): ProcPlantGenome => {
+  const base = cloneGenome(branchModuleTemplateForPalette(palette));
+  const conifer = palette === "excurrent-conifer";
+  const shrub = palette === "shrub";
+  const palm = palette === "palm-ish";
+  const vine = palette === "vine-ish";
+  base.id = `branchModules-${palette}`;
+  base.habit = conifer ? "conifer" : shrub ? "shrub" : palm ? "palm" : vine ? "vine" : "tree";
+  base.weberPenn = undefined;
+  base.clump = undefined;
+  base.branchModules = {
+    palette,
+    moduleBudget: conifer ? 112 : shrub ? 88 : palm ? 32 : palette === "decurrent-broadleaf" ? 132 : 104,
+    levels: palm ? 1 : vine ? 4 : palette === "decurrent-broadleaf" ? 4 : 3,
+    vigor: 1,
+    branchDensity: conifer ? 1.05 : shrub ? 1.2 : palm ? 0.4 : vine ? 0.72 : 1.25,
+    branchAngle: conifer ? 0.82 : vine ? 0.55 : shrub ? 1.08 : 1.08,
+    spread: conifer ? 0.58 : shrub ? 1.12 : palm ? 1.35 : 1.08,
+    droop: palette === "weeping" ? 1.15 : conifer ? 0.34 : vine ? 0.7 : 0.18,
+    tropism: conifer ? 0.72 : 0.48,
+    gnarliness: palette === "decurrent-broadleaf" ? 0.38 : palette === "weeping" ? 0.32 : conifer ? 0.16 : 0.24,
+    collisionBias: 0.45,
+    foliageSource: conifer ? "conifer-spray" : "procplants",
+    barkColor: 0x5d4327,
+    leafColor: base.leaf.colorA,
+  };
+  base.foliage = {
+    mass: palm ? 0.62 : conifer ? 1.05 : 0.88,
+    clusterDensity: shrub ? 1.4 : 1.16,
+    whorlDensity: conifer ? 0.85 : 0.58,
+    tipBias: palette === "weeping" ? 0.72 : 0.58,
+    size: conifer ? 0.54 : 0.62,
+  };
+  if (base.tree) {
+    base.tree.crown = defaultBranchCrown(palette);
+    base.tree.crownStart = base.tree.crown === "umbrella" ? 0.58 : base.tree.crown === "columnar" ? 0.34 : 0.24;
+  }
+  base.treeRealism = {
+    crownSpread: conifer ? 0.42 : shrub ? 1.05 : 0.82,
+    crownTaper: conifer ? 0.84 : palette === "weeping" ? 0.24 : 0.38,
+    trunkFlare: shrub ? 0.22 : 0.38,
+    trunkBend: palette === "weeping" ? 0.24 : 0.14,
+    branchGnarl: palette === "decurrent-broadleaf" ? 0.34 : 0.22,
+    windFlex: palette === "weeping" ? 0.72 : 0.52,
+    colorVariance: 0.14,
+  };
+  base.phyllotaxisAngle += (seed % 19) * 0.0002;
+  return base;
+};
+
+const makeBranchModuleEntry = (palette: BranchModulePalette): TellusBiomeMixEntry => {
+  const seed = currentMix.seed ^ ((currentMix.entries.length + 1) * 0x38b5);
+  const genome = makeBranchModuleGenome(palette, seed);
+  return {
+    id: `branch-module-${palette}-${Date.now().toString(36)}`,
+    label: `Branch ${labelForProcPlantId(palette)}`,
+    source: "mutation",
+    genome,
+    weight: 1,
+    density: palette === "shrub" ? 0.38 : 0.22,
+    scale: palette === "shrub" ? 5.2 : 8.4,
+    environment: currentMix.entries[0]?.environment ?? { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
+    seed,
+    enabled: true,
+  };
 };
 
 const makeWeberPennGenome = (species: SpeciesId, seed: number): ProcPlantGenome => {
@@ -1521,6 +1634,7 @@ const renderEntryEditor = () => {
   const isAssetEntry = isAssetMixEntry(entry);
   const previewGenome = isAssetEntry ? null : genomeForMixEntry(entry);
   const weberPenn = previewGenome?.weberPenn;
+  const branchModules = previewGenome?.branchModules;
   const foliage = previewGenome?.foliage;
   const realism = previewGenome?.treeRealism;
   const foliageMode = previewGenome ? weberFoliageMode(previewGenome) : "plain";
@@ -1530,6 +1644,11 @@ const renderEntryEditor = () => {
   const grassHeight = entry.grassHeight ?? entry.scale;
   const grassSpread = entry.grassSpread ?? 1;
   const grassLean = entry.grassLean ?? 0.42;
+  const branchModuleBudget = Math.min(180, branchModules?.moduleBudget ?? 96);
+  const estimatedLeafCards = Math.min(
+    360,
+    Math.round(branchModuleBudget * (foliage?.mass ?? 0.88) * (foliage?.clusterDensity ?? 1.18) * 1.6),
+  );
   entryEditor.innerHTML = `
     <label>
       Label
@@ -1596,6 +1715,133 @@ const renderEntryEditor = () => {
             <input value="${entry.asset.name.replace(/"/g, "&quot;")}" disabled />
           </label>
         </div>
+      </section>
+    ` : ""}
+    ${branchModules && previewGenome ? `
+      <section class="weber-editor">
+        <h3>Branch Tree</h3>
+        <p class="editor-note">Performance-bounded architecture · about ${branchModuleBudget} modules and ${estimatedLeafCards} leaf cards per tree.</p>
+        <label>
+          Growth form
+          <select id="branch-module-palette">
+            ${branchModulePalettes.map((id) => `<option value="${id}" ${id === branchModules.palette ? "selected" : ""}>${labelForProcPlantId(id)}</option>`).join("")}
+          </select>
+        </label>
+        ${branchModules.palette === "decurrent-broadleaf" || branchModules.palette === "weeping" ? `
+          <label>
+            Crown shape
+            <select id="branch-crown-shape">
+              ${(["rounded", "columnar", "umbrella", "spreading"] as BranchCrownShape[]).map((shape) => `<option value="${shape}" ${shape === (previewGenome.tree?.crown ?? defaultBranchCrown(branchModules.palette)) ? "selected" : ""}>${labelForProcPlantId(shape)}</option>`).join("")}
+            </select>
+          </label>
+        ` : ""}
+        <details open>
+          <summary>Architecture</summary>
+          <div class="inline">
+            <label>
+              Module budget
+              <input id="branch-module-budget" type="range" min="18" max="180" value="${branchModuleBudget}" step="1" />
+              <output>${branchModuleBudget}</output>
+            </label>
+            <label>
+              Levels
+              <input id="branch-module-levels" type="range" min="1" max="4" value="${Math.min(4, branchModules.levels ?? 3)}" step="1" />
+              <output>${Math.min(4, branchModules.levels ?? 3)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Branch density
+              <input id="branch-module-density" type="range" min="0.3" max="2.5" value="${branchModules.branchDensity ?? 1.2}" step="0.01" />
+              <output>${(branchModules.branchDensity ?? 1.2).toFixed(2)}</output>
+            </label>
+            <label>
+              Branch angle
+              <input id="branch-module-angle" type="range" min="0.3" max="2" value="${branchModules.branchAngle ?? 1}" step="0.01" />
+              <output>${(branchModules.branchAngle ?? 1).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Spread
+              <input id="branch-module-spread" type="range" min="0.3" max="2.5" value="${branchModules.spread ?? 0.9}" step="0.01" />
+              <output>${(branchModules.spread ?? 0.9).toFixed(2)}</output>
+            </label>
+            <label>
+              Droop
+              <input id="branch-module-droop" type="range" min="0" max="2" value="${branchModules.droop ?? 0.18}" step="0.01" />
+              <output>${(branchModules.droop ?? 0.18).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Phototropism
+              <input id="branch-module-tropism" type="range" min="-1" max="1" value="${branchModules.tropism ?? 0.48}" step="0.01" />
+              <output>${(branchModules.tropism ?? 0.48).toFixed(2)}</output>
+            </label>
+            <label>
+              Gnarliness
+              <input id="branch-module-gnarliness" type="range" min="0" max="3" value="${branchModules.gnarliness ?? 0.24}" step="0.01" />
+              <output>${(branchModules.gnarliness ?? 0.24).toFixed(2)}</output>
+            </label>
+          </div>
+        </details>
+        <details open>
+          <summary>Foliage</summary>
+          <div class="inline">
+            <label>
+              Leaf shape
+              <select id="branch-leaf-shape">
+                ${branchModuleLeafShapes.map((shape) => `<option value="${shape}" ${shape === previewGenome.leaf.shape ? "selected" : ""}>${labelForProcPlantId(shape)}</option>`).join("")}
+              </select>
+            </label>
+            <label>
+              Tip bias
+              <input id="branch-foliage-tip" type="range" min="0" max="1" value="${foliage?.tipBias ?? 0.58}" step="0.01" />
+              <output>${(foliage?.tipBias ?? 0.58).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Foliage mass
+              <input id="branch-foliage-mass" type="range" min="0.1" max="2" value="${foliage?.mass ?? 0.88}" step="0.01" />
+              <output>${(foliage?.mass ?? 0.88).toFixed(2)}</output>
+            </label>
+            <label>
+              Leaf density
+              <input id="branch-foliage-density" type="range" min="0.2" max="2.4" value="${foliage?.clusterDensity ?? 1.18}" step="0.01" />
+              <output>${(foliage?.clusterDensity ?? 1.18).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Leaf size
+              <input id="branch-foliage-size" type="range" min="0.1" max="1.5" value="${foliage?.size ?? 0.62}" step="0.01" />
+              <output>${(foliage?.size ?? 0.62).toFixed(2)}</output>
+            </label>
+            <label>
+              Foliage source
+              <select id="branch-module-foliage">
+                <option value="procplants" ${(branchModules.foliageSource ?? "procplants") === "procplants" ? "selected" : ""}>Broad leaves</option>
+                <option value="conifer-spray" ${branchModules.foliageSource === "conifer-spray" ? "selected" : ""}>Conifer spray</option>
+              </select>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Leaf color
+              <input id="branch-leaf-color-a" type="color" value="${toHexColor(previewGenome.leaf.colorA, 0x668d42)}" />
+            </label>
+            <label>
+              Variation color
+              <input id="branch-leaf-color-b" type="color" value="${toHexColor(previewGenome.leaf.colorB, 0x8cad55)}" />
+            </label>
+          </div>
+          <label>
+            Bark color
+            <input id="branch-bark-color" type="color" value="${toHexColor(branchModules.barkColor, 0x5d4327)}" />
+          </label>
+        </details>
       </section>
     ` : ""}
     ${weberPenn ? `
@@ -1804,6 +2050,99 @@ const renderEntryEditor = () => {
     renderUi();
     rebuildPreview();
   });
+  if (branchModules) {
+    const updateBranchTree = (
+      fn: (genome: ProcPlantGenome) => void,
+      options: { renderList?: boolean; renderEditor?: boolean } = {},
+    ) => {
+      const genome = editableGenomeForEntry(entry);
+      genome.branchModules = genome.branchModules ?? { palette: branchModules.palette };
+      genome.foliage = genome.foliage ?? { mass: 0.88, clusterDensity: 1.18, whorlDensity: 0.58, tipBias: 0.58, size: 0.62 };
+      fn(genome);
+      renderJson();
+      if (options.renderList) renderEntryList();
+      if (options.renderEditor) renderEntryEditor();
+      rebuildPreview();
+    };
+    const bindBranchNumber = (
+      selector: string,
+      format: (value: number) => string,
+      update: (genome: ProcPlantGenome, value: number) => void,
+    ) => {
+      const input = entryEditor.querySelector<HTMLInputElement>(selector);
+      if (!input) return;
+      const output = input.nextElementSibling as HTMLOutputElement;
+      input.addEventListener("input", () => {
+        const value = Number(input.value);
+        output.textContent = format(value);
+        updateBranchTree((genome) => update(genome, value));
+      });
+    };
+    entryEditor.querySelector<HTMLSelectElement>("#branch-module-palette")?.addEventListener("change", (event) => {
+      const palette = (event.currentTarget as HTMLSelectElement).value as BranchModulePalette;
+      updateBranchTree((genome) => {
+        const next = makeBranchModuleGenome(palette, entry.seed);
+        genome.id = next.id;
+        genome.habit = next.habit;
+        genome.branchModules = next.branchModules;
+        genome.tree = next.tree;
+        genome.treeRealism = next.treeRealism;
+        genome.foliage = next.foliage;
+        genome.leaf = next.leaf;
+        genome.lightResponse = next.lightResponse;
+        entry.label = `Branch ${labelForProcPlantId(palette)}`;
+      }, { renderList: true, renderEditor: true });
+    });
+    entryEditor.querySelector<HTMLSelectElement>("#branch-crown-shape")?.addEventListener("change", (event) => {
+      const crown = (event.currentTarget as HTMLSelectElement).value as BranchCrownShape;
+      updateBranchTree((genome) => {
+        genome.tree = genome.tree ?? { crown: "rounded", crownStart: 0.24, leafClusterScale: 1, exposedTrunk: 0.2 };
+        genome.tree.crown = crown;
+        genome.tree.crownStart = crown === "umbrella" ? 0.58 : crown === "columnar" ? 0.34 : crown === "spreading" ? 0.2 : 0.24;
+      }, { renderEditor: true });
+    });
+    bindBranchNumber("#branch-module-budget", (v) => String(Math.round(v)), (genome, value) => {
+      genome.branchModules!.moduleBudget = Math.min(180, Math.round(value));
+    });
+    bindBranchNumber("#branch-module-levels", (v) => String(Math.round(v)), (genome, value) => {
+      genome.branchModules!.levels = Math.min(4, Math.round(value));
+    });
+    bindBranchNumber("#branch-module-density", (v) => v.toFixed(2), (genome, value) => { genome.branchModules!.branchDensity = value; });
+    bindBranchNumber("#branch-module-angle", (v) => v.toFixed(2), (genome, value) => { genome.branchModules!.branchAngle = value; });
+    bindBranchNumber("#branch-module-spread", (v) => v.toFixed(2), (genome, value) => { genome.branchModules!.spread = value; });
+    bindBranchNumber("#branch-module-droop", (v) => v.toFixed(2), (genome, value) => { genome.branchModules!.droop = value; });
+    bindBranchNumber("#branch-module-tropism", (v) => v.toFixed(2), (genome, value) => { genome.branchModules!.tropism = value; });
+    bindBranchNumber("#branch-module-gnarliness", (v) => v.toFixed(2), (genome, value) => { genome.branchModules!.gnarliness = value; });
+    bindBranchNumber("#branch-foliage-mass", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.mass = value; });
+    bindBranchNumber("#branch-foliage-density", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.clusterDensity = value; });
+    bindBranchNumber("#branch-foliage-size", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.size = value; });
+    bindBranchNumber("#branch-foliage-tip", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.tipBias = value; });
+    entryEditor.querySelector<HTMLSelectElement>("#branch-leaf-shape")?.addEventListener("change", (event) => {
+      updateBranchTree((genome) => { genome.leaf.shape = (event.currentTarget as HTMLSelectElement).value as LeafShapeKind; });
+    });
+    entryEditor.querySelector<HTMLSelectElement>("#branch-module-foliage")?.addEventListener("change", (event) => {
+      updateBranchTree((genome) => {
+        genome.branchModules!.foliageSource = (event.currentTarget as HTMLSelectElement).value as "procplants" | "conifer-spray";
+      }, { renderEditor: true });
+    });
+    entryEditor.querySelector<HTMLInputElement>("#branch-leaf-color-a")?.addEventListener("input", (event) => {
+      updateBranchTree((genome) => {
+        const color = fromHexColor((event.currentTarget as HTMLInputElement).value, genome.leaf.colorA);
+        genome.leaf.colorA = color;
+        genome.branchModules!.leafColor = color;
+      }, { renderList: true });
+    });
+    entryEditor.querySelector<HTMLInputElement>("#branch-leaf-color-b")?.addEventListener("input", (event) => {
+      updateBranchTree((genome) => {
+        genome.leaf.colorB = fromHexColor((event.currentTarget as HTMLInputElement).value, genome.leaf.colorB);
+      }, { renderList: true });
+    });
+    entryEditor.querySelector<HTMLInputElement>("#branch-bark-color")?.addEventListener("input", (event) => {
+      updateBranchTree((genome) => {
+        genome.branchModules!.barkColor = fromHexColor((event.currentTarget as HTMLInputElement).value, 0x5d4327);
+      }, { renderList: true });
+    });
+  }
   if (weberPenn) {
     const updateTree = (fn: (genome: ProcPlantGenome) => void, options: { renderList?: boolean; renderEditor?: boolean } = {}) => {
       const genome = editableGenomeForEntry(entry);
@@ -2027,6 +2366,10 @@ presetSelect.addEventListener("change", () => {
   selectedPresetId = presetSelect.value;
 });
 
+branchModuleSelect.addEventListener("change", () => {
+  selectedBranchModulePalette = branchModuleSelect.value as BranchModulePalette;
+});
+
 weberPennSelect.addEventListener("change", () => {
   selectedWeberPennSpecies = weberPennSelect.value;
 });
@@ -2101,6 +2444,15 @@ document.querySelector<HTMLButtonElement>("#add-weber-penn-button")!.addEventLis
   currentMix.entries.push(entry);
   selectedEntryId = entry.id;
   updateStatus(`Added Weber/Penn ${entry.label}.`);
+  renderUi();
+  rebuildPreview();
+});
+
+document.querySelector<HTMLButtonElement>("#add-branch-module-button")!.addEventListener("click", () => {
+  const entry = makeBranchModuleEntry(selectedBranchModulePalette);
+  currentMix.entries.push(entry);
+  selectedEntryId = entry.id;
+  updateStatus(`Added ${entry.label}.`);
   renderUi();
   rebuildPreview();
 });
