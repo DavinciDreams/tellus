@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   biomeMixRenderSignature,
+  genomeForMixEntry,
   isAssetMixEntry,
   makeAuthoredEcologyBiomeMix,
   makeEcologyBiomeMix,
@@ -9,7 +10,13 @@ import {
   normalizeBiomeMixRegistry,
   serializeBiomeMixRegistryForPersistence,
 } from "./tellus-biome-mix";
-import { ECOLOGY_BIOME_OPTIONS, ECOLOGY_TERRAIN_PAINT_MAP } from "./tellus-procplant-biomes";
+import {
+  biomePatchesForPaint,
+  ECOLOGY_BIOME_OPTIONS,
+  ECOLOGY_TERRAIN_PAINT_MAP,
+  treeBackendForBiomePatch,
+} from "./tellus-procplant-biomes";
+import { procPlantPresets } from "./tellus-procplants";
 
 describe("Tellus biome mix normalization", () => {
   it("represents lightweight global fern substitutes as instanced asset entries", () => {
@@ -187,6 +194,21 @@ describe("Tellus biome mix normalization", () => {
     const second = makeAuthoredEcologyBiomeMix("taiga", 17);
     expect(second?.entries[0]?.density).not.toBe(99);
     expect(ECOLOGY_BIOME_OPTIONS.every((biome) => makeAuthoredEcologyBiomeMix(biome, 17) !== null)).toBe(true);
+  });
+
+  it("keeps the reusable tundra small-pine preset aligned with the authored default and gravel fallback", () => {
+    const authored = makeAuthoredEcologyBiomeMix("tundra", 17);
+    const authoredGenome = genomeForMixEntry(authored!.entries[0]!);
+    const registeredGenome = procPlantPresets.tundraSmallPine;
+
+    expect(registeredGenome.weberPenn).toEqual(authoredGenome.weberPenn);
+    expect(registeredGenome.foliage).toEqual(authoredGenome.foliage);
+    expect(registeredGenome.treeRealism).toEqual(authoredGenome.treeRealism);
+
+    const gravelTree = biomePatchesForPaint("gravel", 17)
+      .find((patch) => patch.primary === "tundraSmallPine");
+    expect(gravelTree).toBeDefined();
+    expect(treeBackendForBiomePatch(gravelTree!)?.species).toBe("smallPine");
   });
 
   it("persists one compact mix without baked asset geometry or session-only assets", () => {

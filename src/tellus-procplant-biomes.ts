@@ -93,6 +93,7 @@ const ADULT_TREE_SCALE_BY_PRESET: Partial<Record<string, number>> = {
   alpineFir: 14.5,
   redwoodSpire: 17.5,
   foldedPalm: 8.4,
+  tundraSmallPine: 5.8,
 };
 
 const ADULT_TREE_SCALE_BY_SPECIES: Partial<Record<string, number>> = {
@@ -325,7 +326,7 @@ const PAINT_BIOMES: Record<TerrainPaintKind, ProcPlantBiomeCandidate[]> = {
   ],
   stone: [],
   gravel: [
-    candidate("alpineFir", { density: 0.14, scale: 4.8, weight: 3, treeBackend: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 4.1, maxLeaves: 165, maxStems: 36, maxBranchDepth: 2 }, environment: { light: 0.72, moisture: 0.3, crowding: 0.12, biomeWarmth: 0.34 } }),
+    candidate("tundraSmallPine", { density: 0.0532, scale: 2.9, weight: 3, treeBackend: { kind: "lsystem", species: "smallPine", leafScaleMultiplier: 5.25, maxLeaves: 387, maxStems: 150, maxBranchDepth: 4, foliageMass: 1.64, foliageTipBias: 0.67 }, environment: { light: 0.72, moisture: 0.3, crowding: 0.12, biomeWarmth: 0.34 } }),
     candidate("furGrass", { density: 0.1, scale: 0.75, weight: 2, environment: { light: 0.7, moisture: 0.28, crowding: 0.1, biomeWarmth: 0.52 } }),
   ],
   "jungle-moss": [
@@ -342,6 +343,7 @@ const TREE_BACKEND_BY_PRESET: Partial<Record<string, ProcPlantTreeBackend>> = {
   blueSpruce: { kind: "lsystem", species: "smallPine", leafScaleMultiplier: 4.2, maxLeaves: 205, maxStems: 54, maxBranchDepth: 2, foliageMass: 1.18, foliageTipBias: 0.28, foliageSpread: 0.14 },
   alpineFir: { kind: "lsystem", species: "balsamFir", leafScaleMultiplier: 4.35, maxLeaves: 210, maxStems: 44, maxBranchDepth: 2 },
   redwoodSpire: { kind: "lsystem", species: "douglasFir", leafScaleMultiplier: 3.9, maxLeaves: 205, maxStems: 44, maxBranchDepth: 2, foliageMass: 1.02, foliageTipBias: 0.32 },
+  tundraSmallPine: { kind: "lsystem", species: "smallPine", leafScaleMultiplier: 5.25, maxLeaves: 387, maxStems: 150, maxBranchDepth: 4, foliageMass: 1.64, foliageTipBias: 0.67 },
 };
 
 const patchFromCandidate = (candidate: ProcPlantBiomeCandidate, seed: number): ProcPlantBiomePatch => ({
