@@ -594,6 +594,17 @@ declare global {
         lastError: string | null;
         onlineCount: number;
         queryKind: "roster" | "batch" | null;
+        relationships?: {
+          refreshIntervalMs: number;
+          lastAttemptAt: string | null;
+          lastSuccessAt: string | null;
+          lastFailureAt: string | null;
+          lastError: string | null;
+          friendCount: number;
+          incomingCount: number;
+          outgoingCount: number;
+          lastMutation: string | null;
+        };
       };
     };
     __tellusPerfReport?: () => unknown;
