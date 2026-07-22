@@ -5,6 +5,7 @@ import {
   buildProcPlantInstancedParts,
   buildProcPlantTemplate,
   buildProcPlantRuntimePackage,
+  branchModuleSpreadForGenome,
   createProcPlantConiferSprayGeometry,
   createProcPlantLeafGeometry,
   defaultPlantEnvironment,
@@ -55,7 +56,7 @@ const templateBounds = (template: ProcPlantTemplate) => {
     max.y = Math.max(max.y, template.pos[i + 1]!);
     max.z = Math.max(max.z, template.pos[i + 2]!);
   }
-  return { min, max, width: max.x - min.x, depth: max.z - min.z };
+  return { min, max, width: max.x - min.x, height: max.y - min.y, depth: max.z - min.z };
 };
 
 describe("procplant vegetation", () => {
@@ -308,6 +309,64 @@ describe("procplant vegetation", () => {
 
     expect(templateBounds(broad).width).toBeGreaterThan(templateBounds(compact).width);
     expect(templateBounds(broad).depth).toBeGreaterThan(templateBounds(compact).depth);
+    expect(broad.idx.length).toBe(compact.idx.length);
+    expect(templateBounds(broad).width).toBeGreaterThan(templateBounds(compact).width * 1.15);
+  });
+
+  it("maps authored deciduous crown spread into live branch-module trees", () => {
+    const oak = procPlantPresets.oakCanopy;
+    const birch = procPlantPresets.birchGrove;
+
+    expect(oak.tree?.crown).toBe("spreading");
+    expect(branchModuleSpreadForGenome(oak)).toBeGreaterThan(1.25);
+    expect(branchModuleSpreadForGenome(oak)).toBeGreaterThan(branchModuleSpreadForGenome(birch)!);
+
+    const explicit = {
+      ...oak,
+      branchModules: {
+        palette: "decurrent-broadleaf" as const,
+        spread: 1.9,
+      },
+    };
+    expect(branchModuleSpreadForGenome(explicit)).toBe(1.9);
+  });
+
+  it("makes branch-module preview spread widen rounded deciduous crowns without increasing geometry", () => {
+    const previewGenome = {
+      ...procPlantPresets.oakCanopy,
+      weberPenn: undefined,
+      tree: { ...procPlantPresets.oakCanopy.tree!, crown: "rounded" as const },
+      branchModules: {
+        palette: "decurrent-broadleaf" as const,
+        moduleBudget: 132,
+        levels: 4,
+        branchDensity: 2.06,
+        branchAngle: 0.99,
+        droop: 0.18,
+        tropism: 0.48,
+        gnarliness: 0.38,
+        junctionBlend: 0.23,
+      },
+    };
+    const compactBuilt = buildProcPlantTemplate({
+      ...previewGenome,
+      branchModules: { ...previewGenome.branchModules, spread: 0.6 },
+    }, 47);
+    const broadBuilt = buildProcPlantTemplate({
+      ...previewGenome,
+      branchModules: { ...previewGenome.branchModules, spread: 1.46 },
+    }, 47);
+    const compact = compactBuilt.template;
+    const broad = broadBuilt.template;
+    const compactBounds = templateBounds(compact);
+    const broadBounds = templateBounds(broad);
+    const trunkTop = Math.max(...broadBuilt.graph.stems.filter((stem) => stem.depth === 0).map((stem) => stem.position.y));
+    const upperPrimary = Math.max(...broadBuilt.graph.stems.filter((stem) => stem.depth === 1).map((stem) => stem.position.y));
+
+    expect(broadBounds.width).toBeGreaterThan(compactBounds.width * 1.2);
+    expect(broadBounds.depth).toBeGreaterThan(compactBounds.depth * 1.2);
+    expect(broadBounds.width / broadBounds.height).toBeGreaterThan(compactBounds.width / compactBounds.height);
+    expect(upperPrimary).toBeGreaterThan(trunkTop * 0.82);
     expect(broad.idx.length).toBe(compact.idx.length);
   });
 

@@ -350,6 +350,7 @@ const genomeFromEzTreeEntry = (entry: Pick<TellusBiomeMixEntry, "id" | "label" |
     tropism: kind === "pine" ? 0.72 : 0.48,
     gnarliness: THREE.MathUtils.clamp(0.24 * gnarliness, 0, 1.6),
     collisionBias: 0.45,
+    junctionBlend: kind === "pine" ? 0.24 : 0.58,
     foliageSource: kind === "pine" ? "conifer-spray" : "procplants",
     barkColor: ezTree?.barkColor ?? (kind === "pine" ? 0x6a5132 : 0x6b4a2c),
     leafColor: ezTree?.leafColor ?? (kind === "pine" ? 0x5f8461 : kind === "willow" ? 0x7fa05c : 0x6f9a45),

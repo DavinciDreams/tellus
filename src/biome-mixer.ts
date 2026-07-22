@@ -1068,7 +1068,13 @@ const branchModuleTemplateForPalette = (palette: BranchModulePalette): ProcPlant
 };
 
 const defaultBranchCrown = (palette: BranchModulePalette): BranchCrownShape =>
-  palette === "weeping" ? "columnar" : palette === "palm-ish" ? "umbrella" : palette === "shrub" ? "spreading" : "rounded";
+  palette === "weeping"
+    ? "columnar"
+    : palette === "palm-ish"
+      ? "umbrella"
+      : palette === "shrub" || palette === "decurrent-broadleaf"
+        ? "spreading"
+        : "rounded";
 
 const makeBranchModuleGenome = (palette: BranchModulePalette, seed: number): ProcPlantGenome => {
   const base = cloneGenome(branchModuleTemplateForPalette(palette));
@@ -1087,11 +1093,12 @@ const makeBranchModuleGenome = (palette: BranchModulePalette, seed: number): Pro
     vigor: 1,
     branchDensity: conifer ? 1.05 : shrub ? 1.2 : palm ? 0.4 : vine ? 0.72 : 1.25,
     branchAngle: conifer ? 0.82 : vine ? 0.55 : shrub ? 1.08 : 1.08,
-    spread: conifer ? 0.58 : shrub ? 1.12 : palm ? 1.35 : 1.08,
+    spread: conifer ? 0.58 : shrub ? 1.12 : palm ? 1.35 : palette === "decurrent-broadleaf" ? 1.28 : 1.08,
     droop: palette === "weeping" ? 1.15 : conifer ? 0.34 : vine ? 0.7 : 0.18,
     tropism: conifer ? 0.72 : 0.48,
     gnarliness: palette === "decurrent-broadleaf" ? 0.38 : palette === "weeping" ? 0.32 : conifer ? 0.16 : 0.24,
     collisionBias: 0.45,
+    junctionBlend: palette === "decurrent-broadleaf" || palette === "weeping" ? 0.58 : 0.24,
     foliageSource: conifer ? "conifer-spray" : "procplants",
     barkColor: 0x5d4327,
     leafColor: base.leaf.colorA,
@@ -1105,10 +1112,16 @@ const makeBranchModuleGenome = (palette: BranchModulePalette, seed: number): Pro
   };
   if (base.tree) {
     base.tree.crown = defaultBranchCrown(palette);
-    base.tree.crownStart = base.tree.crown === "umbrella" ? 0.58 : base.tree.crown === "columnar" ? 0.34 : 0.24;
+    base.tree.crownStart = base.tree.crown === "umbrella"
+      ? 0.58
+      : base.tree.crown === "columnar"
+        ? 0.34
+        : base.tree.crown === "spreading"
+          ? 0.2
+          : 0.24;
   }
   base.treeRealism = {
-    crownSpread: conifer ? 0.42 : shrub ? 1.05 : 0.82,
+    crownSpread: conifer ? 0.42 : shrub ? 1.05 : palette === "decurrent-broadleaf" ? 0.94 : 0.82,
     crownTaper: conifer ? 0.84 : palette === "weeping" ? 0.24 : 0.38,
     trunkFlare: shrub ? 0.22 : 0.38,
     trunkBend: palette === "weeping" ? 0.24 : 0.14,
@@ -1784,6 +1797,11 @@ const renderEntryEditor = () => {
               <input id="branch-module-gnarliness" type="range" min="0" max="3" value="${branchModules.gnarliness ?? 0.24}" step="0.01" />
               <output>${(branchModules.gnarliness ?? 0.24).toFixed(2)}</output>
             </label>
+            <label>
+              Junction blend
+              <input id="branch-module-junction" type="range" min="0" max="1" value="${branchModules.junctionBlend ?? 0.58}" step="0.01" />
+              <output>${(branchModules.junctionBlend ?? 0.58).toFixed(2)}</output>
+            </label>
           </div>
         </details>
         <details open>
@@ -2113,6 +2131,7 @@ const renderEntryEditor = () => {
     bindBranchNumber("#branch-module-droop", (v) => v.toFixed(2), (genome, value) => { genome.branchModules!.droop = value; });
     bindBranchNumber("#branch-module-tropism", (v) => v.toFixed(2), (genome, value) => { genome.branchModules!.tropism = value; });
     bindBranchNumber("#branch-module-gnarliness", (v) => v.toFixed(2), (genome, value) => { genome.branchModules!.gnarliness = value; });
+    bindBranchNumber("#branch-module-junction", (v) => v.toFixed(2), (genome, value) => { genome.branchModules!.junctionBlend = value; });
     bindBranchNumber("#branch-foliage-mass", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.mass = value; });
     bindBranchNumber("#branch-foliage-density", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.clusterDensity = value; });
     bindBranchNumber("#branch-foliage-size", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.size = value; });
