@@ -77,6 +77,10 @@ export interface BranchModuleTreeOptions {
   /** Light proxy for sibling-branch crowding avoidance: spreads a depth level's children further apart
    * in yaw so they overlap less, without true geometric collision checking. Default 0. */
   collisionBias?: number;
+  /** Delays child-branch separation by blending the first branch segments from the parent's tangent
+   * toward the authored child direction. This approximates a grown-together branch collar without
+   * adding strand geometry or changing the instance budget. 0 = hard fork, 1 = longest blend. */
+  junctionBlend?: number;
   /** Explicit growth archetype — the same 6 values as ProcPlantGenome.branchModules.palette. When set,
    * this overrides the species-name regex guess below; presets that don't set it keep working exactly
    * as before via that regex. */
@@ -530,6 +534,11 @@ export function branchModuleTreeFromSpecies(
   const branchAngleMul = THREE.MathUtils.clamp(options.branchAngle ?? 1, 0.3, 2);
   const vigor = THREE.MathUtils.clamp(options.vigor ?? 1, 0.4, 2);
   const collisionBias = THREE.MathUtils.clamp(options.collisionBias ?? 0, 0, 1.5);
+  const junctionBlend = THREE.MathUtils.clamp(
+    options.junctionBlend ?? (broadleaf || weeping ? 0.58 : 0.24),
+    0,
+    1,
+  );
   const modules: BranchModuleInstance[] = [];
   const segments: BranchSegmentInstance[] = [];
 
@@ -570,6 +579,7 @@ export function branchModuleTreeFromSpecies(
     length: number,
     baseRadius: number,
     segmentCount: number,
+    attachmentDirection?: THREE.Vector3,
   ): number => {
     const id = modules.length;
     const module: BranchModuleInstance = {
@@ -582,9 +592,23 @@ export function branchModuleTreeFromSpecies(
     modules.push(module);
     if (parentModuleId !== null) modules[parentModuleId]?.childModuleIds.push(id);
     let point = start.clone();
-    let direction = initialDirection.clone().normalize();
+    const targetDirection = initialDirection.clone().normalize();
+    let direction = targetDirection.clone();
     for (let index = 0; index < segmentCount; index++) {
       const segmentT = index / Math.max(1, segmentCount - 1);
+      if (attachmentDirection && junctionBlend > 0) {
+        // Interactive Invigoration's strand profiles can delay the point where a child branch
+        // separates from its parent. Keep our shared-cylinder renderer, but reproduce the visible
+        // architectural cue by following the parent tangent near the collar and smoothly reaching
+        // the authored child direction by the module tip.
+        const progress = (index + 1) / segmentCount;
+        const delayedSeparation = THREE.MathUtils.smoothstep(progress, 0.08, 0.9);
+        const separation = THREE.MathUtils.lerp(1, delayedSeparation, junctionBlend);
+        const guidedDirection = attachmentDirection.clone().normalize()
+          .lerp(targetDirection, separation)
+          .normalize();
+        direction.lerp(guidedDirection, 0.82).normalize();
+      }
       const bend = (0.018 + depth * 0.014) * (0.35 + random()) * gnarliness;
       // weeping species keep their own stronger built-in droop; droop generalizes the same downward
       // pull to any species so a non-weeping genome can still be tuned toward a drooping silhouette.
@@ -746,8 +770,15 @@ export function branchModuleTreeFromSpecies(
       const crownLengthScale = broadleaf && parent.depth === 0
         ? crownEnvelope * crownPreset.primaryLength * crownPreset.horizontalReach
         : 1;
+      // Spread should lengthen lateral structure as well as rotate it. Applying the strongest response
+      // to primary scaffolds and a gentler response to their forks creates a wider crown without
+      // uniformly scaling the trunk or turning every branch into an equally long radial spoke.
+      const horizontality = Math.hypot(direction.x, direction.z);
+      const spreadLengthScale = broadleaf
+        ? 1 + (spreadMul - 1) * horizontality * (parent.depth === 0 ? 0.62 : 0.28)
+        : 1;
       const branchLength = (spreading ? 0.42 : shape.baseBranchLength) * depthScale *
-        (0.82 + random() * 0.34) * vigor * crownLengthScale;
+        (0.82 + random() * 0.34) * vigor * crownLengthScale * spreadLengthScale;
       const primaryRadiusScale = broadleaf && parent.depth === 0
         ? THREE.MathUtils.lerp(0.56, 0.4, crownT)
         : 0.5;
@@ -763,6 +794,7 @@ export function branchModuleTreeFromSpecies(
         branchLength,
         branchRadius,
         nextDepth >= maxDepth ? 2 : shape.branchSegmentCount,
+        parentDirection,
       );
       pending.push(moduleId);
     }

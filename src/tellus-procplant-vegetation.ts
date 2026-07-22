@@ -36,6 +36,7 @@ import {
   type TellusBiomeMixRegistry,
 } from "./tellus-biome-mix";
 import {
+  branchModuleSpreadForGenome,
   buildProcPlantInstancedParts,
   createProcPlantConiferSprayGeometry,
   createProcPlantDaylilyBloomGeometry,
@@ -184,6 +185,7 @@ interface BiomeTreeTemplateOptions {
   branchAngle?: number;
   vigor?: number;
   collisionBias?: number;
+  junctionBlend?: number;
   palette?: BranchModuleArchetype;
   broadleafCrown?: "rounded" | "columnar" | "umbrella" | "spreading";
 }
@@ -294,7 +296,7 @@ const buildBranchModuleTreeCached = (
     `${species}|${bucket}|${options.maxBranchDepth ?? ""}|${options.maxStems ?? ""}|` +
     `${options.maxLeaves ?? ""}|${options.leafScaleMultiplier ?? ""}|${options.gnarliness ?? ""}|` +
     `${options.droop ?? ""}|${options.spread ?? ""}|${options.tropism ?? ""}|${options.branchDensity ?? ""}|` +
-    `${options.branchAngle ?? ""}|${options.vigor ?? ""}|${options.collisionBias ?? ""}|${options.palette ?? ""}|` +
+    `${options.branchAngle ?? ""}|${options.vigor ?? ""}|${options.collisionBias ?? ""}|${options.junctionBlend ?? ""}|${options.palette ?? ""}|` +
     `${options.broadleafCrown ?? ""}`;
   let tree = branchModuleTreeCache.get(key);
   if (!tree && !allowColdBuild) return null;
@@ -312,6 +314,7 @@ const buildBranchModuleTreeCached = (
       branchAngle: options.branchAngle,
       vigor: options.vigor,
       collisionBias: options.collisionBias,
+      junctionBlend: options.junctionBlend,
       palette: options.palette,
       broadleafCrown: options.broadleafCrown,
     });
@@ -1408,12 +1411,13 @@ export function createProcPlantVegetation(
           palette: genome.branchModules?.palette,
           gnarliness: genome.branchModules?.gnarliness,
           droop: genome.branchModules?.droop,
-          spread: genome.branchModules?.spread,
+          spread: branchModuleSpreadForGenome(genome),
           tropism: genome.branchModules?.tropism,
           branchDensity: genome.branchModules?.branchDensity,
           branchAngle: genome.branchModules?.branchAngle,
           vigor: genome.branchModules?.vigor,
           collisionBias: genome.branchModules?.collisionBias,
+          junctionBlend: genome.branchModules?.junctionBlend,
           broadleafCrown: genome.tree?.crown === "propRoot" ? "spreading" : genome.tree?.crown,
           ...treeBackend,
         }, allowColdBuilds);

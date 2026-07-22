@@ -94,6 +94,8 @@ describe("branch module trees", () => {
     const maxRadius = (tree: typeof baseline) =>
       Math.max(...tree.segments.map((s) => Math.hypot(s.end.x, s.end.z)));
     expect(maxRadius(wide)).toBeGreaterThan(maxRadius(narrow));
+    expect(wide.modules.length).toBe(narrow.modules.length);
+    expect(wide.leaves.length).toBe(narrow.leaves.length);
 
     const dense = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, branchDensity: 2.5 });
     const sparse = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, branchDensity: 0.3 });
@@ -236,6 +238,65 @@ describe("branch module trees", () => {
     expect(crownWidth(umbrella)).toBeGreaterThan(crownWidth(columnar) * 1.35);
     expect(crownWidth(spreadingTree)).toBeGreaterThan(crownWidth(rounded));
     expect(lowestPrimary(umbrella)).toBeGreaterThan(lowestPrimary(rounded) + 0.15);
+  });
+
+  it("uses spread to lengthen lateral broadleaf scaffolds without stretching the trunk", () => {
+    const options = {
+      palette: "decurrent-broadleaf" as const,
+      broadleafCrown: "spreading" as const,
+      maxBranchDepth: 3,
+      maxStems: 90,
+      maxLeaves: 180,
+    };
+    const natural = branchModuleTreeFromSpecies("cambridgeOak", 23, { ...options, spread: 1 });
+    const broad = branchModuleTreeFromSpecies("cambridgeOak", 23, { ...options, spread: 1.35 });
+    const crownRadius = (tree: typeof natural) => Math.max(
+      ...tree.segments.flatMap((segment) => [
+        Math.hypot(segment.start.x, segment.start.z),
+        Math.hypot(segment.end.x, segment.end.z),
+      ]),
+    );
+    const trunkHeight = (tree: typeof natural) => {
+      const trunk = tree.modules.find((module) => module.depth === 0)!;
+      return Math.max(...trunk.segmentIds.map((id) => tree.segments[id]!.end.y));
+    };
+
+    expect(crownRadius(broad)).toBeGreaterThan(crownRadius(natural) * 1.12);
+    expect(trunkHeight(broad)).toBeCloseTo(trunkHeight(natural), 8);
+    expect(broad.segments.length).toBe(natural.segments.length);
+  });
+
+  it("blends broadleaf forks out of the parent tangent without changing the branch budget", () => {
+    const options = {
+      palette: "decurrent-broadleaf" as const,
+      broadleafCrown: "spreading" as const,
+      maxBranchDepth: 3,
+      maxStems: 90,
+      maxLeaves: 180,
+      spread: 1.35,
+    };
+    const hardFork = branchModuleTreeFromSpecies("cambridgeOak", 29, { ...options, junctionBlend: 0 });
+    const grownFork = branchModuleTreeFromSpecies("cambridgeOak", 29, { ...options, junctionBlend: 1 });
+
+    const firstForkAngle = (tree: typeof hardFork) => {
+      const child = tree.modules.find((module) => module.depth === 1)!;
+      const childSegment = tree.segments[child.segmentIds[0]!]!;
+      const parent = tree.modules[child.parentModuleId!]!;
+      const parentSegment = parent.segmentIds
+        .map((id) => tree.segments[id]!)
+        .reduce((nearest, segment) => (
+          segment.start.distanceToSquared(childSegment.start) < nearest.start.distanceToSquared(childSegment.start)
+            ? segment
+            : nearest
+        ));
+      const parentDirection = parentSegment.end.clone().sub(parentSegment.start).normalize();
+      const childDirection = childSegment.end.clone().sub(childSegment.start).normalize();
+      return parentDirection.angleTo(childDirection);
+    };
+
+    expect(firstForkAngle(grownFork)).toBeLessThan(firstForkAngle(hardFork) * 0.65);
+    expect(grownFork.segments.length).toBe(hardFork.segments.length);
+    expect(grownFork.leaves.length).toBe(hardFork.leaves.length);
   });
 
   it("varies broadleaf card proportions without changing conifer foliage proportions", () => {

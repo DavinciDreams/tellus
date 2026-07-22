@@ -150,6 +150,7 @@ export interface ProcPlantGenome {
     tropism?: number;
     gnarliness?: number;
     collisionBias?: number;
+    junctionBlend?: number;
     foliageSource?: "procplants" | "conifer-spray" | "ez-leaf-card";
     barkColor?: number;
     leafColor?: number;
@@ -1225,8 +1226,8 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorB: 0x83a94d,
     },
     tree: {
-      crown: "rounded",
-      crownStart: 0.34,
+      crown: "spreading",
+      crownStart: 0.2,
       leafClusterScale: 1.05,
       exposedTrunk: 0.28,
     },
@@ -4061,6 +4062,21 @@ const treeRealismTraits = (genome: ProcPlantGenome) => {
   };
 };
 
+/**
+ * Convert the authored crown-spread trait into the multiplier used by the live branch-module tree
+ * renderer. Branch-module genomes keep their explicit art direction; ordinary broadleaf genomes use
+ * treeRealism so the same trait shapes both preview/placeable trees and streamed biome vegetation.
+ */
+export const branchModuleSpreadForGenome = (genome: ProcPlantGenome): number | undefined => {
+  if (genome.branchModules?.spread !== undefined) return genome.branchModules.spread;
+  if (genome.habit !== "tree" || genome.treeRealism?.crownSpread === undefined) return undefined;
+  return THREE.MathUtils.lerp(
+    0.78,
+    1.48,
+    THREE.MathUtils.clamp(genome.treeRealism.crownSpread, 0, 1),
+  );
+};
+
 const weberPennBakeOptions = (genome: ProcPlantGenome): BakeOptions => {
   const options = genome.weberPenn;
   return {
@@ -4202,6 +4218,7 @@ const branchModuleDefaults = (genome: ProcPlantGenome) => {
     tropism: genome.branchModules?.tropism ?? (conifer ? 0.72 : vine ? 0.34 : 0.48),
     gnarliness: genome.branchModules?.gnarliness ?? (palette === "decurrent-broadleaf" ? 0.38 : palette === "weeping" ? 0.32 : conifer ? 0.16 : 0.24),
     collisionBias: genome.branchModules?.collisionBias ?? 0.45,
+    junctionBlend: genome.branchModules?.junctionBlend ?? (palette === "decurrent-broadleaf" || palette === "weeping" ? 0.58 : 0.24),
     foliageSource: genome.branchModules?.foliageSource ?? (conifer ? "conifer-spray" : "procplants"),
     barkColor: genome.branchModules?.barkColor ?? 0x5d4327,
     leafColor: genome.branchModules?.leafColor ?? genome.leaf.colorA,
@@ -4294,6 +4311,9 @@ const buildBranchModuleGraphTemplate = (
   const crownStartForShape = crownShape === "umbrella" ? 0.58 : crownShape === "columnar" ? 0.34 : crownShape === "spreading" ? 0.2 : 0.24;
   const crownReach = crownShape === "umbrella" ? 1.24 : crownShape === "spreading" ? 1.16 : crownShape === "columnar" ? 0.72 : 1;
   const crownDeparture = crownShape === "umbrella" ? Math.PI / 2.15 : crownShape === "spreading" ? Math.PI / 2.3 : crownShape === "columnar" ? Math.PI / 3.35 : Math.PI / 2.65;
+  const spreadT = THREE.MathUtils.clamp((options.spread - 0.3) / 2.2, 0, 1);
+  const broadleafScaffoldReach = THREE.MathUtils.lerp(0.28, 0.64, spreadT) * crownReach;
+  const broadleafDepartureScale = THREE.MathUtils.lerp(0.9, 1.35, spreadT);
   const barkColor = new THREE.Color(options.barkColor);
   const baseRadius = options.palette === "shrub" ? 0.036 : options.palette === "vine-ish" ? 0.014 : 0.058;
   const trunkCount = options.palette === "shrub" ? 3 : 1;
@@ -4327,7 +4347,11 @@ const buildBranchModuleGraphTemplate = (
       const bend = new THREE.Vector3(Math.cos(seed * 0.013 + trunk) * realism.trunkBend, 0, Math.sin(seed * 0.017 + trunk) * realism.trunkBend)
         .multiplyScalar(t * 0.035);
       const dir = previous.direction.clone().add(photo).add(crowdNarrowing).add(bend).normalize();
-      const length = height / trunkSegments * (options.palette === "shrub" ? 0.74 : 1) * (0.92 + rng() * 0.16);
+      const decurrentLeaderT = THREE.MathUtils.smoothstep(t, 0.58, 1);
+      const leaderLengthScale = options.palette === "decurrent-broadleaf"
+        ? THREE.MathUtils.lerp(1, 0.28, decurrentLeaderT)
+        : 1;
+      const length = height / trunkSegments * (options.palette === "shrub" ? 0.74 : 1) * (0.92 + rng() * 0.16) * leaderLengthScale;
       const node = addNode(
         previous.position.clone().add(dir.clone().multiplyScalar(length)),
         dir,
@@ -4349,16 +4373,36 @@ const buildBranchModuleGraphTemplate = (
             ? Math.max(1, Math.round(options.branchDensity))
             : Math.max(1, Math.round(options.branchDensity * (t < 0.88 ? 1.8 : 1.2)));
         for (let starter = 0; starter < starterCount; starter++) {
+          // First-order limbs establish the crown silhouette. Deriving their reach from one ninth
+          // of the trunk (the old `length` value) kept even high-spread trees columnar. Scale them
+          // from total tree height instead, then taper upper-crown scaffolds so the trunk remains
+          // visually dominant and the geometry/module budget stays unchanged.
+          const upperCrownT = THREE.MathUtils.clamp((t - crownStart) / Math.max(0.01, 1 - crownStart), 0, 1);
+          const crownLengthEnvelope = THREE.MathUtils.lerp(1.06, 0.62, Math.pow(upperCrownT, 1.25));
+          const scaffoldLength = options.palette === "decurrent-broadleaf"
+            ? height * broadleafScaffoldReach * crownLengthEnvelope
+            : length * (options.palette === "excurrent-conifer" ? 1.15 : options.palette === "weeping" ? 1.9 : 1.75 * crownReach);
           modules.push({
             node,
             direction: dir,
             depth: 1,
-            length: length * (options.palette === "excurrent-conifer" ? 1.15 : options.palette === "weeping" ? 1.9 : 1.75 * crownReach),
+            length: scaffoldLength,
             vigor: options.vigor * (1 - t * 0.18) * (0.88 + starter * 0.04),
             t,
           });
         }
       }
+    }
+    if (options.palette === "decurrent-broadleaf") {
+      // A decurrent leader terminates inside the crown. Give the preview's trunk tip its own
+      // foliage anchor so the final tapered segment does not read as a bare pole above the canopy.
+      anchors.push({
+        position: previous.position.clone(),
+        direction: previous.direction.clone(),
+        right: tangentBasis(previous.direction).right,
+        t: 1,
+        depth: 0,
+      });
     }
     if (options.palette === "palm-ish") {
       for (let i = 0; i < 18; i++) {
@@ -4386,6 +4430,11 @@ const buildBranchModuleGraphTemplate = (
         ? Math.max(1, Math.round((module.depth === 1 ? 4 : 2) * densityBoost))
         : options.palette === "vine-ish"
           ? Math.max(1, Math.round(densityBoost * 0.8))
+          : options.palette === "decurrent-broadleaf" && module.depth === 1
+            // `starterCount` already distributes density around every trunk level. Multiplying it
+            // by another 4x density fan spent the module budget in the lower crown and left the
+            // upper leader bare; one scaffold per starter develops the whole crown first.
+            ? 1
           : Math.max(1, Math.round((module.depth === 1 ? 4 : module.depth === 2 ? 3 : 2) * densityBoost));
     for (let child = 0; child < children && segments.length < options.moduleBudget; child++) {
       const yaw = module.node.index * GOLDEN_ANGLE + child * (Math.PI * 2 / children) + (rng() - 0.5) * genome.branchAngle.spread;
@@ -4395,7 +4444,15 @@ const buildBranchModuleGraphTemplate = (
         options.palette === "weeping" ? Math.PI / 2.2 :
         options.palette === "vine-ish" ? Math.PI / 3.8 :
         module.depth === 1 && options.palette === "decurrent-broadleaf" ? crownDeparture : Math.PI / 2.65;
-      const direction = rotateFromAxis(module.direction, yaw, baseAngle * options.branchAngle * options.spread)
+      const broadleafDeparture = THREE.MathUtils.clamp(
+        baseAngle * options.branchAngle * broadleafDepartureScale,
+        Math.PI / 9,
+        Math.PI / 2.05,
+      );
+      const departure = options.palette === "decurrent-broadleaf"
+        ? broadleafDeparture
+        : baseAngle * options.branchAngle * options.spread;
+      const direction = rotateFromAxis(module.direction, yaw, departure)
         .add(lightVector.clone().multiplyScalar(options.tropism * shade * 0.12))
         .add(new THREE.Vector3(0, -options.droop * (0.12 + depthT * 0.18), 0))
         .add(new THREE.Vector3(0, crowding * options.collisionBias * 0.08, 0))
@@ -4405,7 +4462,11 @@ const buildBranchModuleGraphTemplate = (
       let chainDir = direction;
       for (let step = 1; step <= chain; step++) {
         const chainT = step / chain;
-        chainDir = chainDir.clone()
+        const delayedSeparation = THREE.MathUtils.smoothstep(chainT, 0.08, 0.9);
+        const separation = THREE.MathUtils.lerp(1, delayedSeparation, options.junctionBlend);
+        // Match the live branch-module renderer's strand-inspired junction development: stay near
+        // the parent tangent at the collar, then progressively reach the child branch direction.
+        chainDir = module.direction.clone().lerp(direction, separation).normalize()
           .add(lightVector.clone().multiplyScalar(options.tropism * shade * chainT * 0.08))
           .add(new THREE.Vector3((rng() - 0.5) * options.gnarliness * 0.5, -options.droop * 0.05 * chainT, (rng() - 0.5) * options.gnarliness * 0.5))
           .normalize();
@@ -4533,7 +4594,8 @@ export const buildWeberPennProcPlantTemplate = (
       const taperEnvelope = conifer
         ? THREE.MathUtils.lerp(1.12, 0.36, h)
         : THREE.MathUtils.lerp(0.72 + Math.sin(h * Math.PI) * 0.45, 1 - h * 0.18, realism.crownTaper);
-      const crownScale = 1 + crownT * realism.crownSpread * taperEnvelope * (isLeaf ? 0.24 : 0.11);
+      const spreadStrength = conifer ? (isLeaf ? 0.24 : 0.11) : (isLeaf ? 0.32 : 0.26);
+      const crownScale = 1 + crownT * realism.crownSpread * taperEnvelope * spreadStrength;
       const flare = !isLeaf && h < 0.22 ? 1 + realism.trunkFlare * Math.pow(1 - h / 0.22, 2) * 0.34 : 1;
       p.x *= crownScale * flare;
       p.z *= crownScale * flare;
