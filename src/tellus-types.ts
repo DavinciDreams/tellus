@@ -385,6 +385,7 @@ export interface TellusWorldApi {
     channel?: WorldChatChannel,
     recipientId?: string,
     recipientName?: string,
+    senderName?: string,
   ): WorldChatMessage | null;
   sampleMapPoint(x: number, z: number): { height: number; kind: TerrainKind; loaded: boolean };
   snapshot(): TellusSnapshot;

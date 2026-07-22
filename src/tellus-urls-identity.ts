@@ -128,10 +128,11 @@ export function proxiedGeneratedModelUrl(url: string): string {
   return worldApiUrl(assetStoreGameOptimizedModelUrl(assetId));
 }
 
-export function tellusWorldWebSocketUrl(visitorId: string): string {
+export function tellusWorldWebSocketUrl(visitorId: string, liveTicket?: string | null): string {
   const httpUrl = new URL(tellusWorldHttpUrl("state"), window.location.href);
   httpUrl.pathname = httpUrl.pathname.replace(/\/state\/?$/, "/live");
   httpUrl.searchParams.set("visitorId", visitorId);
+  if (liveTicket?.trim()) httpUrl.searchParams.set("liveTicket", liveTicket.trim());
   httpUrl.protocol = httpUrl.protocol === "https:" ? "wss:" : "ws:";
   return httpUrl.toString();
 }

@@ -171,7 +171,7 @@ import {
 } from "./tellus-ecology";
 import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
 import { generateInteriorRoom, normalizeInteriorBiomeMaterial, type InteriorBiomeMaterial } from "./tellus-building";
-import { installSessionFetch, getSession, SESSION_HEADER } from "./tellus-auth";
+import { installSessionFetch, getSession, issueTellusLiveTicket, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, openTellusAccountPanel, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
 import { buildAgentMapLocation, resolveAgentMoveTarget } from "./tellus-agent-location";
@@ -888,6 +888,7 @@ function createTellusWorld(
   const moonMaterials = new Set<THREE.MeshStandardMaterial>();
   let directGenerationAvailable = true;
   let worldSocket: WebSocket | null = null;
+  let worldSocketConnecting = false;
   let worldSocketReconnectTimer: number | undefined;
   let worldSocketClosedByDestroy = false;
   const visitorId = tellusVisitorId();
@@ -4356,10 +4357,32 @@ function createTellusWorld(
     return name ? playLocalEmote(name) : false;
   };
 
-  const connectTellusWorldRealtime = () => {
-    if (!tellusWorldBackendAvailable || worldSocket || destroyed) return;
-    const socket = new WebSocket(tellusWorldWebSocketUrl(visitorId));
+  const connectTellusWorldRealtime = async () => {
+    if (!tellusWorldBackendAvailable || worldSocket || worldSocketConnecting || destroyed) return;
+    worldSocketConnecting = true;
+    let liveTicket: string | null = null;
+    const ticketAbort = new AbortController();
+    const ticketTimeout = window.setTimeout(() => ticketAbort.abort(), 5000);
+    try {
+      liveTicket = await issueTellusLiveTicket(visitorId, ticketAbort.signal);
+    } catch {
+      // Anonymous and temporarily unauthenticated worlds still use the existing soft-identity socket.
+    } finally {
+      window.clearTimeout(ticketTimeout);
+    }
+    if (worldSocket || destroyed || !tellusWorldBackendAvailable) {
+      worldSocketConnecting = false;
+      return;
+    }
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(tellusWorldWebSocketUrl(visitorId, liveTicket));
+    } catch {
+      worldSocketConnecting = false;
+      return;
+    }
     worldSocket = socket;
+    worldSocketConnecting = false;
 
     socket.addEventListener("message", (event) => {
       let parsed: unknown;
@@ -4584,7 +4607,7 @@ function createTellusWorld(
       if (worldSocketClosedByDestroy || destroyed || !tellusWorldBackendAvailable) return;
       worldSocketReconnectTimer = window.setTimeout(() => {
         worldSocketReconnectTimer = undefined;
-        connectTellusWorldRealtime();
+        void connectTellusWorldRealtime();
       }, 2500);
     });
 
@@ -6819,7 +6842,7 @@ function createTellusWorld(
     setInitialWorldGeneratedThings([]);
   }
 
-  connectTellusWorldRealtime();
+  void connectTellusWorldRealtime();
   if (tellusWorldBackendAvailable) {
     worldChatPollTimer = window.setInterval(() => void pollWorldChatSnapshot(), 5000);
   }
@@ -15709,6 +15732,7 @@ function App(): React.ReactElement {
       worldChatChannel,
       worldChatDmTarget?.visitorId,
       worldChatDmTarget?.name,
+      account?.nip05?.trim() || account?.label?.trim() || undefined,
     );
     if (sent) setWorldChatInput("");
   };
