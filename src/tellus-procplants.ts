@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import {
+  bakeTree,
   generateBakedTree,
-  generateTreeData,
+  generateTreeDataCached,
   SPECIES,
   type BakeOptions,
   type SpeciesId,
@@ -2787,6 +2788,91 @@ const leafWidthAt = (shape: LeafShapeKind, t: number, serration: number): number
   return Math.max(0.02, tip * notch * lobes * teeth);
 };
 
+interface LeafSurfaceData {
+  positions: THREE.Vector3[];
+  indices: number[];
+  rowCount: number;
+  petioleRatio: number;
+}
+
+const leafPetioleRatio = (shape: LeafShapeKind): number => {
+  if (shape === "cordate" || shape === "palmate" || shape === "fan") return 0.16;
+  if (shape === "linear" || shape === "blade" || shape === "frond") return 0.08;
+  return 0.12;
+};
+
+const leafTwistScale = (shape: LeafShapeKind): number => {
+  if (shape === "linear" || shape === "blade" || shape === "frond") return 1.35;
+  if (shape === "palmate" || shape === "fan") return 1.15;
+  return 1;
+};
+
+/**
+ * Build one compact, reusable leaf surface in a local frame where +Y follows the midrib and the
+ * petiole begins at the origin. The three vertices per row form a shallow folded surface instead of
+ * a flat polygon fan: existing genome traits drive the width profile, serration, longitudinal bend,
+ * and midrib camber while retaining a small, deterministic template suitable for instancing.
+ */
+const createLeafSurfaceData = (
+  shape: LeafShapeKind,
+  widthRatio: number,
+  serration: number,
+  curl: number,
+  venation: number,
+): LeafSurfaceData => {
+  const segments = shape === "cordate" || shape === "palmate" || shape === "fan" ? 10 : 7;
+  const petioleRatio = leafPetioleRatio(shape);
+  const clampedVenation = THREE.MathUtils.clamp(venation, 0, 1);
+  const asymmetry = 0.045 + Math.min(0.055, Math.max(0, serration) * 0.12);
+  const twistScale = leafTwistScale(shape);
+  const rows: THREE.Vector3[][] = [];
+  const petioleHalfWidth = Math.max(0.0035, Math.abs(widthRatio) * 0.012);
+  rows.push([
+    new THREE.Vector3(-petioleHalfWidth, 0, 0),
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(petioleHalfWidth, 0, 0),
+  ]);
+
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const envelope = Math.sin(Math.PI * t);
+    const baseHalfWidth = leafWidthAt(shape, t, serration) * widthRatio * 0.5;
+    const asymmetryWave = envelope * Math.sin((t + 0.17) * Math.PI * 2);
+    const leftWidth = Math.max(0.0015, baseHalfWidth * (1 + asymmetry * asymmetryWave));
+    const rightWidth = Math.max(0.0015, baseHalfWidth * (1 - asymmetry * asymmetryWave));
+    const midribOffset = baseHalfWidth * asymmetry * asymmetryWave * 0.22;
+    const y = petioleRatio + t * (1 - petioleRatio);
+    const spineZ = envelope * curl;
+    const camber = envelope * (0.016 + clampedVenation * 0.048);
+    const twist = (t - 0.2) * (0.045 + Math.abs(curl) * 0.5) * twistScale;
+    const cosTwist = Math.cos(twist);
+    const sinTwist = Math.sin(twist);
+    const row = [-1, 0, 1].map((lateral) => {
+      const x = midribOffset + (lateral < 0 ? lateral * leftWidth : lateral * rightWidth);
+      const ridgeZ = camber * (1 - Math.abs(lateral));
+      return new THREE.Vector3(
+        x * cosTwist - ridgeZ * sinTwist,
+        y,
+        spineZ + x * sinTwist + ridgeZ * cosTwist,
+      );
+    });
+    rows.push(row);
+  }
+
+  const positions = rows.flat();
+  const indices: number[] = [];
+  for (let row = 0; row < rows.length - 1; row++) {
+    for (let column = 0; column < 2; column++) {
+      const lowerLeft = row * 3 + column;
+      const lowerRight = lowerLeft + 1;
+      const upperLeft = (row + 1) * 3 + column;
+      const upperRight = upperLeft + 1;
+      indices.push(lowerLeft, lowerRight, upperLeft, upperLeft, lowerRight, upperRight);
+    }
+  }
+  return { positions, indices, rowCount: rows.length, petioleRatio };
+};
+
 const addLeaf = (
   builder: TemplateBuilder,
   genome: ProcPlantGenome,
@@ -2794,46 +2880,40 @@ const addLeaf = (
   shade: number,
 ) => {
   const length = organ.scale * (1 + shade * genome.lightResponse.leafBoostInShade);
-  const halfWidth = length * genome.leaf.widthRatio * 0.5;
   const center = organ.position;
   const dir = organ.direction.clone().normalize();
   const right = organ.right.clone().normalize();
   const normal = new THREE.Vector3().crossVectors(right, dir).normalize();
   const color = new THREE.Color(genome.leaf.colorA).lerp(new THREE.Color(genome.leaf.colorB), organ.t);
-  const segments = genome.leaf.shape === "cordate" || genome.leaf.shape === "palmate" ? 10 : 7;
-  const points: THREE.Vector3[] = [];
-  const spine: THREE.Vector3[] = [];
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const curl = Math.sin(t * Math.PI) * genome.leaf.curl * length;
-    spine.push(
-      center
-        .clone()
-        .add(dir.clone().multiplyScalar((t - 0.08) * length))
-        .add(normal.clone().multiplyScalar(curl)),
+  const surface = createLeafSurfaceData(
+    genome.leaf.shape,
+    genome.leaf.widthRatio,
+    genome.leaf.serration,
+    genome.leaf.curl,
+    genome.leaf.venation,
+  );
+  const points = surface.positions.map((point) => center
+    .clone()
+    .addScaledVector(right, point.x * length)
+    .addScaledVector(dir, point.y * length)
+    .addScaledVector(normal, point.z * length));
+  for (let i = 0; i < surface.indices.length; i += 3) {
+    builder.addTriangle(
+      points[surface.indices[i]!]!,
+      points[surface.indices[i + 1]!]!,
+      points[surface.indices[i + 2]!]!,
+      color,
+      true,
+      0.35 + organ.t * 0.65,
     );
-  }
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const w = leafWidthAt(genome.leaf.shape, t, genome.leaf.serration) * halfWidth;
-    points.push(spine[i].clone().add(right.clone().multiplyScalar(-w)));
-  }
-  for (let i = segments; i >= 0; i--) {
-    const t = i / segments;
-    const w = leafWidthAt(genome.leaf.shape, t, genome.leaf.serration) * halfWidth;
-    points.push(spine[i].clone().add(right.clone().multiplyScalar(w)));
-  }
-  const base = spine[Math.max(0, Math.floor(segments * 0.18))];
-  for (let i = 0; i < points.length; i++) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
-    builder.addTriangle(base, a, b, color, true, 0.35 + organ.t * 0.65);
   }
   if (genome.leaf.venation > 0.05) {
     const veinColor = color.clone().lerp(new THREE.Color(0xd9f0ba), 0.28);
+    const spine = Array.from({ length: surface.rowCount }, (_, row) =>
+      points[row * 3 + 1]!.clone().addScaledVector(normal, length * 0.0015));
     for (let i = 1; i < spine.length; i++) {
-      const a = spine[i - 1];
-      const b = spine[i];
+      const a = spine[i - 1]!;
+      const b = spine[i]!;
       const width = length * 0.008 * genome.leaf.venation * (1 - i / spine.length);
       builder.addQuad(
         [
@@ -3741,43 +3821,21 @@ export const createProcPlantLeafGeometry = (
   widthRatio: number,
   serration = 0,
   curl = 0,
+  venation = 0.5,
 ): THREE.BufferGeometry => {
-  const segments = shape === "cordate" || shape === "palmate" || shape === "fan" ? 10 : 7;
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const indices: number[] = [];
-  const spine: THREE.Vector3[] = [];
-  const points: THREE.Vector3[] = [];
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    spine.push(new THREE.Vector3(0, t - 0.08, Math.sin(t * Math.PI) * curl));
-  }
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const w = leafWidthAt(shape, t, serration) * widthRatio * 0.5;
-    points.push(spine[i].clone().add(new THREE.Vector3(-w, 0, 0)));
-  }
-  for (let i = segments; i >= 0; i--) {
-    const t = i / segments;
-    const w = leafWidthAt(shape, t, serration) * widthRatio * 0.5;
-    points.push(spine[i].clone().add(new THREE.Vector3(w, 0, 0)));
-  }
-  const base = spine[Math.max(0, Math.floor(segments * 0.18))];
-  positions.push(base.x, base.y, base.z);
-  normals.push(0, 0, 1);
-  for (const point of points) {
-    positions.push(point.x, point.y, point.z);
-    normals.push(0, 0, 1);
-  }
-  for (let i = 1; i <= points.length; i++) {
-    const next = i === points.length ? 1 : i + 1;
-    indices.push(0, i, next);
-  }
+  const surface = createLeafSurfaceData(shape, widthRatio, serration, curl, venation);
+  const positions = surface.positions.flatMap((point) => [point.x, point.y, point.z]);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
-  geometry.setIndex(indices);
+  geometry.setIndex(surface.indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
+  geometry.userData.tellusLeafSurface = {
+    rowCount: surface.rowCount,
+    petioleRatio: surface.petioleRatio,
+    triangleCount: surface.indices.length / 3,
+  };
   return geometry;
 };
 
@@ -4063,6 +4121,7 @@ const createWeberPennFoliageGeometry = (genome: ProcPlantGenome, conifer: boolea
       genome.leaf.widthRatio,
       genome.leaf.serration,
       genome.leaf.curl,
+      genome.leaf.venation,
     );
   }
   if (conifer && source !== "species") return createProcPlantConiferSprayGeometry("light");
@@ -4292,7 +4351,13 @@ const addBranchModuleFoliage = (
   const source = options.foliageSource === "ez-leaf-card" ? "procplants" : options.foliageSource;
   const geometry = source === "conifer-spray"
     ? createProcPlantConiferSprayGeometry("light")
-    : createProcPlantLeafGeometry(genome.leaf.shape, genome.leaf.widthRatio, genome.leaf.serration, genome.leaf.curl);
+    : createProcPlantLeafGeometry(
+      genome.leaf.shape,
+      genome.leaf.widthRatio,
+      genome.leaf.serration,
+      genome.leaf.curl,
+      genome.leaf.venation,
+    );
   let leaves = 0;
   const budget = Math.round(THREE.MathUtils.clamp(anchors.length * foliage.mass * foliage.clusterDensity * 2.8, 0, 760));
   for (let i = 0; i < budget; i++) {
@@ -4589,18 +4654,16 @@ export const buildWeberPennProcPlantTemplate = (
   const foliageMass = isWeberPennCrownFillEnabled(genome) ? genome.foliage?.mass ?? 0 : 0;
   const bakeOptions = weberPennBakeOptions(genome);
   const generateLeaves = (genome.weberPenn.maxLeaves ?? 1) !== 0 && (nativeLeaves || foliageMass > 0);
-  const treeData = generateTreeData(
+  const treeData = generateTreeDataCached(
     genome.weberPenn.species,
     seed >>> 0,
     generateLeaves,
     bakeOptions.maxBranchDepth,
   );
-  const baked = generateBakedTree(
-    genome.weberPenn.species,
-    seed >>> 0,
-    bakeOptions,
-    generateLeaves,
-  );
+  // Tree generation is substantially more expensive than baking. Keep the raw tree data for
+  // foliage anchors and bake that same deterministic result instead of generating the complete
+  // Weber-Penn hierarchy a second time.
+  const baked = bakeTree(treeData, bakeOptions);
   const barkColor = new THREE.Color(genome.weberPenn.barkColor ?? 0x5d4327);
   const leafColor = new THREE.Color(genome.weberPenn.leafColor ?? genome.leaf.colorA);
   const height = Math.max(1e-4, baked.max.y - baked.min.y);

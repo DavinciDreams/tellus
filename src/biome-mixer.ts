@@ -1849,6 +1849,18 @@ const renderEntryEditor = () => {
           </div>
           <div class="inline">
             <label>
+              Leaf curl
+              <input id="branch-leaf-curl" type="range" min="0" max="0.5" value="${previewGenome.leaf.curl}" step="0.01" />
+              <output>${previewGenome.leaf.curl.toFixed(2)}</output>
+            </label>
+            <label>
+              Midrib fold
+              <input id="branch-leaf-fold" type="range" min="0" max="1" value="${previewGenome.leaf.venation}" step="0.01" />
+              <output>${previewGenome.leaf.venation.toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
               Leaf color
               <input id="branch-leaf-color-a" type="color" value="${toHexColor(previewGenome.leaf.colorA, 0x668d42)}" />
             </label>
@@ -2138,6 +2150,8 @@ const renderEntryEditor = () => {
     bindBranchNumber("#branch-foliage-density", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.clusterDensity = value; });
     bindBranchNumber("#branch-foliage-size", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.size = value; });
     bindBranchNumber("#branch-foliage-tip", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.tipBias = value; });
+    bindBranchNumber("#branch-leaf-curl", (v) => v.toFixed(2), (genome, value) => { genome.leaf.curl = value; });
+    bindBranchNumber("#branch-leaf-fold", (v) => v.toFixed(2), (genome, value) => { genome.leaf.venation = value; });
     entryEditor.querySelector<HTMLSelectElement>("#branch-leaf-shape")?.addEventListener("change", (event) => {
       updateBranchTree((genome) => { genome.leaf.shape = (event.currentTarget as HTMLSelectElement).value as LeafShapeKind; });
     });

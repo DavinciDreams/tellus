@@ -226,7 +226,7 @@ const PROC_GROUND_PLANT_DETAIL_DISTANCE_THIRD = 42;
 const PROC_GROUND_PLANT_FADE_DISTANCE = 72;
 const PROC_GROUND_PLANT_FADE_DISTANCE_THIRD = 96;
 const PROC_GROUND_PLANT_MIN_DENSITY = 0.22;
-const PROCPLANT_RENDER_STYLE_REVISION = 9;
+const PROCPLANT_RENDER_STYLE_REVISION = 10;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
 const BIOME_MIX_SERVER_REFRESH_FALLBACK_MS = 60_000;
 const LOW_FPS_BUILD_BUDGET = 1;
@@ -641,7 +641,7 @@ const geometryKeyFor = (genome: ProcPlantGenome, instance: ProcPlantInstance): s
   }
   if (instance.kind === "leaf") {
     const leaf = genome.leaf;
-    return `leaf:${leaf.shape}:${leaf.widthRatio.toFixed(3)}:${leaf.serration.toFixed(3)}:${leaf.curl.toFixed(3)}`;
+    return `leaf:${leaf.shape}:${leaf.widthRatio.toFixed(3)}:${leaf.serration.toFixed(3)}:${leaf.curl.toFixed(3)}:${leaf.venation.toFixed(3)}`;
   }
   if (instance.kind === "grassBlade") {
     return `grassBlade:${genome.leaf.widthRatio.toFixed(3)}:${genome.leaf.curl.toFixed(3)}`;
@@ -698,16 +698,18 @@ const createGrassCarpetGeometry = (bladeCount: number): THREE.BufferGeometry => 
 };
 
 const geometryForKey = (key: string): THREE.BufferGeometry => {
-  const [kind, shape, widthRatio, serration, curl] = key.split(":");
+  const [kind, shape, widthRatio, serration, curl, venation] = key.split(":");
   switch (kind) {
     case "grassCarpet":
       return createGrassCarpetGeometry(Number(shape) || 12);
     case "leaf":
+      const parsedVenation = Number(venation);
       return createProcPlantLeafGeometry(
         shape as ProcPlantGenome["leaf"]["shape"],
         Number(widthRatio),
         Number(serration),
         Number(curl),
+        Number.isFinite(parsedVenation) ? parsedVenation : 0.5,
       );
     case "grassBlade":
       return createProcPlantGrassBladeGeometry(Number(shape), Number(widthRatio));
