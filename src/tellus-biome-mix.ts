@@ -18,6 +18,16 @@ import type { TerrainPaintKind } from "./tellus-types";
 import { getSession } from "./tellus-auth";
 import { runtimeConfig, worldApiUrl } from "./tellus-runtime-config";
 import { tellusUserId } from "./tellus-urls-identity";
+import arcticAlpineDefault from "./biome-defaults/arctic-alpine.json";
+import coastalDefault from "./biome-defaults/coastal.json";
+import desertDefault from "./biome-defaults/desert.json";
+import estuaryDefault from "./biome-defaults/estuary.json";
+import grasslandDefault from "./biome-defaults/grassland.json";
+import savannaDefault from "./biome-defaults/savanna.json";
+import taigaDefault from "./biome-defaults/taiga.json";
+import temperateRainForestDefault from "./biome-defaults/temperate-rain-forest.json";
+import tundraDefault from "./biome-defaults/tundra.json";
+import tropicalRainForestDefault from "./biome-defaults/tropical-rain-forest.json";
 
 export type TellusBiomeMixSource = "ecology" | "terrain-paint" | "custom";
 export type TellusBiomeAssetLodPreference = "game-optimized" | "lod0" | "lod1" | "lod2" | "lod3" | "impostor";
@@ -208,22 +218,53 @@ export const entryFromBiomePatch = (
       enabled: true,
     };
 
+const AUTHORED_ECOLOGY_BIOME_MIXES: Partial<Record<EcologyBiomeId, TellusBiomeMixDefinition>> = {
+  "arctic-alpine": arcticAlpineDefault as TellusBiomeMixDefinition,
+  coastal: coastalDefault as TellusBiomeMixDefinition,
+  desert: desertDefault as TellusBiomeMixDefinition,
+  estuary: estuaryDefault as TellusBiomeMixDefinition,
+  grassland: grasslandDefault as TellusBiomeMixDefinition,
+  savanna: savannaDefault as TellusBiomeMixDefinition,
+  taiga: taigaDefault as TellusBiomeMixDefinition,
+  "temperate-rain-forest": temperateRainForestDefault as TellusBiomeMixDefinition,
+  tundra: tundraDefault as TellusBiomeMixDefinition,
+  "tropical-rain-forest": tropicalRainForestDefault as TellusBiomeMixDefinition,
+};
+
+/**
+ * Returns a fresh copy of a mixer-authored global ecology default, when one
+ * exists. The world seed controls placement while each exported entry keeps
+ * its authored genome and mutation seed.
+ */
+export const makeAuthoredEcologyBiomeMix = (
+  biome: EcologyBiomeId,
+  seed = 612072,
+): TellusBiomeMixDefinition | null => {
+  const authored = AUTHORED_ECOLOGY_BIOME_MIXES[biome];
+  if (!authored) return null;
+  const mix = normalizeBiomeMixDefinition(authored);
+  if (!mix) return null;
+  mix.seed = seed;
+  return mix;
+};
+
 export const makeEcologyBiomeMix = (
   biome: EcologyBiomeId,
   seed = 612072,
-): TellusBiomeMixDefinition => ({
-  version: 1,
-  id: `ecology-${slug(biome)}`,
-  label: labelForProcPlantId(biome),
-  source: "ecology",
-  ecologyBiome: biome,
-  targetTerrainPaint: ECOLOGY_TERRAIN_PAINT_MAP[biome],
-  seed,
-  density: 0.72,
-  diversity: 0.82,
-  targetVerticesPerChunk: 250000,
-  entries: biomePatchesForEcologyBiome(biome, seed, 8).map(entryFromBiomePatch),
-});
+): TellusBiomeMixDefinition =>
+  makeAuthoredEcologyBiomeMix(biome, seed) ?? {
+    version: 1,
+    id: `ecology-${slug(biome)}`,
+    label: labelForProcPlantId(biome),
+    source: "ecology",
+    ecologyBiome: biome,
+    targetTerrainPaint: ECOLOGY_TERRAIN_PAINT_MAP[biome],
+    seed,
+    density: 0.72,
+    diversity: 0.82,
+    targetVerticesPerChunk: 250000,
+    entries: biomePatchesForEcologyBiome(biome, seed, 8).map(entryFromBiomePatch),
+  };
 
 export const makeTerrainPaintBiomeMix = (
   paint: TerrainPaintKind,

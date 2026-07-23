@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "id": "ecology-arctic-alpine",
+  "label": "Arctic Alpine",
+  "source": "ecology",
+  "ecologyBiome": "arctic-alpine",
+  "substrate": "granite",
+  "seed": 612072,
+  "density": 0.1,
+  "diversity": 0.21,
+  "targetVerticesPerChunk": 250000,
+  "sample": {
+    "biome": "arctic-alpine",
+    "substrate": "granite",
+    "warmth": 0.08,
+    "moisture": 0.34,
+    "seasonality": 0.92,
+    "salinity": 0.02,
+    "wind": 0.86,
+    "light": 0.82,
+    "elevation": 0.84,
+    "slope": 0.56
+  },
+  "entries": [
+    {
+      "id": "custom-traditional-alpine-pine-mrphzmcj",
+      "label": "traditional alpine pine",
+      "source": "mutation",
+      "weight": 1,
+      "density": 0.07,
+      "scale": 8,
+      "environment": {
+        "light": 0.82,
+        "moisture": 0.34,
+        "crowding": 0.7602000000000001,
+        "biomeWarmth": 0.08
+      },
+      "seed": 732724,
+      "enabled": true,
+      "genome": {
+        "id": "custom-traditional-alpine-pine",
+        "habit": "conifer",
+        "nodeCount": 18,
+        "internode": {
+          "base": 0.22,
+          "tip": 0.085,
+          "curve": 1.28
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.22,
+          "tip": 0.08,
+          "curve": 1.18
+        },
+        "branchAngle": {
+          "mean": 0.82,
+          "spread": 0.2,
+          "depthDecay": 0.72
+        },
+        "apicalDominance": 0.72,
+        "leaf": {
+          "shape": "fan",
+          "length": {
+            "base": 0.85,
+            "tip": 0.3449380353415686,
+            "curve": 1.7351704362678275
+          },
+          "widthRatio": 0.13374442543446374,
+          "density": {
+            "base": 0.8589395830883937,
+            "tip": 0.6764951182471424,
+            "curve": 1.0335427827065515
+          },
+          "curl": 0.12502421101089564,
+          "serration": 0.05634726576507092,
+          "venation": 0.1763142993021756,
+          "colorA": 5734991,
+          "colorB": 8690043
+        },
+        "foliage": {
+          "mass": 1.54,
+          "clusterDensity": 0.34,
+          "whorlDensity": 0.6679561276210103,
+          "tipBias": 0.67,
+          "size": 0.96
+        },
+        "treeRealism": {
+          "crownSpread": 0.4160957662663347,
+          "crownTaper": 0.8474116670873956,
+          "trunkFlare": 0.38,
+          "trunkBend": 0.05668527491856369,
+          "branchGnarl": 0.07909064474515617,
+          "windFlex": 0.5912492931494489,
+          "colorVariance": 0.1975369719415903
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.12414627361111344,
+          "leafBoostInShade": 0.12821693472564222,
+          "branchSuppressionInShade": 0.3224101798748597,
+          "phototropism": 0
+        },
+        "branchModules": {
+          "palette": "excurrent-conifer",
+          "moduleBudget": 91,
+          "levels": 5,
+          "vigor": 1.5,
+          "branchDensity": 0.46,
+          "branchAngle": 1.16,
+          "spread": 2,
+          "droop": 2,
+          "tropism": 0.59,
+          "gnarliness": 0,
+          "collisionBias": 0.87,
+          "foliageSource": "procplants",
+          "leafColor": 5078367,
+          "barkColor": 8807225
+        }
+      }
+    },
+    {
+      "id": "branch-module-excurrent-conifer-mrpkhz49",
+      "label": "Modules Excurrent Conifer Mutation",
+      "source": "mutation",
+      "genome": {
+        "id": "branchModules-excurrent-conifer",
+        "habit": "conifer",
+        "nodeCount": 18,
+        "internode": {
+          "base": 0.22,
+          "tip": 0.085,
+          "curve": 1.28
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.22,
+          "tip": 0.08,
+          "curve": 1.18
+        },
+        "branchAngle": {
+          "mean": 0.82,
+          "spread": 0.2,
+          "depthDecay": 0.72
+        },
+        "apicalDominance": 0.72,
+        "leaf": {
+          "shape": "fan",
+          "length": {
+            "base": 0.6747377125073375,
+            "tip": 0.3569607706882773,
+            "curve": 0.9980841208999598
+          },
+          "widthRatio": 0.2387651732367032,
+          "density": {
+            "base": 0.8368914421326711,
+            "tip": 0.876435699452814,
+            "curve": 0.7751891070830652
+          },
+          "curl": 0.19759119411930437,
+          "serration": 0.439834408722818,
+          "venation": 0.28368879167363037,
+          "colorA": 5342068,
+          "colorB": 7702649
+        },
+        "foliage": {
+          "mass": 0.68,
+          "clusterDensity": 0.77,
+          "whorlDensity": 1.8,
+          "tipBias": 0.02,
+          "size": 1.03
+        },
+        "treeRealism": {
+          "crownSpread": 0.343888667930575,
+          "crownTaper": 0.5889649895832384,
+          "trunkFlare": 0.38,
+          "trunkBend": 0,
+          "branchGnarl": 0.11117090787272899,
+          "windFlex": 0.8905812565796078,
+          "colorVariance": 0.17341594939120114
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.3066616623289883,
+          "leafBoostInShade": 0.2015860459581018,
+          "branchSuppressionInShade": 0.13741159960627555,
+          "phototropism": 0.12780803785193712
+        },
+        "branchModules": {
+          "palette": "excurrent-conifer",
+          "moduleBudget": 56,
+          "levels": 3,
+          "vigor": 0.77,
+          "branchDensity": 0.82,
+          "branchAngle": 0.25,
+          "spread": 1.07,
+          "droop": 1.26,
+          "tropism": 0.65,
+          "gnarliness": 1.08,
+          "collisionBias": 1.014696445595473,
+          "foliageSource": "procplants",
+          "leafColor": 6131062,
+          "barkColor": 9270344
+        }
+      },
+      "weight": 1,
+      "density": 0.05,
+      "scale": 8.4,
+      "environment": {
+        "light": 0.82,
+        "moisture": 0.34,
+        "crowding": 0.7602000000000001,
+        "biomeWarmth": 0.08
+      },
+      "seed": 223024004,
+      "enabled": true
+    }
+  ]
+}

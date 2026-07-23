@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "id": "ecology-tundra",
+  "label": "Tundra",
+  "source": "ecology",
+  "ecologyBiome": "tundra",
+  "targetTerrainPaint": "gravel",
+  "seed": 612072,
+  "density": 0.72,
+  "diversity": 0.82,
+  "targetVerticesPerChunk": 250000,
+  "entries": [
+    {
+      "id": "alpineFir-1",
+      "label": "Small Pine",
+      "source": "mutation",
+      "weight": 3,
+      "density": 0.053200000000000004,
+      "scale": 2.9,
+      "environment": {
+        "light": 0.72,
+        "moisture": 0.3,
+        "crowding": 0.12,
+        "biomeWarmth": 0.34
+      },
+      "seed": -2048746365,
+      "enabled": true,
+      "genome": {
+        "id": "weberPenn-smallPine",
+        "habit": "conifer",
+        "nodeCount": 20,
+        "internode": {
+          "base": 0.2,
+          "tip": 0.07,
+          "curve": 1.42
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.28,
+          "tip": 0.1,
+          "curve": 1.32
+        },
+        "branchAngle": {
+          "mean": 0.74,
+          "spread": 0.16,
+          "depthDecay": 0.74
+        },
+        "apicalDominance": 0.82,
+        "leaf": {
+          "shape": "linear",
+          "length": {
+            "base": 0.62,
+            "tip": 0.24,
+            "curve": 1.2
+          },
+          "widthRatio": 0.16,
+          "density": {
+            "base": 0.95,
+            "tip": 0.7,
+            "curve": 1.08
+          },
+          "curl": 0.22,
+          "serration": 0,
+          "venation": 0.06,
+          "colorA": 2046254,
+          "colorB": 7047779
+        },
+        "foliage": {
+          "mass": 1.64,
+          "clusterDensity": 1.82,
+          "whorlDensity": 0.95,
+          "tipBias": 0.67,
+          "size": 0.68
+        },
+        "treeRealism": {
+          "crownSpread": 0.36,
+          "crownTaper": 0.88,
+          "trunkFlare": 0.36,
+          "trunkBend": 0.43,
+          "branchGnarl": 0.36,
+          "windFlex": 0.5,
+          "colorVariance": 0.1
+        },
+        "weberPenn": {
+          "species": "smallPine",
+          "nativeLeaves": false,
+          "crownFill": true,
+          "foliageSource": "conifer-spray",
+          "fillAnchor": "leaf-sites",
+          "maxBranchDepth": 4,
+          "maxStems": 150,
+          "maxLeaves": 387,
+          "leafScaleMultiplier": 5.25,
+          "radialSegments": 7,
+          "branchSamples": 4,
+          "barkColor": 6112039,
+          "leafColor": 2506546
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.22,
+          "leafBoostInShade": 0.16,
+          "branchSuppressionInShade": 0.12,
+          "phototropism": 0.05
+        }
+      }
+    }
+  ]
+}

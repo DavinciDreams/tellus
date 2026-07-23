@@ -100,7 +100,7 @@ describe("procplant vegetation", () => {
     expect(conifer.pos.length).not.toBe(broadleaf.pos.length);
   });
 
-  it("gives branch-module conifers a needle-spray foliage mesh instead of a flat broadleaf leaf card", () => {
+  it("honors the authored alpine conifers' procplants foliage mode", () => {
     const scene = new THREE.Scene();
     const alpineEcology = resolveEcologySample({
       seed: 1,
@@ -120,13 +120,13 @@ describe("procplant vegetation", () => {
       densityMultiplier: 4,
     });
 
-    // Biome trees (treeBackend: {kind: "lsystem", ...}) only build the detailed branch-module tree
-    // (vs. a cheap travel silhouette that never increments branchSegments) once the player has been
-    // stationary for >650ms — hold a fixed position and advance the clock well past that threshold.
-    for (let i = 0; i < 40 && vegetation.stats().branchSegments === 0; i++) {
+    // The sparse authored alpine mix explicitly selects procplants foliage on both mutation trees.
+    // Hold a fixed position and advance past travel mode so their detailed geometry is built.
+    for (let i = 0; i < 40; i++) {
       vegetation.update(0, 0, 1, 60, 1000 + i * 900);
     }
-    expect(vegetation.stats().branchSegments).toBeGreaterThan(0);
+    expect(vegetation.stats().plants).toBeGreaterThan(0);
+    expect(vegetation.stats().stemTriangles).toBeGreaterThan(0);
 
     const sprayGeometry = createProcPlantConiferSprayGeometry();
     const meshes: THREE.InstancedMesh[] = [];
@@ -143,7 +143,7 @@ describe("procplant vegetation", () => {
       return count === createProcPlantLeafGeometry("fan", 1, 0, 0).getAttribute("position").count;
     });
 
-    expect(hasSprayMesh).toBe(true);
+    expect(hasSprayMesh).toBe(false);
     expect(hasFlatLeafCardOfWrongShape).toBe(false);
 
     vegetation.dispose();

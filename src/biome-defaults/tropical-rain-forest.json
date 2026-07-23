@@ -1,0 +1,412 @@
+{
+  "version": 1,
+  "id": "ecology-tropical-rain-forest",
+  "label": "Tropical Rain Forest",
+  "source": "ecology",
+  "ecologyBiome": "tropical-rain-forest",
+  "targetTerrainPaint": "jungle-moss",
+  "seed": 612072,
+  "density": 1.8,
+  "diversity": 0.82,
+  "targetVerticesPerChunk": 250000,
+  "entries": [
+    {
+      "id": "weber-penn-palm-mr3et3pp",
+      "label": "Palm",
+      "source": "mutation",
+      "genome": {
+        "id": "weberPenn-palm",
+        "habit": "palm",
+        "nodeCount": 15,
+        "internode": {
+          "base": 0.2,
+          "tip": 0.14,
+          "curve": 0.9
+        },
+        "phyllotaxisAngle": 2.4008632297279924,
+        "branchChance": {
+          "base": 0.01,
+          "tip": 0,
+          "curve": 1
+        },
+        "branchAngle": {
+          "mean": 0.95,
+          "spread": 0.18,
+          "depthDecay": 0.55
+        },
+        "apicalDominance": 0.95,
+        "leaf": {
+          "shape": "fan",
+          "length": {
+            "base": 0.85,
+            "tip": 0.62,
+            "curve": 0.85
+          },
+          "widthRatio": 0.58,
+          "density": {
+            "base": 1,
+            "tip": 1,
+            "curve": 1
+          },
+          "curl": 0.18,
+          "serration": 0.08,
+          "venation": 0.95,
+          "colorA": 4435283,
+          "colorB": 10798944
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.42,
+          "leafBoostInShade": 0.2,
+          "branchSuppressionInShade": 0.12,
+          "phototropism": 0.12
+        },
+        "weberPenn": {
+          "species": "palm",
+          "nativeLeaves": true,
+          "crownFill": false,
+          "foliageSource": "species",
+          "fillAnchor": "leaf-sites",
+          "maxBranchDepth": 3,
+          "maxStems": 80,
+          "maxLeaves": 311,
+          "leafScaleMultiplier": 3.2,
+          "radialSegments": 4,
+          "branchSamples": 2,
+          "barkColor": 8017456,
+          "leafColor": 4435283
+        },
+        "foliage": {
+          "mass": 0,
+          "clusterDensity": 1.12,
+          "whorlDensity": 0.48,
+          "tipBias": 0.62,
+          "size": 0.54
+        },
+        "treeRealism": {
+          "crownSpread": 0.72,
+          "crownTaper": 0.34,
+          "trunkFlare": 0.34,
+          "trunkBend": 0.14,
+          "branchGnarl": 0.22,
+          "windFlex": 0.48,
+          "colorVariance": 0.14
+        }
+      },
+      "weight": 2.5,
+      "density": 1.08,
+      "scale": 7.6,
+      "environment": {
+        "light": 0.58,
+        "moisture": 0.9,
+        "crowding": 0.9,
+        "biomeWarmth": 0.92
+      },
+      "seed": 219253593,
+      "enabled": true
+    },
+    {
+      "id": "rosebush-desertrosette-hybrid-911594",
+      "label": "Rose Bush Desert Rosette Hybrid",
+      "source": "mutation",
+      "genome": {
+        "id": "roseBush-desertRosette-hybrid",
+        "habit": "tropical",
+        "nodeCount": 12,
+        "internode": {
+          "base": 0.08291790236486121,
+          "tip": 0.05022288126125932,
+          "curve": 1.1112258469369263
+        },
+        "phyllotaxisAngle": 2.399963229727992,
+        "branchChance": {
+          "base": 0.21728453292790798,
+          "tip": 0.08089152504503726,
+          "curve": 1.2275074141891673
+        },
+        "branchAngle": {
+          "mean": 0.7975483061261475,
+          "spread": 0.2002228812612593,
+          "depthDecay": 0.59661588914413
+        },
+        "apicalDominance": 0.6069911029729992,
+        "leaf": {
+          "shape": "round",
+          "length": {
+            "base": 0.4076597467567772,
+            "tip": 0.27338411085586994,
+            "curve": 0.8912258469369262
+          },
+          "widthRatio": 0.5321173719819635,
+          "density": {
+            "base": 0.9595542374774813,
+            "tip": 0.8539413140090182,
+            "curve": 1
+          },
+          "curl": 0.010780084414407608,
+          "serration": 0.15639300788287075,
+          "venation": 0.4522288126125932,
+          "colorA": 6194535,
+          "colorB": 8367181
+        },
+        "flower": {
+          "whorls": 4,
+          "petals": 9,
+          "radius": 0.2,
+          "color": 14175587,
+          "centerColor": 16762730
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.26089152504503726,
+          "leafBoostInShade": 0.11572436409909277,
+          "branchSuppressionInShade": 0.17527860157657416,
+          "phototropism": 0.10066864378377793
+        }
+      },
+      "weight": 0.95,
+      "density": 1.05,
+      "scale": 2.6,
+      "environment": {
+        "light": 0.7173177024815232,
+        "moisture": 0.5128827158479539,
+        "crowding": 0.5897348924197935,
+        "biomeWarmth": 0.6622421023761853
+      },
+      "seed": 911594,
+      "enabled": true
+    },
+    {
+      "id": "weber-penn-palm-mrwn8rom",
+      "label": "Palm",
+      "source": "mutation",
+      "genome": {
+        "id": "weberPenn-palm",
+        "habit": "palm",
+        "nodeCount": 15,
+        "internode": {
+          "base": 0.2,
+          "tip": 0.14,
+          "curve": 0.9
+        },
+        "phyllotaxisAngle": 2.403863229727992,
+        "branchChance": {
+          "base": 0.01,
+          "tip": 0,
+          "curve": 1
+        },
+        "branchAngle": {
+          "mean": 0.95,
+          "spread": 0.18,
+          "depthDecay": 0.55
+        },
+        "apicalDominance": 0.95,
+        "leaf": {
+          "shape": "fan",
+          "length": {
+            "base": 0.85,
+            "tip": 0.62,
+            "curve": 0.85
+          },
+          "widthRatio": 0.58,
+          "density": {
+            "base": 1,
+            "tip": 1,
+            "curve": 1
+          },
+          "curl": 0.18,
+          "serration": 0.08,
+          "venation": 0.95,
+          "colorA": 4505622,
+          "colorB": 10798944
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.42,
+          "leafBoostInShade": 0.2,
+          "branchSuppressionInShade": 0.12,
+          "phototropism": 0.12
+        },
+        "weberPenn": {
+          "species": "palm",
+          "nativeLeaves": true,
+          "crownFill": false,
+          "foliageSource": "species",
+          "fillAnchor": "leaf-sites",
+          "maxBranchDepth": 3,
+          "maxStems": 80,
+          "maxLeaves": 190,
+          "leafScaleMultiplier": 3.2,
+          "radialSegments": 4,
+          "branchSamples": 2,
+          "barkColor": 12230013,
+          "leafColor": 4505622
+        },
+        "foliage": {
+          "mass": 0,
+          "clusterDensity": 1.12,
+          "whorlDensity": 0.48,
+          "tipBias": 0.62,
+          "size": 0.54
+        },
+        "treeRealism": {
+          "crownSpread": 0.72,
+          "crownTaper": 0.34,
+          "trunkFlare": 0.34,
+          "trunkBend": 0.14,
+          "branchGnarl": 0.22,
+          "windFlex": 0.48,
+          "colorVariance": 0.14
+        }
+      },
+      "weight": 1,
+      "density": 1.17,
+      "scale": 10,
+      "environment": {
+        "light": 0.58,
+        "moisture": 0.9,
+        "crowding": 0.9,
+        "biomeWarmth": 0.92
+      },
+      "seed": 366824143,
+      "enabled": true
+    },
+    {
+      "id": "custom-rose-bush-phi-fern-mix-mutation-mutation-tropicalaroid-hybrid-143687",
+      "label": "Custom Rose Bush Phi Fern Mix Mutation Mutation Tropical Aroid Hybrid",
+      "source": "mutation",
+      "genome": {
+        "id": "custom-rose-bush-phi-fern-mix-mutation-mutation-tropicalAroid-hybrid",
+        "habit": "fern",
+        "nodeCount": 15,
+        "internode": {
+          "base": 0.08396380175914599,
+          "tip": 0.051963200854945796,
+          "curve": 1.064288
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.114708,
+          "tip": 0.040784,
+          "curve": 1.26133
+        },
+        "branchAngle": {
+          "mean": 1.55,
+          "spread": 0.715850609058035,
+          "depthDecay": 0.574206
+        },
+        "apicalDominance": 0.5083443712,
+        "leaf": {
+          "shape": "round",
+          "length": {
+            "base": 1.1005931249999998,
+            "tip": 0.5973243749999999,
+            "curve": 0.84361
+          },
+          "widthRatio": 0.509456,
+          "density": {
+            "base": 0.844178,
+            "tip": 0.613014,
+            "curve": 1
+          },
+          "curl": 0.175,
+          "serration": 0.100262,
+          "venation": 0.67948,
+          "colorA": 2248477,
+          "colorB": 6728015
+        },
+        "flower": {
+          "whorls": 4,
+          "petals": 9,
+          "radius": 0.2,
+          "color": 14175587,
+          "centerColor": 16762730
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.330036,
+          "leafBoostInShade": 0.502302,
+          "branchSuppressionInShade": 0.17394,
+          "phototropism": 0.158644
+        }
+      },
+      "weight": 3.2,
+      "density": 0.94,
+      "scale": 1.2,
+      "environment": {
+        "light": 0.8,
+        "moisture": 0.68,
+        "crowding": 0.28,
+        "biomeWarmth": 0.7950442727003246
+      },
+      "seed": 143687,
+      "enabled": true
+    },
+    {
+      "id": "custom-rose-bush-phi-fern-mix-mutation-mutation-tropical-aroid-mix-hibiscusbloom-hybrid-143687",
+      "label": "Custom Rose Bush Phi Fern Mix Mutation Mutation Tropical Aroid Mix Hibiscus Bloom Hybrid",
+      "source": "mutation",
+      "genome": {
+        "id": "custom-rose-bush-phi-fern-mix-mutation-mutation-tropical-aroid-mix-hibiscusBloom-hybrid",
+        "habit": "flower",
+        "nodeCount": 10,
+        "internode": {
+          "base": 0.08563313241688922,
+          "tip": 0.05657577559729627,
+          "curve": 0.96942896
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.08590036000000001,
+          "tip": 0.023533280000000004,
+          "curve": 1.3764261
+        },
+        "branchAngle": {
+          "mean": 1.52237,
+          "spread": 0.45679440696467416,
+          "depthDecay": 0.6952150199999999
+        },
+        "apicalDominance": 0.5232148344831999,
+        "leaf": {
+          "shape": "round",
+          "length": {
+            "base": 1.2053268703125,
+            "tip": 0.6766765734375,
+            "curve": 1.0149137
+          },
+          "widthRatio": 0.50160752,
+          "density": {
+            "base": 0.8241102599999999,
+            "tip": 0.48601238,
+            "curve": 1.166
+          },
+          "curl": 0.15335,
+          "serration": 0.08344454000000001,
+          "venation": 0.7131116,
+          "colorA": 2644785,
+          "colorB": 7909205
+        },
+        "flower": {
+          "whorls": 1,
+          "petals": 5,
+          "radius": 0.34,
+          "color": 16732015,
+          "centerColor": 16766810
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.48770612,
+          "leafBoostInShade": 0.33439134,
+          "branchSuppressionInShade": 0.2287698,
+          "phototropism": 0.17636948
+        }
+      },
+      "weight": 2.4,
+      "density": 0.6,
+      "scale": 1.3,
+      "environment": {
+        "light": 0.8,
+        "moisture": 0.68,
+        "crowding": 0.28,
+        "biomeWarmth": 0.7950442727003246
+      },
+      "seed": 143687,
+      "enabled": true
+    }
+  ]
+}

@@ -1,0 +1,412 @@
+{
+  "version": 1,
+  "id": "ecology-temperate-rain-forest",
+  "label": "Temperate Rain Forest",
+  "source": "ecology",
+  "ecologyBiome": "temperate-rain-forest",
+  "targetTerrainPaint": "forest-floor",
+  "seed": 612072,
+  "density": 0.46,
+  "diversity": 0.82,
+  "targetVerticesPerChunk": 250000,
+  "entries": [
+    {
+      "id": "birchGrove-mrwdzfiu",
+      "label": "Birch Grove",
+      "source": "mutation",
+      "weight": 1,
+      "density": 0.24,
+      "scale": 8,
+      "environment": {
+        "light": 0.7037157017590392,
+        "moisture": 0.7357024853413401,
+        "crowding": 0.82,
+        "biomeWarmth": 0.7823895546394818
+      },
+      "seed": 560205,
+      "enabled": true,
+      "genome": {
+        "id": "birchGrove",
+        "habit": "tree",
+        "nodeCount": 20,
+        "internode": {
+          "base": 0.2,
+          "tip": 0.09,
+          "curve": 1.12
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.18,
+          "tip": 0.14,
+          "curve": 1
+        },
+        "branchAngle": {
+          "mean": 0.46,
+          "spread": 0.22,
+          "depthDecay": 0.76
+        },
+        "apicalDominance": 0.64,
+        "leaf": {
+          "shape": "round",
+          "length": {
+            "base": 0.18,
+            "tip": 0.13,
+            "curve": 0.9
+          },
+          "widthRatio": 0.68,
+          "density": {
+            "base": 0.48,
+            "tip": 0.82,
+            "curve": 0.72
+          },
+          "curl": 0.06,
+          "serration": 0.22,
+          "venation": 0.58,
+          "colorA": 12751892,
+          "colorB": 11979102
+        },
+        "tree": {
+          "crown": "columnar",
+          "crownStart": 0.42,
+          "leafClusterScale": 0.82,
+          "exposedTrunk": 0.5
+        },
+        "foliage": {
+          "mass": 1.24,
+          "clusterDensity": 1.57,
+          "whorlDensity": 0.42,
+          "tipBias": 0.44,
+          "size": 0.27
+        },
+        "treeRealism": {
+          "crownSpread": 1.03,
+          "crownTaper": 0.22,
+          "trunkFlare": 0.24,
+          "trunkBend": 0.22,
+          "branchGnarl": 0.18,
+          "windFlex": 0.74,
+          "colorVariance": 0.18
+        },
+        "weberPenn": {
+          "species": "silverBirch",
+          "nativeLeaves": true,
+          "crownFill": true,
+          "foliageSource": "species",
+          "fillAnchor": "leaf-sites",
+          "maxBranchDepth": 3,
+          "maxStems": 72,
+          "maxLeaves": 242,
+          "leafScaleMultiplier": 5.85,
+          "radialSegments": 4,
+          "branchSamples": 2,
+          "leafColor": 12751892,
+          "barkColor": 14866896
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.58,
+          "leafBoostInShade": 0.16,
+          "branchSuppressionInShade": 0.26,
+          "phototropism": 0.2
+        }
+      }
+    },
+    {
+      "id": "weber-penn-apple-mrwe4b0i",
+      "label": "Quaking Aspen",
+      "source": "mutation",
+      "genome": {
+        "id": "weberPenn-quakingAspen",
+        "habit": "tree",
+        "nodeCount": 18,
+        "internode": {
+          "base": 0.18,
+          "tip": 0.08,
+          "curve": 1.28
+        },
+        "phyllotaxisAngle": 2.4008632297279924,
+        "branchChance": {
+          "base": 0.34,
+          "tip": 0.2,
+          "curve": 1.05
+        },
+        "branchAngle": {
+          "mean": 0.68,
+          "spread": 0.32,
+          "depthDecay": 0.72
+        },
+        "apicalDominance": 0.34,
+        "leaf": {
+          "shape": "ovate",
+          "length": {
+            "base": 0.26,
+            "tip": 0.2,
+            "curve": 0.9
+          },
+          "widthRatio": 0.54,
+          "density": {
+            "base": 0.68,
+            "tip": 0.92,
+            "curve": 0.78
+          },
+          "curl": 0.09,
+          "serration": 0.12,
+          "venation": 0.66,
+          "colorA": 8896642,
+          "colorB": 8628557
+        },
+        "tree": {
+          "crown": "rounded",
+          "crownStart": 0.34,
+          "leafClusterScale": 1.05,
+          "exposedTrunk": 0.28
+        },
+        "foliage": {
+          "mass": 0.43,
+          "clusterDensity": 0.99,
+          "whorlDensity": 1.11,
+          "tipBias": 1,
+          "size": 0.11
+        },
+        "treeRealism": {
+          "crownSpread": 0.78,
+          "crownTaper": 0.36,
+          "trunkFlare": 0.46,
+          "trunkBend": 0.16,
+          "branchGnarl": 0.16,
+          "windFlex": 0.42,
+          "colorVariance": 0.16
+        },
+        "weberPenn": {
+          "species": "quakingAspen",
+          "nativeLeaves": true,
+          "crownFill": true,
+          "foliageSource": "procplants",
+          "fillAnchor": "branch-tips",
+          "maxBranchDepth": 3,
+          "maxStems": 116,
+          "maxLeaves": 403,
+          "leafScaleMultiplier": 5.35,
+          "radialSegments": 5,
+          "branchSamples": 3,
+          "barkColor": 6112039,
+          "leafColor": 8896642
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.42,
+          "leafBoostInShade": 0.18,
+          "branchSuppressionInShade": 0.18,
+          "phototropism": 0.12
+        }
+      },
+      "weight": 1,
+      "density": 0.27,
+      "scale": 8.6,
+      "environment": {
+        "light": 0.7037157017590392,
+        "moisture": 0.7357024853413401,
+        "crowding": 0.82,
+        "biomeWarmth": 0.7823895546394818
+      },
+      "seed": 293546500,
+      "enabled": true
+    },
+    {
+      "id": "weber-penn-blackTupelo-mrwggkgw",
+      "label": "Black Tupelo",
+      "source": "mutation",
+      "genome": {
+        "id": "weberPenn-blackTupelo",
+        "habit": "tree",
+        "nodeCount": 15,
+        "internode": {
+          "base": 0.14,
+          "tip": 0.075,
+          "curve": 1.15
+        },
+        "phyllotaxisAngle": 2.4008632297279924,
+        "branchChance": {
+          "base": 0.28,
+          "tip": 0.18,
+          "curve": 1.1
+        },
+        "branchAngle": {
+          "mean": 0.72,
+          "spread": 0.25,
+          "depthDecay": 0.72
+        },
+        "apicalDominance": 0.38,
+        "leaf": {
+          "shape": "ovate",
+          "length": {
+            "base": 0.22,
+            "tip": 0.17,
+            "curve": 0.88
+          },
+          "widthRatio": 0.5,
+          "density": {
+            "base": 0.62,
+            "tip": 0.88,
+            "curve": 0.82
+          },
+          "curl": 0.1,
+          "serration": 0.02,
+          "venation": 0.58,
+          "colorA": 1067788,
+          "colorB": 8564058
+        },
+        "tree": {
+          "crown": "propRoot",
+          "crownStart": 0.36,
+          "leafClusterScale": 0.96,
+          "exposedTrunk": 0.32
+        },
+        "foliage": {
+          "mass": 1.42,
+          "clusterDensity": 1.7,
+          "whorlDensity": 0.93,
+          "tipBias": 0.98,
+          "size": 0.06
+        },
+        "treeRealism": {
+          "crownSpread": 1.11,
+          "crownTaper": 0.3,
+          "trunkFlare": 0.62,
+          "trunkBend": 0.24,
+          "branchGnarl": 0.59,
+          "windFlex": 0.48,
+          "colorVariance": 0.18
+        },
+        "weberPenn": {
+          "species": "blackTupelo",
+          "nativeLeaves": true,
+          "crownFill": true,
+          "foliageSource": "procplants",
+          "fillAnchor": "leaf-sites",
+          "maxBranchDepth": 5,
+          "maxStems": 162,
+          "maxLeaves": 420,
+          "leafScaleMultiplier": 6.45,
+          "radialSegments": 7,
+          "branchSamples": 5,
+          "barkColor": 9139291,
+          "leafColor": 1067788
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.34,
+          "leafBoostInShade": 0.24,
+          "branchSuppressionInShade": 0.18,
+          "phototropism": 0.12
+        }
+      },
+      "weight": 1,
+      "density": 0.18,
+      "scale": 7.9,
+      "environment": {
+        "light": 0.7037157017590392,
+        "moisture": 0.7357024853413401,
+        "crowding": 0.82,
+        "biomeWarmth": 0.7823895546394818
+      },
+      "seed": 293546500,
+      "enabled": true
+    },
+    {
+      "id": "custom-hill-cherry-mangrove-roots-mutation-meadow-flower-mix-mutation-mix-102119",
+      "label": "Custom Hill Cherry Mangrove Roots Mutation Meadow Flower Mix Mutation Mix",
+      "source": "mutation",
+      "genome": {
+        "id": "custom-hill-cherry-mangrove-roots-mutation-meadow-flower-mix-mutation-mix",
+        "habit": "tree",
+        "nodeCount": 16,
+        "internode": {
+          "base": 0.159924,
+          "tip": 0.07844600000000002,
+          "curve": 1.21448
+        },
+        "phyllotaxisAngle": 2.400485229727993,
+        "branchChance": {
+          "base": 0.29296000000000005,
+          "tip": 0.174128,
+          "curve": 1.14744
+        },
+        "branchAngle": {
+          "mean": 0.6782360000000001,
+          "spread": 0.282956,
+          "depthDecay": 0.7090799999999999
+        },
+        "apicalDominance": 0.40484800000000004,
+        "leaf": {
+          "shape": "ovate",
+          "length": {
+            "base": 0.13302000000000003,
+            "tip": 0.09675393750000001,
+            "curve": 0.8774040000000001
+          },
+          "widthRatio": 0.488256,
+          "density": {
+            "base": 0.672272,
+            "tip": 0.8453240000000001,
+            "curve": 0.854676
+          },
+          "curl": 0.0942,
+          "serration": 0.08455200000000002,
+          "venation": 0.6231240000000001,
+          "colorA": 16732823,
+          "colorB": 8628557
+        },
+        "foliage": {
+          "mass": 2.5437287399999997,
+          "clusterDensity": 1.3273200000000003,
+          "whorlDensity": 1.8,
+          "tipBias": 0.8098,
+          "size": 0.31500000000000006
+        },
+        "treeRealism": {
+          "crownSpread": 1.85,
+          "crownTaper": 1.2419137082399998,
+          "trunkFlare": 0.49771600000000005,
+          "trunkBend": 0.23961488588799995,
+          "branchGnarl": 0.319328,
+          "windFlex": 0.452844,
+          "colorVariance": 0.164032
+        },
+        "weberPenn": {
+          "species": "blackTupelo",
+          "nativeLeaves": true,
+          "crownFill": true,
+          "foliageSource": "procplants",
+          "fillAnchor": "leaf-sites",
+          "maxBranchDepth": 3,
+          "maxStems": 80,
+          "maxLeaves": 200,
+          "leafScaleMultiplier": 2.2,
+          "radialSegments": 4,
+          "branchSamples": 2
+        },
+        "tree": {
+          "crown": "rounded",
+          "crownStart": 0.34,
+          "leafClusterScale": 1.05,
+          "exposedTrunk": 0.28
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.427896,
+          "leafBoostInShade": 0.198648,
+          "branchSuppressionInShade": 0.209484,
+          "phototropism": 0.13747199999999998
+        }
+      },
+      "weight": 1,
+      "density": 0.25,
+      "scale": 8,
+      "environment": {
+        "light": 0.4713892535865307,
+        "moisture": 0.6825678557918214,
+        "crowding": 0.36658398092641564,
+        "biomeWarmth": 0.9722106159524992
+      },
+      "seed": 102119,
+      "enabled": true
+    }
+  ]
+}

@@ -1,0 +1,419 @@
+{
+  "version": 1,
+  "id": "ecology-estuary",
+  "label": "Estuary",
+  "source": "ecology",
+  "ecologyBiome": "estuary",
+  "targetTerrainPaint": "flowers",
+  "seed": 612072,
+  "density": 1.8,
+  "diversity": 0.82,
+  "targetVerticesPerChunk": 250000,
+  "entries": [
+    {
+      "id": "foxglovespike-840154",
+      "label": "Foxglove Spike",
+      "source": "mutation",
+      "genome": {
+        "id": "foxgloveSpike",
+        "habit": "flower",
+        "nodeCount": 13,
+        "internode": {
+          "base": 0.13,
+          "tip": 0.085,
+          "curve": 1.05
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.01,
+          "tip": 0,
+          "curve": 1.4
+        },
+        "branchAngle": {
+          "mean": 0.32,
+          "spread": 0.1,
+          "depthDecay": 0.72
+        },
+        "apicalDominance": 0.94,
+        "leaf": {
+          "shape": "ovate",
+          "length": {
+            "base": 0.34,
+            "tip": 0.16,
+            "curve": 1.35
+          },
+          "widthRatio": 0.42,
+          "density": {
+            "base": 0.82,
+            "tip": 0.18,
+            "curve": 2
+          },
+          "curl": 0.1,
+          "serration": 0.18,
+          "venation": 0.6,
+          "colorA": 2971439,
+          "colorB": 8825432
+        },
+        "flower": {
+          "whorls": 2,
+          "petals": 5,
+          "radius": 0.12,
+          "color": 13658840,
+          "centerColor": 16110575
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.72,
+          "leafBoostInShade": 0.16,
+          "branchSuppressionInShade": 0.45,
+          "phototropism": 0.22
+        }
+      },
+      "weight": 1,
+      "density": 1.17,
+      "scale": 1,
+      "environment": {
+        "light": 0.9149349384056404,
+        "moisture": 0.2898714056587633,
+        "crowding": 0.5984583281627452,
+        "biomeWarmth": 0.5945086144609377
+      },
+      "seed": 840154,
+      "enabled": true
+    },
+    {
+      "id": "weber-penn-hillCherry-mr3ekmcy",
+      "label": "Hill Cherry",
+      "source": "mutation",
+      "genome": {
+        "id": "weberPenn-hillCherry",
+        "habit": "tree",
+        "nodeCount": 18,
+        "internode": {
+          "base": 0.18,
+          "tip": 0.08,
+          "curve": 1.28
+        },
+        "phyllotaxisAngle": 2.4008632297279924,
+        "branchChance": {
+          "base": 0.34,
+          "tip": 0.2,
+          "curve": 1.05
+        },
+        "branchAngle": {
+          "mean": 0.68,
+          "spread": 0.32,
+          "depthDecay": 0.72
+        },
+        "apicalDominance": 0.34,
+        "leaf": {
+          "shape": "ovate",
+          "length": {
+            "base": 0.26,
+            "tip": 0.2,
+            "curve": 0.9
+          },
+          "widthRatio": 0.54,
+          "density": {
+            "base": 0.68,
+            "tip": 0.92,
+            "curve": 0.78
+          },
+          "curl": 0.09,
+          "serration": 0.12,
+          "venation": 0.66,
+          "colorA": 16732823,
+          "colorB": 8628557
+        },
+        "tree": {
+          "crown": "rounded",
+          "crownStart": 0.34,
+          "leafClusterScale": 1.05,
+          "exposedTrunk": 0.28
+        },
+        "foliage": {
+          "mass": 0,
+          "clusterDensity": 1.51,
+          "whorlDensity": 0.45,
+          "tipBias": 0.52,
+          "size": 0.79
+        },
+        "treeRealism": {
+          "crownSpread": 1.23,
+          "crownTaper": 0.36,
+          "trunkFlare": 0.46,
+          "trunkBend": 0.07,
+          "branchGnarl": 0.16,
+          "windFlex": 0.42,
+          "colorVariance": 0.16
+        },
+        "weberPenn": {
+          "species": "hillCherry",
+          "nativeLeaves": true,
+          "crownFill": false,
+          "foliageSource": "species",
+          "fillAnchor": "branch-tips",
+          "maxBranchDepth": 4,
+          "maxStems": 111,
+          "maxLeaves": 322,
+          "leafScaleMultiplier": 4.4,
+          "radialSegments": 6,
+          "branchSamples": 4,
+          "barkColor": 7881223,
+          "leafColor": 16732823
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.42,
+          "leafBoostInShade": 0.18,
+          "branchSuppressionInShade": 0.18,
+          "phototropism": 0.12
+        }
+      },
+      "weight": 1,
+      "density": 0.35,
+      "scale": 7.7,
+      "environment": {
+        "light": 0.76,
+        "moisture": 0.94,
+        "crowding": 0.9,
+        "biomeWarmth": 0.58
+      },
+      "seed": 293546500,
+      "enabled": true
+    },
+    {
+      "id": "daylilyflower-605827",
+      "label": "Daylily Flower",
+      "source": "mutation",
+      "genome": {
+        "id": "daylilyFlower",
+        "habit": "flower",
+        "nodeCount": 10,
+        "internode": {
+          "base": 0.1434,
+          "tip": 0.0956,
+          "curve": 0.92
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.02,
+          "tip": 0.01,
+          "curve": 1.35
+        },
+        "branchAngle": {
+          "mean": 0.574,
+          "spread": 0.15725,
+          "depthDecay": 0.72
+        },
+        "apicalDominance": 1.308,
+        "leaf": {
+          "shape": "linear",
+          "length": {
+            "base": 1.333,
+            "tip": 0.744,
+            "curve": 1.05
+          },
+          "widthRatio": 0.06,
+          "density": {
+            "base": 1,
+            "tip": 0.3,
+            "curve": 1.8
+          },
+          "curl": 0.11200000000000002,
+          "serration": 0,
+          "venation": 0.28,
+          "colorA": 3563052,
+          "colorB": 11059042
+        },
+        "flower": {
+          "whorls": 2,
+          "petals": 3,
+          "radius": 0.27,
+          "color": 16748335,
+          "centerColor": 16765272,
+          "mesh": "flobot-daylily"
+        },
+        "clump": {
+          "count": 20,
+          "radius": 1.1688599999999998,
+          "jitter": 0.62,
+          "scaleVar": 0.24,
+          "lean": 0.9377100000000002,
+          "flowerDensity": 0.32
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.58,
+          "leafBoostInShade": 0.12,
+          "branchSuppressionInShade": 0.4,
+          "phototropism": 0.16
+        }
+      },
+      "weight": 1,
+      "density": 0.9,
+      "scale": 1,
+      "environment": {
+        "light": 0.49,
+        "moisture": 0.19,
+        "crowding": 0.9,
+        "biomeWarmth": 0.89
+      },
+      "seed": 605827,
+      "enabled": true
+    },
+    {
+      "id": "irisbulb-605827",
+      "label": "Iris Bulb",
+      "source": "mutation",
+      "genome": {
+        "id": "irisBulb",
+        "habit": "flower",
+        "nodeCount": 10,
+        "internode": {
+          "base": 0.18016,
+          "tip": 0.11259999999999999,
+          "curve": 0.92
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.01,
+          "tip": 0,
+          "curve": 1.3
+        },
+        "branchAngle": {
+          "mean": 0.462,
+          "spread": 0.12760000000000002,
+          "depthDecay": 0.7
+        },
+        "apicalDominance": 1.35,
+        "leaf": {
+          "shape": "linear",
+          "length": {
+            "base": 1.518,
+            "tip": 0.858,
+            "curve": 1.05
+          },
+          "widthRatio": 0.075,
+          "density": {
+            "base": 1,
+            "tip": 0.32,
+            "curve": 1.8
+          },
+          "curl": -0.00799999999999998,
+          "serration": 0,
+          "venation": 0.32,
+          "colorA": 3235126,
+          "colorB": 10337128
+        },
+        "flower": {
+          "whorls": 2,
+          "petals": 3,
+          "radius": 0.24,
+          "color": 12033279,
+          "centerColor": 16765546
+        },
+        "clump": {
+          "count": 6,
+          "radius": 0.4538400000000001,
+          "jitter": 0.5,
+          "scaleVar": 0.26,
+          "lean": 0.18689999999999998,
+          "flowerDensity": 0.45
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.58,
+          "leafBoostInShade": 0.12,
+          "branchSuppressionInShade": 0.4,
+          "phototropism": 0.16
+        }
+      },
+      "weight": 1,
+      "density": 0.9,
+      "scale": 1,
+      "environment": {
+        "light": 0.49,
+        "moisture": 0.55,
+        "crowding": 0.7,
+        "biomeWarmth": 0.89
+      },
+      "seed": 605827,
+      "enabled": true
+    },
+    {
+      "id": "tulipcup-605827",
+      "label": "Tulip Cup",
+      "source": "mutation",
+      "genome": {
+        "id": "tulipCup",
+        "habit": "flower",
+        "nodeCount": 8,
+        "internode": {
+          "base": 0.1287,
+          "tip": 0.0891,
+          "curve": 0.95
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0,
+          "tip": 0,
+          "curve": 1
+        },
+        "branchAngle": {
+          "mean": 0.36899999999999994,
+          "spread": 0.1258,
+          "depthDecay": 0.7
+        },
+        "apicalDominance": 1.35,
+        "leaf": {
+          "shape": "lanceolate",
+          "length": {
+            "base": 1.271,
+            "tip": 0.697,
+            "curve": 1.05
+          },
+          "widthRatio": 0.2,
+          "density": {
+            "base": 0.9,
+            "tip": 0.22,
+            "curve": 1.8
+          },
+          "curl": 0.06,
+          "serration": 0.01,
+          "venation": 0.42,
+          "colorA": 3235632,
+          "colorB": 10468191
+        },
+        "flower": {
+          "whorls": 2,
+          "petals": 3,
+          "radius": 0.24,
+          "color": 16751206,
+          "centerColor": 16766314
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.48,
+          "leafBoostInShade": 0.14,
+          "branchSuppressionInShade": 0.36,
+          "phototropism": 0.14
+        },
+        "clump": {
+          "count": 3,
+          "radius": 0.7623000000000001,
+          "jitter": 0.5,
+          "scaleVar": 0.28,
+          "lean": 0.2065,
+          "flowerDensity": 0.45
+        }
+      },
+      "weight": 1,
+      "density": 0.9,
+      "scale": 1,
+      "environment": {
+        "light": 0.49,
+        "moisture": 0.55,
+        "crowding": 0.7,
+        "biomeWarmth": 0.89
+      },
+      "seed": 605827,
+      "enabled": true
+    }
+  ]
+}

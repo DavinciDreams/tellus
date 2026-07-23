@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   biomeMixRenderSignature,
   isAssetMixEntry,
+  makeAuthoredEcologyBiomeMix,
+  makeEcologyBiomeMix,
   makeTerrainPaintBiomeMix,
   normalizeBiomeMixDefinition,
   normalizeBiomeMixRegistry,
   serializeBiomeMixRegistryForPersistence,
 } from "./tellus-biome-mix";
-import { ECOLOGY_TERRAIN_PAINT_MAP } from "./tellus-procplant-biomes";
+import { ECOLOGY_BIOME_OPTIONS, ECOLOGY_TERRAIN_PAINT_MAP } from "./tellus-procplant-biomes";
 
 describe("Tellus biome mix normalization", () => {
   it("represents lightweight global fern substitutes as instanced asset entries", () => {
@@ -148,6 +150,42 @@ describe("Tellus biome mix normalization", () => {
       "arctic-alpine": "snow",
       savanna: "meadow",
     });
+  });
+
+  it("uses the mixer-authored global ecology defaults", () => {
+    const expectations = [
+      ["tropical-rain-forest", "jungle-moss", 1.8, ["mutation", "mutation", "mutation", "mutation", "mutation"]],
+      ["temperate-rain-forest", "forest-floor", 0.46, ["mutation", "mutation", "mutation", "mutation"]],
+      ["grassland", "grass", 1.77, ["mutation", "preset", "preset"]],
+      ["desert", "desert-sand", 0.72, ["preset", "preset", "mutation", "mutation"]],
+      ["coastal", "beach", 0.72, ["mutation", "mutation"]],
+      ["taiga", "dirt", 0.39, ["mutation", "mutation", "mutation", "mutation"]],
+      ["savanna", "meadow", 1.8, ["preset", "preset", "mutation", "preset"]],
+      ["estuary", "flowers", 1.8, ["mutation", "mutation", "mutation", "mutation", "mutation"]],
+      ["tundra", "gravel", 0.72, ["mutation"]],
+      ["arctic-alpine", "snow", 0.1, ["mutation", "mutation"]],
+    ] as const;
+
+    for (const [biome, paint, density, sources] of expectations) {
+      const mix = makeEcologyBiomeMix(biome, 94321);
+      expect(mix.id).toBe(`ecology-${biome}`);
+      expect(mix.ecologyBiome).toBe(biome);
+      expect(mix.targetTerrainPaint).toBe(paint);
+      expect(mix.seed).toBe(94321);
+      expect(mix.density).toBe(density);
+      expect(mix.entries.map((entry) => entry.source)).toEqual([...sources]);
+      expect(normalizeBiomeMixDefinition(mix)).toEqual(mix);
+    }
+  });
+
+  it("keeps authored defaults isolated from callers and covers every ecology biome", () => {
+    const first = makeAuthoredEcologyBiomeMix("taiga", 17);
+    expect(first).toBeTruthy();
+    first!.entries[0]!.density = 99;
+
+    const second = makeAuthoredEcologyBiomeMix("taiga", 17);
+    expect(second?.entries[0]?.density).not.toBe(99);
+    expect(ECOLOGY_BIOME_OPTIONS.every((biome) => makeAuthoredEcologyBiomeMix(biome, 17) !== null)).toBe(true);
   });
 
   it("persists one compact mix without baked asset geometry or session-only assets", () => {
