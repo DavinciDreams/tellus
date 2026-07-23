@@ -15,11 +15,33 @@ Useful ideas:
 - Make the plant description deterministic, human-readable, and editable.
 - Describe curvature along an organ, not only its endpoint angle.
 - Preserve one continuous hierarchy from stem to branch, petiole, and leaf attachment.
+- Shape leaf blades with an explicit width profile, midrib curve, transverse camber/V-fold, twist, and
+  a continuous graft from petiole to blade.
 
 Tellus already follows the first two ideas through `ProcPlantGenome`. Branch-module `spread`, `vigor`,
 `droop`, `tropism`, `gnarliness`, and `junctionBlend` should remain authored traits that deterministically
 produce instanced geometry. FloraForge's NURBS surfaces are valuable for close-up crop leaves, but are too
-heavy to substitute for every forest leaf or branch in the streamed world renderer.
+heavy to substitute for every forest leaf or branch in the streamed world renderer. The practical
+translation is a coarsely tessellated version of the same morphological surface, shared by every leaf
+instance of an authored genome.
+
+## LeafFit
+
+Reference: [LeafFit: Plant Assets Creation from 3D Gaussian
+Splatting](https://arxiv.org/abs/2602.11577) and its [source
+repository](https://github.com/netbeifeng/leaf_fit).
+
+Useful ideas:
+
+- Reuse one thin leaf template across the plant instead of storing a unique mesh for every leaf.
+- Preserve per-leaf shape and orientation variation through compact deformation parameters.
+- Keep the result editable and game-ready rather than rendering the source reconstruction directly.
+
+Tellus already batches a shared leaf geometry with per-instance transforms and colors. Importing LeafFit's
+3D Gaussian segmentation and differentiable MLS fitting would not help procedural trees, but its runtime
+representation validates the existing shared-template direction. The leaf pass therefore upgrades that
+template and keeps per-instance proportion/orientation variation in instance matrices; it does not add a
+mesh, material, or draw call per leaf.
 
 ## DeepTreeSketch
 
@@ -59,6 +81,10 @@ Applied in this branch:
 - `junctionBlend` makes the first child segments follow the parent tangent before reaching their authored
   direction. This approximates delayed strand separation while retaining the same segment prototypes,
   draw-call structure, LOD contracts, and deterministic seed behavior.
+- Broadleaf cards are now continuous three-column surfaces with a narrow petiole, species width profile,
+  subtle asymmetry and twist, genome-driven longitudinal curl, and a venation-driven midrib fold. The
+  shared template remains deterministic and instanced, and its triangle ceiling is fixed rather than
+  scaling with leaf count.
 
 A future close-only LOD may add a merged collar mesh or non-circular strand-inspired cross section. That
 should not replace instanced branch prototypes at normal forest distances.
@@ -74,8 +100,8 @@ aggregation. EcoViz is not itself a source for detailed branch-junction geometry
 
 ## Recommended sequence
 
-1. Finish the current deciduous pass with measured crown width/height and junction-angle diagnostics.
+1. Validate the folded leaf template across broadleaf species and preserve its silhouette in impostor bakes.
 2. Add an optional low-resolution radial crown guide for asymmetric, lobed broadleaf silhouettes.
 3. Connect ecology/stand data to height, crown diameter, DBH, and cohort density.
 4. Add richer close-only collars and branch cross sections after profiling their geometry and build cost.
-5. Reserve spline leaf surfaces for hero plants or crop-scale inspection LODs.
+5. Reserve denser spline or MLS-deformed leaf surfaces for hero plants or crop-scale inspection LODs.

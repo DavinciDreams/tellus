@@ -1167,7 +1167,7 @@ const makeWeberPennGenome = (species: SpeciesId, seed: number): ProcPlantGenome 
     maxStems: base.weberPenn?.maxStems ?? (conifer ? 96 : 80),
     maxLeaves: base.weberPenn?.maxLeaves ?? (conifer ? 220 : 190),
     leafScaleMultiplier: base.weberPenn?.leafScaleMultiplier ?? (conifer ? 4.2 : 3.2),
-    radialSegments: base.weberPenn?.radialSegments ?? 4,
+    radialSegments: base.weberPenn?.radialSegments ?? 6,
     branchSamples: base.weberPenn?.branchSamples ?? 2,
     barkColor: base.weberPenn?.barkColor ?? (palm ? 0x7a5630 : 0x5d4327),
     leafColor: base.weberPenn?.leafColor ?? base.leaf.colorA,
@@ -1849,6 +1849,18 @@ const renderEntryEditor = () => {
           </div>
           <div class="inline">
             <label>
+              Leaf curl
+              <input id="branch-leaf-curl" type="range" min="0" max="0.5" value="${previewGenome.leaf.curl}" step="0.01" />
+              <output>${previewGenome.leaf.curl.toFixed(2)}</output>
+            </label>
+            <label>
+              Midrib fold
+              <input id="branch-leaf-fold" type="range" min="0" max="1" value="${previewGenome.leaf.venation}" step="0.01" />
+              <output>${previewGenome.leaf.venation.toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
               Leaf color
               <input id="branch-leaf-color-a" type="color" value="${toHexColor(previewGenome.leaf.colorA, 0x668d42)}" />
             </label>
@@ -1905,8 +1917,8 @@ const renderEntryEditor = () => {
           </label>
           <label>
             Radial segments
-            <input id="weber-radial" type="range" min="3" max="8" value="${weberPenn.radialSegments ?? 4}" step="1" />
-            <output>${weberPenn.radialSegments ?? 4}</output>
+            <input id="weber-radial" type="range" min="6" max="10" value="${weberPenn.radialSegments ?? 6}" step="1" />
+            <output>${weberPenn.radialSegments ?? 6}</output>
           </label>
         </div>
         <div class="inline">
@@ -2138,6 +2150,8 @@ const renderEntryEditor = () => {
     bindBranchNumber("#branch-foliage-density", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.clusterDensity = value; });
     bindBranchNumber("#branch-foliage-size", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.size = value; });
     bindBranchNumber("#branch-foliage-tip", (v) => v.toFixed(2), (genome, value) => { genome.foliage!.tipBias = value; });
+    bindBranchNumber("#branch-leaf-curl", (v) => v.toFixed(2), (genome, value) => { genome.leaf.curl = value; });
+    bindBranchNumber("#branch-leaf-fold", (v) => v.toFixed(2), (genome, value) => { genome.leaf.venation = value; });
     entryEditor.querySelector<HTMLSelectElement>("#branch-leaf-shape")?.addEventListener("change", (event) => {
       updateBranchTree((genome) => { genome.leaf.shape = (event.currentTarget as HTMLSelectElement).value as LeafShapeKind; });
     });

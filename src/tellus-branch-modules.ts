@@ -229,7 +229,7 @@ const UNIT_Y = new THREE.Vector3(0, 1, 0);
 // even radial spoke pattern — that mechanical regularity is what makes a procedural tree read as fake.
 // The golden angle spaces successive branches so no two ever repeat the same azimuth within many turns.
 const BRANCH_GOLDEN_ANGLE = THREE.MathUtils.degToRad(137.50776405);
-const prototypeTemplates = new Map<BranchSegmentPrototypeId, ProcPlantTemplate>();
+const prototypeTemplates = new Map<string, ProcPlantTemplate>();
 
 const prototypeForTaper = (tipRatio: number): BranchSegmentPrototypeId => {
   if (tipRatio >= 0.875) return "taper-100";
@@ -247,15 +247,20 @@ const taperForPrototype = (id: BranchSegmentPrototypeId): number => {
   }
 };
 
-/** Shared low-sided branch tube used by every tree, varied only by taper bucket and instance matrix. */
-export function branchSegmentPrototypeTemplate(id: BranchSegmentPrototypeId): ProcPlantTemplate {
-  const cached = prototypeTemplates.get(id);
+/** Shared branch tube, varied by taper and a small LOD-specific radial-side budget. */
+export function branchSegmentPrototypeTemplate(
+  id: BranchSegmentPrototypeId,
+  radialSegments = 5,
+): ProcPlantTemplate {
+  const sides = Math.max(5, Math.round(radialSegments));
+  const cacheKey = `${id}:${sides}`;
+  const cached = prototypeTemplates.get(cacheKey);
   if (cached) return cached;
   const geometry = new THREE.CylinderGeometry(
     taperForPrototype(id),
     1,
     1,
-    5,
+    sides,
     1,
     false,
   );
@@ -287,7 +292,7 @@ export function branchSegmentPrototypeTemplate(id: BranchSegmentPrototypeId): Pr
   for (let i = 0; i < idx.length; i++) idx[i] = sourceIndex?.getX(i) ?? i;
   geometry.dispose();
   const template = { pos, nrm, col, tintable, sway, idx };
-  prototypeTemplates.set(id, template);
+  prototypeTemplates.set(cacheKey, template);
   return template;
 }
 

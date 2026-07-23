@@ -25,6 +25,16 @@ describe("branch module trees", () => {
     expect([...ids].every((id) => branchSegmentPrototypeTemplate(id).idx.length > 0)).toBe(true);
   });
 
+  it("uses a rounder shared tube near the player without increasing draw-call vocabulary", () => {
+    const far = branchSegmentPrototypeTemplate("taper-75", 5);
+    const near = branchSegmentPrototypeTemplate("taper-75", 8);
+
+    expect(near).toBe(branchSegmentPrototypeTemplate("taper-75", 8));
+    expect(near).not.toBe(far);
+    expect(near.idx.length).toBeGreaterThan(far.idx.length);
+    expect(near.idx.length).toBeLessThan(far.idx.length * 2);
+  });
+
   it("keeps module parent and child links internally consistent", () => {
     const tree = branchModuleTreeFromSpecies("quakingAspen", 55, {
       maxBranchDepth: 3,

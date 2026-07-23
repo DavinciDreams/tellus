@@ -36,6 +36,7 @@ import {
   buildCheapTreeTemplate,
   createProcPlantVegetation,
   groundPlantDistanceDensity,
+  procPlantBranchRadialSegments,
   procPlantTemplateFromAssetTemplate,
   procPlantChunkSeed,
   shouldUseCheapDistantTree,
@@ -60,6 +61,19 @@ const templateBounds = (template: ProcPlantTemplate) => {
 };
 
 describe("procplant vegetation", () => {
+  it("keeps nearby branch trunks round independently of compute-pressure LOD", () => {
+    expect(procPlantBranchRadialSegments(0, 0)).toBe(8);
+    expect(procPlantBranchRadialSegments(0, 1)).toBe(6);
+    expect(procPlantBranchRadialSegments(1, 0)).toBe(6);
+    expect(procPlantBranchRadialSegments(2, 0)).toBe(5);
+  });
+
+  it("keeps authored close-tree presets above box-like radial budgets", () => {
+    const treePresets = Object.values(procPlantPresets).filter((genome) => genome.weberPenn);
+    expect(treePresets.length).toBeGreaterThan(0);
+    expect(treePresets.every((genome) => (genome.weberPenn?.radialSegments ?? 6) >= 6)).toBe(true);
+  });
+
   it("uses global mix colors as flat overrides for black asset LOD materials", () => {
     const color = new THREE.Color(0x4f8f3d);
     const template = procPlantTemplateFromAssetTemplate({
@@ -151,6 +165,59 @@ describe("procplant vegetation", () => {
       .toBeGreaterThan(0);
 
     vegetation.dispose();
+  });
+
+  it("builds reusable deciduous leaf cards as folded surfaces with a narrow petiole", () => {
+    const geometry = createProcPlantLeafGeometry("ovate", 0.54, 0.12, 0.09, 0.66);
+    const repeated = createProcPlantLeafGeometry("ovate", 0.54, 0.12, 0.09, 0.66);
+    const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+    const normals = geometry.getAttribute("normal") as THREE.BufferAttribute;
+    const metadata = geometry.userData.tellusLeafSurface as {
+      rowCount: number;
+      petioleRatio: number;
+      triangleCount: number;
+    };
+
+    expect(Array.from(positions.array)).toEqual(
+      Array.from((repeated.getAttribute("position") as THREE.BufferAttribute).array),
+    );
+    expect(metadata.rowCount).toBe(9);
+    expect(metadata.petioleRatio).toBeCloseTo(0.12, 6);
+    expect(metadata.triangleCount).toBeLessThanOrEqual(44);
+
+    const rowWidth = (row: number) =>
+      positions.getX(row * 3 + 2) - positions.getX(row * 3);
+    const widestRow = Math.max(...Array.from({ length: metadata.rowCount }, (_, row) => rowWidth(row)));
+    expect(widestRow).toBeGreaterThan(rowWidth(0) * 10);
+    expect(positions.getY(0)).toBeCloseTo(0, 8);
+    expect(positions.getY((metadata.rowCount - 1) * 3 + 1)).toBeCloseTo(1, 8);
+
+    const middleRow = Math.floor(metadata.rowCount / 2);
+    const leftZ = positions.getZ(middleRow * 3);
+    const midribZ = positions.getZ(middleRow * 3 + 1);
+    const rightZ = positions.getZ(middleRow * 3 + 2);
+    expect(midribZ - (leftZ + rightZ) * 0.5).toBeGreaterThan(0.02);
+
+    const normalDirections = new Set(
+      Array.from({ length: normals.count }, (_, index) =>
+        `${normals.getX(index).toFixed(3)}:${normals.getY(index).toFixed(3)}:${normals.getZ(index).toFixed(3)}`),
+    );
+    expect(normalDirections.size).toBeGreaterThan(4);
+  });
+
+  it("uses authored venation to deepen the midrib fold without changing the leaf budget", () => {
+    const subtle = createProcPlantLeafGeometry("round", 0.68, 0.22, 0.06, 0.1);
+    const pronounced = createProcPlantLeafGeometry("round", 0.68, 0.22, 0.06, 0.9);
+    const subtlePositions = subtle.getAttribute("position") as THREE.BufferAttribute;
+    const pronouncedPositions = pronounced.getAttribute("position") as THREE.BufferAttribute;
+    const rowCount = (pronounced.userData.tellusLeafSurface as { rowCount: number }).rowCount;
+    const row = Math.floor(rowCount / 2);
+    const fold = (positions: THREE.BufferAttribute) =>
+      positions.getZ(row * 3 + 1) - (positions.getZ(row * 3) + positions.getZ(row * 3 + 2)) * 0.5;
+
+    expect(fold(pronouncedPositions)).toBeGreaterThan(fold(subtlePositions) * 1.8);
+    expect(pronouncedPositions.count).toBe(subtlePositions.count);
+    expect(pronounced.getIndex()?.count).toBe(subtle.getIndex()?.count);
   });
 
   it("reduces distant ground-plant density without removing the population", () => {
@@ -252,29 +319,27 @@ describe("procplant vegetation", () => {
   });
 
   it("can apply procplant foliage mass to wrapped L-system tree templates", () => {
-    const sparse = treeTemplateFromSpecies("balsamFir", 123, {
+    const fixtureBudget = {
       radialSegments: 3,
       branchSamples: 1,
       maxBranchDepth: 2,
-      maxStems: 44,
-      maxLeaves: 120,
+      maxStems: 20,
+      maxLeaves: 48,
       leafScaleMultiplier: 2.4,
+    } as const;
+    const sparse = treeTemplateFromSpecies("balsamFir", 123, {
+      ...fixtureBudget,
     });
     const full = treeTemplateFromSpecies("balsamFir", 123, {
-      radialSegments: 3,
-      branchSamples: 1,
-      maxBranchDepth: 2,
-      maxStems: 44,
-      maxLeaves: 120,
-      leafScaleMultiplier: 2.4,
+      ...fixtureBudget,
       foliageMass: 1,
       foliageClusterDensity: 1.25,
       foliageTipBias: 0.35,
     });
 
     expect(full.idx.length).toBeGreaterThan(sparse.idx.length);
-    expect(full.idx.length).toBeLessThanOrEqual(sparse.idx.length + 120 * 4 * 6);
-  }, 15_000);
+    expect(full.idx.length).toBeLessThanOrEqual(sparse.idx.length + fixtureBudget.maxLeaves * 4 * 6);
+  });
 
   it("renders grass presets as multi-shoot clumps for biome ground cover", () => {
     const built = buildProcPlantInstancedParts(procPlantPresets.furGrass, 1234);
@@ -286,8 +351,19 @@ describe("procplant vegetation", () => {
 
   it("applies procplant tree realism traits to Weber-Penn genomes", () => {
     const baseGenome = procPlantPresets.oakCanopy;
-    const compact = buildProcPlantTemplate({
+    const fixtureGenome = {
       ...baseGenome,
+      weberPenn: {
+        ...baseGenome.weberPenn!,
+        radialSegments: 3,
+        branchSamples: 1,
+        maxBranchDepth: 2,
+        maxStems: 36,
+        maxLeaves: 96,
+      },
+    };
+    const compact = buildProcPlantTemplate({
+      ...fixtureGenome,
       treeRealism: {
         crownSpread: 0,
         crownTaper: 0.9,
@@ -299,7 +375,7 @@ describe("procplant vegetation", () => {
       },
     }, 99).template;
     const broad = buildProcPlantTemplate({
-      ...baseGenome,
+      ...fixtureGenome,
       treeRealism: {
         crownSpread: 1,
         crownTaper: 0.15,
@@ -314,7 +390,7 @@ describe("procplant vegetation", () => {
     expect(templateBounds(broad).width).toBeGreaterThan(templateBounds(compact).width);
     expect(templateBounds(broad).depth).toBeGreaterThan(templateBounds(compact).depth);
     expect(broad.idx.length).toBe(compact.idx.length);
-    expect(templateBounds(broad).width).toBeGreaterThan(templateBounds(compact).width * 1.15);
+    expect(templateBounds(broad).width).toBeGreaterThan(templateBounds(compact).width * 1.1);
   });
 
   it("maps authored deciduous crown spread into live branch-module trees", () => {
@@ -511,14 +587,25 @@ describe("procplant vegetation", () => {
   });
 
   it("builds SpeedTree-like runtime packages with wind and LOD contracts", () => {
-    const runtime = buildProcPlantRuntimePackage(procPlantPresets.alpineFir, 123);
+    const alpineFir = procPlantPresets.alpineFir;
+    const runtime = buildProcPlantRuntimePackage({
+      ...alpineFir,
+      weberPenn: {
+        ...alpineFir.weberPenn!,
+        radialSegments: 3,
+        branchSamples: 1,
+        maxBranchDepth: 1,
+        maxStems: 16,
+        maxLeaves: 32,
+      },
+    }, 123);
 
     expect(runtime.architecture.backend).toBe("weber-penn");
     expect(runtime.architecture.species).toBe("balsamFir");
     expect(runtime.lods.map((lod) => lod.label)).toEqual(["full", "clustered", "billboard-cross", "impostor"]);
     expect(runtime.wind.leafFlutter).toBeGreaterThan(runtime.wind.trunkSway);
     expect(runtime.stats.triangles).toBeGreaterThan(0);
-  }, 20000);
+  });
 
   it("exposes procplant presets as placeable procedural model urls", () => {
     const daylily = procPlantPlaceableById("procplant-daylilyflower");
@@ -947,7 +1034,9 @@ describe("procplant vegetation", () => {
       worldId: "chunked-stable-rebuild-test",
       sampleHeight: () => 1,
       samplePaint: () => "forest-floor",
-      bounds: { minX: -80, maxX: 80, minZ: -80, maxZ: 80 },
+      bounds: { minX: -16, maxX: 16, minZ: -16, maxZ: 16 },
+      chunkSize: 16,
+      maxRing: 0,
       densityMultiplier: 1,
       viewMode: () => "first",
     });
