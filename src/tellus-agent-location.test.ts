@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentMapLocation, resolveAgentMoveTarget } from "./tellus-agent-location";
+import {
+  buildAgentMapLocation,
+  resolveAgentMoveTarget,
+  resolveBlockableAgentMoveTarget,
+} from "./tellus-agent-location";
 import type { Vec3 } from "./tellus-types";
 
 const ground = (x: number, z: number): Vec3 => ({ x, y: 1, z });
@@ -92,5 +96,36 @@ describe("resolveAgentMoveTarget", () => {
     expect(result.position).toEqual({ x: 3, y: 1, z: 4 });
     expect(result.distanceRemaining).toBe(0);
     expect(result.reached).toBe(true);
+  });
+});
+
+describe("resolveBlockableAgentMoveTarget", () => {
+  it("keeps the agent in place and reports a blocked absolute move", () => {
+    const current = { x: 0, y: 1, z: 0 };
+    const result = resolveBlockableAgentMoveTarget(
+      { target: { x: 30, z: 40 } },
+      current,
+      10,
+      ground,
+      (x, z) => ({ x, z, kind: "water", reason: "target is ocean" }),
+    );
+
+    expect(result.position).toEqual(current);
+    expect(result.target).toEqual({ x: 30, z: 40 });
+    expect(result.distanceRemaining).toBe(50);
+    expect(result.reached).toBe(false);
+    expect(result.blocked).toEqual({ x: 6, z: 8, kind: "water", reason: "target is ocean" });
+  });
+
+  it("grounds a move normally when the target is traversable", () => {
+    const result = resolveBlockableAgentMoveTarget(
+      { east: 3 },
+      { x: 2, y: 0, z: 4 },
+      8,
+      ground,
+      () => null,
+    );
+
+    expect(result).toEqual({ position: { x: 5, y: 1, z: 4 } });
   });
 });

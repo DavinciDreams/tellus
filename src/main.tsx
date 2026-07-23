@@ -174,7 +174,7 @@ import { generateInteriorRoom, normalizeInteriorBiomeMaterial, type InteriorBiom
 import { installSessionFetch, getSession, issueTellusLiveTicket, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, openTellusAccountPanel, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
-import { buildAgentMapLocation, resolveAgentMoveTarget } from "./tellus-agent-location";
+import { buildAgentMapLocation, resolveBlockableAgentMoveTarget } from "./tellus-agent-location";
 import {
   MakerAgentApiError,
   createMakerAgent,
@@ -3860,6 +3860,17 @@ function createTellusWorld(
     const height = terrainHeight(x, z);
     return { height, kind: terrainKind(x, z, height), loaded: true };
   };
+
+  const isAgentPlacementWater = (x: number, z: number): boolean => {
+    if (interiorObject) return false;
+    return isChunked ? isChunkedWaterPoint(x, z) : sampleMapPoint(x, z).kind === "water";
+  };
+  const requiresDryLand = (kind: GeneratedKind): boolean =>
+    kind === "tree" ||
+    kind === "flower" ||
+    kind === "path" ||
+    kind === "shrine" ||
+    kind === "seed";
 
   let worldChatPollTimer: number | undefined;
   const pollWorldChatSnapshot = async () => {
@@ -8305,7 +8316,9 @@ function createTellusWorld(
       option.max,
     );
     const placed: ProceduralAssetPlacement[] = [];
-    for (let i = 0; i < total; i++) {
+    const maxAttempts = total * 4;
+    for (let attempt = 0; attempt < maxAttempts && placed.length < total; attempt++) {
+      const i = placed.length;
       const seed = (rng() * 0xffffffff) >>> 0;
       const angle = rng() * Math.PI * 2;
       const brushRadius = Math.max(1.5, option.radius * 0.55);
@@ -8320,6 +8333,7 @@ function createTellusWorld(
         y: 0,
         z: center.z + Math.cos(angle) * distance,
       };
+      if (isAgentPlacementWater(location.x, location.z)) continue;
       const scale = option.scale(0.82 + rng() * 0.42);
       const plantPlacement = placeProcPlantAsset(option, seed, location, scale);
       if (plantPlacement) {
@@ -11069,12 +11083,77 @@ function createTellusWorld(
       const a = args ?? {};
       switch (verb) {
         case "moveSelf": {
-          const moved = resolveAgentMoveTarget(
+          const mountedThing = sailingThingId ? thingById(sailingThingId) : undefined;
+          if (sailingThingId && !mountedThing) sailingThingId = undefined;
+          if (mountedThing) {
+            const previousMountPosition = { ...mountedThing.position };
+            const moved = resolveBlockableAgentMoveTarget(
+              a,
+              mountedThing.position,
+              8,
+              (x, z) => movedVehiclePositionForCurrentWorld(
+                mountedThing,
+                x,
+                z,
+                mountedThing.position,
+              ),
+              () => null,
+            );
+            mountedThing.position = moved.position;
+            const dx = moved.position.x - previousMountPosition.x;
+            const dz = moved.position.z - previousMountPosition.z;
+            const isMoving = Math.hypot(dx, dz) > 0.001;
+            if (isMoving) mountedThing.rotationY = Math.atan2(dx, dz);
+            updateMountedAnimation(mountedThing, isMoving, false);
+            updateThingMeshPosition(mountedThing);
+            visitorPosition = riderPositionForThing(mountedThing);
+            publishGeneratedThing(mountedThing);
+            syncAnchoredPortalsForThing(mountedThing);
+            sendPresenceUpdate(true);
+            publish();
+            return {
+              ok: true,
+              worldId: runtimeConfig.worldId,
+              position: { ...visitorPosition },
+              mountedThingId: mountedThing.id,
+              mountedPosition: { ...mountedThing.position },
+              mode: vehicleMode(mountedThing),
+              target: moved.target,
+              distanceRemaining: moved.distanceRemaining,
+              reached: moved.reached,
+            };
+          }
+          const currentPositionIsWater = isAgentPlacementWater(visitorPosition.x, visitorPosition.z);
+          const moved = resolveBlockableAgentMoveTarget(
             a,
             visitorPosition,
             8,
-            (x, z) => groundedPosition(x, z, visitorPosition),
+            (x, z) => {
+              const target = isChunked ? clampChunkedPoint(x, z) : { x, z };
+              return groundedPositionForCurrentSurface(target.x, target.z, visitorPosition);
+            },
+            (x, z) => {
+              const target = isChunked ? clampChunkedPoint(x, z) : { x, z };
+              if (currentPositionIsWater || !isAgentPlacementWater(target.x, target.z)) return null;
+              return {
+                ...target,
+                kind: "water",
+                reason: "moveSelf cannot enter water or ocean in this world",
+              };
+            },
           );
+          if (moved.blocked) {
+            return {
+              ok: false,
+              error: moved.blocked.reason,
+              worldId: runtimeConfig.worldId,
+              position: { ...visitorPosition },
+              target: moved.target,
+              distanceRemaining: moved.distanceRemaining,
+              reached: false,
+              blocked: moved.blocked,
+            };
+          }
           visitorPosition = moved.position;
           sendPresenceUpdate(true);
           return {
@@ -11146,9 +11225,21 @@ function createTellusWorld(
             suggestions.find((candidate) => candidate.modelUrl === assetId) ??
             suggestions[0];
           if (!model) return { ok: false, error: "No reusable asset matched" };
+          const location = nearToLocation(a.near);
+          const modelKind = inferGeneratedKind(
+            model.description?.trim() || model.name,
+            visitorId as GenerateRequest["creatorId"],
+          );
+          if (
+            typeof location === "object" &&
+            requiresDryLand(modelKind) &&
+            isAgentPlacementWater(location.x, location.z)
+          ) {
+            return { ok: false, error: "This asset requires dry land; move ashore before placing it" };
+          }
           const thing = addLibraryAsset(model, {
             creatorId: visitorId as GenerateRequest["creatorId"],
-            location: nearToLocation(a.near),
+            location,
           });
           return { ok: true, id: thing.id, reused: model.id, name: model.name };
         }
@@ -11167,6 +11258,13 @@ function createTellusWorld(
             : option.scale();
           const plantLocation =
             typeof location === "string" ? { ...visitorPosition } : location;
+          if (isAgentPlacementWater(plantLocation.x, plantLocation.z)) {
+            return {
+              ok: false,
+              error: "placeProceduralAsset requires dry land; move ashore before planting",
+              position: plantLocation,
+            };
+          }
           const plantPlacement = placeProcPlantAsset(option, seed, plantLocation, scale);
           if (plantPlacement) {
             return { ok: true, id: plantPlacement.id, archetypeId: option.id, label: option.label, chunkedVegetation: true };
@@ -11191,7 +11289,14 @@ function createTellusWorld(
         case "scatterProceduralAsset": {
           const archetypeId = typeof a.archetypeId === "string" ? a.archetypeId : typeof a.id === "string" ? a.id : "";
           const placed = scatterProceduralAsset(archetypeId, typeof a.count === "number" ? a.count : undefined);
-          if (!placed.length) return { ok: false, error: "scatterProceduralAsset requires a valid archetypeId" };
+          if (!placed.length) {
+            return {
+              ok: false,
+              error: proceduralAssetOption(archetypeId)
+                ? "No dry planting locations were found nearby; move ashore before scattering vegetation"
+                : "scatterProceduralAsset requires a valid archetypeId",
+            };
+          }
           return {
             ok: true,
             archetypeId,
@@ -11201,10 +11306,20 @@ function createTellusWorld(
         }
         case "generate": {
           if (typeof a.prompt !== "string" || !a.prompt.trim()) return { ok: false, error: "generate requires a prompt" };
+          const prompt = a.prompt.trim();
+          const location = nearToLocation(a.near);
+          const kind = inferGeneratedKind(prompt, visitorId as GenerateRequest["creatorId"]);
+          if (
+            typeof location === "object" &&
+            requiresDryLand(kind) &&
+            isAgentPlacementWater(location.x, location.z)
+          ) {
+            return { ok: false, error: "This creation requires dry land; move ashore before generating it" };
+          }
           const forceNew = a.force === true || a.generateNew === true || a.variant === true;
           if (!forceNew) {
             const suggestions = await reusableAssetsForPrompt(
-              a.prompt.trim(),
+              prompt,
               4,
               assetContextFromUnknown(a.contexts ?? a.context),
             );
@@ -11225,8 +11340,8 @@ function createTellusWorld(
             }
           }
           const thing = generate({
-            prompt: a.prompt.trim(),
-            location: nearToLocation(a.near),
+            prompt,
+            location,
             // Attribute creations to THIS visitor (e.g. an embodied agent's id) instead of the generic
             // "visitor", so the world + dashboards credit the actual creator.
             creatorId: visitorId as GenerateRequest["creatorId"],
@@ -16065,16 +16180,20 @@ function App(): React.ReactElement {
       const agentWorldId = canonicalWorldId(agentStatus.worldId || currentWorldId);
       const key = `agent:${agentStatus.visitorId}`;
       const existing = byKey.get(key);
+      const existingInAgentWorld =
+        existing?.worldId && canonicalWorldId(existing.worldId) === agentWorldId
+          ? existing
+          : undefined;
       byKey.set(key, {
         visitorId: agentStatus.visitorId,
-        name: existing?.name || actorName({ visitorId: agentStatus.visitorId, name: "Your agent" }),
+        name: existingInAgentWorld?.name || actorName({ visitorId: agentStatus.visitorId, name: "Your agent" }),
         kind: "agent",
-        worldId: existing?.worldId || agentWorldId,
-        position: existing?.position,
-        online: existing?.online ?? Boolean(agentStatus.enabled || agentStatus.ownerPresent || agentStatus.offlinePersistence),
-        currentWorld: existing?.currentWorld ?? agentWorldId === currentWorldId,
+        worldId: existingInAgentWorld?.worldId || agentWorldId,
+        position: existingInAgentWorld?.position,
+        online: existingInAgentWorld?.online ?? Boolean(agentStatus.enabled || agentStatus.ownerPresent || agentStatus.offlinePersistence),
+        currentWorld: existingInAgentWorld?.currentWorld ?? agentWorldId === currentWorldId,
         canMessage: true,
-        lastSeenAt: existing?.lastSeenAt || agentStatus.lastTickAt || undefined,
+        lastSeenAt: existingInAgentWorld?.lastSeenAt || agentStatus.lastTickAt || undefined,
       });
     }
 
@@ -16125,21 +16244,30 @@ function App(): React.ReactElement {
     setWorldChatDmTarget(target);
     setWorldChatInput("");
   };
+  const finiteContactPosition = (contact: OnlineContact): Vec3 | undefined => {
+    const position = contact.position;
+    return position &&
+      Number.isFinite(position.x) &&
+      Number.isFinite(position.z)
+      ? position
+      : undefined;
+  };
   const goToOnlineContact = (contact: OnlineContact) => {
     if (!contact.worldId || !contact.online) return;
+    const position = finiteContactPosition(contact);
     if (contact.worldId === currentWorldId) {
-      if (contact.position) worldRef.current?.warpTo(contact.position.x, contact.position.z);
+      if (position) worldRef.current?.warpTo(position.x, position.z);
       return;
     }
-    if (!contact.position) {
+    if (!position) {
       sharedLocationRef.current = null;
       switchWorld(canonicalWorldId(contact.worldId));
       return;
     }
     const nextLocation = {
       worldId: canonicalWorldId(contact.worldId),
-      x: contact.position.x,
-      z: contact.position.z,
+      x: position.x,
+      z: position.z,
       consumed: false,
     };
     sharedLocationRef.current = nextLocation;
@@ -16495,7 +16623,7 @@ function App(): React.ReactElement {
                               <span className="mini-chat-friend-name" title={target.userId}>{target.name}<small>{statusText}</small></span>
                               <div className="mini-chat-friend-actions">
                                 <button type="button" disabled={!target.canMessage} onClick={() => setWorldChatDmTarget(target)}>Message</button>
-                                <button type="button" disabled={!target.online || !target.worldId || (target.currentWorld && !target.position)} onClick={() => goToOnlineContact(target)}>Go</button>
+                                <button type="button" disabled={!target.online || !target.worldId || (target.currentWorld && !finiteContactPosition(target))} onClick={() => goToOnlineContact(target)}>Go</button>
                                 <button type="button" disabled={friendMutationsBusy.has(`remove:${target.userId}`)} onClick={() => void mutateFriendship("remove", target.userId!)}>Remove</button>
                               </div>
                             </li>
@@ -16561,7 +16689,7 @@ function App(): React.ReactElement {
                           <button
                             type="button"
                             className="mini-chat-contact-go"
-                            disabled={target.currentWorld && !target.position}
+                            disabled={target.currentWorld && !finiteContactPosition(target)}
                             aria-label={target.currentWorld ? `Go to ${target.name}` : `Travel to ${target.name}'s world`}
                             onClick={(event) => {
                               event.stopPropagation();
