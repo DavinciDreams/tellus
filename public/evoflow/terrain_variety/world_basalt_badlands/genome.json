@@ -1,0 +1,19 @@
+{
+  "concept": "branching basalt badlands cut by erosion channels and narrow high ridges",
+  "id": "world_basalt_badlands",
+  "lineage": {
+    "generation": 0,
+    "operation": "curated-topology"
+  },
+  "modules": {
+    "materials": {
+      "palette": "basalt-teeth"
+    },
+    "terrain": {
+      "size": 256,
+      "topology": "branching-badlands"
+    }
+  },
+  "schema_version": "0.2.0",
+  "seed": 40163
+}

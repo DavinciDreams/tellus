@@ -9,10 +9,14 @@ import {
   largeWorldBaseHeight,
   largeWorldSlope,
   largeWorldTerrainKind,
+  evoflowChunkedWaterbedHeight,
   usesContinentalChunkedTerrain,
 } from "./tellus-large-world-terrain";
 import { runtimeConfig } from "./tellus-runtime-config";
-import { evoflowBiomeForSemanticLabel } from "./tellus-terrain";
+import {
+  evoflowBiomeForSemanticLabel,
+  evoflowTerrainKindForSemanticLabel,
+} from "./tellus-terrain";
 import type { WorldTemplateId } from "./tellus-types";
 
 function sampleGrid(step = 96, count = 12): Array<{ x: number; z: number; h: number; slope: number }> {
@@ -89,6 +93,20 @@ describe("large-world terrain", () => {
     expect(evoflowBiomeForSemanticLabel("evoflow-lichen-basin", 4, 4)).toBe("tundra");
     expect(evoflowBiomeForSemanticLabel("evoflow-glass-ridge", 3, 18)).toBe("arctic-alpine");
     expect(evoflowBiomeForSemanticLabel("evoflow-coral-canyon", 4, 2)).toBe("grassland");
+  });
+
+  it("keeps low EvoFlow semantic water distinct from beach terrain", () => {
+    expect(evoflowTerrainKindForSemanticLabel(0, -2)).toBe("water");
+    expect(evoflowTerrainKindForSemanticLabel(0, -1)).toBe("meadow");
+    expect(evoflowTerrainKindForSemanticLabel(2, -2)).toBe("beach");
+  });
+
+  it("places EvoFlow semantic waterbeds below the rendered ocean plane", () => {
+    expect(evoflowChunkedWaterbedHeight(SEA_LEVEL + 0.45, "water")).toBeLessThan(SEA_LEVEL);
+    expect(evoflowChunkedWaterbedHeight(SEA_LEVEL - 8, "water")).toBeGreaterThanOrEqual(
+      SEA_LEVEL - 1.4,
+    );
+    expect(evoflowChunkedWaterbedHeight(SEA_LEVEL + 0.45, "beach")).toBe(SEA_LEVEL + 0.45);
   });
 
   afterEach(() => {

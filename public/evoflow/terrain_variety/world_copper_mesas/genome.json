@@ -1,0 +1,19 @@
+{
+  "concept": "separated copper mesas with broad buildable tops and winding dry washes",
+  "id": "world_copper_mesas",
+  "lineage": {
+    "generation": 0,
+    "operation": "curated-topology"
+  },
+  "modules": {
+    "materials": {
+      "palette": "copper-terraces"
+    },
+    "terrain": {
+      "size": 256,
+      "topology": "stepped-mesas"
+    }
+  },
+  "schema_version": "0.2.0",
+  "seed": 31847
+}

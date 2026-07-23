@@ -1,0 +1,19 @@
+{
+  "concept": "a broad upland divided by a winding river canyon and tributary ravines",
+  "id": "world_river_canyon",
+  "lineage": {
+    "generation": 0,
+    "operation": "curated-topology"
+  },
+  "modules": {
+    "materials": {
+      "palette": "coral-canyon-child"
+    },
+    "terrain": {
+      "size": 256,
+      "topology": "river-canyon"
+    }
+  },
+  "schema_version": "0.2.0",
+  "seed": 7319
+}

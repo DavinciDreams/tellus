@@ -2947,7 +2947,7 @@ function createTellusWorld(
     }
     return { live: 0, glass, liveCap: 0, trackedLive: 0 };
   };
-  window.__tellusWorldDebug = () => ({
+  window.__tellusWorldDebug = (sampleX = visitorPosition.x, sampleZ = visitorPosition.z) => ({
     worldId: runtimeConfig.worldId,
     runtimeTemplate: parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
     runtimeSkyboxUrl: runtimeConfig.skyboxUrl,
@@ -2961,6 +2961,15 @@ function createTellusWorld(
     terrainMode: {
       isChunked,
       isContinentalChunkedWorld,
+    },
+    point: {
+      x: sampleX,
+      z: sampleZ,
+      visitorY: visitorPosition.y,
+      sampled: sampleMapPoint(sampleX, sampleZ),
+      analyticHeight: largeWorldBaseHeight(sampleX, sampleZ),
+      renderedHeight: renderedTerrainHeightAt(sampleX, sampleZ),
+      chunkStats: chunkRenderer?.stats(),
     },
     water: {
       oceanVisible: ocean.visible,
@@ -3778,11 +3787,13 @@ function createTellusWorld(
       const height = chunkRenderer?.sampleHeight(x, z);
       if (height != null && Number.isFinite(height)) {
         const kind = largeWorldTerrainKind(x, z);
-        return { height, kind: kind === "water" ? "beach" : kind, loaded: true };
+        return { height, kind, loaded: true };
       }
       return {
         height: isContinentalChunkedWorld ? largeWorldBaseHeight(x, z) : SEA_LEVEL - 8,
-        kind: isContinentalChunkedWorld ? largeWorldTerrainKind(x, z) : "water",
+        // Unknown streamed terrain is not water. `loaded: false` lets the minimap render a neutral
+        // placeholder until the chunk arrives without promising a lake that later turns into land.
+        kind: isContinentalChunkedWorld ? largeWorldTerrainKind(x, z) : "meadow",
         loaded: false,
       };
     }
@@ -15280,17 +15291,19 @@ function App(): React.ReactElement {
           const hh = h !== undefined && Number.isFinite(h) ? h : SEA_LEVEL;
           const terrainSampleKind = sample?.kind ?? "water";
           let r: number, g: number, b: number;
-          if (terrainSampleKind === "water" || hh <= SEA_LEVEL) {
+          if (!hasH) {
+            // Unloaded chunks used to share the water palette, which made the map show temporary
+            // blue lakes over terrain that appeared as the player approached. A subtle checker is
+            // intentionally neutral: it communicates streaming state without inventing geography.
+            const checker = ((i >> 3) + (j >> 3)) % 2;
+            r = checker ? 48 : 40;
+            g = checker ? 55 : 47;
+            b = checker ? 48 : 42;
+          } else if (terrainSampleKind === "water" || hh <= SEA_LEVEL) {
             const depth = clamp((SEA_LEVEL - hh) / 12, 0, 1);
-            if (!hasH) {
-              r = 24;
-              g = 58;
-              b = 47;
-            } else {
-              r = lerp(56, 18, depth);
-              g = lerp(128, 70, depth);
-              b = lerp(114, 92, depth);
-            }
+            r = lerp(56, 18, depth);
+            g = lerp(128, 70, depth);
+            b = lerp(114, 92, depth);
           } else {
             const t = clamp((hh - SEA_LEVEL) / 16, 0, 1);
             const base = BIOME_MAP_RGB[terrainSampleKind] ?? BIOME_MAP_RGB.meadow;
@@ -15318,11 +15331,6 @@ function App(): React.ReactElement {
               g *= combinedShade;
               b *= combinedShade;
             }
-          }
-          if (!hasH && terrainSampleKind !== "water") {
-            r *= 0.65;
-            g *= 0.65;
-            b *= 0.65;
           }
           if (terrainSampleKind === "water" && hasH) {
             const he = worldRef.current?.sampleMapPoint(w.x + 2, w.z).height;

@@ -1,0 +1,19 @@
+{
+  "concept": "an asymmetric alpine range with isolated spires, saddles, and open foothills",
+  "id": "world_alpine_spires",
+  "lineage": {
+    "generation": 0,
+    "operation": "curated-topology"
+  },
+  "modules": {
+    "materials": {
+      "palette": "spires"
+    },
+    "terrain": {
+      "size": 256,
+      "topology": "alpine-spires"
+    }
+  },
+  "schema_version": "0.2.0",
+  "seed": 11429
+}

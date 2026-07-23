@@ -658,11 +658,20 @@ declare global {
       lod2: string;
       impostor: string;
     } | null;
-    __tellusWorldDebug?: () => {
+    __tellusWorldDebug?: (sampleX?: number, sampleZ?: number) => {
       worldId: string;
       runtimeTemplate: WorldTemplateId;
       runtimeSkyboxUrl?: string;
       chunkedWorldChunks: { w: number; h: number } | null;
+      point: {
+        x: number;
+        z: number;
+        visitorY: number;
+        sampled: { height: number; kind: TerrainKind; loaded: boolean };
+        analyticHeight: number;
+        renderedHeight: number | null;
+        chunkStats: ReturnType<import("./tellus-chunk-renderer").ChunkRenderer["stats"]> | undefined;
+      };
     };
     // Diagnostics for the rigged-VRM avatar upgrade (consumed by smoke tests / the console).
     __tellusAvatarDebug?: () => {
