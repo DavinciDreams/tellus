@@ -1167,7 +1167,7 @@ const makeWeberPennGenome = (species: SpeciesId, seed: number): ProcPlantGenome 
     maxStems: base.weberPenn?.maxStems ?? (conifer ? 96 : 80),
     maxLeaves: base.weberPenn?.maxLeaves ?? (conifer ? 220 : 190),
     leafScaleMultiplier: base.weberPenn?.leafScaleMultiplier ?? (conifer ? 4.2 : 3.2),
-    radialSegments: base.weberPenn?.radialSegments ?? 4,
+    radialSegments: base.weberPenn?.radialSegments ?? 6,
     branchSamples: base.weberPenn?.branchSamples ?? 2,
     barkColor: base.weberPenn?.barkColor ?? (palm ? 0x7a5630 : 0x5d4327),
     leafColor: base.weberPenn?.leafColor ?? base.leaf.colorA,
@@ -1917,8 +1917,8 @@ const renderEntryEditor = () => {
           </label>
           <label>
             Radial segments
-            <input id="weber-radial" type="range" min="3" max="8" value="${weberPenn.radialSegments ?? 4}" step="1" />
-            <output>${weberPenn.radialSegments ?? 4}</output>
+            <input id="weber-radial" type="range" min="6" max="10" value="${weberPenn.radialSegments ?? 6}" step="1" />
+            <output>${weberPenn.radialSegments ?? 6}</output>
           </label>
         </div>
         <div class="inline">

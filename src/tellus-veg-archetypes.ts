@@ -397,7 +397,7 @@ export const buildBoulderTemplate = (seed = 90210): Template => buildRockTemplat
 //   birch → silverBirch,  palm → palm,  deadtree → blackOak with leaves stripped (bare branches).
 
 const AMBIENT_BUDGET: TreeTemplateOptions = {
-  radialSegments: 3, // triangular-prism tubes — cheapest closed tube
+  radialSegments: 5, // cheapest non-boxy closed tube; shared once across ambient instances
   branchSamples: 1, // one quad-ring per Bezier segment
   branchCaps: false,
   maxBranchDepth: 2, // trunk + main + secondary branches so the canopy has places to hang leaves

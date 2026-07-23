@@ -36,6 +36,7 @@ import {
   buildCheapTreeTemplate,
   createProcPlantVegetation,
   groundPlantDistanceDensity,
+  procPlantBranchRadialSegments,
   procPlantTemplateFromAssetTemplate,
   procPlantChunkSeed,
   shouldUseCheapDistantTree,
@@ -60,6 +61,19 @@ const templateBounds = (template: ProcPlantTemplate) => {
 };
 
 describe("procplant vegetation", () => {
+  it("keeps nearby branch trunks round independently of compute-pressure LOD", () => {
+    expect(procPlantBranchRadialSegments(0, 0)).toBe(8);
+    expect(procPlantBranchRadialSegments(0, 1)).toBe(6);
+    expect(procPlantBranchRadialSegments(1, 0)).toBe(6);
+    expect(procPlantBranchRadialSegments(2, 0)).toBe(5);
+  });
+
+  it("keeps authored close-tree presets above box-like radial budgets", () => {
+    const treePresets = Object.values(procPlantPresets).filter((genome) => genome.weberPenn);
+    expect(treePresets.length).toBeGreaterThan(0);
+    expect(treePresets.every((genome) => (genome.weberPenn?.radialSegments ?? 6) >= 6)).toBe(true);
+  });
+
   it("uses global mix colors as flat overrides for black asset LOD materials", () => {
     const color = new THREE.Color(0x4f8f3d);
     const template = procPlantTemplateFromAssetTemplate({

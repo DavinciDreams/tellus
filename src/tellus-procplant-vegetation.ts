@@ -226,7 +226,7 @@ const PROC_GROUND_PLANT_DETAIL_DISTANCE_THIRD = 42;
 const PROC_GROUND_PLANT_FADE_DISTANCE = 72;
 const PROC_GROUND_PLANT_FADE_DISTANCE_THIRD = 96;
 const PROC_GROUND_PLANT_MIN_DENSITY = 0.22;
-const PROCPLANT_RENDER_STYLE_REVISION = 10;
+const PROCPLANT_RENDER_STYLE_REVISION = 11;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
 const BIOME_MIX_SERVER_REFRESH_FALLBACK_MS = 60_000;
 const LOW_FPS_BUILD_BUDGET = 1;
@@ -274,6 +274,12 @@ export const groundPlantDistanceDensity = (
     : PROC_GROUND_PLANT_FADE_DISTANCE;
   const fade = THREE.MathUtils.smoothstep(distanceToPlayer, detailDistance, fadeDistance);
   return THREE.MathUtils.lerp(1, PROC_GROUND_PLANT_MIN_DENSITY, fade);
+};
+
+/** Keep close trunks visually round even when low FPS reduces branch-count LOD. */
+export const procPlantBranchRadialSegments = (chunkLod: number, distanceLod: BranchModuleLodLevel): number => {
+  const visualLod = Math.max(chunkLod, distanceLod);
+  return visualLod <= 0 ? 8 : visualLod === 1 ? 6 : 5;
 };
 
 const foliageDefaultsForTreeSpecies = (
@@ -1753,13 +1759,14 @@ export function createProcPlantVegetation(
           moduleTree,
           Math.max(chunk.lod, distanceLod, computeLod) as BranchModuleLodLevel,
         );
+        const branchRadialSegments = procPlantBranchRadialSegments(chunk.lod, distanceLod);
         chunk.stats.branchSegments += structuralTree.segments.length;
         chunk.stats.attachedLeaves += structuralTree.leaves.length;
         if (structuralTree.level === 0) chunk.stats.branchLod0++;
         else if (structuralTree.level === 1) chunk.stats.branchLod1++;
         else chunk.stats.branchLod2++;
         for (const segment of structuralTree.segments) {
-          const template = branchSegmentPrototypeTemplate(segment.prototypeId);
+          const template = branchSegmentPrototypeTemplate(segment.prototypeId, branchRadialSegments);
           stemTemplates.push({
             template,
             matrix: treeMatrix.clone().multiply(segment.matrix),

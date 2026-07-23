@@ -1244,7 +1244,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       maxStems: 80,
       maxLeaves: 220,
       leafScaleMultiplier: 2.05,
-      radialSegments: 4,
+      radialSegments: 6,
       branchSamples: 2,
     },
     lightResponse: {
@@ -1292,7 +1292,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       maxStems: 72,
       maxLeaves: 200,
       leafScaleMultiplier: 3.05,
-      radialSegments: 4,
+      radialSegments: 6,
       branchSamples: 2,
     },
     lightResponse: {
@@ -1340,7 +1340,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       maxStems: 72,
       maxLeaves: 200,
       leafScaleMultiplier: 2.1,
-      radialSegments: 4,
+      radialSegments: 6,
       branchSamples: 2,
     },
     lightResponse: {
@@ -1388,7 +1388,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       maxStems: 80,
       maxLeaves: 200,
       leafScaleMultiplier: 2.2,
-      radialSegments: 4,
+      radialSegments: 6,
       branchSamples: 2,
     },
     lightResponse: {
@@ -1430,7 +1430,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       maxStems: 96,
       maxLeaves: 260,
       leafScaleMultiplier: 2.6,
-      radialSegments: 4,
+      radialSegments: 6,
       branchSamples: 2,
     },
     lightResponse: {
@@ -1472,7 +1472,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       maxStems: 104,
       maxLeaves: 300,
       leafScaleMultiplier: 2.85,
-      radialSegments: 4,
+      radialSegments: 6,
       branchSamples: 2,
     },
     lightResponse: {
@@ -1558,7 +1558,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       maxStems: 96,
       maxLeaves: 300,
       leafScaleMultiplier: 2.45,
-      radialSegments: 4,
+      radialSegments: 6,
       branchSamples: 2,
     },
     lightResponse: {
