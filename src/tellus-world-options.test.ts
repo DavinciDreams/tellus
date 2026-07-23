@@ -6,6 +6,7 @@ import {
   WORLD_CREATION_TEMPLATES,
   WORLD_TEMPLATE_OPTIONS,
   fallbackWorldDisplayName,
+  isProtectedWorldId,
   normalizeDayNightCycleMs,
   normalizeSkyboxUrl,
   parseDayNightMode,
@@ -71,5 +72,12 @@ describe("world option helpers", () => {
     expect(fallbackWorldDisplayName("chunked-24-coral-archipelago")).toBe("Coral Archipelago");
     expect(worldPickerLabel("chunked-24-coral-archipelago", "Coral Isles")).toBe("Coral Isles");
     expect(worldPickerLabel("chunked-24-coral-archipelago")).toBe("Coral Archipelago");
+  });
+
+  it("protects both durable Main world ids from cleanup", () => {
+    expect(isProtectedWorldId("main")).toBe(true);
+    expect(isProtectedWorldId(" chunked-64-main ")).toBe(true);
+    expect(isProtectedWorldId("chunked-64-genesis")).toBe(false);
+    expect(isProtectedWorldId("interior-main-room_mqn0oe2")).toBe(false);
   });
 });

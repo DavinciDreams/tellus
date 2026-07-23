@@ -220,6 +220,7 @@ import {
   WORLD_CREATION_TEMPLATES,
   WORLD_TEMPLATE_OPTIONS,
   fallbackWorldDisplayName,
+  isProtectedWorldId,
   liveDayNightPhase,
   normalizeDayNightCycleMs,
   normalizeSkyboxUrl,
@@ -13614,6 +13615,7 @@ function App(): React.ReactElement {
   };
 
   const canDeleteWorld = (worldId: string): boolean => {
+    if (isProtectedWorldId(worldId)) return false;
     const profile = loadLocalWorldProfiles()[canonicalWorldId(worldId)] ?? {};
     return Boolean(profile.canDelete || isAdmin);
   };
@@ -14290,6 +14292,7 @@ function App(): React.ReactElement {
     }
   };
   const renderWorldDeleteButton = (target: string, className = "world-icon-button") => {
+    if (isProtectedWorldId(target)) return null;
     const armed = pendingDeleteWorld === target;
     const serverDeleteAllowed = Boolean(runtimeConfig.worldApiBase && canDeleteWorld(target));
     return (
@@ -16407,7 +16410,7 @@ function App(): React.ReactElement {
                     </option>
                   ))}
                 </select>
-                {activeWorldId &&
+                {activeWorldId && !isProtectedWorldId(activeWorldId) &&
                   (() => {
                     const target = activeWorldId;
                     const armed = pendingDeleteWorld === target;
@@ -16438,9 +16441,12 @@ function App(): React.ReactElement {
                   })()}
               </div>
             </div>
-            {worlds.length > 0 && (
-              <div className="world-control-group world-list-group">
-                <span>Worlds</span>
+            {isAdmin && worlds.length > 0 && (
+              <details className="world-control-group world-list-group world-registry-manager">
+                <summary>Manage worlds ({worlds.length})</summary>
+                <p className="world-registry-note">
+                  Admin cleanup. Main is protected; deleting another world is permanent.
+                </p>
                 <div className="world-list" role="list" aria-label="Known worlds">
                   {worlds.map((worldId) => {
                     const active = worldId === (activeWorldId ?? runtimeConfig.worldId);
@@ -16456,12 +16462,16 @@ function App(): React.ReactElement {
                             <span>{worldDisplayName(worldId)}</span>
                             <small>{active ? `Current - ${worldId}` : worldId}</small>
                           </button>
-                        {renderWorldDeleteButton(worldId, "world-icon-button world-list-delete")}
+                        {isProtectedWorldId(worldId) ? (
+                          <span className="world-protected-badge">Protected</span>
+                        ) : (
+                          renderWorldDeleteButton(worldId, "world-icon-button world-list-delete")
+                        )}
                       </div>
                     );
                   })}
                 </div>
-              </div>
+              </details>
             )}
             <div className="world-control-group world-name-edit-group">
               <span>Name</span>
