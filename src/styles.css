@@ -266,6 +266,80 @@ textarea::placeholder {
   flex-wrap: wrap;
 }
 
+.world-mode-switcher {
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 4px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 10px;
+  background: rgb(0 0 0 / 28%);
+}
+
+.world-mode-switcher button {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: rgb(223 231 216 / 70%);
+  font: 800 11px/1 ui-sans-serif, system-ui;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.world-mode-switcher button:hover {
+  color: #fff2bd;
+}
+
+.world-mode-switcher button.active {
+  border-color: rgb(230 192 95 / 42%);
+  background: rgb(71 55 20 / 58%);
+  color: #fff2bd;
+  box-shadow: inset 0 0 0 1px rgb(255 235 160 / 12%);
+}
+
+.world-mode-switcher button:focus-visible,
+.world-menu-panel button:focus-visible,
+.world-menu-panel select:focus-visible,
+.world-menu-panel input:focus-visible {
+  outline: 2px solid var(--hud-gold-bright);
+  outline-offset: 2px;
+}
+
+.world-mode-intro {
+  flex: 1 1 100%;
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border-left: 3px solid rgb(230 192 95 / 62%);
+  border-radius: 0 8px 8px 0;
+  background: rgb(230 192 95 / 8%);
+  text-align: left;
+}
+
+.world-mode-intro > span {
+  color: rgb(223 231 216 / 62%);
+  font: 800 9px/1 ui-sans-serif, system-ui;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+}
+
+.world-mode-intro > strong {
+  color: #fff3c9;
+  font: 800 14px/1.2 ui-sans-serif, system-ui;
+}
+
+.world-mode-intro > small,
+.world-create-explainer {
+  color: rgb(223 231 216 / 68%);
+  font: 600 10px/1.35 ui-sans-serif, system-ui;
+}
+
 .world-control-group,
 .world-field {
   display: grid;
@@ -483,6 +557,10 @@ textarea::placeholder {
   color: var(--hud-gold-bright);
   font-size: 12px;
   font-weight: 800;
+}
+
+.world-create-explainer {
+  margin: -2px 0 2px;
 }
 
 .world-name-field input,
