@@ -620,6 +620,33 @@ textarea::placeholder {
   display: none;
 }
 
+.world-menu-panel .world-list-group.world-registry-manager {
+  display: block;
+  flex: 1 1 100%;
+}
+
+.world-registry-manager > summary {
+  cursor: pointer;
+  color: var(--hud-gold-bright);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.world-registry-note {
+  margin: 6px 2px;
+  color: rgb(223 231 216 / 70%);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.world-protected-badge {
+  align-self: center;
+  color: rgb(223 231 216 / 62%);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .travel-menu-intro {
   display: grid;
   gap: 3px;

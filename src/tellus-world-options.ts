@@ -311,6 +311,12 @@ export function worldPickerLabel(worldId: string, displayName?: string): string 
   return displayName?.trim() || fallbackWorldDisplayName(worldId);
 }
 
+const PROTECTED_WORLD_IDS = new Set(["main", "chunked-64-main"]);
+
+export function isProtectedWorldId(worldId: string): boolean {
+  return PROTECTED_WORLD_IDS.has(worldId.trim().toLowerCase());
+}
+
 export const SKYBOX_OPTIONS: Array<{ url: string; label: string }> = [
   { url: "/skybox/free_-_skybox_in_the_cloud/scene.gltf", label: "Cloud Dome" },
   { url: "/skybox/free_-_skybox_basic_sky.glb", label: "Basic Sky" },
