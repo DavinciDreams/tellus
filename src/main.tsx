@@ -230,6 +230,7 @@ import {
   worldPickerLabel,
   worldTemplateLabel,
 } from "./tellus-world-options";
+import { validatedLegacyWorldCleanupIds } from "./tellus-world-cleanup";
 import { AssetTile, AvatarTile } from "./tellus-picker-tiles";
 import { FirstRunCoach } from "./onboarding/FirstRunCoach";
 import { useDialogs, CommandPalette, Dock } from "./design-system";
@@ -13300,6 +13301,8 @@ function App(): React.ReactElement {
   // second click within the window confirms; clicking elsewhere / a timeout disarms.
   const [pendingDeleteWorld, setPendingDeleteWorld] = useState<string | null>(null);
   const [deletingWorld, setDeletingWorld] = useState(false);
+  const [legacyCleanupBusy, setLegacyCleanupBusy] = useState(false);
+  const [legacyCleanupProgress, setLegacyCleanupProgress] = useState<string | null>(null);
   const [savingWorld, setSavingWorld] = useState(false);
   const pendingDeleteTimerRef = useRef<number | undefined>(undefined);
   const KNOWN_WORLDS_KEY = "tellus.knownWorlds";
@@ -14289,6 +14292,68 @@ function App(): React.ReactElement {
       showWorldNote("Delete failed: network error", 4000);
     } finally {
       setDeletingWorld(false);
+    }
+  };
+  const cleanupLegacyWorlds = async () => {
+    if (!isAdmin || legacyCleanupBusy || !runtimeConfig.worldApiBase) return;
+    const cleanupIds = validatedLegacyWorldCleanupIds();
+    const confirmed = await askConfirm({
+      title: `Delete ${cleanupIds.length} legacy test worlds?`,
+      message:
+        "This permanently deletes the approved experimental worlds and old interior instances. Main, Earth Flight, and the indoor creation templates are preserved.",
+      confirmLabel: `Delete ${cleanupIds.length} worlds`,
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    const token = getSession()?.token;
+    let deleted = 0;
+    let alreadyGone = 0;
+    const failed: string[] = [];
+    setLegacyCleanupBusy(true);
+    try {
+      for (let index = 0; index < cleanupIds.length; index += 1) {
+        const worldId = cleanupIds[index];
+        setLegacyCleanupProgress(`${index + 1}/${cleanupIds.length}: ${worldId}`);
+        try {
+          const response = await fetch(
+            `${runtimeConfig.worldApiBase}/api/tellus/worlds/${encodeURIComponent(worldId)}?userId=${encodeURIComponent(tellusUserId())}`,
+            {
+              method: "DELETE",
+              headers: {
+                "Content-Type": "application/json",
+                ...(token ? { [SESSION_HEADER]: token } : {}),
+              },
+              body: JSON.stringify({ confirm: worldId }),
+            },
+          );
+          if (response.ok) {
+            deleted += 1;
+            forgetWorld(worldId);
+          } else if (response.status === 404 || response.status === 410) {
+            alreadyGone += 1;
+            forgetWorld(worldId);
+          } else {
+            failed.push(worldId);
+          }
+        } catch {
+          failed.push(worldId);
+        }
+      }
+
+      const activeId = activeWorldId ?? runtimeConfig.worldId;
+      if (cleanupIds.includes(activeId)) {
+        switchWorld("main");
+      } else {
+        await refreshWorldList();
+      }
+      showWorldNote(
+        `Cleanup complete: ${deleted} deleted, ${alreadyGone} already gone${failed.length ? `, ${failed.length} failed` : ""}`,
+        8000,
+      );
+    } finally {
+      setLegacyCleanupBusy(false);
+      setLegacyCleanupProgress(null);
     }
   };
   const renderWorldDeleteButton = (target: string, className = "world-icon-button") => {
@@ -16447,6 +16512,15 @@ function App(): React.ReactElement {
                 <p className="world-registry-note">
                   Admin cleanup. Main is protected; deleting another world is permanent.
                 </p>
+                <button
+                  type="button"
+                  className="world-action-button legacy-world-cleanup-button"
+                  disabled={legacyCleanupBusy || deletingWorld}
+                  onClick={() => void cleanupLegacyWorlds()}
+                >
+                  <Trash2 size={14} />
+                  {legacyCleanupBusy ? legacyCleanupProgress ?? "Cleaning up…" : "Clean up legacy test worlds"}
+                </button>
                 <div className="world-list" role="list" aria-label="Known worlds">
                   {worlds.map((worldId) => {
                     const active = worldId === (activeWorldId ?? runtimeConfig.worldId);
