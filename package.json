@@ -16,6 +16,7 @@
     "instantmesh:setup": "bash scripts/setup-instantmesh.sh",
     "instantmesh:start": "bash scripts/start-instantmesh.sh",
     "bench:instantmesh": "bun scripts/benchmark-instantmesh.mjs",
+    "terrain:evoflow-variety": "node scripts/generate-evoflow-terrain-variety.mjs",
     "terrain:yosemite": "node scripts/bake-yosemite-dem.mjs --chunks=20",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"

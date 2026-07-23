@@ -298,6 +298,14 @@ function blendChunkedIslandShoreShelf(height: number, r: number, beachStartRatio
   return nearShelf * (1 - shelfT) + chunkedIslandOceanShelfHeight(r) * shelfT;
 }
 
+export function evoflowChunkedWaterbedHeight(height: number, kind: TerrainKind | null): number {
+  if (kind !== "water") return height;
+  // EvoFlow's semantic raster is authoritative for channels and lagoons. Keep their floor shallow
+  // enough to cross on foot, but always below the shared ocean plane so "water" on the minimap is
+  // visibly water in the streamed chunk too.
+  return clamp(height, SEA_LEVEL - 1.4, SEA_LEVEL - 0.65);
+}
+
 export function usesContinentalChunkedTerrain(
   worldId = runtimeConfig.worldId,
   template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
@@ -342,7 +350,10 @@ function chunkedIslandBaseHeight(x: number, z: number): number | null {
     const networkHeight = rasterHeight ?? fallbackCanyon;
     const sandyFloor = 2.4 + fbm2(cx * 0.045, cz * 0.045, 4, 503) * 1.4;
     const detail = terrainDetailHeight(shape, cx, cz, r) * 0.32;
-    return blendChunkedIslandShoreShelf(sandyFloor + networkHeight * 1.1 + detail + shape.baseOffset, r);
+    const height = sandyFloor + networkHeight * 1.1 + detail + shape.baseOffset;
+    const semanticKind = activeEvoflowTerrainKind(cx, cz, height);
+    if (semanticKind === "water") return evoflowChunkedWaterbedHeight(height, semanticKind);
+    return blendChunkedIslandShoreShelf(height, r);
   }
 
   if (template === "ridge") {
@@ -590,7 +601,11 @@ export function largeWorldTerrainKind(
     const shape = resolveLandShapeConfig(template, runtimeConfig.landShape);
     if (isEvoflowTemplate(template)) {
       const kind = activeEvoflowTerrainKind(islandPoint.cx, islandPoint.cz, y);
-      if (kind && kind !== "water" && kind !== "meadow") return kind;
+      // EvoFlow's semantic raster and height raster describe the same surface. Preserve a water
+      // label here so the minimap, vegetation, vehicles, and the SEA_LEVEL ocean plane agree on
+      // which low cells are navigable water instead of recoloring them as beach.
+      if (kind === "water") return "water";
+      if (kind && kind !== "meadow") return kind;
       if (islandPoint.r > CLASSIC_WORLD_RADIUS * 1.02) return "beach";
       const washA = Math.abs(Math.sin(islandPoint.cx * 0.085 + fbm2(islandPoint.cx * 0.022, islandPoint.cz * 0.022, 3, 601) * 2.8));
       const washB = Math.abs(Math.sin((islandPoint.cx + islandPoint.cz * 0.45) * 0.06 + fbm2(islandPoint.cx * 0.026 - 4, islandPoint.cz * 0.026 + 9, 3, 607) * 2.4));

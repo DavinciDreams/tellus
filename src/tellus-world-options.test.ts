@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   ADVANCED_WORLD_TEMPLATE_OPTIONS,
+  ALL_WORLD_CREATION_TEMPLATES,
+  DEFAULT_WORLD_CREATION_TEMPLATE_IDS,
   WORLD_CREATION_TEMPLATES,
   WORLD_TEMPLATE_OPTIONS,
+  fallbackWorldDisplayName,
   normalizeDayNightCycleMs,
   normalizeSkyboxUrl,
   parseDayNightMode,
   parseLightingMood,
   skyboxLabel,
+  worldPickerLabel,
   worldTemplateLabel,
 } from "./tellus-world-options";
 
@@ -35,30 +39,14 @@ describe("world option helpers", () => {
     expect(skyboxLabel("/unknown.glb")).toBe("Custom Sky");
   });
 
-  it("keeps curated creation templates registered and out of advanced terrain", () => {
+  it("shows Main and the new Evoflow terrains as the default creation choices", () => {
     const allIds = new Set(WORLD_TEMPLATE_OPTIONS.map((option) => option.id));
     const advancedIds = new Set(ADVANCED_WORLD_TEMPLATE_OPTIONS.map((option) => option.id));
     const curatedIds = WORLD_CREATION_TEMPLATES.map((template) => template.id);
 
+    expect(curatedIds).toEqual(DEFAULT_WORLD_CREATION_TEMPLATE_IDS);
     expect(curatedIds).toEqual([
       "tellus",
-      "lowlands",
-      "wide-island",
-      "ridge",
-      "fantasy-garden",
-      "realistic-cove",
-      "flight-range",
-      "grassland-field",
-      "low-poly-meadow",
-      "cartoon-hills",
-      "yosemite-terrain",
-      "grand-canyon-terrain",
-      "chaco-canyon",
-      "cahokia-mounds",
-      "temple-portara",
-      "interior-studio",
-      "grand-hall-shell",
-      "evoflow-coral-canyon",
       "evoflow-coral-canyon-child",
       "evoflow-spires",
       "evoflow-glass-ridge",
@@ -71,5 +59,17 @@ describe("world option helpers", () => {
       expect(allIds.has(id), id).toBe(true);
       expect(advancedIds.has(id), id).toBe(false);
     }
+    expect(advancedIds.has("evoflow-coral-canyon")).toBe(true);
+    expect(advancedIds.has("interior-studio")).toBe(true);
+    expect(advancedIds.has("wide-island")).toBe(true);
+    expect(ALL_WORLD_CREATION_TEMPLATES).toHaveLength(
+      WORLD_CREATION_TEMPLATES.length + ADVANCED_WORLD_TEMPLATE_OPTIONS.length,
+    );
+  });
+
+  it("uses friendly picker labels without appending internal world ids", () => {
+    expect(fallbackWorldDisplayName("chunked-24-coral-archipelago")).toBe("Coral Archipelago");
+    expect(worldPickerLabel("chunked-24-coral-archipelago", "Coral Isles")).toBe("Coral Isles");
+    expect(worldPickerLabel("chunked-24-coral-archipelago")).toBe("Coral Archipelago");
   });
 });

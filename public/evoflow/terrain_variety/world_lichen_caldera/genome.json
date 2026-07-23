@@ -1,0 +1,19 @@
+{
+  "concept": "a mossy breached caldera enclosing a sheltered basin and upland rim",
+  "id": "world_lichen_caldera",
+  "lineage": {
+    "generation": 0,
+    "operation": "curated-topology"
+  },
+  "modules": {
+    "materials": {
+      "palette": "lichen-basin"
+    },
+    "terrain": {
+      "size": 256,
+      "topology": "breached-caldera"
+    }
+  },
+  "schema_version": "0.2.0",
+  "seed": 24371
+}

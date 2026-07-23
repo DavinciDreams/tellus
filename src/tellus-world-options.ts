@@ -31,13 +31,13 @@ export const WORLD_TEMPLATE_OPTIONS: WorldTemplateOption[] = [
   { id: "interior-studio", label: "Interior Studio" },
   { id: "grand-hall-shell", label: "Grand Hall Shell" },
   { id: "evoflow-coral-canyon", label: "Evoflow Coral Canyon" },
-  { id: "evoflow-coral-canyon-child", label: "Evoflow Canyon Child" },
-  { id: "evoflow-spires", label: "Evoflow Spires" },
+  { id: "evoflow-coral-canyon-child", label: "Evoflow River Canyon" },
+  { id: "evoflow-spires", label: "Evoflow Alpine Spires" },
   { id: "evoflow-glass-ridge", label: "Evoflow Glass Ridge" },
-  { id: "evoflow-lichen-basin", label: "Evoflow Lichen Basin" },
-  { id: "evoflow-copper-terraces", label: "Evoflow Copper Terraces" },
-  { id: "evoflow-basalt-teeth", label: "Evoflow Basalt Teeth" },
-  { id: "evoflow-coral-fold", label: "Evoflow Coral Fold" },
+  { id: "evoflow-lichen-basin", label: "Evoflow Lichen Caldera" },
+  { id: "evoflow-copper-terraces", label: "Evoflow Copper Mesas" },
+  { id: "evoflow-basalt-teeth", label: "Evoflow Basalt Badlands" },
+  { id: "evoflow-coral-fold", label: "Evoflow Coral Archipelago" },
 ];
 
 export type WorldCreationTemplate = WorldTemplateOption & {
@@ -49,7 +49,7 @@ export type WorldCreationTemplate = WorldTemplateOption & {
   previewUrl?: string;
 };
 
-export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
+export const ALL_WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
   {
     id: "tellus",
     label: "Main Island",
@@ -214,8 +214,8 @@ export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
   },
   {
     id: "evoflow-coral-canyon-child",
-    label: "Canyon Child",
-    tagline: "A smaller coral-canyon variation for experiments and compact alien builds.",
+    label: "River Canyon",
+    tagline: "A winding canyon and tributary ravines divide broad, buildable uplands.",
     defaultSkyboxUrl: "/skybox/tellus-starry-night/scene.gltf",
     defaultLightingMood: "cool-dream",
     defaultDayNightMode: "night",
@@ -223,8 +223,8 @@ export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
   },
   {
     id: "evoflow-spires",
-    label: "Blue Spires",
-    tagline: "Sharp procedural ridges under blue clouds for vertical fantasy landmarks.",
+    label: "Alpine Spires",
+    tagline: "An asymmetric mountain chain with distinct peaks, saddles, and open foothills.",
     defaultSkyboxUrl: "/skybox/tellus-blue-clouds/scene.gltf",
     defaultLightingMood: "natural",
     defaultDayNightMode: "cycle",
@@ -233,7 +233,7 @@ export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
   {
     id: "evoflow-glass-ridge",
     label: "Glass Ridge",
-    tagline: "A crystalline Evoflow variant for alien gardens and moonlit builds.",
+    tagline: "A single sweeping crystalline escarpment rising above quiet lowlands.",
     defaultSkyboxUrl: "/skybox/tellus-aurora-sky/scene.gltf",
     defaultLightingMood: "moonlit",
     defaultDayNightMode: "night",
@@ -241,8 +241,8 @@ export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
   },
   {
     id: "evoflow-lichen-basin",
-    label: "Lichen Basin",
-    tagline: "A quieter basin-like Evoflow terrain for mossy surreal outdoor rooms.",
+    label: "Lichen Caldera",
+    tagline: "A mossy breached caldera with a sheltered basin and strong circular rim.",
     defaultSkyboxUrl: "/skybox/tellus-aurora-sky/scene.gltf",
     defaultLightingMood: "cool-dream",
     defaultDayNightMode: "cycle",
@@ -250,8 +250,8 @@ export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
   },
   {
     id: "evoflow-copper-terraces",
-    label: "Copper Terraces",
-    tagline: "Warm terraced terrain with sunset color for desert, temple, and ruin worlds.",
+    label: "Copper Mesas",
+    tagline: "Separated stepped mesas with broad tops for desert temples and ruins.",
     defaultSkyboxUrl: "/skybox/tellus-desert-sunset/scene.gltf",
     defaultLightingMood: "dramatic-sunset",
     defaultDayNightMode: "golden",
@@ -259,8 +259,8 @@ export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
   },
   {
     id: "evoflow-basalt-teeth",
-    label: "Basalt Teeth",
-    tagline: "Dark rugged Evoflow terrain for stormy cliffs, dungeons, and hostile coasts.",
+    label: "Basalt Badlands",
+    tagline: "Branching erosion ridges and dark channels form a rugged hostile landscape.",
     defaultSkyboxUrl: "/skybox/tellus-storm-ocean/scene.gltf",
     defaultLightingMood: "moonlit",
     defaultDayNightMode: "cycle",
@@ -268,8 +268,8 @@ export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
   },
   {
     id: "evoflow-coral-fold",
-    label: "Coral Fold",
-    tagline: "Folded canyon terrain with starry-night mood for compact alien landscapes.",
+    label: "Coral Archipelago",
+    tagline: "Uneven islands and sheltered channels create an open world for boats and bridges.",
     defaultSkyboxUrl: "/skybox/tellus-starry-night/scene.gltf",
     defaultLightingMood: "cool-dream",
     defaultDayNightMode: "night",
@@ -277,12 +277,39 @@ export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
   },
 ];
 
-const CURATED_TEMPLATE_IDS = new Set<WorldTemplateId>(
-  WORLD_CREATION_TEMPLATES.map((template) => template.id),
-);
+export const DEFAULT_WORLD_CREATION_TEMPLATE_IDS: readonly WorldTemplateId[] = [
+  "tellus",
+  "evoflow-coral-canyon-child",
+  "evoflow-spires",
+  "evoflow-glass-ridge",
+  "evoflow-lichen-basin",
+  "evoflow-copper-terraces",
+  "evoflow-basalt-teeth",
+  "evoflow-coral-fold",
+];
 
-export const ADVANCED_WORLD_TEMPLATE_OPTIONS: WorldTemplateOption[] =
-  WORLD_TEMPLATE_OPTIONS.filter((option) => !CURATED_TEMPLATE_IDS.has(option.id));
+const CURATED_TEMPLATE_IDS = new Set<WorldTemplateId>(DEFAULT_WORLD_CREATION_TEMPLATE_IDS);
+
+export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] =
+  ALL_WORLD_CREATION_TEMPLATES.filter((template) => CURATED_TEMPLATE_IDS.has(template.id));
+
+export const ADVANCED_WORLD_TEMPLATE_OPTIONS: WorldCreationTemplate[] =
+  ALL_WORLD_CREATION_TEMPLATES.filter((option) => !CURATED_TEMPLATE_IDS.has(option.id));
+
+export function fallbackWorldDisplayName(worldId: string): string {
+  const trimmed = worldId.trim();
+  const chunkedMatch = /^chunked-\d+-(.+)$/i.exec(trimmed);
+  const slug = chunkedMatch?.[1] || trimmed;
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+export function worldPickerLabel(worldId: string, displayName?: string): string {
+  return displayName?.trim() || fallbackWorldDisplayName(worldId);
+}
 
 export const SKYBOX_OPTIONS: Array<{ url: string; label: string }> = [
   { url: "/skybox/free_-_skybox_in_the_cloud/scene.gltf", label: "Cloud Dome" },

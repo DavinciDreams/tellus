@@ -1,0 +1,19 @@
+{
+  "concept": "an open coral archipelago of uneven islands, lagoons, and sheltered channels",
+  "id": "world_coral_archipelago",
+  "lineage": {
+    "generation": 0,
+    "operation": "curated-topology"
+  },
+  "modules": {
+    "materials": {
+      "palette": "coral-fold"
+    },
+    "terrain": {
+      "size": 256,
+      "topology": "archipelago"
+    }
+  },
+  "schema_version": "0.2.0",
+  "seed": 52711
+}

@@ -315,6 +315,10 @@ function evoflowTerrainKind(cx: number, cz: number, y: number): TerrainKind | nu
       v,
     ),
   );
+  return evoflowTerrainKindForSemanticLabel(label, y);
+}
+
+export function evoflowTerrainKindForSemanticLabel(label: number, y: number): TerrainKind {
   if (label <= 0 && y < -1.5) return "water";
   if (label === 1) return "dirt";
   if (label === 3) return "rock";

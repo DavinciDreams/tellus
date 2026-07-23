@@ -1,0 +1,19 @@
+{
+  "concept": "a long crystalline escarpment sweeping across quiet lowlands",
+  "id": "world_glass_ridge",
+  "lineage": {
+    "generation": 0,
+    "operation": "curated-topology"
+  },
+  "modules": {
+    "materials": {
+      "palette": "glass-ridge"
+    },
+    "terrain": {
+      "size": 256,
+      "topology": "sweeping-ridge"
+    }
+  },
+  "schema_version": "0.2.0",
+  "seed": 18917
+}
