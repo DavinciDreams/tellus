@@ -30,6 +30,7 @@ import {
   toAssetId,
 } from "./tellus-urls-identity";
 import { normalizeAnimationIntent, type AnimationActorKind, type AssetAnimationMetadata } from "./tellus-animation-intents";
+import { normalizeAssetImpostorVariant } from "./tellus-asset-impostor";
 
 export const gltfObjectCache = new Map<string, Promise<THREE.Object3D>>();
 export const dracoLoader = new DRACOLoader().setDecoderPath(
@@ -309,6 +310,8 @@ const parseAssetLibraryModels = (rawModels: unknown): AssetLibraryModel[] => {
         lodAvailableLevels: numberArrayField(record, "lod_available_levels", "lodAvailableLevels"),
         lodSummary: parseLodSummary(record.lod_summary ?? record.lodSummary),
         lodVariants: parseLodVariants(record.lod_variants ?? record.lodVariants),
+        hasImpostor: booleanField(record, "has_impostor", "hasImpostor"),
+        impostor: normalizeAssetImpostorVariant(record.impostor),
         source: "asset-library" as const,
       };
     if (model.viewable !== false) models.push(model);

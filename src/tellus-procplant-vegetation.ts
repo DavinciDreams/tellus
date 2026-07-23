@@ -21,6 +21,16 @@ import {
 import { buildRetroCutoutTreeTemplate } from "./tellus-veg-archetypes";
 import { loadBiomeAssetTemplate } from "./tellus-biome-asset-template";
 import {
+  createAssetStoreImpostorInstance,
+  loadAssetStoreImpostor,
+} from "./tellus-asset-impostor";
+import {
+  bakeImpostor,
+  isImpostorBakingSupported,
+  type ImpostorHandle,
+  type TellusImpostorInstance,
+} from "./tellus-impostor";
+import {
   BIOME_MIX_STORAGE_EVENT,
   activeBiomeMixStorageKey,
   biomeMixRenderSignature,
@@ -60,6 +70,9 @@ import {
 
 export interface ProcPlantVegetationOptions {
   scene: THREE.Scene;
+  /** Late-bound because the renderer is initialized after the vegetation system. */
+  renderer?: () => unknown;
+  camera?: () => THREE.Camera;
   worldId: string;
   sampleHeight: (x: number, z: number) => number | null;
   samplePaint: (x: number, z: number) => TerrainPaintKind | null;
@@ -91,6 +104,7 @@ export interface ProcPlantVegetationStats {
   branchLod0: number;
   branchLod1: number;
   branchLod2: number;
+  impostors: number;
   lod0: number;
   lod1: number;
   lod2: number;
@@ -146,6 +160,7 @@ interface ChunkStats {
   branchLod0: number;
   branchLod1: number;
   branchLod2: number;
+  impostors: number;
 }
 
 interface ActiveChunk {
@@ -159,6 +174,7 @@ interface ActiveChunk {
   needsColdRefinement: boolean;
   lastNeededMs: number;
   group: THREE.Group;
+  impostors: TellusImpostorInstance[];
   stats: ChunkStats;
 }
 
@@ -193,20 +209,24 @@ interface BiomeTreeTemplateOptions {
 const DEFAULT_CHUNK_SIZE = 16;
 const DEFAULT_MAX_RING = 3;
 const THIRD_PERSON_MAX_RING = 4;
-const MAX_LOD0_PLANTS = 3;
-const MAX_LOD1_PLANTS = 3;
-const MAX_LOD2_PLANTS = 4;
+const MAX_PLANTS_PER_CHUNK = 4;
 const PROC_TREE_NEAR_SCALE = 1.85;
-const PROC_TREE_MID_SCALE = 1.45;
-const PROC_TREE_FAR_SCALE = 1.15;
+// Tree transforms must not change when a chunk crosses an LOD ring. Geometry can simplify, but a
+// different scale makes a crown visibly expand/contract and reads as a different tree popping in.
+const PROC_TREE_STABLE_SCALE = PROC_TREE_NEAR_SCALE;
 const PROC_TREE_DETAIL_DISTANCE = 58;
 const PROC_TREE_DETAIL_DISTANCE_THIRD = 72;
+const PROC_TREE_IMPOSTOR_DISTANCE_FACTOR = 0.9;
+const PROC_TREE_IMPOSTOR_ATLAS_SIZE = 512;
+const PROC_TREE_IMPOSTOR_GRID_SIZE = 8;
+const MAX_PROC_TREE_IMPOSTOR_HANDLES = 12;
+const PROC_TREE_PLACEMENT_DENSITY = 0.58;
 const PROC_GROUND_PLANT_DETAIL_DISTANCE = 34;
 const PROC_GROUND_PLANT_DETAIL_DISTANCE_THIRD = 42;
 const PROC_GROUND_PLANT_FADE_DISTANCE = 72;
 const PROC_GROUND_PLANT_FADE_DISTANCE_THIRD = 96;
 const PROC_GROUND_PLANT_MIN_DENSITY = 0.22;
-const PROCPLANT_RENDER_STYLE_REVISION = 7;
+const PROCPLANT_RENDER_STYLE_REVISION = 9;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
 const BIOME_MIX_SERVER_REFRESH_FALLBACK_MS = 60_000;
 const LOW_FPS_BUILD_BUDGET = 1;
@@ -283,12 +303,11 @@ const foliageDefaultsForTreeSpecies = (
 // variants preserves variety while every rendered segment reuses one of four small prototype meshes.
 const DETAILED_TREE_SEED_BUCKETS = 8;
 const branchModuleTreeCache = new Map<string, BranchModuleTree>();
-const buildBranchModuleTreeCached = (
+const branchModuleTreeCacheKey = (
   species: string,
   seed: number,
   options: BiomeTreeTemplateOptions = {},
-  allowColdBuild = true,
-): BranchModuleTree | null => {
+): { bucket: number; key: string } => {
   const bucket =
     ((Math.trunc(seed) % DETAILED_TREE_SEED_BUCKETS) + DETAILED_TREE_SEED_BUCKETS) %
     DETAILED_TREE_SEED_BUCKETS;
@@ -298,6 +317,15 @@ const buildBranchModuleTreeCached = (
     `${options.droop ?? ""}|${options.spread ?? ""}|${options.tropism ?? ""}|${options.branchDensity ?? ""}|` +
     `${options.branchAngle ?? ""}|${options.vigor ?? ""}|${options.collisionBias ?? ""}|${options.junctionBlend ?? ""}|${options.palette ?? ""}|` +
     `${options.broadleafCrown ?? ""}`;
+  return { bucket, key };
+};
+const buildBranchModuleTreeCached = (
+  species: string,
+  seed: number,
+  options: BiomeTreeTemplateOptions = {},
+  allowColdBuild = true,
+): BranchModuleTree | null => {
+  const { bucket, key } = branchModuleTreeCacheKey(species, seed, options);
   let tree = branchModuleTreeCache.get(key);
   if (!tree && !allowColdBuild) return null;
   if (!tree) {
@@ -384,6 +412,7 @@ const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color
 
 const cheapTreeTemplateCache = new Map<string, ProcPlantTemplate>();
 const templateMinYCache = new WeakMap<ProcPlantTemplate, number>();
+const templateHeightCache = new WeakMap<ProcPlantTemplate, number>();
 const assetTemplateCache = new WeakMap<TellusBiomeAssetTemplate, Map<string, ProcPlantTemplate>>();
 
 export const procPlantTemplateFromAssetTemplate = (
@@ -427,6 +456,23 @@ const templateMinY = (template: ProcPlantTemplate): number => {
   const y = Number.isFinite(minY) ? minY : 0;
   templateMinYCache.set(template, y);
   return y;
+};
+
+const templateHeight = (template: ProcPlantTemplate): number => {
+  const cached = templateHeightCache.get(template);
+  if (cached !== undefined) return cached;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = 1; i < template.pos.length; i += 3) {
+    const y = template.pos[i] ?? 0;
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  }
+  const height = Number.isFinite(minY) && Number.isFinite(maxY)
+    ? Math.max(1e-4, maxY - minY)
+    : 1;
+  templateHeightCache.set(template, height);
+  return height;
 };
 
 export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit): ProcPlantTemplate => {
@@ -698,6 +744,7 @@ const emptyStats = (): ProcPlantVegetationStats => ({
   branchLod0: 0,
   branchLod1: 0,
   branchLod2: 0,
+  impostors: 0,
   lod0: 0,
   lod1: 0,
   lod2: 0,
@@ -845,6 +892,11 @@ export function createProcPlantVegetation(
   organMaterial.userData.tellusProcplantShared = true;
   const stemGeometryCache = new Map<ProcPlantTemplate, THREE.BufferGeometry>();
   const organGeometryCache = new Map<string, THREE.BufferGeometry>();
+  const branchTreeImpostorHandles = new Map<string, ImpostorHandle>();
+  const branchTreeImpostorBakes = new Set<string>();
+  const branchTreeImpostorFailures = new Set<string>();
+  const branchTreeImpostorConsumers = new Map<string, Set<string>>();
+  let branchTreeImpostorBakeQueue = Promise.resolve();
   const globalAssetTemplates = new Map<string, TellusBiomeAssetTemplate>();
   const authoredDefaultMixByBiome = new Map<EcologyBiomeId, TellusBiomeMixDefinition | null>();
   const authoredDefaultMixForBiome = (biome: EcologyBiomeId): TellusBiomeMixDefinition | null => {
@@ -950,6 +1002,160 @@ export function createProcPlantVegetation(
     for (const key of active.keys()) enqueue(key);
   };
 
+  const buildBranchTreeImpostorSource = (
+    tree: BranchModuleTree,
+    leafGeometry: THREE.BufferGeometry,
+    leafColor: THREE.Color,
+    barkColor: THREE.ColorRepresentation,
+  ): THREE.Group => {
+    const source = new THREE.Group();
+    const segmentsByTemplate = new Map<ProcPlantTemplate, THREE.Matrix4[]>();
+    for (const segment of tree.segments) {
+      const template = branchSegmentPrototypeTemplate(segment.prototypeId);
+      const matrices = segmentsByTemplate.get(template) ?? [];
+      matrices.push(segment.matrix);
+      segmentsByTemplate.set(template, matrices);
+    }
+    for (const [template, matrices] of segmentsByTemplate) {
+      const material = new THREE.MeshLambertMaterial({ color: barkColor, side: THREE.DoubleSide });
+      const mesh = new THREE.InstancedMesh(stemGeometryForTemplate(template), material, matrices.length);
+      matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
+      mesh.instanceMatrix.needsUpdate = true;
+      source.add(mesh);
+    }
+    if (tree.leaves.length > 0) {
+      const material = new THREE.MeshLambertMaterial({ color: leafColor, side: THREE.DoubleSide });
+      const mesh = new THREE.InstancedMesh(leafGeometry, material, tree.leaves.length);
+      tree.leaves.forEach((leaf, index) => mesh.setMatrixAt(index, leaf.matrix));
+      mesh.instanceMatrix.needsUpdate = true;
+      source.add(mesh);
+    }
+    return source;
+  };
+
+  const scheduleBranchTreeImpostorBake = (
+    cacheKey: string,
+    chunkKey: string,
+    tree: BranchModuleTree,
+    leafGeometry: THREE.BufferGeometry,
+    leafColor: THREE.Color,
+    barkColor: THREE.ColorRepresentation,
+  ) => {
+    const renderer = options.renderer?.();
+    if (!isImpostorBakingSupported(renderer)) return;
+    if (branchTreeImpostorFailures.has(cacheKey)) return;
+    if (branchTreeImpostorHandles.has(cacheKey)) return;
+    if (
+      !branchTreeImpostorBakes.has(cacheKey) &&
+      branchTreeImpostorHandles.size + branchTreeImpostorBakes.size >= MAX_PROC_TREE_IMPOSTOR_HANDLES
+    ) return;
+    const consumers = branchTreeImpostorConsumers.get(cacheKey) ?? new Set<string>();
+    consumers.add(chunkKey);
+    branchTreeImpostorConsumers.set(cacheKey, consumers);
+    if (branchTreeImpostorBakes.has(cacheKey)) return;
+    branchTreeImpostorBakes.add(cacheKey);
+    branchTreeImpostorBakeQueue = branchTreeImpostorBakeQueue
+      .then(async () => {
+        if (disposed) {
+          branchTreeImpostorBakes.delete(cacheKey);
+          branchTreeImpostorConsumers.delete(cacheKey);
+          return;
+        }
+        const activeRenderer = options.renderer?.();
+        if (!isImpostorBakingSupported(activeRenderer)) {
+          branchTreeImpostorBakes.delete(cacheKey);
+          branchTreeImpostorConsumers.delete(cacheKey);
+          return;
+        }
+        const source = buildBranchTreeImpostorSource(tree, leafGeometry, leafColor, barkColor);
+        try {
+          const handle = await bakeImpostor(source, activeRenderer, {
+            atlasWidth: PROC_TREE_IMPOSTOR_ATLAS_SIZE,
+            atlasHeight: PROC_TREE_IMPOSTOR_ATLAS_SIZE,
+            gridSizeX: PROC_TREE_IMPOSTOR_GRID_SIZE,
+            gridSizeY: PROC_TREE_IMPOSTOR_GRID_SIZE,
+            pbrMode: 0,
+          });
+          if (disposed) {
+            handle.dispose();
+            return;
+          }
+          branchTreeImpostorHandles.set(cacheKey, handle);
+          for (const key of branchTreeImpostorConsumers.get(cacheKey) ?? []) {
+            const chunk = active.get(key);
+            if (!chunk) continue;
+            chunk.rev = -1;
+            enqueue(key);
+          }
+        } catch (error) {
+          branchTreeImpostorFailures.add(cacheKey);
+          console.warn("Tellus procplant impostor bake failed", cacheKey, error);
+        } finally {
+          disposeGroup(source);
+          branchTreeImpostorBakes.delete(cacheKey);
+          branchTreeImpostorConsumers.delete(cacheKey);
+        }
+      })
+      .catch((error) => {
+        branchTreeImpostorFailures.add(cacheKey);
+        branchTreeImpostorBakes.delete(cacheKey);
+        branchTreeImpostorConsumers.delete(cacheKey);
+        console.warn("Tellus procplant impostor queue failed", cacheKey, error);
+      });
+  };
+
+  const addBranchTreeImpostor = (
+    chunk: ActiveChunk,
+    cacheKey: string,
+    x: number,
+    groundY: number,
+    z: number,
+    yaw: number,
+    scale: number,
+  ): boolean => {
+    const handle = branchTreeImpostorHandles.get(cacheKey);
+    const camera = options.camera?.();
+    if (!handle || !camera) return false;
+    const instance = handle.createInstance({ scale });
+    const center = handle.result.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3(0, 0.5, 0);
+    center.multiplyScalar(scale).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    instance.mesh.position.set(x + center.x, groundY + center.y, z + center.z);
+    instance.mesh.castShadow = false;
+    instance.mesh.receiveShadow = false;
+    instance.update(camera);
+    chunk.group.add(instance.mesh);
+    chunk.impostors.push(instance);
+    chunk.stats.impostors++;
+    return true;
+  };
+
+  const addAssetStoreImpostor = (
+    chunk: ActiveChunk,
+    entry: TellusBiomeMixEntry,
+    x: number,
+    groundY: number,
+    z: number,
+    yaw: number,
+    scale: number,
+  ): boolean => {
+    if (!isAssetMixEntry(entry) || !entry.asset.impostor) return false;
+    const instance = createAssetStoreImpostorInstance(entry.asset.impostor, {
+      scale,
+      yaw,
+    });
+    instance.mesh.position.set(
+      x,
+      groundY + instance.normalizedCenterY * scale,
+      z,
+    );
+    const camera = options.camera?.();
+    if (camera) instance.update(camera);
+    chunk.group.add(instance.mesh);
+    chunk.impostors.push(instance);
+    chunk.stats.impostors++;
+    return true;
+  };
+
   const hydrateGlobalAssetDefaults = () => {
     if (typeof window === "undefined") return;
     void Promise.all(GLOBAL_DEFAULT_FERN_ASSET_IDS.map(async (assetId) => {
@@ -970,20 +1176,31 @@ export function createProcPlantVegetation(
     ].flatMap((mix) => mix?.entries ?? []))]
       .filter((entry) =>
         isAssetMixEntry(entry) &&
-        !entry.asset.template &&
         entry.asset.runtimeOnly !== true &&
-        Boolean(entry.asset.libraryId)
+        Boolean(entry.asset.libraryId) &&
+        (!entry.asset.template || !entry.asset.impostor)
       );
     if (entries.length === 0) return;
     void Promise.all(entries.map(async (entry) => {
       if (!isAssetMixEntry(entry) || !entry.asset.libraryId) return false;
-      const template = await loadBiomeAssetTemplate(
-        entry.asset.libraryId,
-        entry.asset.lodPreference ?? "lod2",
-      );
-      if (!template) return false;
-      entry.asset.template = template;
-      return true;
+      const [template, impostor] = await Promise.all([
+        entry.asset.template
+          ? Promise.resolve(entry.asset.template)
+          : loadBiomeAssetTemplate(entry.asset.libraryId, entry.asset.lodPreference ?? "lod2"),
+        entry.asset.impostor
+          ? Promise.resolve(entry.asset.impostor)
+          : loadAssetStoreImpostor(entry.asset.libraryId),
+      ]);
+      let changed = false;
+      if (template && !entry.asset.template) {
+        entry.asset.template = template;
+        changed = true;
+      }
+      if (impostor && !entry.asset.impostor) {
+        entry.asset.impostor = impostor;
+        changed = true;
+      }
+      return changed;
     })).then((hydrated) => {
       if (disposed || activeBiomeMixRegistry !== registry || !hydrated.some(Boolean)) return;
       enqueueAllActive();
@@ -1093,6 +1310,7 @@ export function createProcPlantVegetation(
     // themselves for the same gradual refinement path used by cold cache entries.
     const travelBuild = !allowColdBuilds;
     disposeGroup(chunk.group);
+    chunk.impostors = [];
     chunk.stats = {
       plants: 0,
       instances: 0,
@@ -1105,6 +1323,7 @@ export function createProcPlantVegetation(
       branchLod0: 0,
       branchLod1: 0,
       branchLod2: 0,
+      impostors: 0,
     };
     chunk.rev = terrainRev;
     chunk.builtLod = chunk.lod;
@@ -1115,11 +1334,9 @@ export function createProcPlantVegetation(
     chunk.needsColdRefinement = travelBuild;
     const seed = procPlantChunkSeed(options.worldId, chunk.cx, chunk.cz, 0);
     const rand = mulberry32(seed);
-    const plantCap = chunk.lod === 0
-      ? Math.max(1, Math.round(MAX_LOD0_PLANTS * densityMultiplier))
-      : chunk.lod === 1
-        ? Math.max(1, Math.round(MAX_LOD1_PLANTS * densityMultiplier))
-        : Math.max(1, Math.round(MAX_LOD2_PLANTS * densityMultiplier));
+    // Candidate count and density are invariant across LOD rings. A lower-detail chunk renders the
+    // same seeded plants with cheaper geometry instead of selecting a different forest population.
+    const plantCap = Math.max(1, Math.round(MAX_PLANTS_PER_CHUNK * densityMultiplier));
     const stemTemplates: Array<{ template: ProcPlantTemplate; matrix: THREE.Matrix4 }> = [];
     const organBuckets = new Map<string, OrganBucket>();
     const x0 = chunk.cx * chunkSize;
@@ -1286,7 +1503,7 @@ export function createProcPlantVegetation(
           slope: estimateSlope(x, z, height),
           terrainPaint: paint,
         });
-      const lodDensity = chunk.lod === 2 ? 0.65 : chunk.lod === 1 ? 0.52 : 0.48;
+      const lodDensity = PROC_TREE_PLACEMENT_DENSITY;
       const customMix = activeBiomeMixRegistry.mixesByEcologyBiome[ecology.biome] ??
         (paint ? activeBiomeMixRegistry.mixesByTerrainPaint[paint] : undefined);
       const authoredMix = customMix ? null : authoredDefaultMixForBiome(ecology.biome);
@@ -1302,8 +1519,17 @@ export function createProcPlantVegetation(
         if (!template) continue;
         const baseScale = customEntry.scale;
         const scale = baseScale * THREE.MathUtils.lerp(0.82, 1.22, rand());
+        const yaw = rand() * Math.PI * 2;
+        if (
+          !fullDetailLod &&
+          chunk.lod === 2 &&
+          addAssetStoreImpostor(chunk, customEntry, x, height + 0.02, z, yaw, scale)
+        ) {
+          chunk.stats.plants++;
+          continue;
+        }
         const matrix = new THREE.Matrix4()
-          .makeRotationY(rand() * Math.PI * 2)
+          .makeRotationY(yaw)
           .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
           .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02 - templateMinY(template) * scale, z));
         stemTemplates.push({ template, matrix });
@@ -1338,12 +1564,6 @@ export function createProcPlantVegetation(
         : patch!.seed ^ i;
       const distanceToPlayer = Math.hypot(x - (lastPlayerX ?? x), z - (lastPlayerZ ?? z));
       const detailDistance = viewMode() === "third" ? PROC_TREE_DETAIL_DISTANCE_THIRD : PROC_TREE_DETAIL_DISTANCE;
-      const useDetailedTree = distanceToPlayer <= detailDistance;
-      const treeScaleMultiplier = chunk.lod === 0
-        ? PROC_TREE_NEAR_SCALE
-        : chunk.lod === 1
-          ? PROC_TREE_MID_SCALE
-          : PROC_TREE_FAR_SCALE;
       const distanceDensity = groundPlantDistanceDensity(
         genome.habit,
         distanceToPlayer,
@@ -1416,23 +1636,33 @@ export function createProcPlantVegetation(
         if (placedTufts > 0) chunk.stats.plants++;
         continue;
       }
-      if (treeBackend?.kind === "lsystem") {
-        const scaleMultiplier = fullDetailLod ? PROC_TREE_NEAR_SCALE : useDetailedTree ? treeScaleMultiplier : PROC_TREE_FAR_SCALE;
-        const scale = baseScale * scaleMultiplier * THREE.MathUtils.lerp(0.9, 1.24, rand());
+      const branchTreeSpecies = treeBackend?.kind === "lsystem"
+        ? treeBackend.species
+        : genome.branchModules
+          ? genome.weberPenn?.species ?? genome.id
+          : null;
+      if (branchTreeSpecies) {
+        const yaw = rand() * Math.PI * 2;
+        const scale = baseScale * PROC_TREE_STABLE_SCALE * THREE.MathUtils.lerp(0.9, 1.24, rand());
         const treeMatrix = new THREE.Matrix4()
-          .makeRotationY(rand() * Math.PI * 2)
+          .makeRotationY(yaw)
           .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
           .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02, z));
-        if (travelBuild) {
-          const template = buildCheapTreeTemplate(treeBackend.species, genome.habit);
-          stemTemplates.push({ template, matrix: treeMatrix });
-          chunk.stats.plants++;
-          chunk.stats.stemTriangles += template.idx.length / 3;
-          chunk.needsColdRefinement = true;
-          continue;
-        }
-        const moduleTree = buildBranchModuleTreeCached(treeBackend.species, patch!.seed ^ i, {
-          ...foliageDefaultsForTreeSpecies(treeBackend.species),
+        const branchTreeOptions: BiomeTreeTemplateOptions = {
+          ...foliageDefaultsForTreeSpecies(branchTreeSpecies),
+          maxBranchDepth: genome.branchModules?.levels,
+          maxStems: genome.branchModules?.moduleBudget,
+          maxLeaves: genome.branchModules
+            ? Math.round(THREE.MathUtils.clamp(
+                (genome.branchModules.moduleBudget ?? 140) *
+                (genome.foliage?.mass ?? 0.74) *
+                (genome.foliage?.clusterDensity ?? 1.1) *
+                1.6,
+                24,
+                360,
+              ))
+            : undefined,
+          leafScaleMultiplier: genome.foliage?.size,
           palette: genome.branchModules?.palette,
           gnarliness: genome.branchModules?.gnarliness,
           droop: genome.branchModules?.droop,
@@ -1444,13 +1674,29 @@ export function createProcPlantVegetation(
           collisionBias: genome.branchModules?.collisionBias,
           junctionBlend: genome.branchModules?.junctionBlend,
           broadleafCrown: genome.tree?.crown === "propRoot" ? "spreading" : genome.tree?.crown,
-          ...treeBackend,
-        }, allowColdBuilds);
+          ...(treeBackend?.kind === "lsystem" ? treeBackend : {}),
+        };
+        const { key: branchTreeKey } = branchModuleTreeCacheKey(branchTreeSpecies, renderSeed, branchTreeOptions);
+        const moduleTree = buildBranchModuleTreeCached(
+          branchTreeSpecies,
+          renderSeed,
+          branchTreeOptions,
+          allowColdBuilds,
+        );
         if (!moduleTree) {
-          // Never run a cold Weber-Penn generation pass in a movement frame. Keep the landscape
-          // populated with a cheap cached silhouette and refine this chunk after the player settles.
-          const template = buildCheapTreeTemplate(treeBackend.species, genome.habit);
-          stemTemplates.push({ template, matrix: treeMatrix });
+          // A brand-new branch graph is still deferred during movement, but the emergency silhouette
+          // is normalized to the same one-unit tree height so it cannot tower over its replacement.
+          const template = buildCheapTreeTemplate(branchTreeSpecies, genome.habit);
+          const fallbackScale = scale / templateHeight(template);
+          const fallbackMatrix = new THREE.Matrix4()
+            .makeRotationY(yaw)
+            .premultiply(new THREE.Matrix4().makeScale(fallbackScale, fallbackScale, fallbackScale))
+            .premultiply(new THREE.Matrix4().makeTranslation(
+              x,
+              height + 0.02 - templateMinY(template) * fallbackScale,
+              z,
+            ));
+          stemTemplates.push({ template, matrix: fallbackMatrix });
           chunk.stats.plants++;
           chunk.stats.stemTriangles += template.idx.length / 3;
           chunk.needsColdRefinement = true;
@@ -1459,23 +1705,6 @@ export function createProcPlantVegetation(
         const distanceRatio = THREE.MathUtils.clamp(distanceToPlayer / detailDistance, 0, 1);
         const distanceLod: BranchModuleLodLevel = distanceRatio < 0.45 ? 0 : distanceRatio < 0.75 ? 1 : 2;
         const computeLod: BranchModuleLodLevel = currentFps < 32 ? 2 : currentFps < 48 ? 1 : 0;
-        const structuralTree = branchModuleLodView(
-          moduleTree,
-          Math.max(distanceLod, computeLod) as BranchModuleLodLevel,
-        );
-        chunk.stats.branchSegments += structuralTree.segments.length;
-        chunk.stats.attachedLeaves += structuralTree.leaves.length;
-        if (structuralTree.level === 0) chunk.stats.branchLod0++;
-        else if (structuralTree.level === 1) chunk.stats.branchLod1++;
-        else chunk.stats.branchLod2++;
-        for (const segment of structuralTree.segments) {
-          const template = branchSegmentPrototypeTemplate(segment.prototypeId);
-          stemTemplates.push({
-            template,
-            matrix: treeMatrix.clone().multiply(segment.matrix),
-          });
-          chunk.stats.stemTriangles += template.idx.length / 3;
-        }
         const useConiferSpray = branchModuleFoliageIsConiferSpray(genome);
         const foliageKind: "leaf" | "coniferSpray" = useConiferSpray ? "coniferSpray" : "leaf";
         const leafKey = geometryKeyFor(genome, {
@@ -1496,6 +1725,45 @@ export function createProcPlantVegetation(
         const treeLight = (hash01(renderSeed * 1.324717957) - 0.5) * 0.1;
         leafA.offsetHSL(treeHue, 0, treeLight);
         leafB.offsetHSL(treeHue * 0.7, 0, treeLight * 0.75);
+        if (!fullDetailLod && chunk.lod === 2) {
+          scheduleBranchTreeImpostorBake(
+            branchTreeKey,
+            chunk.key,
+            moduleTree,
+            leafBucket.geometry,
+            leafA.clone().lerp(leafB, 0.45),
+            genome.branchModules?.barkColor ?? 0x5b3d24,
+          );
+        }
+        const useImpostor =
+          !fullDetailLod &&
+          chunk.lod === 2 &&
+          distanceToPlayer >= detailDistance * PROC_TREE_IMPOSTOR_DISTANCE_FACTOR &&
+          addBranchTreeImpostor(chunk, branchTreeKey, x, height + 0.02, z, yaw, scale);
+        if (useImpostor) {
+          if (leafBucket.instances.length === 0) organBuckets.delete(leafKey);
+          chunk.stats.plants++;
+          continue;
+        }
+        // During travel, reuse a warm connected graph immediately. LOD only removes branches and their
+        // attached leaves; it never swaps the tree for an unrelated conifer/lollipop silhouette.
+        const structuralTree = branchModuleLodView(
+          moduleTree,
+          Math.max(chunk.lod, distanceLod, computeLod) as BranchModuleLodLevel,
+        );
+        chunk.stats.branchSegments += structuralTree.segments.length;
+        chunk.stats.attachedLeaves += structuralTree.leaves.length;
+        if (structuralTree.level === 0) chunk.stats.branchLod0++;
+        else if (structuralTree.level === 1) chunk.stats.branchLod1++;
+        else chunk.stats.branchLod2++;
+        for (const segment of structuralTree.segments) {
+          const template = branchSegmentPrototypeTemplate(segment.prototypeId);
+          stemTemplates.push({
+            template,
+            matrix: treeMatrix.clone().multiply(segment.matrix),
+          });
+          chunk.stats.stemTriangles += template.idx.length / 3;
+        }
         for (const leaf of structuralTree.leaves) {
           const leafTone = hash01(renderSeed ^ Math.imul(leaf.id + 1, 2654435761));
           const leafLight = (leafTone - 0.5) * 0.075;
@@ -1510,34 +1778,42 @@ export function createProcPlantVegetation(
         chunk.stats.plants++;
         continue;
       }
-      const useCheapDistantTree = shouldUseCheapDistantTree(genome.habit, useDetailedTree, baseScale);
-      if (useCheapDistantTree) {
-        const template = buildCheapTreeTemplate(genome.weberPenn?.species ?? genome.id, genome.habit);
-        const scale = baseScale * PROC_TREE_FAR_SCALE * THREE.MathUtils.lerp(0.9, 1.2, rand());
-        const matrix = new THREE.Matrix4()
-          .makeRotationY(rand() * Math.PI * 2)
-          .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
-          .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02 - templateMinY(template) * scale, z));
-        stemTemplates.push({ template, matrix });
-        chunk.stats.plants++;
-        chunk.stats.stemTriangles += template.idx.length / 3;
-        continue;
-      }
+      const treeHabit = genome.habit === "tree" || genome.habit === "conifer";
+      const scaleBase = treeHabit && baseScale >= 1.2
+        ? baseScale * PROC_TREE_STABLE_SCALE
+        : baseScale;
+      const scale = scaleBase * THREE.MathUtils.lerp(0.82, 1.22, rand());
+      const yaw = rand() * Math.PI * 2;
       const built = buildProcPlantInstancedPartsCached(genome, renderSeed, environment, allowColdBuilds);
       if (!built) {
         chunk.needsColdRefinement = true;
+        if (shouldUseCheapDistantTree(genome.habit, false, baseScale)) {
+          const template = buildCheapTreeTemplate(genome.weberPenn?.species ?? genome.id, genome.habit);
+          const fallbackScale = scale / templateHeight(template);
+          const matrix = new THREE.Matrix4()
+            .makeRotationY(yaw)
+            .premultiply(new THREE.Matrix4().makeScale(fallbackScale, fallbackScale, fallbackScale))
+            .premultiply(new THREE.Matrix4().makeTranslation(
+              x,
+              height + 0.02 - templateMinY(template) * fallbackScale,
+              z,
+            ));
+          stemTemplates.push({ template, matrix });
+          chunk.stats.plants++;
+          chunk.stats.stemTriangles += template.idx.length / 3;
+        }
         continue;
       }
-      const scaleBase = baseScale >= 1.2 ? baseScale * treeScaleMultiplier : baseScale;
-      const scale = scaleBase * THREE.MathUtils.lerp(0.82, 1.22, rand());
       const matrix = new THREE.Matrix4()
-        .makeRotationY(rand() * Math.PI * 2)
+        .makeRotationY(yaw)
         .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
         .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02 - templateMinY(built.stems) * scale, z));
       stemTemplates.push({ template: built.stems, matrix });
       chunk.stats.plants++;
       chunk.stats.stemTriangles += built.stats.stemTriangles;
-      for (const instance of built.instances) {
+      const organStride = treeHabit ? (chunk.lod === 2 ? 4 : chunk.lod === 1 ? 2 : 1) : 1;
+      for (let instanceIndex = 0; instanceIndex < built.instances.length; instanceIndex += organStride) {
+        const instance = built.instances[instanceIndex]!;
         const key = geometryKeyFor(genome, instance);
         let bucket = organBuckets.get(key);
         if (!bucket) {
@@ -1653,6 +1929,12 @@ export function createProcPlantVegetation(
     const updateStartedAt = performance.now();
     builtLastUpdate = 0;
     currentFps = fps;
+    const camera = options.camera?.();
+    if (camera) {
+      for (const chunk of active.values()) {
+        for (const impostor of chunk.impostors) impostor.update(camera);
+      }
+    }
     buildDeferred = options.shouldDeferBuild?.() ?? false;
     if (
       lastPlayerX === null ||
@@ -1713,6 +1995,7 @@ export function createProcPlantVegetation(
             needsColdRefinement: false,
             lastNeededMs: nowMs,
             group: new THREE.Group(),
+            impostors: [],
             stats: {
               plants: 0,
               instances: 0,
@@ -1725,6 +2008,7 @@ export function createProcPlantVegetation(
               branchLod0: 0,
               branchLod1: 0,
               branchLod2: 0,
+              impostors: 0,
             },
           };
           chunksCreated++;
@@ -1847,6 +2131,7 @@ export function createProcPlantVegetation(
       out.branchLod0 += chunk.stats.branchLod0;
       out.branchLod1 += chunk.stats.branchLod1;
       out.branchLod2 += chunk.stats.branchLod2;
+      out.impostors += chunk.stats.impostors;
       if (chunk.builtLod !== null && chunk.builtLod !== chunk.lod) out.deferredLodChunks++;
       if (chunk.needsColdRefinement) out.deferredColdChunks++;
       const renderedLod = chunk.builtLod ?? chunk.lod;
@@ -1947,6 +2232,10 @@ export function createProcPlantVegetation(
       active.clear();
       root.clear();
       options.scene.remove(root);
+      for (const handle of branchTreeImpostorHandles.values()) handle.dispose();
+      branchTreeImpostorHandles.clear();
+      branchTreeImpostorFailures.clear();
+      branchTreeImpostorConsumers.clear();
       for (const geometry of stemGeometryCache.values()) geometry.dispose();
       for (const geometry of organGeometryCache.values()) geometry.dispose();
       stemGeometryCache.clear();

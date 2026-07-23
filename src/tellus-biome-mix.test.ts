@@ -69,6 +69,7 @@ describe("Tellus biome mix normalization", () => {
         colors: [1, 1, 1, 1, 1, 1, 1, 1, 1],
         indices: [0, 1, 2],
       };
+      entry.asset.impostor = { assetId: "asset-1" } as typeof entry.asset.impostor;
     }
 
     expect(biomeMixRenderSignature(refreshed)).toBe(biomeMixRenderSignature(base));

@@ -15,6 +15,7 @@ import {
   type ProcPlantGenome,
 } from "./tellus-procplants";
 import type { TerrainPaintKind } from "./tellus-types";
+import type { AssetStoreImpostorTemplate } from "./tellus-asset-impostor";
 import { getSession } from "./tellus-auth";
 import { runtimeConfig, worldApiUrl } from "./tellus-runtime-config";
 import { tellusUserId } from "./tellus-urls-identity";
@@ -57,6 +58,8 @@ export interface TellusBiomeMixEntry {
     color?: number;
     runtimeOnly?: boolean;
     template?: TellusBiomeAssetTemplate;
+    /** Runtime-only Asset Store atlas. Never serialized with a biome mix. */
+    impostor?: AssetStoreImpostorTemplate;
   };
   weight: number;
   density: number;
@@ -118,7 +121,7 @@ export interface PersistedTellusBiomeMixRegistryV2 {
  */
 export const biomeMixRenderSignature = (registry: TellusBiomeMixRegistry): string =>
   JSON.stringify(registry, (key, value) =>
-    key === "updatedAt" || key === "template" ? undefined : value
+    key === "updatedAt" || key === "template" || key === "impostor" ? undefined : value
   );
 
 export interface ProcPlantLabExport {
@@ -538,7 +541,7 @@ export const compactBiomeMixDefinitionForPersistence = (
   const entries = normalized.entries
     .filter((entry) => !isAssetMixEntry(entry) || entry.asset.runtimeOnly !== true)
     .map((entry) => isAssetMixEntry(entry)
-      ? { ...entry, asset: { ...entry.asset, template: undefined, runtimeOnly: false } }
+      ? { ...entry, asset: { ...entry.asset, template: undefined, impostor: undefined, runtimeOnly: false } }
       : entry);
   return entries.length > 0 ? { ...normalized, entries } : null;
 };
