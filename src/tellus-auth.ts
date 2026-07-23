@@ -4,8 +4,8 @@
 // Wire contract: hyades docs/TELLUS_USERS_PAYMENTS.md. The session is an HMAC bearer token
 // ("tlu1.<accountId>.<tokenVersion>.<exp-unix>.<sig>") persisted in localStorage and sent as
 // X-Tellus-Session on every Hyades API call (installSessionFetch patches window.fetch so all
-// existing call sites pick it up). The /live WebSocket cannot carry headers — it keeps the soft
-// ?userId= identity, which tellusUserId() switches to the accountId while logged in.
+// existing call sites pick it up). The /live WebSocket cannot carry headers, so an authenticated
+// HTTP call exchanges the session for a short-lived one-time ticket backed by Hyades' ceremony grain.
 
 import { runtimeConfig, runtimeConfigReady } from "./tellus-runtime-config";
 
@@ -338,6 +338,24 @@ export async function authStatus(): Promise<TellusAuthStatus> {
     clearSession();
   }
   return status;
+}
+
+/**
+ * Exchange the header-authenticated account session for a one-time, short-lived WebSocket ticket.
+ * Browser WebSocket handshakes cannot set X-Tellus-Session, so the ticket lets Hyades recover the
+ * verified account without exposing the bearer token in the socket URL.
+ */
+export async function issueTellusLiveTicket(visitorId: string, signal?: AbortSignal): Promise<string | null> {
+  const normalizedVisitorId = visitorId.trim();
+  if (!sessionToken() || !normalizedVisitorId) return null;
+  const response = await apiJson<{ ticket?: unknown }>(() => authUrl("live-ticket"), {
+    method: "POST",
+    body: JSON.stringify({ visitorId: normalizedVisitorId }),
+    signal,
+  });
+  return typeof response.ticket === "string" && response.ticket.trim()
+    ? response.ticket.trim()
+    : null;
 }
 
 export async function logout(all = false): Promise<void> {

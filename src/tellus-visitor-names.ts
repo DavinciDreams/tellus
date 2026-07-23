@@ -23,9 +23,11 @@ export const friendlyVisitorName = (
   selfVisitorId?: string,
 ): string => {
   const name = explicitName?.trim();
-  if (name) return name;
   if (visitorId === "local-player") return "You";
   if (selfVisitorId && visitorId === selfVisitorId && !visitorId.startsWith("agent:")) return "You";
+  // "You" is local UI language, not a portable sender name. Older chat rows and anonymous sockets may
+  // have put it on the wire; never let a remote visitor inherit it in this viewer.
+  if (name && name.toLowerCase() !== "you") return name;
   if (visitorId === "world") return "World";
   if (visitorId.startsWith("agent:")) return friendlyAgentNameFromId(visitorId);
   return `Player ${visitorId.slice(0, 6) || "nearby"}`;

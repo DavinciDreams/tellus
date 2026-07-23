@@ -11,6 +11,8 @@ describe("visitor name helpers", () => {
   it("prefers explicit names and labels the local visitor as You", () => {
     expect(friendlyVisitorName("visitor-1", " Mira ")).toBe("Mira");
     expect(friendlyVisitorName("visitor-self", undefined, "visitor-self")).toBe("You");
+    expect(friendlyVisitorName("visitor-self", "Lisa", "visitor-self")).toBe("You");
+    expect(friendlyVisitorName("visitor-remote", "You", "visitor-self")).toBe("Player visito");
   });
 
   it("builds friendly agent and anonymous player names", () => {
