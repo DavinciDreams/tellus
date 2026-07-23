@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { makeProcPlantModelUrl, parseProceduralModelUrl } from "./tellus-procedural-assets";
 import {
   buildProcPlantInstancedParts,
+  buildProcPlantGraph,
   buildProcPlantTemplate,
   buildProcPlantRuntimePackage,
   branchModuleSpreadForGenome,
@@ -34,6 +35,7 @@ import {
 } from "./tellus-ecology";
 import {
   buildCheapTreeTemplate,
+  branchModuleLodForTree,
   createProcPlantVegetation,
   groundPlantDistanceDensity,
   procPlantBranchRadialSegments,
@@ -72,6 +74,40 @@ describe("procplant vegetation", () => {
     const treePresets = Object.values(procPlantPresets).filter((genome) => genome.weberPenn);
     expect(treePresets.length).toBeGreaterThan(0);
     expect(treePresets.every((genome) => (genome.weberPenn?.radialSegments ?? 6) >= 6)).toBe(true);
+  });
+
+  it("protects nearby branch-module crowns from chunk and low-FPS LOD pressure", () => {
+    const detailDistance = 72;
+
+    // Near trees can simplify their connected crown once, but cannot collapse to sparse LOD2.
+    expect(branchModuleLodForTree(2, 12, detailDistance, 20)).toBe(1);
+    expect(branchModuleLodForTree(2, 30, detailDistance, 20)).toBe(1);
+    expect(branchModuleLodForTree(0, 12, detailDistance, 60)).toBe(0);
+    // Far trees still respond to the existing chunk, distance, and low-FPS pressure.
+    expect(branchModuleLodForTree(0, 52, detailDistance, 20)).toBe(2);
+    expect(branchModuleLodForTree(1, 52, detailDistance, 60)).toBe(1);
+  });
+
+  it("keeps conifer foliage as authored-size sprays inside the upper crown", () => {
+    const base = procPlantPresets.alpineFir;
+    const fullSize = buildProcPlantGraph({
+      ...base,
+      foliage: { ...base.foliage!, mass: 1, tipBias: 0.9, size: 1 },
+    }, 73);
+    const authoredSize = buildProcPlantGraph({
+      ...base,
+      foliage: { ...base.foliage!, mass: 1, tipBias: 0.9, size: 0.25 },
+    }, 73);
+    const fullSprays = fullSize.organs.filter((organ) => organ.kind === "coniferSpray");
+    const authoredSprays = authoredSize.organs.filter((organ) => organ.kind === "coniferSpray");
+
+    expect(authoredSprays.length).toBeGreaterThan(8);
+    expect(authoredSprays.length).toBe(fullSprays.length);
+    expect(authoredSize.organs.some((organ) => organ.kind === "leaf")).toBe(false);
+    expect(Math.min(...authoredSprays.map((organ) => organ.t))).toBeGreaterThanOrEqual(0.26);
+    for (let index = 0; index < authoredSprays.length; index++) {
+      expect(authoredSprays[index]!.scale).toBeCloseTo(fullSprays[index]!.scale * 0.25, 6);
+    }
   });
 
   it("uses global mix colors as flat overrides for black asset LOD materials", () => {
@@ -114,7 +150,7 @@ describe("procplant vegetation", () => {
     expect(conifer.pos.length).not.toBe(broadleaf.pos.length);
   });
 
-  it("renders foliage for both authored alpine conifer backends", () => {
+  it("uses the dense authored conifer throughout the alpine mix", () => {
     const scene = new THREE.Scene();
     const alpineEcology = resolveEcologySample({
       seed: 1,
@@ -134,8 +170,7 @@ describe("procplant vegetation", () => {
       densityMultiplier: 4,
     });
 
-    // The alpine mix combines the remaining branch-module mutation with the imported procplant-graph
-    // conifer. Hold a fixed position and advance past travel mode so both foliage paths are built.
+    // Hold a fixed position and advance past travel mode so the authored replacement graph is built.
     for (let i = 0; i < 40; i++) {
       vegetation.update(0, 0, 1, 60, 1000 + i * 900);
     }
@@ -157,12 +192,12 @@ describe("procplant vegetation", () => {
       return count === createProcPlantLeafGeometry("fan", 1, 0, 0).getAttribute("position").count;
     });
 
-    // The branch-module mutation retains its authored ordinary leaf cards, while the replacement graph
-    // conifer supplies its denser conifer-spray organs instead of the removed sparse module foliage.
+    // Every alpine tree slot now uses the dense hybrid graph. Its conifer habit renders authored-size
+    // sprays rather than broad folded fan cards; zero branch LOD trees proves the sparse mutation is gone.
     expect(hasSprayMesh).toBe(true);
-    expect(hasProcplantLeafCard).toBe(true);
+    expect(hasProcplantLeafCard).toBe(false);
     expect(vegetation.stats().branchLod0 + vegetation.stats().branchLod1 + vegetation.stats().branchLod2)
-      .toBeGreaterThan(0);
+      .toBe(0);
 
     vegetation.dispose();
   });

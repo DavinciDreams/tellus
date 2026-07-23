@@ -171,7 +171,7 @@ describe("Tellus biome mix normalization", () => {
       ["savanna", "meadow", 1.8, ["preset", "preset", "mutation", "preset"]],
       ["estuary", "flowers", 1.8, ["mutation", "mutation", "mutation", "mutation", "mutation"]],
       ["tundra", "gravel", 0.72, ["mutation"]],
-      ["arctic-alpine", "snow", 0.1, ["mutation", "mutation"]],
+      ["arctic-alpine", "snow", 0.1, ["mutation"]],
     ] as const;
 
     for (const [biome, paint, density, sources] of expectations) {
