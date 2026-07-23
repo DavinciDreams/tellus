@@ -4,7 +4,7 @@ import {
   MIN_DAY_NIGHT_CYCLE_MS,
 } from "./tellus-constants";
 import { runtimeConfig } from "./tellus-runtime-config";
-import type { DayNightMode, LightingMood, WorldTemplateId } from "./tellus-types";
+import type { DayNightMode, LightingMood, WaterSettings, WorldTemplateId } from "./tellus-types";
 import { boundedNumber } from "./tellus-utils";
 
 export type WorldTemplateOption = {
@@ -46,6 +46,7 @@ export type WorldCreationTemplate = WorldTemplateOption & {
   defaultLightingMood: LightingMood;
   defaultDayNightMode: DayNightMode;
   defaultChunkSize: number;
+  defaultWaterSettings?: WaterSettings;
   previewUrl?: string;
 };
 
@@ -58,6 +59,7 @@ export const ALL_WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
     defaultLightingMood: "natural",
     defaultDayNightMode: "cycle",
     defaultChunkSize: 64,
+    defaultWaterSettings: { style: "lagoon", opacity: 0.72, waveStrength: 1 },
   },
   {
     id: "lowlands",
@@ -274,6 +276,7 @@ export const ALL_WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
     defaultLightingMood: "cool-dream",
     defaultDayNightMode: "night",
     defaultChunkSize: 24,
+    defaultWaterSettings: { style: "lagoon", opacity: 0.68, waveStrength: 0.8 },
   },
 ];
 
@@ -295,6 +298,10 @@ export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] =
 
 export const ADVANCED_WORLD_TEMPLATE_OPTIONS: WorldCreationTemplate[] =
   ALL_WORLD_CREATION_TEMPLATES.filter((option) => !CURATED_TEMPLATE_IDS.has(option.id));
+
+export function defaultChunkSizeForWorldTemplate(template: WorldTemplateId): number {
+  return ALL_WORLD_CREATION_TEMPLATES.find((option) => option.id === template)?.defaultChunkSize ?? 8;
+}
 
 export function fallbackWorldDisplayName(worldId: string): string {
   const trimmed = worldId.trim();

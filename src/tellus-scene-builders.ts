@@ -59,6 +59,10 @@ import { proxiedGeneratedModelUrl } from "./tellus-urls-identity";
 import { tryLoadVrmObject, VrmObjectRig } from "./tellus-vrm-avatar";
 import { createTerrainMaterial, terrainKindCode } from "./tellus-terrain-material";
 import { worldThingTargetHeight } from "./tellus-world-object-profile";
+import {
+  createPondRippleSimulation,
+  type PondRippleSimulation,
+} from "./tellus-pond-simulation";
 
 const ASSET_BACKED_PROCPLANT_OPAQUE_MODEL_IDS = new Set([
   "3e610d94-51a5-4257-9899-34f5c8eaa0bb",
@@ -229,6 +233,7 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
       uTintColor: { value: new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.38) },
       uOpacity: { value: water.opacity },
       uWaveStrength: { value: water.waveStrength },
+      uPondCalm: { value: 0 },
       uIslandRadius: { value: WORLD_RADIUS },
       uShoreCenter: { value: new THREE.Vector2(0, 0) },
     },
@@ -253,6 +258,7 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
       uniform vec3 uTintColor;
       uniform float uOpacity;
       uniform float uWaveStrength;
+      uniform float uPondCalm;
       uniform float uIslandRadius;
       uniform vec2 uShoreCenter;
       varying vec2 vWorldXZ;
@@ -321,18 +327,24 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
         float shoreFoam = shoreBand * max(shoreLine, shoreLine2 * 0.55) * mix(0.68, 1.0, shoreNoise);
         vec3 lagoonBase = mix(uDeepColor, uShallowColor, 0.56);
         vec3 rippleTint = mix(lagoonBase, uFoamColor, 0.42);
-        vec3 water = mix(lagoonBase, rippleTint, clamp(0.24 + surface * 0.58 + glint * 0.14, 0.0, 1.0));
-        float foam = smoothstep(0.62, 1.0, surface) * (0.1 * wave);
+        float surfaceMix = mix(
+          0.24 + surface * 0.58 + glint * 0.14,
+          0.06 + surface * 0.18 + glint * 0.04,
+          uPondCalm
+        );
+        vec3 water = mix(lagoonBase, rippleTint, clamp(surfaceMix, 0.0, 1.0));
+        float foam = smoothstep(0.62, 1.0, surface) * mix(0.1, 0.025, uPondCalm) * wave;
         water = mix(water, uFoamColor, clamp(foam + shoreFoam * 0.95, 0.0, 0.92));
         water = mix(water, vec3(1.0, 1.0, 1.0), clamp(shoreFoam * 0.62, 0.0, 0.72));
         vec3 reflection = mix(vec3(0.48, 0.78, 1.0), uFoamColor, glint * 0.62);
-        water = mix(water, reflection, clamp(fresnel * 0.32 + glint * 0.16, 0.0, 0.48));
+        float reflectionMix = fresnel * mix(0.32, 0.11, uPondCalm) + glint * mix(0.16, 0.035, uPondCalm);
+        water = mix(water, reflection, clamp(reflectionMix, 0.0, mix(0.48, 0.18, uPondCalm)));
         water = mix(water, uTintColor, 0.025);
         water = mix(water, uShallowColor, 0.14);
         float horizonHaze = smoothstep(uIslandRadius * 1.25, uIslandRadius * 2.65, islandDistance);
         water = mix(water, mix(uDeepColor, uShallowColor, 0.42), horizonHaze * 0.32);
         float alpha = clamp(
-          uOpacity * (0.28 + surface * 0.08) +
+          uOpacity * (0.28 + surface * mix(0.08, 0.025, uPondCalm)) +
             fresnel * 0.12 +
             glint * 0.03 +
             shoreFoam * 0.28 +
@@ -894,6 +906,8 @@ export function disposeObject(object: THREE.Object3D): void {
   // Legacy generated objects may still carry disposal hooks; honor them before walking buffers.
   const disposeMirror = object.userData?.disposeMirror as (() => void) | undefined;
   if (disposeMirror) disposeMirror();
+  const disposePondSimulation = object.userData?.disposePondSimulation as (() => void) | undefined;
+  if (disposePondSimulation) disposePondSimulation();
   const hasSharedBuffers = Boolean(object.userData?.sharedGltf || object.userData?.sharedProcedural);
   object.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
@@ -1315,6 +1329,7 @@ export function createPondWater(options: {
   radius?: number;
   waterLevel?: number;
   animated?: boolean;
+  simulated?: boolean;
   waterSettings?: Partial<WaterSettings>;
 } = {}): THREE.Group {
   const group = new THREE.Group();
@@ -1326,19 +1341,42 @@ export function createPondWater(options: {
   const waterLevel = options.waterLevel ?? pondWaterLevel();
   const waterSettings = resolvedWaterSettings(options.waterSettings);
   const palette = WATER_STYLE_COLORS[waterSettings.style];
+  const pondColor = new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.62);
+  // Keep the fixed-size GPU simulation inexpensive, but map it across the full
+  // semantic pond so outgoing rings can dissipate at the shoreline.
+  const simulationRadius = options.simulated ? Math.min(radius, 36) : radius;
+  const simulation = options.simulated
+    ? createPondRippleSimulation({
+        center,
+        radius: simulationRadius,
+        waterSettings,
+        deepColor: palette.deep,
+        shallowColor: palette.shallow,
+        foamColor: palette.foam,
+      })
+    : null;
   const water = new THREE.Mesh(
-    new THREE.CircleGeometry(radius, 96),
-    options.animated
-      ? createBackdropWaterMaterial(waterSettings)
-      : new THREE.MeshBasicMaterial({
-          color: new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.55),
-          transparent: true,
-          opacity: Math.min(0.86, waterSettings.opacity * 0.78),
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        }),
+    simulation
+      ? new THREE.PlaneGeometry(simulationRadius * 2, simulationRadius * 2, 96, 96)
+      : new THREE.CircleGeometry(radius, 96),
+    simulation?.material ??
+      new THREE.MeshPhysicalMaterial({
+        color: pondColor,
+        roughness: 0.16,
+        metalness: 0.02,
+        clearcoat: 0.82,
+        clearcoatRoughness: 0.12,
+        transparent: true,
+        opacity: Math.min(0.84, waterSettings.opacity * 0.76),
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
   );
   water.name = "tellus-pond-surface";
+  water.userData = {
+    pondStillWater: !simulation,
+    pondSimulatedWater: Boolean(simulation),
+  };
   water.rotation.x = -Math.PI / 2;
   water.position.set(center.x, waterLevel, center.z);
   water.renderOrder = 2;
@@ -1346,28 +1384,35 @@ export function createPondWater(options: {
   const rippleMaterial = new THREE.MeshBasicMaterial({
     color: palette.foam,
     transparent: true,
-    opacity: 0.18 + waterSettings.waveStrength * 0.18,
+    opacity: 0,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
-  const rippleGeometry = new THREE.RingGeometry(0.88, 0.93, 96);
+  const rippleGeometry = new THREE.RingGeometry(0.82, 1, 64);
   const ripples = new THREE.Group();
   ripples.name = "tellus-pond-ripples";
   ripples.position.set(center.x, waterLevel + 0.035, center.z);
-  ripples.rotation.x = -Math.PI / 2;
+  ripples.userData = { center: { ...center }, radius };
 
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 7; i++) {
     const ripple = new THREE.Mesh(rippleGeometry, rippleMaterial.clone());
-    const scale = radius * (0.28 + i * 0.18);
-    ripple.scale.setScalar(scale);
-    ripple.userData = { rippleIndex: i };
+    ripple.rotation.x = -Math.PI / 2;
+    ripple.visible = false;
+    ripple.renderOrder = 3;
+    ripple.userData = {
+      rippleIndex: i,
+      active: false,
+      startedAt: Number.NEGATIVE_INFINITY,
+      durationMs: 1400,
+      strength: 0,
+    };
     ripples.add(ripple);
   }
 
   const shore = new THREE.Mesh(
     new THREE.RingGeometry(radius * 0.96, radius * 1.08, 128),
     new THREE.MeshStandardMaterial({
-      color: 0x7b6b48,
+      color: simulation ? 0x312d2a : 0x7b6b48,
       roughness: 0.95,
       metalness: 0,
     }),
@@ -1376,8 +1421,104 @@ export function createPondWater(options: {
   shore.rotation.x = -Math.PI / 2;
   shore.position.set(center.x, waterLevel - 0.035, center.z);
 
+  if (simulation) {
+    group.userData.pondRippleSimulation = simulation;
+    group.userData.disposePondSimulation = () => simulation.dispose();
+    ripples.visible = false;
+    shore.visible = false;
+  }
+
   group.add(shore, water, ripples);
   return group;
+}
+
+export function triggerPondRipple(
+  pondWater: THREE.Group,
+  position: { x: number; z: number },
+  nowMs: number,
+  strength = 1,
+): boolean {
+  if (!pondWater.visible) return false;
+  const simulation = pondWater.userData.pondRippleSimulation as PondRippleSimulation | undefined;
+  if (simulation) {
+    if (simulation.recenter(position)) {
+      const surface = pondWater.getObjectByName("tellus-pond-surface");
+      if (surface) {
+        surface.position.x = simulation.center.x;
+        surface.position.z = simulation.center.z;
+      }
+    }
+    return simulation.queueDrop(position, nowMs, strength);
+  }
+  const ripples = pondWater.getObjectByName("tellus-pond-ripples");
+  const center = ripples?.userData.center as { x: number; z: number } | undefined;
+  const radius = Number(ripples?.userData.radius);
+  if (!ripples || !center || !Number.isFinite(radius) || radius <= 0) return false;
+  if (Math.hypot(position.x - center.x, position.z - center.z) > radius) return false;
+
+  const pool = ripples.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+  if (pool.length === 0) return false;
+  const ripple = pool.find((child) => child.userData.active !== true) ??
+    pool.reduce((oldest, child) =>
+      Number(child.userData.startedAt) < Number(oldest.userData.startedAt) ? child : oldest,
+    );
+  const normalizedStrength = clamp(strength, 0.25, 1.5);
+  ripple.position.set(position.x - center.x, 0, position.z - center.z);
+  ripple.scale.setScalar(0.12 + normalizedStrength * 0.08);
+  ripple.visible = true;
+  ripple.userData.active = true;
+  ripple.userData.startedAt = nowMs;
+  ripple.userData.durationMs = 1150 + normalizedStrength * 350;
+  ripple.userData.strength = normalizedStrength;
+  if (ripple.material instanceof THREE.MeshBasicMaterial) {
+    ripple.material.opacity = 0.34 * normalizedStrength;
+  }
+  return true;
+}
+
+export function positionPondRipplePatch(
+  pondWater: THREE.Group,
+  position: { x: number; z: number },
+  waterLevel: number,
+): boolean {
+  const simulation = pondWater.userData.pondRippleSimulation as PondRippleSimulation | undefined;
+  if (!simulation) return false;
+  simulation.recenter(position);
+  const surface = pondWater.getObjectByName("tellus-pond-surface");
+  if (!surface) return false;
+  surface.position.set(simulation.center.x, waterLevel, simulation.center.z);
+  return true;
+}
+
+export function updatePondRipples(
+  pondWater: THREE.Group,
+  nowMs: number,
+  renderer?: THREE.WebGLRenderer | null,
+): void {
+  const simulation = pondWater.userData.pondRippleSimulation as PondRippleSimulation | undefined;
+  if (simulation && renderer) simulation.update(renderer, nowMs);
+  const ripples = pondWater.getObjectByName("tellus-pond-ripples");
+  const radius = Number(ripples?.userData.radius);
+  if (!ripples || !Number.isFinite(radius) || radius <= 0) return;
+  for (const child of ripples.children) {
+    if (!(child instanceof THREE.Mesh) || child.userData.active !== true) continue;
+    const startedAt = Number(child.userData.startedAt);
+    const durationMs = Math.max(1, Number(child.userData.durationMs) || 1400);
+    const strength = clamp(Number(child.userData.strength) || 1, 0.25, 1.5);
+    const phase = clamp((nowMs - startedAt) / durationMs, 0, 1);
+    if (phase >= 1) {
+      child.visible = false;
+      child.userData.active = false;
+      if (child.material instanceof THREE.MeshBasicMaterial) child.material.opacity = 0;
+      continue;
+    }
+    const eased = 1 - (1 - phase) ** 2;
+    const maxScale = Math.min(radius * 0.52, 2.4 + strength * 1.35);
+    child.scale.setScalar(THREE.MathUtils.lerp(0.12 + strength * 0.08, maxScale, eased));
+    if (child.material instanceof THREE.MeshBasicMaterial) {
+      child.material.opacity = 0.34 * strength * (1 - phase) ** 1.7;
+    }
+  }
 }
 
 export function inferGeneratedKind(

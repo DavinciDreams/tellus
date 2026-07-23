@@ -16,6 +16,7 @@ import {
   CHUNK_SEGMENTS,
   CHUNK_SPAN,
   CHUNK_VERTEX_COUNT,
+  SEA_LEVEL,
   setChunkedWorldChunks,
 } from "./tellus-constants";
 import { runtimeConfig } from "./tellus-runtime-config";
@@ -76,6 +77,19 @@ describe("createChunkTerrainGeometry", () => {
     const geometry = createChunkTerrainGeometry(makeChunk(), 16);
     expect(geometry.getAttribute("position").count).toBe(terrainVertexCount(16));
     expect(geometry.getIndex()?.count).toBe(terrainIndexCount(16));
+  });
+
+  it("does not build a vertical skirt around a submerged beach shelf", () => {
+    const sculptOffsets = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(SEA_LEVEL - 1);
+    const paint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(terrainPaintCode("beach"));
+    const geometry = createChunkTerrainGeometry(
+      makeChunk({ sculptOffsets, paint, heightMode: "absolute" }),
+      16,
+    );
+
+    expect(geometry.getAttribute("position").count).toBe((16 + 1) ** 2);
+    expect(geometry.getIndex()?.count).toBe(16 * 16 * 6);
+    geometry.dispose();
   });
 
   it("spans local x/z in [0, CHUNK_SPAN] regardless of chunk world coords", () => {
