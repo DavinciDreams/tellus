@@ -20,6 +20,17 @@ export interface AgentMoveTarget {
   reached?: boolean;
 }
 
+export interface AgentMoveBlock {
+  x: number;
+  z: number;
+  kind: string;
+  reason: string;
+}
+
+export interface BlockableAgentMoveTarget extends AgentMoveTarget {
+  blocked?: AgentMoveBlock;
+}
+
 const finite = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
@@ -176,5 +187,30 @@ export function resolveAgentMoveTarget(
       current.x + Math.max(-maxStep, Math.min(maxStep, delta.dx)),
       current.z + Math.max(-maxStep, Math.min(maxStep, delta.dz)),
     ),
+  };
+}
+
+export function resolveBlockableAgentMoveTarget(
+  args: Record<string, unknown>,
+  current: Vec3,
+  maxStep: number,
+  ground: (x: number, z: number) => Vec3,
+  blockedAt: (x: number, z: number) => AgentMoveBlock | null,
+): BlockableAgentMoveTarget {
+  let blocked: AgentMoveBlock | undefined;
+  const moved = resolveAgentMoveTarget(args, current, maxStep, (x, z) => {
+    blocked = blockedAt(x, z) ?? undefined;
+    return blocked ? { ...current } : ground(x, z);
+  });
+  if (!blocked) return moved;
+
+  return {
+    ...moved,
+    position: { ...current },
+    distanceRemaining: moved.target
+      ? rounded(Math.hypot(moved.target.x - current.x, moved.target.z - current.z))
+      : moved.distanceRemaining,
+    reached: false,
+    blocked,
   };
 }
