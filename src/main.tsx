@@ -216,14 +216,17 @@ import {
   LIGHTING_MOOD_PROFILES,
   SKYBOX_OPTIONS,
   ADVANCED_WORLD_TEMPLATE_OPTIONS,
+  ALL_WORLD_CREATION_TEMPLATES,
   WORLD_CREATION_TEMPLATES,
   WORLD_TEMPLATE_OPTIONS,
+  fallbackWorldDisplayName,
   liveDayNightPhase,
   normalizeDayNightCycleMs,
   normalizeSkyboxUrl,
   parseDayNightMode,
   parseLightingMood,
   skyboxLabel,
+  worldPickerLabel,
   worldTemplateLabel,
 } from "./tellus-world-options";
 import { AssetTile, AvatarTile } from "./tellus-picker-tiles";
@@ -13508,7 +13511,7 @@ function App(): React.ReactElement {
 
   const isFrontendVisibleWorld = (worldId: string, profile?: WorldRenderProfile): boolean => {
     const key = canonicalWorldId(worldId);
-    if (isMainWorld(key)) return true;
+    if (isMainWorld(key) || isAdmin) return true;
     return canEditWorldFromProfile(profile ?? loadLocalWorldProfiles()[key]);
   };
 
@@ -13584,19 +13587,11 @@ function App(): React.ReactElement {
     };
   };
 
-  const fallbackWorldDisplayName = (worldId: string): string => {
-    const chunkedMatch = /^chunked-\d+-(.+)$/i.exec(worldId.trim());
-    if (chunkedMatch?.[1]) return chunkedMatch[1];
-    return worldId;
-  };
-
   const worldDisplayName = (worldId: string): string =>
     loadLocalWorldProfiles()[worldId]?.displayName?.trim() || fallbackWorldDisplayName(worldId);
 
-  const worldOptionLabel = (worldId: string): string => {
-    const label = worldDisplayName(worldId);
-    return label === worldId ? label : `${label} (${worldId})`;
-  };
+  const worldOptionLabel = (worldId: string): string =>
+    worldPickerLabel(worldId, loadLocalWorldProfiles()[worldId]?.displayName);
 
   const worldDestinationDetails = (worldId: string) => {
     const profile = loadLocalWorldProfiles()[canonicalWorldId(worldId)] ?? {};
@@ -13634,12 +13629,12 @@ function App(): React.ReactElement {
   const templatePreviewUrl = (template: WorldTemplateId): string | undefined =>
     evoflowTerrainSourceFor(template)?.previewUrl;
 
-  const selectedCreationTemplate = (): (typeof WORLD_CREATION_TEMPLATES)[number] | undefined =>
-    WORLD_CREATION_TEMPLATES.find((template) => template.id === newWorldTemplate);
+  const selectedCreationTemplate = (): (typeof ALL_WORLD_CREATION_TEMPLATES)[number] | undefined =>
+    ALL_WORLD_CREATION_TEMPLATES.find((template) => template.id === newWorldTemplate);
 
   const applyNewWorldTemplate = (template: WorldTemplateId) => {
     const next = parseWorldTemplateId(template, defaultWorldTemplateRef.current);
-    const preset = WORLD_CREATION_TEMPLATES.find((option) => option.id === next);
+    const preset = ALL_WORLD_CREATION_TEMPLATES.find((option) => option.id === next);
     setNewWorldTemplate(next);
     setNewWorldSkyboxUrl(
       normalizeSkyboxUrl(preset?.defaultSkyboxUrl || defaultSkyboxUrlForTemplate(next)),
@@ -13955,7 +13950,7 @@ function App(): React.ReactElement {
     try {
       const res = await fetch(
         `${runtimeConfig.worldApiBase}/api/tellus/worlds?userId=${encodeURIComponent(tellusUserId())}`,
-        { cache: "no-store" },
+        { cache: "no-store", headers: worldMetadataHeaders() },
       );
       const data = (await res.json()) as unknown;
       const list = Array.isArray(data)
@@ -15501,7 +15496,7 @@ function App(): React.ReactElement {
       });
     }
   }, [refreshFriends]);
-  const doorInteriorOptions = WORLD_CREATION_TEMPLATES.filter((option) =>
+  const doorInteriorOptions = ALL_WORLD_CREATION_TEMPLATES.filter((option) =>
     isInteriorWorldTemplate(option.id),
   );
   const portalTargetOptions = worlds.filter((worldId) => worldId && worldId !== currentWorldId);
@@ -16416,7 +16411,7 @@ function App(): React.ReactElement {
                   (() => {
                     const target = activeWorldId;
                     const armed = pendingDeleteWorld === target;
-                    const serverDeleteAllowed = Boolean(runtimeConfig.worldApiBase && (canDeleteWorld(target) || getSession()));
+                    const serverDeleteAllowed = Boolean(runtimeConfig.worldApiBase && canDeleteWorld(target));
                     return (
                       <button
                         type="button"

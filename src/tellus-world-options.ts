@@ -49,7 +49,7 @@ export type WorldCreationTemplate = WorldTemplateOption & {
   previewUrl?: string;
 };
 
-export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
+export const ALL_WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
   {
     id: "tellus",
     label: "Main Island",
@@ -277,12 +277,39 @@ export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] = [
   },
 ];
 
-const CURATED_TEMPLATE_IDS = new Set<WorldTemplateId>(
-  WORLD_CREATION_TEMPLATES.map((template) => template.id),
-);
+export const DEFAULT_WORLD_CREATION_TEMPLATE_IDS: readonly WorldTemplateId[] = [
+  "tellus",
+  "evoflow-coral-canyon-child",
+  "evoflow-spires",
+  "evoflow-glass-ridge",
+  "evoflow-lichen-basin",
+  "evoflow-copper-terraces",
+  "evoflow-basalt-teeth",
+  "evoflow-coral-fold",
+];
 
-export const ADVANCED_WORLD_TEMPLATE_OPTIONS: WorldTemplateOption[] =
-  WORLD_TEMPLATE_OPTIONS.filter((option) => !CURATED_TEMPLATE_IDS.has(option.id));
+const CURATED_TEMPLATE_IDS = new Set<WorldTemplateId>(DEFAULT_WORLD_CREATION_TEMPLATE_IDS);
+
+export const WORLD_CREATION_TEMPLATES: WorldCreationTemplate[] =
+  ALL_WORLD_CREATION_TEMPLATES.filter((template) => CURATED_TEMPLATE_IDS.has(template.id));
+
+export const ADVANCED_WORLD_TEMPLATE_OPTIONS: WorldCreationTemplate[] =
+  ALL_WORLD_CREATION_TEMPLATES.filter((option) => !CURATED_TEMPLATE_IDS.has(option.id));
+
+export function fallbackWorldDisplayName(worldId: string): string {
+  const trimmed = worldId.trim();
+  const chunkedMatch = /^chunked-\d+-(.+)$/i.exec(trimmed);
+  const slug = chunkedMatch?.[1] || trimmed;
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+export function worldPickerLabel(worldId: string, displayName?: string): string {
+  return displayName?.trim() || fallbackWorldDisplayName(worldId);
+}
 
 export const SKYBOX_OPTIONS: Array<{ url: string; label: string }> = [
   { url: "/skybox/free_-_skybox_in_the_cloud/scene.gltf", label: "Cloud Dome" },
