@@ -1816,16 +1816,19 @@ export const buildProcPlantGraph = (
     mass: genome.foliage?.mass ?? (genome.habit === "conifer" ? 0.84 : 0.55),
     clusterDensity: genome.foliage?.clusterDensity ?? 1,
     whorlDensity: genome.foliage?.whorlDensity ?? (genome.habit === "conifer" ? 0.82 : 0.42),
-    tipBias: genome.foliage?.tipBias ?? 0.5,
+    tipBias: THREE.MathUtils.clamp(genome.foliage?.tipBias ?? 0.5, 0, 1),
+    size: THREE.MathUtils.clamp(genome.foliage?.size ?? 1, 0.05, 1.5),
   };
+  const coniferCrownStart = THREE.MathUtils.lerp(0.12, 0.28, foliageTraits.tipBias);
   const addConiferFoliageMass = () => {
-    const trunkNodes = stems.filter((node) => node.depth === 0 && node.t > 0.12);
+    const trunkNodes = stems.filter((node) => node.depth === 0 && node.t >= coniferCrownStart);
     for (const node of trunkNodes) {
       const t = node.t;
       const crownEnvelope = Math.sin(Math.PI * THREE.MathUtils.clamp(t * 0.92 + 0.04, 0, 1));
       const lowerShelf = THREE.MathUtils.smoothstep(1 - t, 0.05, 0.86);
+      const tipWeight = THREE.MathUtils.lerp(1, t, foliageTraits.tipBias);
       const fill = THREE.MathUtils.clamp(
-        (0.38 + crownEnvelope * 0.48 + lowerShelf * 0.18) * foliageTraits.mass,
+        (0.38 + crownEnvelope * 0.48 + lowerShelf * 0.18) * foliageTraits.mass * tipWeight,
         0,
         1.65,
       );
@@ -1836,6 +1839,7 @@ export const buildProcPlantGraph = (
         const branchDir = rotateFromAxis(node.direction, yaw, droop);
         const scale =
           curve(genome.leaf.length, t) *
+          foliageTraits.size *
           (1.12 - t * 0.3) *
           (0.78 + fill * 0.22) *
           (0.78 + rng() * 0.22);
@@ -1896,24 +1900,28 @@ export const buildProcPlantGraph = (
       const organDir = rotateFromAxis(direction, azimuth, Math.PI / 2.6);
       const organRight = right.applyAxisAngle(direction, azimuth).normalize();
       const density = curve(genome.leaf.density, t) * (1 + shade * genome.lightResponse.leafBoostInShade);
-      if (genome.habit === "conifer" && t > 0.12 && rng() < density) {
-        const downSweep = Math.PI / 2.05 + t * 0.52 + depth * 0.14;
-        const sprayCount = depth === 0 && t < 0.88 ? 2 : 1;
-        for (let s = 0; s < sprayCount; s++) {
-          const sprayYaw = azimuth + s * Math.PI + (rng() - 0.5) * 0.12;
-          organs.push({
-            kind: "coniferSpray",
-            position,
-            direction: rotateFromAxis(direction, sprayYaw, downSweep),
-            right: organRight.clone().applyAxisAngle(direction, s * Math.PI).normalize(),
-            scale:
-              curve(genome.leaf.length, t) *
-              (1.12 - t * 0.38) *
-              Math.pow(0.78, depth) *
-              (0.84 + rng() * 0.24) *
-              (s === 0 ? 1 : 0.82),
-            t,
-          });
+      if (genome.habit === "conifer") {
+        const tipWeight = THREE.MathUtils.lerp(1, t, foliageTraits.tipBias);
+        if (t >= coniferCrownStart && rng() < density * tipWeight) {
+          const downSweep = Math.PI / 2.05 + t * 0.52 + depth * 0.14;
+          const sprayCount = depth === 0 && t < 0.88 ? 2 : 1;
+          for (let s = 0; s < sprayCount; s++) {
+            const sprayYaw = azimuth + s * Math.PI + (rng() - 0.5) * 0.12;
+            organs.push({
+              kind: "coniferSpray",
+              position,
+              direction: rotateFromAxis(direction, sprayYaw, downSweep),
+              right: organRight.clone().applyAxisAngle(direction, s * Math.PI).normalize(),
+              scale:
+                curve(genome.leaf.length, t) *
+                foliageTraits.size *
+                (1.12 - t * 0.38) *
+                Math.pow(0.78, depth) *
+                (0.84 + rng() * 0.24) *
+                (s === 0 ? 1 : 0.82),
+              t,
+            });
+          }
         }
       } else if (
         (genome.habit !== "palm" &&

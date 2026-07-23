@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { makeProcPlantModelUrl, parseProceduralModelUrl } from "./tellus-procedural-assets";
 import {
   buildProcPlantInstancedParts,
+  buildProcPlantGraph,
   buildProcPlantTemplate,
   buildProcPlantRuntimePackage,
   branchModuleSpreadForGenome,
@@ -87,6 +88,28 @@ describe("procplant vegetation", () => {
     expect(branchModuleLodForTree(1, 52, detailDistance, 60)).toBe(1);
   });
 
+  it("keeps conifer foliage as authored-size sprays inside the upper crown", () => {
+    const base = procPlantPresets.alpineFir;
+    const fullSize = buildProcPlantGraph({
+      ...base,
+      foliage: { ...base.foliage!, mass: 1, tipBias: 0.9, size: 1 },
+    }, 73);
+    const authoredSize = buildProcPlantGraph({
+      ...base,
+      foliage: { ...base.foliage!, mass: 1, tipBias: 0.9, size: 0.25 },
+    }, 73);
+    const fullSprays = fullSize.organs.filter((organ) => organ.kind === "coniferSpray");
+    const authoredSprays = authoredSize.organs.filter((organ) => organ.kind === "coniferSpray");
+
+    expect(authoredSprays.length).toBeGreaterThan(8);
+    expect(authoredSprays.length).toBe(fullSprays.length);
+    expect(authoredSize.organs.some((organ) => organ.kind === "leaf")).toBe(false);
+    expect(Math.min(...authoredSprays.map((organ) => organ.t))).toBeGreaterThanOrEqual(0.26);
+    for (let index = 0; index < authoredSprays.length; index++) {
+      expect(authoredSprays[index]!.scale).toBeCloseTo(fullSprays[index]!.scale * 0.25, 6);
+    }
+  });
+
   it("uses global mix colors as flat overrides for black asset LOD materials", () => {
     const color = new THREE.Color(0x4f8f3d);
     const template = procPlantTemplateFromAssetTemplate({
@@ -169,10 +192,10 @@ describe("procplant vegetation", () => {
       return count === createProcPlantLeafGeometry("fan", 1, 0, 0).getAttribute("position").count;
     });
 
-    // Every alpine tree slot now uses the dense hybrid graph, including its conifer sprays and authored
-    // fan cards; zero branch LOD trees proves the separate sparse branch-module mutation is gone.
+    // Every alpine tree slot now uses the dense hybrid graph. Its conifer habit renders authored-size
+    // sprays rather than broad folded fan cards; zero branch LOD trees proves the sparse mutation is gone.
     expect(hasSprayMesh).toBe(true);
-    expect(hasProcplantLeafCard).toBe(true);
+    expect(hasProcplantLeafCard).toBe(false);
     expect(vegetation.stats().branchLod0 + vegetation.stats().branchLod1 + vegetation.stats().branchLod2)
       .toBe(0);
 
