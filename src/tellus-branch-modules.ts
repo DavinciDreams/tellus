@@ -484,10 +484,30 @@ export function branchModuleLodView(
 
   const segments = tree.segments.filter((segment) => retainedModules.has(segment.moduleId));
   const retainedSegments = new Set(segments.map((segment) => segment.id));
-  const leafStride = level === 1 ? 2 : 4;
+  const retainedSegmentByModule = new Map<number, number>();
+  for (const segment of segments) retainedSegmentByModule.set(segment.moduleId, segment.id);
+  const proxySegmentForLeaf = (leaf: AttachedLeafInstance): number | null => {
+    const sourceSegment = tree.segments[leaf.segmentId];
+    let moduleId: number | null = sourceSegment?.moduleId ?? null;
+    while (moduleId !== null) {
+      const retained = retainedSegmentByModule.get(moduleId);
+      if (retained !== undefined) return retained;
+      moduleId = moduleById.get(moduleId)?.parentModuleId ?? null;
+    }
+    return segments[0]?.id ?? null;
+  };
+  // Keep a sampled crown even when the fine branch carrying a leaf was removed. At LOD distance the
+  // foliage cluster is the tree silhouette; dropping every terminal leaf makes a healthy tree turn into
+  // a bare pole. Re-associate sampled leaves with the nearest retained ancestor while preserving their
+  // authored crown-space transforms, so draw cost falls without the crown collapsing.
+  const leafStride = level === 1 ? 2 : 3;
   const leaves = tree.leaves.filter(
-    (leaf) => retainedSegments.has(leaf.segmentId) && leaf.id % leafStride === 0,
-  );
+    (leaf) => leaf.id % leafStride === 0,
+  ).flatMap((leaf) => {
+    if (retainedSegments.has(leaf.segmentId)) return [leaf];
+    const segmentId = proxySegmentForLeaf(leaf);
+    return segmentId === null ? [] : [{ ...leaf, segmentId }];
+  });
   return { level, segments, leaves };
 }
 

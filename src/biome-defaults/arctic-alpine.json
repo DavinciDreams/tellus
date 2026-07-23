@@ -23,97 +23,81 @@
   },
   "entries": [
     {
-      "id": "custom-traditional-alpine-pine-mrphzmcj",
-      "label": "traditional alpine pine",
+      "id": "custom-traditional-alpine-pine-mutation-mix-605827",
+      "label": "Traditional Alpine Pine Mutation Mix (605827)",
       "source": "mutation",
       "weight": 1,
       "density": 0.07,
       "scale": 8,
       "environment": {
-        "light": 0.82,
-        "moisture": 0.34,
-        "crowding": 0.7602000000000001,
-        "biomeWarmth": 0.08
+        "light": 0.49,
+        "moisture": 0.55,
+        "crowding": 0.43,
+        "biomeWarmth": 0.89
       },
-      "seed": 732724,
+      "seed": 605827,
       "enabled": true,
       "genome": {
-        "id": "custom-traditional-alpine-pine",
+        "id": "custom-traditional-alpine-pine-vinca-vine-lotus-bloom-mix-mix-mutation-blue-spruce-mix-talltraditional-conifer-mix-traditional-alpine-pine-mutation-mix",
         "habit": "conifer",
         "nodeCount": 18,
         "internode": {
-          "base": 0.22,
-          "tip": 0.085,
-          "curve": 1.28
+          "base": 0.21622503700663387,
+          "tip": 0.08788941268847271,
+          "curve": 1.2514455042790336
         },
         "phyllotaxisAngle": 2.3999632297279923,
         "branchChance": {
-          "base": 0.22,
-          "tip": 0.08,
-          "curve": 1.18
+          "base": 0.21616575011888237,
+          "tip": 0.07800352361047144,
+          "curve": 1.2096555591543035
         },
         "branchAngle": {
-          "mean": 0.82,
-          "spread": 0.2,
-          "depthDecay": 0.72
+          "mean": 0.8323840677716803,
+          "spread": 0.204609487806949,
+          "depthDecay": 0.7102724086256498
         },
-        "apicalDominance": 0.72,
+        "apicalDominance": 0.7598493577595065,
         "leaf": {
           "shape": "fan",
           "length": {
-            "base": 0.85,
-            "tip": 0.3449380353415686,
-            "curve": 1.7351704362678275
+            "base": 1.0577793016978048,
+            "tip": 0.447351174651701,
+            "curve": 1.6055863256584866
           },
-          "widthRatio": 0.13374442543446374,
+          "widthRatio": 0.1921505939038604,
           "density": {
-            "base": 0.8589395830883937,
-            "tip": 0.6764951182471424,
-            "curve": 1.0335427827065515
+            "base": 0.8582432991704162,
+            "tip": 0.6674164058469052,
+            "curve": 1.032491017512219
           },
-          "curl": 0.12502421101089564,
-          "serration": 0.05634726576507092,
-          "venation": 0.1763142993021756,
+          "curl": 0.11453223414627833,
+          "serration": 0.05254109930782265,
+          "venation": 0.22879887494895496,
           "colorA": 5734991,
           "colorB": 8690043
         },
         "foliage": {
-          "mass": 1.54,
-          "clusterDensity": 0.34,
-          "whorlDensity": 0.6679561276210103,
-          "tipBias": 0.67,
-          "size": 0.96
+          "mass": 3.1391302241471126,
+          "clusterDensity": 1.2316153462506392,
+          "whorlDensity": 1.2236963761498438,
+          "tipBias": 0.91924,
+          "size": 0.4692
         },
         "treeRealism": {
-          "crownSpread": 0.4160957662663347,
-          "crownTaper": 0.8474116670873956,
-          "trunkFlare": 0.38,
-          "trunkBend": 0.05668527491856369,
-          "branchGnarl": 0.07909064474515617,
-          "windFlex": 0.5912492931494489,
-          "colorVariance": 0.1975369719415903
+          "crownSpread": 0.8503164770660272,
+          "crownTaper": 1.45,
+          "trunkFlare": 0.37448587444373405,
+          "trunkBend": 0.05910569548108948,
+          "branchGnarl": 0.09787496730401307,
+          "windFlex": 0.5861627208021849,
+          "colorVariance": 0.1869146103163245
         },
         "lightResponse": {
-          "shadeAvoidance": 0.12414627361111344,
-          "leafBoostInShade": 0.12821693472564222,
-          "branchSuppressionInShade": 0.3224101798748597,
-          "phototropism": 0
-        },
-        "branchModules": {
-          "palette": "excurrent-conifer",
-          "moduleBudget": 91,
-          "levels": 5,
-          "vigor": 1.5,
-          "branchDensity": 0.46,
-          "branchAngle": 1.16,
-          "spread": 2,
-          "droop": 2,
-          "tropism": 0.59,
-          "gnarliness": 0,
-          "collisionBias": 0.87,
-          "foliageSource": "procplants",
-          "leafColor": 5078367,
-          "barkColor": 8807225
+          "shadeAvoidance": 0.16247236229085066,
+          "leafBoostInShade": 0.1435733087681322,
+          "branchSuppressionInShade": 0.3097615943702734,
+          "phototropism": 0.02102543649409771
         }
       }
     },

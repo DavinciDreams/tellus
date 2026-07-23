@@ -1554,6 +1554,8 @@ function createTellusWorld(
   const procplants = procplantsEnabled
     ? createProcPlantVegetation({
         scene,
+        renderer: () => renderer,
+        camera: () => camera,
         worldId: runtimeConfig.worldId,
         sampleHeight: sampleVegetationHeight,
         samplePaint: sampleVegetationPaint,
@@ -1605,6 +1607,7 @@ function createTellusWorld(
           branchLod0: 0,
           branchLod1: 0,
           branchLod2: 0,
+          impostors: 0,
           lod0: 0,
           lod1: 0,
           lod2: 0,
@@ -12002,7 +12005,8 @@ function DebugLiveRows({ worldRef, rxEnabled }: DebugLiveRowsProps): React.React
           </div>
           <div className="debug-stats-row">
             branches {ambientStats.procplants.branchSegments} segments · {ambientStats.procplants.attachedLeaves} attached leaves · tree LOD{" "}
-            {ambientStats.procplants.branchLod0}/{ambientStats.procplants.branchLod1}/{ambientStats.procplants.branchLod2}
+            {ambientStats.procplants.branchLod0}/{ambientStats.procplants.branchLod1}/{ambientStats.procplants.branchLod2} ·{" "}
+            {ambientStats.procplants.impostors} impostors
           </div>
           <div className="debug-stats-row">
             plant work {ambientStats.procplants.lastUpdateMs} ms · build {ambientStats.procplants.lastBuildMs} ms /{" "}

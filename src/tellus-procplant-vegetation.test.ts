@@ -100,7 +100,7 @@ describe("procplant vegetation", () => {
     expect(conifer.pos.length).not.toBe(broadleaf.pos.length);
   });
 
-  it("honors the authored alpine conifers' procplants foliage mode", () => {
+  it("renders foliage for both authored alpine conifer backends", () => {
     const scene = new THREE.Scene();
     const alpineEcology = resolveEcologySample({
       seed: 1,
@@ -120,8 +120,8 @@ describe("procplant vegetation", () => {
       densityMultiplier: 4,
     });
 
-    // The sparse authored alpine mix explicitly selects procplants foliage on both mutation trees.
-    // Hold a fixed position and advance past travel mode so their detailed geometry is built.
+    // The alpine mix combines the remaining branch-module mutation with the imported procplant-graph
+    // conifer. Hold a fixed position and advance past travel mode so both foliage paths are built.
     for (let i = 0; i < 40; i++) {
       vegetation.update(0, 0, 1, 60, 1000 + i * 900);
     }
@@ -136,15 +136,19 @@ describe("procplant vegetation", () => {
     const hasSprayMesh = meshes.some(
       (mesh) => mesh.geometry.getAttribute("position").count === sprayGeometry.getAttribute("position").count,
     );
-    const hasFlatLeafCardOfWrongShape = meshes.some((mesh) => {
+    const hasProcplantLeafCard = meshes.some((mesh) => {
       const count = mesh.geometry.getAttribute("position").count;
       // A "fan"/"ovate"/etc leaf card from createProcPlantLeafGeometry has a much smaller, odd
       // (2*segments+2) vertex count than the multi-plate conifer spray mesh.
       return count === createProcPlantLeafGeometry("fan", 1, 0, 0).getAttribute("position").count;
     });
 
-    expect(hasSprayMesh).toBe(false);
-    expect(hasFlatLeafCardOfWrongShape).toBe(false);
+    // The branch-module mutation retains its authored ordinary leaf cards, while the replacement graph
+    // conifer supplies its denser conifer-spray organs instead of the removed sparse module foliage.
+    expect(hasSprayMesh).toBe(true);
+    expect(hasProcplantLeafCard).toBe(true);
+    expect(vegetation.stats().branchLod0 + vegetation.stats().branchLod1 + vegetation.stats().branchLod2)
+      .toBeGreaterThan(0);
 
     vegetation.dispose();
   });

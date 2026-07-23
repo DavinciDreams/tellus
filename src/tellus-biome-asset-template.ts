@@ -22,11 +22,13 @@ const candidatePaths = (assetId: string, preference: TellusBiomeAssetLodPreferen
         : preference === "lod0"
           ? ["lod0", "game-optimized"]
           : preference === "impostor"
-            ? ["impostor", "lod3", "lod2", "game-optimized"]
+            // The impostor endpoint is a WebP atlas, not glTF. Keep a real mesh
+            // as the near/mid fallback while the far tier loads the atlas separately.
+            ? ["lod3", "lod2", "game-optimized"]
             : ["game-optimized"];
   return [...new Set(order.map((lod) => {
     if (lod === "game-optimized") return assetStoreGameOptimizedModelUrl(assetId);
-    return `/api/assets/model/${encodeURIComponent(assetId)}/${lod === "impostor" ? "impostor" : `lod/${lod.slice(3)}`}`;
+    return `/api/assets/model/${encodeURIComponent(assetId)}/lod/${lod.slice(3)}`;
   }))];
 };
 

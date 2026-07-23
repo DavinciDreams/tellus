@@ -1362,7 +1362,9 @@ const assetModelCandidatePaths = (
           : lodPreference === "lod0"
             ? ["lod0", "game-optimized"]
             : lodPreference === "impostor"
-              ? ["impostor", "lod3", "lod2", "game-optimized"]
+              // The atlas is hydrated by the runtime far-LOD path. The editor
+              // still needs mesh geometry for its preview and persisted fallback.
+              ? ["lod3", "lod2", "game-optimized"]
               : ["game-optimized"];
   return [...new Set(order.map((candidate) => assetModelPathForLod(assetId, candidate)))];
 };

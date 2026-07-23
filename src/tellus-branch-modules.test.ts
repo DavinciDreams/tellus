@@ -69,6 +69,8 @@ describe("branch module trees", () => {
     expect(balanced.segments.length).toBeLessThan(tree.segments.length);
     expect(constrained.segments.length).toBeLessThanOrEqual(balanced.segments.length);
     expect(constrained.leaves.length).toBeLessThanOrEqual(balanced.leaves.length);
+    expect(constrained.leaves.length).toBeGreaterThan(0);
+    expect(constrained.leaves.length).toBeGreaterThanOrEqual(Math.floor(tree.leaves.length / 4));
     const constrainedSegmentIds = new Set(constrained.segments.map((segment) => segment.id));
     expect(constrained.segments.some((segment) => tree.modules[segment.moduleId]?.depth === 0)).toBe(true);
     expect(constrained.leaves.every((leaf) => constrainedSegmentIds.has(leaf.segmentId))).toBe(true);

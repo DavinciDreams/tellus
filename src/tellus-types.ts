@@ -220,6 +220,8 @@ export interface AssetLibraryModel {
   lodAvailableLevels?: number[];
   lodSummary?: AssetLodSummary;
   lodVariants?: AssetLodVariant[];
+  hasImpostor?: boolean;
+  impostor?: AssetImpostorVariant;
 }
 
 export interface AssetMeshStats {
@@ -256,6 +258,35 @@ export interface AssetLodVariant extends AssetLodLevelSummary {
   url?: string;
   download_url?: string;
   mesh_stats?: AssetMeshStats;
+}
+
+export interface AssetImpostorBounds {
+  min?: number[];
+  max?: number[];
+  center?: number[];
+  size?: number[];
+  max_dimension?: number;
+  effective_radius?: number;
+}
+
+export interface AssetImpostorVariant {
+  file_format?: string;
+  status?: string;
+  type?: "octahedral_atlas" | "billboard" | string;
+  width?: number;
+  height?: number;
+  atlas_width?: number;
+  atlas_height?: number;
+  grid_size_x?: number;
+  grid_size_y?: number;
+  cell_size?: number;
+  view_count?: number;
+  octahedron_type?: "hemi" | "full" | string;
+  source?: string;
+  role?: string;
+  url?: string;
+  download_url?: string;
+  bounds?: AssetImpostorBounds;
 }
 
 export interface AssetLibraryResponse {
