@@ -1,0 +1,382 @@
+{
+  "version": 1,
+  "id": "ecology-taiga",
+  "label": "Taiga",
+  "source": "ecology",
+  "ecologyBiome": "taiga",
+  "targetTerrainPaint": "dirt",
+  "seed": 612072,
+  "density": 0.39,
+  "diversity": 1,
+  "targetVerticesPerChunk": 250000,
+  "entries": [
+    {
+      "id": "branch-module-excurrent-conifer-mrqgiwvs",
+      "label": "Branch Excurrent Conifer",
+      "source": "mutation",
+      "genome": {
+        "id": "branchModules-excurrent-conifer",
+        "habit": "conifer",
+        "nodeCount": 18,
+        "internode": {
+          "base": 0.22,
+          "tip": 0.085,
+          "curve": 1.28
+        },
+        "phyllotaxisAngle": 2.4027632297279924,
+        "branchChance": {
+          "base": 0.22,
+          "tip": 0.08,
+          "curve": 1.18
+        },
+        "branchAngle": {
+          "mean": 0.82,
+          "spread": 0.2,
+          "depthDecay": 0.72
+        },
+        "apicalDominance": 0.72,
+        "leaf": {
+          "shape": "palmate",
+          "length": {
+            "base": 0.78,
+            "tip": 0.32,
+            "curve": 1.15
+          },
+          "widthRatio": 0.18,
+          "density": {
+            "base": 0.92,
+            "tip": 0.68,
+            "curve": 0.95
+          },
+          "curl": 0.18,
+          "serration": 0,
+          "venation": 0.08,
+          "colorA": 2506814,
+          "colorB": 4954999
+        },
+        "foliage": {
+          "mass": 1.05,
+          "clusterDensity": 1.16,
+          "whorlDensity": 0.85,
+          "tipBias": 1,
+          "size": 1.16
+        },
+        "treeRealism": {
+          "crownSpread": 0.42,
+          "crownTaper": 0.84,
+          "trunkFlare": 0.38,
+          "trunkBend": 0.14,
+          "branchGnarl": 0.22,
+          "windFlex": 0.52,
+          "colorVariance": 0.14
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.28,
+          "leafBoostInShade": 0.12,
+          "branchSuppressionInShade": 0.18,
+          "phototropism": 0.08
+        },
+        "branchModules": {
+          "palette": "excurrent-conifer",
+          "moduleBudget": 112,
+          "levels": 4,
+          "vigor": 1,
+          "branchDensity": 1.05,
+          "branchAngle": 0.81,
+          "spread": 1.68,
+          "droop": 2,
+          "tropism": -0.34,
+          "gnarliness": 0.63,
+          "collisionBias": 0.45,
+          "foliageSource": "procplants",
+          "barkColor": 15641443,
+          "leafColor": 2506814
+        }
+      },
+      "weight": 1,
+      "density": 0.21,
+      "scale": 4.3,
+      "environment": {
+        "light": 0.8,
+        "moisture": 0.38,
+        "crowding": 0.24,
+        "biomeWarmth": 0.7
+      },
+      "seed": 654583,
+      "enabled": true
+    },
+    {
+      "id": "custom-blue-spruce-reed-sedge-mangrove-roots-mutation-meadow-flower-mix-hibiscus-bloom-mix-meadow-flower-fur-grass-mix-mix-mix-mix-custom-down-pine-hybrid-959624",
+      "label": "Custom Blue Spruce Reed Sedge Mangrove Roots Mutation Meadow Flower Mix Hibiscus Bloom Mix Meadow Flower Fur Grass Mix Mix Mix Mix Custom Down Pine Hybrid",
+      "source": "mutation",
+      "genome": {
+        "id": "custom-blue-spruce-reed-sedge-mangrove-roots-mutation-meadow-flower-mix-hibiscus-bloom-mix-meadow-flower-fur-grass-mix-mix-mix-mix-custom-down-pine-hybrid",
+        "habit": "conifer",
+        "nodeCount": 18,
+        "internode": {
+          "base": 0.21366270804682672,
+          "tip": 0.08424847725567712,
+          "curve": 1.2597639474552738
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.2102728394987996,
+          "tip": 0.07650411724431325,
+          "curve": 1.1820182819879799
+        },
+        "branchAngle": {
+          "mean": 0.8142411473688447,
+          "spread": 0.20111443693034448,
+          "depthDecay": 0.7166252708465223
+        },
+        "apicalDominance": 0.7257590842918267,
+        "leaf": {
+          "shape": "linear",
+          "length": {
+            "base": 0.8391176097637639,
+            "tip": 0.37686175055618015,
+            "curve": 1.142571011938425
+          },
+          "widthRatio": 0.18124959368079907,
+          "density": {
+            "base": 0.9184153670731409,
+            "tip": 0.6824587330007303,
+            "curve": 0.9579573715504607
+          },
+          "curl": 0.17714120873550654,
+          "serration": 0.0019343912512185912,
+          "venation": 0.09911889360149231,
+          "colorA": 3235621,
+          "colorB": 7311220
+        },
+        "grass": {
+          "blades": 38,
+          "furBias": 0.9,
+          "heightJitter": 0.38
+        },
+        "foliage": {
+          "mass": 1.875921668661613,
+          "clusterDensity": 1.9019254646056707,
+          "whorlDensity": 1.627364565051406,
+          "tipBias": 0.9560004551334932,
+          "size": 0.37400000000000005
+        },
+        "treeRealism": {
+          "crownSpread": 0.837472955359212,
+          "crownTaper": 1.2455697468361504,
+          "trunkFlare": 0.37248101520490917,
+          "trunkBend": 0.15231506899101538,
+          "branchGnarl": 0.21250032436832061,
+          "windFlex": 0.5321718556239785,
+          "colorVariance": 0.1366492593025845
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.29633529347620546,
+          "leafBoostInShade": 0.1241793556706712,
+          "branchSuppressionInShade": 0.19236173380944938,
+          "phototropism": 0.08558575774904059
+        }
+      },
+      "weight": 1,
+      "density": 0.36,
+      "scale": 2.4,
+      "environment": {
+        "light": 0.66,
+        "moisture": 0.58,
+        "crowding": 0.25,
+        "biomeWarmth": 0.32
+      },
+      "seed": 959624,
+      "enabled": true
+    },
+    {
+      "id": "branch-module-excurrent-conifer-mrw9j83v",
+      "label": "Branch Excurrent Conifer",
+      "source": "mutation",
+      "genome": {
+        "id": "branchModules-excurrent-conifer",
+        "habit": "conifer",
+        "nodeCount": 18,
+        "internode": {
+          "base": 0.22,
+          "tip": 0.085,
+          "curve": 1.28
+        },
+        "phyllotaxisAngle": 2.4027632297279924,
+        "branchChance": {
+          "base": 0.22,
+          "tip": 0.08,
+          "curve": 1.18
+        },
+        "branchAngle": {
+          "mean": 0.82,
+          "spread": 0.2,
+          "depthDecay": 0.72
+        },
+        "apicalDominance": 0.72,
+        "leaf": {
+          "shape": "spatulate",
+          "length": {
+            "base": 0.78,
+            "tip": 0.32,
+            "curve": 1.15
+          },
+          "widthRatio": 0.18,
+          "density": {
+            "base": 0.92,
+            "tip": 0.68,
+            "curve": 0.95
+          },
+          "curl": 0.18,
+          "serration": 0,
+          "venation": 0.08,
+          "colorA": 2506546,
+          "colorB": 2124331
+        },
+        "foliage": {
+          "mass": 1.42,
+          "clusterDensity": 2.01,
+          "whorlDensity": 0.85,
+          "tipBias": 0.68,
+          "size": 0.73
+        },
+        "treeRealism": {
+          "crownSpread": 0.42,
+          "crownTaper": 0.84,
+          "trunkFlare": 0.38,
+          "trunkBend": 0.14,
+          "branchGnarl": 0.22,
+          "windFlex": 0.52,
+          "colorVariance": 0.14
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.28,
+          "leafBoostInShade": 0.12,
+          "branchSuppressionInShade": 0.18,
+          "phototropism": 0.08
+        },
+        "branchModules": {
+          "palette": "excurrent-conifer",
+          "moduleBudget": 149,
+          "levels": 3,
+          "vigor": 1,
+          "branchDensity": 1.73,
+          "branchAngle": 1.42,
+          "spread": 2.5,
+          "droop": 2,
+          "tropism": -0.05,
+          "gnarliness": 0.89,
+          "collisionBias": 0.45,
+          "foliageSource": "procplants",
+          "barkColor": 6112039,
+          "leafColor": 2506546
+        }
+      },
+      "weight": 1,
+      "density": 0.22,
+      "scale": 3.3,
+      "environment": {
+        "light": 0.8,
+        "moisture": 0.38,
+        "crowding": 0.24,
+        "biomeWarmth": 0.7
+      },
+      "seed": 654583,
+      "enabled": true
+    },
+    {
+      "id": "custom-redwood-spire-mutation-uptilted-gnarly-pines-mix-custom-pointypine-hybrid-959624",
+      "label": "Douglas Fir",
+      "source": "mutation",
+      "genome": {
+        "id": "weberPenn-douglasFir",
+        "habit": "conifer",
+        "nodeCount": 22,
+        "internode": {
+          "base": 0.23392000000000002,
+          "tip": 0.08152000000000001,
+          "curve": 1.23824
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.17824,
+          "tip": 0.06608,
+          "curve": 1.18
+        },
+        "branchAngle": {
+          "mean": 0.65296,
+          "spread": 0.17216,
+          "depthDecay": 0.7617600000000001
+        },
+        "apicalDominance": 0.8452800000000001,
+        "leaf": {
+          "shape": "linear",
+          "length": {
+            "base": 0.7957824000000001,
+            "tip": 0.3184048,
+            "curve": 1.1291200000000001
+          },
+          "widthRatio": 0.18,
+          "density": {
+            "base": 0.8225600000000001,
+            "tip": 0.6104,
+            "curve": 0.9848000000000001
+          },
+          "curl": 0.13824,
+          "serration": 0,
+          "venation": 0.06608,
+          "colorA": 2508597,
+          "colorB": 7902814
+        },
+        "foliage": {
+          "mass": 1.24,
+          "clusterDensity": 2.06,
+          "whorlDensity": 0.37,
+          "tipBias": 0.4,
+          "size": 0.3
+        },
+        "treeRealism": {
+          "crownSpread": 0.77,
+          "crownTaper": 0.6,
+          "trunkFlare": 0.40784000000000004,
+          "trunkBend": 0.12,
+          "branchGnarl": 0.17,
+          "windFlex": 0.42256000000000005,
+          "colorVariance": 0.11216000000000001
+        },
+        "weberPenn": {
+          "species": "douglasFir",
+          "nativeLeaves": false,
+          "crownFill": true,
+          "foliageSource": "conifer-spray",
+          "fillAnchor": "leaf-sites",
+          "maxBranchDepth": 4,
+          "maxStems": 91,
+          "maxLeaves": 300,
+          "leafScaleMultiplier": 5.1,
+          "radialSegments": 7,
+          "branchSamples": 4,
+          "barkColor": 6112039,
+          "leafColor": 2508597
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.33568,
+          "leafBoostInShade": 0.12,
+          "branchSuppressionInShade": 0.13824,
+          "phototropism": 0.06608
+        }
+      },
+      "weight": 1,
+      "density": 0.14,
+      "scale": 8,
+      "environment": {
+        "light": 0.61,
+        "moisture": 0.29,
+        "crowding": 0.25,
+        "biomeWarmth": 0.32
+      },
+      "seed": 959624,
+      "enabled": true
+    }
+  ]
+}

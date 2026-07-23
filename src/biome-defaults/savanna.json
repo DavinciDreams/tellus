@@ -1,0 +1,168 @@
+{
+  "version": 1,
+  "id": "ecology-savanna",
+  "label": "Savanna",
+  "source": "ecology",
+  "ecologyBiome": "savanna",
+  "targetTerrainPaint": "meadow",
+  "seed": 612072,
+  "density": 1.8,
+  "diversity": 0.82,
+  "targetVerticesPerChunk": 250000,
+  "entries": [
+    {
+      "id": "tulipCup-mrpuszvm",
+      "label": "Tulip Cup",
+      "source": "preset",
+      "presetId": "tulipCup",
+      "weight": 1,
+      "density": 1.4,
+      "scale": 1,
+      "environment": {
+        "light": 0.6780334530258552,
+        "moisture": 0.45912409723168285,
+        "crowding": 0.43278687638317287,
+        "biomeWarmth": 0.1988672124641016
+      },
+      "seed": 560205,
+      "enabled": true
+    },
+    {
+      "id": "furGrass-mrpv4flh",
+      "label": "Fur Grass",
+      "source": "preset",
+      "presetId": "furGrass",
+      "weight": 1,
+      "density": 1.4,
+      "scale": 0.5,
+      "grassHeight": 0.78,
+      "grassSpread": 2.39,
+      "grassLean": 1.04,
+      "environment": {
+        "light": 0.6780334530258552,
+        "moisture": 0.45912409723168285,
+        "crowding": 0.43278687638317287,
+        "biomeWarmth": 0.1988672124641016
+      },
+      "seed": 560205,
+      "enabled": true
+    },
+    {
+      "id": "weber-penn-acer-mrpv7hk5",
+      "label": "Acer",
+      "source": "mutation",
+      "genome": {
+        "id": "weberPenn-acer",
+        "habit": "tree",
+        "nodeCount": 18,
+        "internode": {
+          "base": 0.18,
+          "tip": 0.08,
+          "curve": 1.28
+        },
+        "phyllotaxisAngle": 2.4008632297279924,
+        "branchChance": {
+          "base": 0.34,
+          "tip": 0.2,
+          "curve": 1.05
+        },
+        "branchAngle": {
+          "mean": 0.68,
+          "spread": 0.32,
+          "depthDecay": 0.72
+        },
+        "apicalDominance": 0.34,
+        "leaf": {
+          "shape": "ovate",
+          "length": {
+            "base": 0.26,
+            "tip": 0.2,
+            "curve": 0.9
+          },
+          "widthRatio": 0.54,
+          "density": {
+            "base": 0.68,
+            "tip": 0.92,
+            "curve": 0.78
+          },
+          "curl": 0.09,
+          "serration": 0.12,
+          "venation": 0.66,
+          "colorA": 15467617,
+          "colorB": 8628557
+        },
+        "tree": {
+          "crown": "rounded",
+          "crownStart": 0.34,
+          "leafClusterScale": 1.05,
+          "exposedTrunk": 0.28
+        },
+        "foliage": {
+          "mass": 0,
+          "clusterDensity": 1.5,
+          "whorlDensity": 0.5,
+          "tipBias": 0.93,
+          "size": 0.82
+        },
+        "treeRealism": {
+          "crownSpread": 1.37,
+          "crownTaper": 0.36,
+          "trunkFlare": 0.46,
+          "trunkBend": 0.16,
+          "branchGnarl": 0.32,
+          "windFlex": 0.42,
+          "colorVariance": 0.16
+        },
+        "weberPenn": {
+          "species": "acer",
+          "nativeLeaves": true,
+          "crownFill": false,
+          "foliageSource": "species",
+          "fillAnchor": "branch-tips",
+          "maxBranchDepth": 3,
+          "maxStems": 80,
+          "maxLeaves": 220,
+          "leafScaleMultiplier": 3.6,
+          "radialSegments": 4,
+          "branchSamples": 2,
+          "barkColor": 6112039,
+          "leafColor": 15467617
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.42,
+          "leafBoostInShade": 0.18,
+          "branchSuppressionInShade": 0.18,
+          "phototropism": 0.12
+        }
+      },
+      "weight": 1,
+      "density": 0.18,
+      "scale": 10,
+      "environment": {
+        "light": 0.6780334530258552,
+        "moisture": 0.45912409723168285,
+        "crowding": 0.43278687638317287,
+        "biomeWarmth": 0.1988672124641016
+      },
+      "seed": 293546500,
+      "enabled": true
+    },
+    {
+      "id": "poppyFlower-mrwlsujk",
+      "label": "Poppy Flower",
+      "source": "preset",
+      "presetId": "poppyFlower",
+      "weight": 1,
+      "density": 0.45,
+      "scale": 1,
+      "environment": {
+        "light": 0.6780334530258552,
+        "moisture": 0.45912409723168285,
+        "crowding": 0.43278687638317287,
+        "biomeWarmth": 0.1988672124641016
+      },
+      "seed": 672251,
+      "enabled": true
+    }
+  ]
+}

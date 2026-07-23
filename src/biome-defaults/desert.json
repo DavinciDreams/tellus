@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "id": "ecology-desert",
+  "label": "Desert",
+  "source": "ecology",
+  "ecologyBiome": "desert",
+  "targetTerrainPaint": "desert-sand",
+  "seed": 612072,
+  "density": 0.72,
+  "diversity": 0.82,
+  "targetVerticesPerChunk": 250000,
+  "entries": [
+    {
+      "id": "desertRosette-mrwvarhc",
+      "label": "Desert Rosette",
+      "source": "preset",
+      "presetId": "desertRosette",
+      "weight": 1,
+      "density": 0.45,
+      "scale": 1,
+      "environment": {
+        "light": 0.7128677017590392,
+        "moisture": 0.72610248534134,
+        "crowding": 0.32,
+        "biomeWarmth": 0.7823895546394818
+      },
+      "seed": 551558,
+      "enabled": true
+    },
+    {
+      "id": "agaveSucculent-mrwvbdp5",
+      "label": "Agave Succulent",
+      "source": "preset",
+      "presetId": "agaveSucculent",
+      "weight": 1,
+      "density": 0.45,
+      "scale": 1,
+      "environment": {
+        "light": 0.7128677017590392,
+        "moisture": 0.72610248534134,
+        "crowding": 0.32,
+        "biomeWarmth": 0.7823895546394818
+      },
+      "seed": 560205,
+      "enabled": true
+    },
+    {
+      "id": "agavesucculent-poppyflower-hybrid-605827",
+      "label": "Agave Succulent Poppy Flower Hybrid",
+      "source": "mutation",
+      "genome": {
+        "id": "agaveSucculent-poppyFlower-hybrid",
+        "habit": "tropical",
+        "nodeCount": 9,
+        "internode": {
+          "base": 0.10018800000000001,
+          "tip": 0.068508,
+          "curve": 0.966
+        },
+        "phyllotaxisAngle": 2.3999632297279923,
+        "branchChance": {
+          "base": 0.0068000000000000005,
+          "tip": 0,
+          "curve": 1.2040000000000002
+        },
+        "branchAngle": {
+          "mean": 1.19556,
+          "spread": 0.21889199999999998,
+          "depthDecay": 0.6496
+        },
+        "apicalDominance": 1.35,
+        "leaf": {
+          "shape": "spatulate",
+          "length": {
+            "base": 0.89052,
+            "tip": 0.4706799999999999,
+            "curve": 1.122
+          },
+          "widthRatio": 0.2472,
+          "density": {
+            "base": 0.8231999999999999,
+            "tip": 0.44239999999999996,
+            "curve": 1.6800000000000002
+          },
+          "curl": -0.043999999999999984,
+          "serration": 0.20240000000000002,
+          "venation": 0.3432,
+          "colorA": 3825966,
+          "colorB": 11913641
+        },
+        "flower": {
+          "whorls": 1,
+          "petals": 4,
+          "radius": 0.28,
+          "color": 16723743,
+          "centerColor": 2630676
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.47440000000000004,
+          "leafBoostInShade": 0.10800000000000001,
+          "branchSuppressionInShade": 0.3176,
+          "phototropism": 0.1456
+        },
+        "clump": {
+          "count": 3,
+          "radius": 0.7623000000000001,
+          "jitter": 0.5,
+          "scaleVar": 0.28,
+          "lean": 0.2065,
+          "flowerDensity": 0.45
+        }
+      },
+      "weight": 1,
+      "density": 0.9,
+      "scale": 1,
+      "environment": {
+        "light": 0.49,
+        "moisture": 0.55,
+        "crowding": 0.7,
+        "biomeWarmth": 0.89
+      },
+      "seed": 605827,
+      "enabled": true
+    },
+    {
+      "id": "weber-penn-fanPalm-mrwve4it",
+      "label": "Fan Palm",
+      "source": "mutation",
+      "genome": {
+        "id": "weberPenn-fanPalm",
+        "habit": "palm",
+        "nodeCount": 15,
+        "internode": {
+          "base": 0.2,
+          "tip": 0.14,
+          "curve": 0.9
+        },
+        "phyllotaxisAngle": 2.4008632297279924,
+        "branchChance": {
+          "base": 0.01,
+          "tip": 0,
+          "curve": 1
+        },
+        "branchAngle": {
+          "mean": 0.95,
+          "spread": 0.18,
+          "depthDecay": 0.55
+        },
+        "apicalDominance": 0.95,
+        "leaf": {
+          "shape": "fan",
+          "length": {
+            "base": 0.85,
+            "tip": 0.62,
+            "curve": 0.85
+          },
+          "widthRatio": 0.58,
+          "density": {
+            "base": 1,
+            "tip": 1,
+            "curve": 1
+          },
+          "curl": 0.18,
+          "serration": 0.08,
+          "venation": 0.95,
+          "colorA": 3044408,
+          "colorB": 10798944
+        },
+        "lightResponse": {
+          "shadeAvoidance": 0.42,
+          "leafBoostInShade": 0.2,
+          "branchSuppressionInShade": 0.12,
+          "phototropism": 0.12
+        },
+        "weberPenn": {
+          "species": "fanPalm",
+          "nativeLeaves": true,
+          "crownFill": false,
+          "foliageSource": "species",
+          "fillAnchor": "leaf-sites",
+          "maxBranchDepth": 3,
+          "maxStems": 76,
+          "maxLeaves": 295,
+          "leafScaleMultiplier": 3.8,
+          "radialSegments": 5,
+          "branchSamples": 3,
+          "barkColor": 8017456,
+          "leafColor": 3044408
+        },
+        "foliage": {
+          "mass": 0,
+          "clusterDensity": 1.12,
+          "whorlDensity": 0.48,
+          "tipBias": 0.62,
+          "size": 0.54
+        },
+        "treeRealism": {
+          "crownSpread": 1.22,
+          "crownTaper": 0.34,
+          "trunkFlare": 0.34,
+          "trunkBend": 0.45,
+          "branchGnarl": 0.44,
+          "windFlex": 0.48,
+          "colorVariance": 0.14
+        }
+      },
+      "weight": 1,
+      "density": 0.18,
+      "scale": 10,
+      "environment": {
+        "light": 0.7128677017590392,
+        "moisture": 0.72610248534134,
+        "crowding": 0.32,
+        "biomeWarmth": 0.7823895546394818
+      },
+      "seed": 293546500,
+      "enabled": true
+    }
+  ]
+}

@@ -9,7 +9,7 @@ import {
   genomeForBiomePatch,
   treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
-import { resolveEcologySample, type EcologySample } from "./tellus-ecology";
+import { resolveEcologySample, type EcologyBiomeId, type EcologySample } from "./tellus-ecology";
 import {
   branchModuleLodView,
   branchModuleTreeFromSpecies,
@@ -28,7 +28,7 @@ import {
   isAssetMixEntry,
   loadActiveBiomeMixRegistryForWorld,
   loadActiveBiomeMixRegistryFromServer,
-  makeEcologyBiomeMix,
+  makeAuthoredEcologyBiomeMix,
   makeTerrainPaintBiomeMix,
   type TellusBiomeMixDefinition,
   type TellusBiomeAssetTemplate,
@@ -846,6 +846,13 @@ export function createProcPlantVegetation(
   const stemGeometryCache = new Map<ProcPlantTemplate, THREE.BufferGeometry>();
   const organGeometryCache = new Map<string, THREE.BufferGeometry>();
   const globalAssetTemplates = new Map<string, TellusBiomeAssetTemplate>();
+  const authoredDefaultMixByBiome = new Map<EcologyBiomeId, TellusBiomeMixDefinition | null>();
+  const authoredDefaultMixForBiome = (biome: EcologyBiomeId): TellusBiomeMixDefinition | null => {
+    if (authoredDefaultMixByBiome.has(biome)) return authoredDefaultMixByBiome.get(biome) ?? null;
+    const mix = makeAuthoredEcologyBiomeMix(biome);
+    authoredDefaultMixByBiome.set(biome, mix);
+    return mix;
+  };
   const stemGeometryForTemplate = (template: ProcPlantTemplate): THREE.BufferGeometry => {
     const cached = stemGeometryCache.get(template);
     if (cached) return cached;
@@ -1119,7 +1126,10 @@ export function createProcPlantVegetation(
     const z0 = chunk.cz * chunkSize;
     const attempts = plantCap * 5;
     const grassCarpetPaints = new Set<TerrainPaintKind>();
-    const ecologyMixByRegion = new Map<string, TellusBiomeMixDefinition | undefined>();
+    const ecologyMixByRegion = new Map<string, {
+      authored: TellusBiomeMixDefinition | null;
+      custom: TellusBiomeMixDefinition | undefined;
+    }>();
     const defaultMixByPaint = new Map<TerrainPaintKind, TellusBiomeMixDefinition>();
     const defaultMixForPaint = (paint: TerrainPaintKind): TellusBiomeMixDefinition => {
       let mix = defaultMixByPaint.get(paint);
@@ -1135,9 +1145,13 @@ export function createProcPlantVegetation(
       height: number,
       paint: TerrainPaintKind | null,
       ecologySeed: number,
-    ): TellusBiomeMixDefinition | undefined => {
+    ): {
+      authored: TellusBiomeMixDefinition | null;
+      custom: TellusBiomeMixDefinition | undefined;
+    } => {
       const regionKey = options.ecologyRegionKey?.(x, z) ?? chunk.key;
-      if (ecologyMixByRegion.has(regionKey)) return ecologyMixByRegion.get(regionKey);
+      const cached = ecologyMixByRegion.get(regionKey);
+      if (cached) return cached;
       const ecology = options.sampleEcology?.(x, z, height, paint, ecologySeed) ??
         resolveEcologySample({
           seed: ecologySeed,
@@ -1147,9 +1161,12 @@ export function createProcPlantVegetation(
           slope: estimateSlope(x, z, height),
           terrainPaint: paint,
         });
-      const mix = activeBiomeMixRegistry.mixesByEcologyBiome[ecology.biome];
-      ecologyMixByRegion.set(regionKey, mix);
-      return mix;
+      const mixes = {
+        authored: authoredDefaultMixForBiome(ecology.biome),
+        custom: activeBiomeMixRegistry.mixesByEcologyBiome[ecology.biome],
+      };
+      ecologyMixByRegion.set(regionKey, mixes);
+      return mixes;
     };
 
     const grassRing = Math.max(
@@ -1185,8 +1202,10 @@ export function createProcPlantVegetation(
         if (options.isExcluded?.(x, z, height)) continue;
         const paint = options.samplePaint(x, z);
         if (!paint || paint === "stone" || paint === "brick") continue;
-        const mix = ecologyMixAt(x, z, height, paint, cellSeed) ??
+        const ecologyMixes = ecologyMixAt(x, z, height, paint, cellSeed);
+        const mix = ecologyMixes.custom ??
           activeBiomeMixRegistry.mixesByTerrainPaint[paint] ??
+          ecologyMixes.authored ??
           defaultMixForPaint(paint);
         const grassEntries = mix.entries
           .filter((entry) => entry.enabled && !isAssetMixEntry(entry))
@@ -1270,8 +1289,10 @@ export function createProcPlantVegetation(
       const lodDensity = chunk.lod === 2 ? 0.65 : chunk.lod === 1 ? 0.52 : 0.48;
       const customMix = activeBiomeMixRegistry.mixesByEcologyBiome[ecology.biome] ??
         (paint ? activeBiomeMixRegistry.mixesByTerrainPaint[paint] : undefined);
-      const customEntry = customMix ? chooseBiomeMixEntry(customMix, rand, densityMultiplier, lodDensity) : null;
-      if (customMix && !customEntry) continue;
+      const authoredMix = customMix ? null : authoredDefaultMixForBiome(ecology.biome);
+      const selectedMix = customMix ?? authoredMix;
+      const customEntry = selectedMix ? chooseBiomeMixEntry(selectedMix, rand, densityMultiplier, lodDensity) : null;
+      if (selectedMix && !customEntry) continue;
       const patch = customEntry ? null : biomePatchForEcology(ecology, patchSeed) ?? biomePatchForPaint(paint, patchSeed);
       if (!customEntry && (!patch || rand() > patch.density * densityMultiplier * lodDensity)) continue;
       if (customEntry && isAssetMixEntry(customEntry)) {
@@ -1310,7 +1331,11 @@ export function createProcPlantVegetation(
       const treeBackend = patch ? treeBackendForBiomePatch(patch) : undefined;
       const environment = customEntry ? customEntry.environment : environmentForBiomePatch(patch!);
       const baseScale = customEntry ? customEntry.scale : patch!.scale;
-      const renderSeed = customEntry ? (customEntry.seed ^ patchSeed) : (patch!.seed ^ i);
+      const renderSeed = customEntry
+        ? authoredMix
+          ? customEntry.seed
+          : customEntry.seed ^ patchSeed
+        : patch!.seed ^ i;
       const distanceToPlayer = Math.hypot(x - (lastPlayerX ?? x), z - (lastPlayerZ ?? z));
       const detailDistance = viewMode() === "third" ? PROC_TREE_DETAIL_DISTANCE_THIRD : PROC_TREE_DETAIL_DISTANCE;
       const useDetailedTree = distanceToPlayer <= detailDistance;
