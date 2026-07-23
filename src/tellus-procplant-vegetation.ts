@@ -216,6 +216,7 @@ const PROC_TREE_NEAR_SCALE = 1.85;
 const PROC_TREE_STABLE_SCALE = PROC_TREE_NEAR_SCALE;
 const PROC_TREE_DETAIL_DISTANCE = 58;
 const PROC_TREE_DETAIL_DISTANCE_THIRD = 72;
+const PROC_TREE_NEAR_DETAIL_RATIO = 0.45;
 const PROC_TREE_IMPOSTOR_DISTANCE_FACTOR = 0.9;
 const PROC_TREE_IMPOSTOR_ATLAS_SIZE = 512;
 const PROC_TREE_IMPOSTOR_GRID_SIZE = 8;
@@ -228,6 +229,35 @@ const PROC_GROUND_PLANT_FADE_DISTANCE_THIRD = 96;
 const PROC_GROUND_PLANT_MIN_DENSITY = 0.22;
 const PROCPLANT_RENDER_STYLE_REVISION = 11;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
+
+const branchModuleDistanceLod = (
+  distanceToPlayer: number,
+  detailDistance: number,
+): BranchModuleLodLevel => {
+  const distanceRatio = THREE.MathUtils.clamp(distanceToPlayer / Math.max(1, detailDistance), 0, 1);
+  return distanceRatio < 0.45 ? 0 : distanceRatio < 0.75 ? 1 : 2;
+};
+
+export const branchModuleLodForTree = (
+  chunkLod: BranchModuleLodLevel,
+  distanceToPlayer: number,
+  detailDistance: number,
+  fps: number,
+): BranchModuleLodLevel => {
+  const distanceRatio = THREE.MathUtils.clamp(distanceToPlayer / Math.max(1, detailDistance), 0, 1);
+  const distanceLod = branchModuleDistanceLod(distanceToPlayer, detailDistance);
+  const computeLod: BranchModuleLodLevel = fps < 32 ? 2 : fps < 48 ? 1 : 0;
+  const pressuredLod = Math.max(chunkLod, distanceLod, computeLod) as BranchModuleLodLevel;
+
+  // Chunk rings are intentionally coarse and compute pressure is global, so neither should make a
+  // tree beside the player collapse to the sparsest structural view. Nearby trees may simplify once,
+  // retaining the connected medium crown, while farther trees remain free to use LOD2 under distance,
+  // chunk, or FPS pressure.
+  if (distanceRatio < PROC_TREE_NEAR_DETAIL_RATIO) {
+    return Math.min(pressuredLod, 1) as BranchModuleLodLevel;
+  }
+  return pressuredLod;
+};
 const BIOME_MIX_SERVER_REFRESH_FALLBACK_MS = 60_000;
 const LOW_FPS_BUILD_BUDGET = 1;
 const NORMAL_BUILD_BUDGET = 2;
@@ -1710,9 +1740,6 @@ export function createProcPlantVegetation(
           chunk.needsColdRefinement = true;
           continue;
         }
-        const distanceRatio = THREE.MathUtils.clamp(distanceToPlayer / detailDistance, 0, 1);
-        const distanceLod: BranchModuleLodLevel = distanceRatio < 0.45 ? 0 : distanceRatio < 0.75 ? 1 : 2;
-        const computeLod: BranchModuleLodLevel = currentFps < 32 ? 2 : currentFps < 48 ? 1 : 0;
         const useConiferSpray = branchModuleFoliageIsConiferSpray(genome);
         const foliageKind: "leaf" | "coniferSpray" = useConiferSpray ? "coniferSpray" : "leaf";
         const leafKey = geometryKeyFor(genome, {
@@ -1757,8 +1784,9 @@ export function createProcPlantVegetation(
         // attached leaves; it never swaps the tree for an unrelated conifer/lollipop silhouette.
         const structuralTree = branchModuleLodView(
           moduleTree,
-          Math.max(chunk.lod, distanceLod, computeLod) as BranchModuleLodLevel,
+          branchModuleLodForTree(chunk.lod, distanceToPlayer, detailDistance, currentFps),
         );
+        const distanceLod = branchModuleDistanceLod(distanceToPlayer, detailDistance);
         const branchRadialSegments = procPlantBranchRadialSegments(chunk.lod, distanceLod);
         chunk.stats.branchSegments += structuralTree.segments.length;
         chunk.stats.attachedLeaves += structuralTree.leaves.length;
