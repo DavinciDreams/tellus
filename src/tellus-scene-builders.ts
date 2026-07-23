@@ -1326,19 +1326,23 @@ export function createPondWater(options: {
   const waterLevel = options.waterLevel ?? pondWaterLevel();
   const waterSettings = resolvedWaterSettings(options.waterSettings);
   const palette = WATER_STYLE_COLORS[waterSettings.style];
+  const pondColor = new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.62);
   const water = new THREE.Mesh(
     new THREE.CircleGeometry(radius, 96),
-    options.animated
-      ? createBackdropWaterMaterial(waterSettings)
-      : new THREE.MeshBasicMaterial({
-          color: new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.55),
-          transparent: true,
-          opacity: Math.min(0.86, waterSettings.opacity * 0.78),
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        }),
+    new THREE.MeshPhysicalMaterial({
+      color: pondColor,
+      roughness: 0.16,
+      metalness: 0.02,
+      clearcoat: 0.82,
+      clearcoatRoughness: 0.12,
+      transparent: true,
+      opacity: Math.min(0.84, waterSettings.opacity * 0.76),
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
   );
   water.name = "tellus-pond-surface";
+  water.userData = { pondStillWater: true };
   water.rotation.x = -Math.PI / 2;
   water.position.set(center.x, waterLevel, center.z);
   water.renderOrder = 2;
@@ -1346,21 +1350,28 @@ export function createPondWater(options: {
   const rippleMaterial = new THREE.MeshBasicMaterial({
     color: palette.foam,
     transparent: true,
-    opacity: 0.18 + waterSettings.waveStrength * 0.18,
+    opacity: 0,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
-  const rippleGeometry = new THREE.RingGeometry(0.88, 0.93, 96);
+  const rippleGeometry = new THREE.RingGeometry(0.82, 1, 64);
   const ripples = new THREE.Group();
   ripples.name = "tellus-pond-ripples";
   ripples.position.set(center.x, waterLevel + 0.035, center.z);
-  ripples.rotation.x = -Math.PI / 2;
+  ripples.userData = { center: { ...center }, radius };
 
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 7; i++) {
     const ripple = new THREE.Mesh(rippleGeometry, rippleMaterial.clone());
-    const scale = radius * (0.28 + i * 0.18);
-    ripple.scale.setScalar(scale);
-    ripple.userData = { rippleIndex: i };
+    ripple.rotation.x = -Math.PI / 2;
+    ripple.visible = false;
+    ripple.renderOrder = 3;
+    ripple.userData = {
+      rippleIndex: i,
+      active: false,
+      startedAt: Number.NEGATIVE_INFINITY,
+      durationMs: 1400,
+      strength: 0,
+    };
     ripples.add(ripple);
   }
 
@@ -1378,6 +1389,64 @@ export function createPondWater(options: {
 
   group.add(shore, water, ripples);
   return group;
+}
+
+export function triggerPondRipple(
+  pondWater: THREE.Group,
+  position: { x: number; z: number },
+  nowMs: number,
+  strength = 1,
+): boolean {
+  if (!pondWater.visible) return false;
+  const ripples = pondWater.getObjectByName("tellus-pond-ripples");
+  const center = ripples?.userData.center as { x: number; z: number } | undefined;
+  const radius = Number(ripples?.userData.radius);
+  if (!ripples || !center || !Number.isFinite(radius) || radius <= 0) return false;
+  if (Math.hypot(position.x - center.x, position.z - center.z) > radius) return false;
+
+  const pool = ripples.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+  if (pool.length === 0) return false;
+  const ripple = pool.find((child) => child.userData.active !== true) ??
+    pool.reduce((oldest, child) =>
+      Number(child.userData.startedAt) < Number(oldest.userData.startedAt) ? child : oldest,
+    );
+  const normalizedStrength = clamp(strength, 0.25, 1.5);
+  ripple.position.set(position.x - center.x, 0, position.z - center.z);
+  ripple.scale.setScalar(0.12 + normalizedStrength * 0.08);
+  ripple.visible = true;
+  ripple.userData.active = true;
+  ripple.userData.startedAt = nowMs;
+  ripple.userData.durationMs = 1150 + normalizedStrength * 350;
+  ripple.userData.strength = normalizedStrength;
+  if (ripple.material instanceof THREE.MeshBasicMaterial) {
+    ripple.material.opacity = 0.34 * normalizedStrength;
+  }
+  return true;
+}
+
+export function updatePondRipples(pondWater: THREE.Group, nowMs: number): void {
+  const ripples = pondWater.getObjectByName("tellus-pond-ripples");
+  const radius = Number(ripples?.userData.radius);
+  if (!ripples || !Number.isFinite(radius) || radius <= 0) return;
+  for (const child of ripples.children) {
+    if (!(child instanceof THREE.Mesh) || child.userData.active !== true) continue;
+    const startedAt = Number(child.userData.startedAt);
+    const durationMs = Math.max(1, Number(child.userData.durationMs) || 1400);
+    const strength = clamp(Number(child.userData.strength) || 1, 0.25, 1.5);
+    const phase = clamp((nowMs - startedAt) / durationMs, 0, 1);
+    if (phase >= 1) {
+      child.visible = false;
+      child.userData.active = false;
+      if (child.material instanceof THREE.MeshBasicMaterial) child.material.opacity = 0;
+      continue;
+    }
+    const eased = 1 - (1 - phase) ** 2;
+    const maxScale = Math.min(radius * 0.52, 2.4 + strength * 1.35);
+    child.scale.setScalar(THREE.MathUtils.lerp(0.12 + strength * 0.08, maxScale, eased));
+    if (child.material instanceof THREE.MeshBasicMaterial) {
+      child.material.opacity = 0.34 * strength * (1 - phase) ** 1.7;
+    }
+  }
 }
 
 export function inferGeneratedKind(

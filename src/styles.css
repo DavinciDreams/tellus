@@ -431,11 +431,13 @@ textarea::placeholder {
   color: #ffe9a8;
 }
 
-.world-icon-button.danger {
+.world-icon-button.danger,
+.world-action-button.danger {
   color: #ffb6a9;
 }
 
-.world-icon-button.danger.armed {
+.world-icon-button.danger.armed,
+.world-action-button.danger.armed {
   min-width: 70px;
   border-color: rgb(255 116 91 / 62%);
   background: rgb(88 21 18 / 64%);

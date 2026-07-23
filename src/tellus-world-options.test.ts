@@ -5,6 +5,7 @@ import {
   DEFAULT_WORLD_CREATION_TEMPLATE_IDS,
   WORLD_CREATION_TEMPLATES,
   WORLD_TEMPLATE_OPTIONS,
+  defaultChunkSizeForWorldTemplate,
   fallbackWorldDisplayName,
   isProtectedWorldId,
   normalizeDayNightCycleMs,
@@ -66,6 +67,19 @@ describe("world option helpers", () => {
     expect(ALL_WORLD_CREATION_TEMPLATES).toHaveLength(
       WORLD_CREATION_TEMPLATES.length + ADVANCED_WORLD_TEMPLATE_OPTIONS.length,
     );
+  });
+
+  it("uses the selected template's intended world size", () => {
+    expect(defaultChunkSizeForWorldTemplate("tellus")).toBe(64);
+    expect(defaultChunkSizeForWorldTemplate("evoflow-coral-fold")).toBe(24);
+    expect(defaultChunkSizeForWorldTemplate("interior-studio")).toBe(8);
+  });
+
+  it("gives Coral Archipelago a calmer Main-like lagoon ocean", () => {
+    const main = ALL_WORLD_CREATION_TEMPLATES.find((template) => template.id === "tellus");
+    const coral = ALL_WORLD_CREATION_TEMPLATES.find((template) => template.id === "evoflow-coral-fold");
+    expect(main?.defaultWaterSettings).toEqual({ style: "lagoon", opacity: 0.72, waveStrength: 1 });
+    expect(coral?.defaultWaterSettings).toEqual({ style: "lagoon", opacity: 0.68, waveStrength: 0.8 });
   });
 
   it("uses friendly picker labels without appending internal world ids", () => {

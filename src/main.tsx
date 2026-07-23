@@ -160,7 +160,7 @@ import { applyActiveBiomeMixRegistryForWorld } from "./tellus-biome-mix";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, assetStoreLodModelUrl, assetStoreOptimizedAssetUrls, toAssetId } from "./tellus-urls-identity";
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded, activeEvoflowWorldBiomeCellAt } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
-import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
+import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, triggerPondRipple, updatePondRipples, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial, terrainKindCode, terrainTextureDiagnostics } from "./tellus-terrain-material";
 import { largeWorldBaseHeight, largeWorldBiomeCellAt, largeWorldTerrainKind, usesContinentalChunkedTerrain } from "./tellus-large-world-terrain";
 import {
@@ -219,6 +219,7 @@ import {
   ALL_WORLD_CREATION_TEMPLATES,
   WORLD_CREATION_TEMPLATES,
   WORLD_TEMPLATE_OPTIONS,
+  defaultChunkSizeForWorldTemplate,
   fallbackWorldDisplayName,
   isProtectedWorldId,
   liveDayNightPhase,
@@ -2928,6 +2929,8 @@ function createTellusWorld(
   setAvatarUserScale(visitor, localAvatarScale, true); // persisted size from the very first frame
   // Local locomotion state is derived per-frame from the position delta in animate().
   const lastLocalAvatarPos = { x: visitorPosition.x, z: visitorPosition.z };
+  const lastPondRipplePosition = { x: visitorPosition.x, z: visitorPosition.z };
+  let lastPondRippleAt = Number.NEGATIVE_INFINITY;
   let pointWalkTarget: Vec3 | null = null;
   // Diagnostics hooks (smoke tests / console) — mirror the other __tellus* hooks. The referenced
   // closures are defined later in this function; the arrow bodies only resolve them at call time.
@@ -8994,6 +8997,7 @@ function createTellusWorld(
       throwEuler.set(thing.rotationX ?? 0, thing.rotationY, thing.rotationZ ?? 0),
     );
     let lastFlightPublish = 0;
+    let pondSplashCreated = false;
     const applyPose = (p: THREE.Vector3, q: THREE.Quaternion) => {
       thing.position = { x: p.x, y: p.y, z: p.z };
       throwEuler.setFromQuaternion(q);
@@ -9015,6 +9019,19 @@ function createTellusWorld(
       restitution: isBalloon ? 0.55 : 0.42,
       onFrame: (p, q) => {
         applyPose(p, q);
+        if (
+          !pondSplashCreated &&
+          pondWater.visible &&
+          waterFeatureContains(p.x, p.z, -0.15) &&
+          p.y - radius * 0.25 <= waterFeatureLevel() + 0.08
+        ) {
+          pondSplashCreated = triggerPondRipple(
+            pondWater,
+            { x: p.x, z: p.z },
+            performance.now(),
+            THREE.MathUtils.clamp(0.7 + velocity.length() * 0.045, 0.7, 1.5),
+          );
+        }
         const nowMs = performance.now();
         if (nowMs - lastFlightPublish > 150) {
           lastFlightPublish = nowMs;
@@ -9045,17 +9062,33 @@ function createTellusWorld(
       if (mesh) updateGeneratedBuildingLod(thing, mesh);
     }
 
-    const ripples = pondWater.getObjectByName("tellus-pond-ripples");
-    if (ripples) {
-      ripples.children.forEach((child, index) => {
-        const phase = (now * 0.00028 + index * 0.23) % 1;
-        const scale = waterFeatureRadius * (0.22 + phase * 0.72);
-        child.scale.setScalar(scale);
-        const material = (child as THREE.Mesh).material;
-        if (material instanceof THREE.MeshBasicMaterial) {
-          material.opacity = Math.max(0, 0.32 * (1 - phase));
-        }
-      });
+    updatePondRipples(pondWater, now);
+    const pondStepDistance = Math.hypot(
+      visitorPosition.x - lastPondRipplePosition.x,
+      visitorPosition.z - lastPondRipplePosition.z,
+    );
+    if (
+      pondWater.visible &&
+      waterFeatureContains(visitorPosition.x, visitorPosition.z, -0.2) &&
+      pondStepDistance >= 0.24 &&
+      now - lastPondRippleAt >= 145
+    ) {
+      const rippleStrength = THREE.MathUtils.clamp(0.62 + pondStepDistance * 0.7, 0.62, 1.25);
+      if (
+        triggerPondRipple(
+          pondWater,
+          { x: visitorPosition.x, z: visitorPosition.z },
+          now,
+          rippleStrength,
+        )
+      ) {
+        lastPondRipplePosition.x = visitorPosition.x;
+        lastPondRipplePosition.z = visitorPosition.z;
+        lastPondRippleAt = now;
+      }
+    } else if (!waterFeatureContains(visitorPosition.x, visitorPosition.z, 0.1)) {
+      lastPondRipplePosition.x = visitorPosition.x;
+      lastPondRipplePosition.z = visitorPosition.z;
     }
 
     let index = 0;
@@ -10610,7 +10643,12 @@ function createTellusWorld(
         !event.altKey
       ) {
         const target = dragGroundTarget(event);
-        if (target) setPointWalkTarget(target);
+        if (target) {
+          if (pondWater.visible && waterFeatureContains(target.x, target.z, -0.12)) {
+            triggerPondRipple(pondWater, target, performance.now(), 0.72);
+          }
+          setPointWalkTarget(target);
+        }
       }
     }
     isDragging = false;
@@ -13258,7 +13296,11 @@ function App(): React.ReactElement {
   const [newWorldName, setNewWorldName] = useState("");
   const [newWorldPanelOpen, setNewWorldPanelOpen] = useState(false);
   const [newWorldPrivate, setNewWorldPrivate] = useState(false);
-  const [newWorldChunkSize, setNewWorldChunkSize] = useState(8);
+  const [newWorldChunkSize, setNewWorldChunkSize] = useState(() =>
+    defaultChunkSizeForWorldTemplate(
+      parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
+    ),
+  );
   const [newWorldDayNightMode, setNewWorldDayNightMode] = useState<DayNightMode>(
     runtimeConfig.dayNightMode,
   );
@@ -13315,6 +13357,7 @@ function App(): React.ReactElement {
   const NEW_WORLD_NAME_KEY = "tellus.newWorldName";
   const NEW_WORLD_PRIVATE_KEY = "tellus.newWorldPrivate";
   const NEW_WORLD_CHUNK_SIZE_KEY = "tellus.newWorldChunkSize";
+  const NEW_WORLD_CHUNK_SIZE_TEMPLATE_KEY = "tellus.newWorldChunkSizeTemplate";
   const NEW_WORLD_DAY_NIGHT_MODE_KEY = "tellus.newWorldDayNightMode";
   const NEW_WORLD_LIGHTING_MOOD_KEY = "tellus.newWorldLightingMood";
   const NEW_WORLD_WATER_SETTINGS_KEY = "tellus.newWorldWaterSettings";
@@ -13325,6 +13368,7 @@ function App(): React.ReactElement {
   const defaultLandShapeRef = useRef<LandShapeOverrides | undefined>(runtimeConfig.landShape);
   const pendingWorldProfileOverridesRef = useRef<Record<string, { profile: WorldRenderProfile; expiresAt: number }>>({});
   const metadataWriteDeniedRef = useRef<Record<string, number>>({});
+  const newWorldFormHydratedRef = useRef(false);
 
   interface WorldRenderProfile {
     displayName?: string;
@@ -13648,6 +13692,9 @@ function App(): React.ReactElement {
       setNewWorldLightingMood(preset.defaultLightingMood);
       setNewWorldDayNightMode(preset.defaultDayNightMode);
       setNewWorldChunkSize(preset.defaultChunkSize);
+      if (preset.defaultWaterSettings) {
+        setNewWorldWaterSettings(preset.defaultWaterSettings);
+      }
     }
   };
 
@@ -14241,15 +14288,15 @@ function App(): React.ReactElement {
         await refreshWorldList();
       }
     };
-    if (!canAttemptServerDelete && runtimeConfig.worldApiBase) {
-      showWorldNote(`Cannot delete "${id}" on server: ${canDeleteWorld(id) ? "not authorized" : "not owner/admin"}`, 5000);
-      await refreshWorldList(id);
-      return;
-    }
     if (!canAttemptServerDelete) {
       forgetWorld(id);
       await moveAwayFromRemovedWorld();
-      showWorldNote(`Removed local world "${id}"`);
+      showWorldNote(
+        runtimeConfig.worldApiBase
+          ? `Removed "${label}" from this browser; the server copy remains`
+          : `Removed local world "${label}"`,
+        5000,
+      );
       return;
     }
     const token = getSession()?.token;
@@ -14356,7 +14403,11 @@ function App(): React.ReactElement {
       setLegacyCleanupProgress(null);
     }
   };
-  const renderWorldDeleteButton = (target: string, className = "world-icon-button") => {
+  const renderWorldDeleteButton = (
+    target: string,
+    className = "world-icon-button",
+    showLabel = false,
+  ) => {
     if (isProtectedWorldId(target)) return null;
     const armed = pendingDeleteWorld === target;
     const serverDeleteAllowed = Boolean(runtimeConfig.worldApiBase && canDeleteWorld(target));
@@ -14383,7 +14434,16 @@ function App(): React.ReactElement {
         }}
         className={`${className} ${armed ? "danger armed" : "danger"}`}
       >
-        {deletingWorld ? "..." : armed ? "Confirm" : <Trash2 size={14} />}
+        {deletingWorld ? (
+          "..."
+        ) : armed ? (
+          "Confirm"
+        ) : (
+          <>
+            <Trash2 size={14} />
+            {showLabel && (serverDeleteAllowed ? "Delete world" : "Remove from picker")}
+          </>
+        )}
       </button>
     );
   };
@@ -15044,12 +15104,12 @@ function App(): React.ReactElement {
           const savedWorldName = window.localStorage.getItem(NEW_WORLD_NAME_KEY);
           const savedPrivate = window.localStorage.getItem(NEW_WORLD_PRIVATE_KEY);
           const savedChunkSize = window.localStorage.getItem(NEW_WORLD_CHUNK_SIZE_KEY);
+          const savedChunkSizeTemplate = window.localStorage.getItem(NEW_WORLD_CHUNK_SIZE_TEMPLATE_KEY);
           const savedDayNightMode = window.localStorage.getItem(NEW_WORLD_DAY_NIGHT_MODE_KEY);
           const savedLightingMood = window.localStorage.getItem(NEW_WORLD_LIGHTING_MOOD_KEY);
           const savedWaterSettings = window.localStorage.getItem(NEW_WORLD_WATER_SETTINGS_KEY);
-          setNewWorldTemplate(
-            parseWorldTemplateId(savedTemplate, defaultWorldTemplateRef.current),
-          );
+          const hydratedTemplate = parseWorldTemplateId(savedTemplate, defaultWorldTemplateRef.current);
+          setNewWorldTemplate(hydratedTemplate);
           setNewWorldSkyboxUrl(
             savedSkyboxUrl ||
               defaultSkyboxUrlRef.current ||
@@ -15060,12 +15120,14 @@ function App(): React.ReactElement {
           setNewWorldDayNightMode(parseDayNightMode(savedDayNightMode, runtimeConfig.dayNightMode));
           setNewWorldLightingMood(parseLightingMood(savedLightingMood, runtimeConfig.lightingMood));
           setNewWorldWaterSettings(parseWaterSettings(savedWaterSettings ? JSON.parse(savedWaterSettings) : undefined));
-          if (savedChunkSize) {
+          setNewWorldChunkSize(defaultChunkSizeForWorldTemplate(hydratedTemplate));
+          if (savedChunkSize && savedChunkSizeTemplate === hydratedTemplate) {
             const parsed = Math.round(Number(savedChunkSize));
             if (Number.isFinite(parsed)) {
               setNewWorldChunkSize(Math.min(64, Math.max(1, parsed)));
             }
           }
+          newWorldFormHydratedRef.current = true;
         } catch {
           setNewWorldTemplate(defaultWorldTemplateRef.current);
           setNewWorldSkyboxUrl(
@@ -15073,10 +15135,11 @@ function App(): React.ReactElement {
           );
           setNewWorldName("");
           setNewWorldPrivate(false);
-          setNewWorldChunkSize(8);
+          setNewWorldChunkSize(defaultChunkSizeForWorldTemplate(defaultWorldTemplateRef.current));
           setNewWorldDayNightMode(runtimeConfig.dayNightMode);
           setNewWorldLightingMood(runtimeConfig.lightingMood);
           setNewWorldWaterSettings(runtimeConfig.waterSettings);
+          newWorldFormHydratedRef.current = true;
         }
         const sharedLocation = parseSharedLocation();
         sharedLocationRef.current = sharedLocation;
@@ -15108,12 +15171,14 @@ function App(): React.ReactElement {
   }, []);
 
   useEffect(() => {
+    if (!newWorldFormHydratedRef.current) return;
     try {
       window.localStorage.setItem(NEW_WORLD_TEMPLATE_KEY, newWorldTemplate);
       window.localStorage.setItem(NEW_WORLD_SKYBOX_KEY, newWorldSkyboxUrl);
       window.localStorage.setItem(NEW_WORLD_NAME_KEY, newWorldName);
       window.localStorage.setItem(NEW_WORLD_PRIVATE_KEY, newWorldPrivate ? "1" : "0");
       window.localStorage.setItem(NEW_WORLD_CHUNK_SIZE_KEY, String(newWorldChunkSize));
+      window.localStorage.setItem(NEW_WORLD_CHUNK_SIZE_TEMPLATE_KEY, newWorldTemplate);
       window.localStorage.setItem(NEW_WORLD_DAY_NIGHT_MODE_KEY, newWorldDayNightMode);
       window.localStorage.setItem(NEW_WORLD_LIGHTING_MOOD_KEY, newWorldLightingMood);
       window.localStorage.setItem(NEW_WORLD_WATER_SETTINGS_KEY, JSON.stringify(newWorldWaterSettings));
@@ -16797,6 +16862,12 @@ function App(): React.ReactElement {
             >
               <Plus size={14} /> New
             </button>
+            {activeWorldId && !isProtectedWorldId(activeWorldId) &&
+              renderWorldDeleteButton(
+                activeWorldId,
+                "world-action-button active-world-delete-action",
+                true,
+              )}
             {worldCreateNote && (
               <span className="world-create-note">
                 {worldCreateNote}
@@ -16856,7 +16927,7 @@ function App(): React.ReactElement {
                     {LIGHTING_MOOD_OPTIONS.find((option) => option.id === newWorldLightingMood)?.label ??
                       newWorldLightingMood} - {DAY_NIGHT_MODE_OPTIONS.find((option) => option.id === newWorldDayNightMode)?.label ??
                       newWorldDayNightMode} - {WATER_STYLE_OPTIONS.find((option) => option.id === newWorldWaterSettings.style)?.label ??
-                      newWorldWaterSettings.style}
+                      newWorldWaterSettings.style} - {newWorldChunkSize} chunks
                   </small>
                 </div>
                 {ADVANCED_WORLD_TEMPLATE_OPTIONS.length > 0 && (
@@ -16973,7 +17044,7 @@ function App(): React.ReactElement {
                     />
                   </label>
                   <label className="world-field compact">
-                    <span>Size</span>
+                    <span>Size (chunks)</span>
                     <input
                       type="number"
                       min={1}

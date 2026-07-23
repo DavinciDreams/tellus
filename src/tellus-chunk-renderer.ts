@@ -6,6 +6,7 @@ import {
   CHUNK_SEGMENTS,
   CHUNK_SPAN,
   CHUNK_VERTEX_COUNT,
+  SEA_LEVEL,
   getChunkedWorldChunks,
 } from "./tellus-constants";
 import {
@@ -226,9 +227,13 @@ export function createChunkTerrainGeometry(
     const next = (i + 1) % ring.length;
     const a = ring[i];
     const b = ring[next];
+    const aHeight = positions[a * 3 + 1] ?? Number.POSITIVE_INFINITY;
+    const bHeight = positions[b * 3 + 1] ?? Number.POSITIVE_INFINITY;
+    const edgeIsSubmerged = aHeight <= SEA_LEVEL + 0.08 && bHeight <= SEA_LEVEL + 0.08;
     if (
-      (terrainKindCodes[a] ?? 0) === TERRAIN_KIND_CODE_WATER &&
-      (terrainKindCodes[b] ?? 0) === TERRAIN_KIND_CODE_WATER
+      edgeIsSubmerged ||
+      ((terrainKindCodes[a] ?? 0) === TERRAIN_KIND_CODE_WATER &&
+        (terrainKindCodes[b] ?? 0) === TERRAIN_KIND_CODE_WATER)
     ) {
       continue;
     }
