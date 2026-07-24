@@ -294,16 +294,29 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
         vec2 waterUV = vWorldXZ;
         float t = uTime * 0.62 * wave;
         vec2 flow = vec2(t, -t * 0.73);
-        float waterLayer0 = worley(waterUV * (1.12 + wave * 0.24) + flow);
-        float waterLayer1 = worley(waterUV * (0.58 + wave * 0.14) - flow * 0.62);
+        // Layered, crossing directional waves keep the ocean in motion without adding another
+        // texture or render pass. The broad domain warp is inspired by the analytic spectrum in
+        // https://github.com/achrefelouafi/WaterThreeJS, but tuned for Tellus's lightweight water.
+        float directionalA = sin(dot(waterUV, vec2(0.052, 0.031)) + t * 1.35);
+        float directionalB = cos(dot(waterUV, vec2(-0.024, 0.061)) - t * 0.92);
+        float whorl = sin(
+          length(waterUV - uShoreCenter) * 0.027 - t * 0.7 + directionalA * 1.2
+        );
+        vec2 whorlOffset = vec2(
+          directionalB + whorl * 0.62,
+          directionalA - whorl * 0.48
+        ) * (0.16 + wave * 0.09) * (1.0 - uPondCalm * 0.88);
+        vec2 movingUV = waterUV + whorlOffset;
+        float waterLayer0 = worley(movingUV * (1.12 + wave * 0.24) + flow);
+        float waterLayer1 = worley(movingUV * (0.58 + wave * 0.14) - flow * 0.62);
         float surface = clamp(pow(waterLayer0 * waterLayer1, 0.54) * 1.18, 0.0, 1.0);
         float rippleScale = 0.11 + wave * 0.06;
         // Cheaper ripple normal: finite-difference only the PRIMARY octave (waterLayer0) instead of
         // recomputing the full two-octave surface at both offsets. Drops these 4 worley calls to 2 --
         // worley is ~9 cells x several sin each, the dominant per-pixel cost of horizon-filling water.
         // The perturbation normal is visually near-identical; the second octave barely moves the gradient.
-        float rippleX = worley((waterUV + vec2(rippleScale, 0.0)) * (1.12 + wave * 0.24) + flow);
-        float rippleZ = worley((waterUV + vec2(0.0, rippleScale)) * (1.12 + wave * 0.24) + flow);
+        float rippleX = worley((movingUV + vec2(rippleScale, 0.0)) * (1.12 + wave * 0.24) + flow);
+        float rippleZ = worley((movingUV + vec2(0.0, rippleScale)) * (1.12 + wave * 0.24) + flow);
         vec3 rippleNormal = normalize(vec3(
           (waterLayer0 - rippleX) * (2.6 + wave),
           0.28,
@@ -364,12 +377,17 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
   return material;
 }
 
-function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflector {
+function createOceanReflectionLayer(
+  geometry: THREE.BufferGeometry,
+  settings?: Partial<WaterSettings>,
+  motionStrength = 1,
+  textureSize = 512,
+  captureHz = 20,
+): Reflector {
   const water = resolvedWaterSettings(settings);
   const palette = WATER_STYLE_COLORS[water.style];
   const tint = new THREE.Color(palette.shallow).lerp(new THREE.Color(0xffffff), 0.34);
   const opacity = clamp(0.36 + water.opacity * 0.3, 0.46, 0.68);
-  const geometry = new THREE.CircleGeometry(OCEAN_RADIUS, 192);
   const shader = {
     name: "TellusOceanReflectionShader",
     uniforms: {
@@ -377,6 +395,8 @@ function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflecto
       tDiffuse: { value: null },
       textureMatrix: { value: null },
       opacity: { value: opacity },
+      time: { value: 0 },
+      motionStrength: { value: motionStrength },
     },
     vertexShader: /* glsl */`
       uniform mat4 textureMatrix;
@@ -398,6 +418,8 @@ function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflecto
       uniform vec3 color;
       uniform sampler2D tDiffuse;
       uniform float opacity;
+      uniform float time;
+      uniform float motionStrength;
       varying vec4 vUv;
       varying vec3 vWorldPosition;
 
@@ -420,10 +442,17 @@ function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflecto
 
       void main() {
         #include <logdepthbuf_fragment>
-        vec4 reflected = texture2DProj(tDiffuse, vUv);
+        float waveA = sin(dot(vWorldPosition.xz, vec2(0.041, 0.023)) + time * 0.82);
+        float waveB = cos(dot(vWorldPosition.xz, vec2(-0.018, 0.047)) - time * 0.61);
+        float whorl = sin(length(vWorldPosition.xz) * 0.018 - time * 0.44 + waveA);
+        vec2 distortion = vec2(waveB + whorl * 0.55, waveA - whorl * 0.42)
+          * 0.0018 * motionStrength;
+        vec4 reflectedUv = vUv;
+        reflectedUv.xy += distortion * vUv.w;
+        vec4 reflected = texture2DProj(tDiffuse, reflectedUv);
         float rippleBreakup =
-          noise(vWorldPosition.xz * 0.065) * 0.55 +
-          noise(vWorldPosition.xz * 0.19 + 17.0) * 0.45;
+          noise(vWorldPosition.xz * 0.065 + vec2(time * 0.025, -time * 0.018)) * 0.55 +
+          noise(vWorldPosition.xz * 0.19 + vec2(-time * 0.042, time * 0.031) + 17.0) * 0.45;
         float reflectionMask = smoothstep(0.08, 0.92, reflected.a) * mix(0.82, 1.0, rippleBreakup);
         vec3 softened = mix(reflected.rgb, color, 0.08);
         gl_FragColor = vec4(softened, opacity * reflectionMask);
@@ -437,8 +466,8 @@ function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflecto
     // 512² (was 1024²): the reflection is heavily softened (mixed 0.08 toward the water color and
     // broken up by ripple noise), so the resolution drop is invisible while quartering this extra
     // full-scene render pass's pixel cost — a real GPU-fill-rate saving on water-heavy views.
-    textureWidth: 512,
-    textureHeight: 512,
+    textureWidth: textureSize,
+    textureHeight: textureSize,
     color: tint,
     shader,
     multisample: 0,
@@ -448,11 +477,14 @@ function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflecto
     captures: 0,
     skipped: 0,
     lastCaptureMs: Number.NEGATIVE_INFINITY,
-    minIntervalMs: 1000 / 20, // 20 Hz (was 30): softened reflection needs no per-frame update
+    minIntervalMs: 1000 / captureHz,
   };
   const renderReflection = reflection.onBeforeRender;
   reflection.onBeforeRender = function (...args) {
     const now = performance.now();
+    if (reflection.material instanceof THREE.ShaderMaterial) {
+      reflection.material.uniforms.time.value = now * 0.001;
+    }
     if (now - reflectionState.lastCaptureMs < reflectionState.minIntervalMs) {
       reflectionState.skipped++;
       return;
@@ -462,6 +494,7 @@ function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflecto
     renderReflection.apply(this, args);
   };
   reflection.userData.tellusReflectionState = reflectionState;
+  reflection.userData.disposeReflector = () => reflection.getRenderTarget().dispose();
   reflection.position.z = 0.018;
   reflection.renderOrder = -3;
   reflection.frustumCulled = false;
@@ -477,18 +510,30 @@ function createOceanReflectionLayer(settings?: Partial<WaterSettings>): Reflecto
 export function createOceanSurface(
   useBackdropWater: boolean,
   settings?: Partial<WaterSettings>,
+  options: {
+    mode?: "ocean" | "lake";
+    width?: number;
+    depth?: number;
+  } = {},
 ): THREE.Mesh {
-  const geometry = new THREE.CircleGeometry(OCEAN_RADIUS, 192);
+  const mode = options.mode ?? "ocean";
+  const geometry = mode === "lake"
+    ? new THREE.PlaneGeometry(options.width ?? OCEAN_RADIUS * 2, options.depth ?? OCEAN_RADIUS * 2)
+    : new THREE.CircleGeometry(OCEAN_RADIUS, 192);
   const material = useBackdropWater
     ? createBackdropWaterMaterial(settings)
     : createFallbackOceanMaterial(settings);
   const ocean = new THREE.Mesh(geometry, material);
-  ocean.name = "tellus-surrounding-ocean";
+  ocean.name = mode === "lake" ? "tellus-inland-water-plane" : "tellus-surrounding-ocean";
+  ocean.userData.tellusWaterSurfaceMode = mode;
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.y = SEA_LEVEL;
   ocean.renderOrder = -4;
+  if (mode === "lake" && material instanceof THREE.ShaderMaterial && material.uniforms.uPondCalm) {
+    material.uniforms.uPondCalm.value = 1;
+  }
   if (!useBackdropWater) {
-    ocean.add(createOceanReflectionLayer(settings));
+    ocean.add(createOceanReflectionLayer(geometry.clone(), settings, mode === "lake" ? 0.22 : 1));
   } else {
     const reflectorTarget = material.userData.tellusReflectorTarget;
     if (reflectorTarget instanceof THREE.Object3D) {
@@ -912,6 +957,8 @@ export function disposeObject(object: THREE.Object3D): void {
   object.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     if (hasSharedBuffers && (child.userData?.sharedGltf || child.userData?.sharedProcedural)) return;
+    const disposeReflector = child.userData?.disposeReflector as (() => void) | undefined;
+    disposeReflector?.();
     child.geometry.dispose();
     disposeMaterial(child.material);
   });
@@ -1330,6 +1377,7 @@ export function createPondWater(options: {
   waterLevel?: number;
   animated?: boolean;
   simulated?: boolean;
+  baseSurface?: boolean;
   waterSettings?: Partial<WaterSettings>;
 } = {}): THREE.Group {
   const group = new THREE.Group();
@@ -1342,6 +1390,7 @@ export function createPondWater(options: {
   const waterSettings = resolvedWaterSettings(options.waterSettings);
   const palette = WATER_STYLE_COLORS[waterSettings.style];
   const pondColor = new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.62);
+  const baseSurface = options.baseSurface !== false;
   // Keep the fixed-size GPU simulation inexpensive, but map it across the full
   // semantic pond so outgoing rings can dissipate at the shoreline.
   const simulationRadius = options.simulated ? Math.min(radius, 36) : radius;
@@ -1355,31 +1404,49 @@ export function createPondWater(options: {
         foamColor: palette.foam,
       })
     : null;
+  const waterGeometry = new THREE.CircleGeometry(radius, 96);
   const water = new THREE.Mesh(
-    simulation
-      ? new THREE.PlaneGeometry(simulationRadius * 2, simulationRadius * 2, 96, 96)
-      : new THREE.CircleGeometry(radius, 96),
-    simulation?.material ??
-      new THREE.MeshPhysicalMaterial({
-        color: pondColor,
-        roughness: 0.16,
-        metalness: 0.02,
-        clearcoat: 0.82,
-        clearcoatRoughness: 0.12,
-        transparent: true,
-        opacity: Math.min(0.84, waterSettings.opacity * 0.76),
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
+    waterGeometry,
+    new THREE.MeshPhysicalMaterial({
+      color: pondColor,
+      roughness: 0.1,
+      metalness: 0.02,
+      clearcoat: 0.96,
+      clearcoatRoughness: 0.07,
+      transparent: true,
+      opacity: Math.min(0.84, waterSettings.opacity * 0.76),
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
   );
   water.name = "tellus-pond-surface";
   water.userData = {
-    pondStillWater: !simulation,
-    pondSimulatedWater: Boolean(simulation),
+    pondStillWater: true,
+    pondSimulatedWater: false,
   };
   water.rotation.x = -Math.PI / 2;
   water.position.set(center.x, waterLevel, center.z);
   water.renderOrder = 2;
+  water.visible = baseSurface;
+  if (baseSurface) {
+    const reflection = createOceanReflectionLayer(waterGeometry.clone(), waterSettings, 0.16, 256, 10);
+    reflection.name = "tellus-pond-reflection";
+    water.add(reflection);
+  }
+
+  const rippleSurface = simulation
+    ? new THREE.Mesh(
+        new THREE.PlaneGeometry(simulationRadius * 2, simulationRadius * 2, 96, 96),
+        simulation.material,
+      )
+    : null;
+  if (rippleSurface) {
+    rippleSurface.name = "tellus-pond-ripple-surface";
+    rippleSurface.userData.pondSimulatedWater = true;
+    rippleSurface.rotation.x = -Math.PI / 2;
+    rippleSurface.position.set(center.x, waterLevel + 0.025, center.z);
+    rippleSurface.renderOrder = 3;
+  }
 
   const rippleMaterial = new THREE.MeshBasicMaterial({
     color: palette.foam,
@@ -1425,10 +1492,11 @@ export function createPondWater(options: {
     group.userData.pondRippleSimulation = simulation;
     group.userData.disposePondSimulation = () => simulation.dispose();
     ripples.visible = false;
-    shore.visible = false;
+    shore.visible = baseSurface;
   }
 
   group.add(shore, water, ripples);
+  if (rippleSurface) group.add(rippleSurface);
   return group;
 }
 
@@ -1442,7 +1510,7 @@ export function triggerPondRipple(
   const simulation = pondWater.userData.pondRippleSimulation as PondRippleSimulation | undefined;
   if (simulation) {
     if (simulation.recenter(position)) {
-      const surface = pondWater.getObjectByName("tellus-pond-surface");
+      const surface = pondWater.getObjectByName("tellus-pond-ripple-surface");
       if (surface) {
         surface.position.x = simulation.center.x;
         surface.position.z = simulation.center.z;
@@ -1484,7 +1552,7 @@ export function positionPondRipplePatch(
   const simulation = pondWater.userData.pondRippleSimulation as PondRippleSimulation | undefined;
   if (!simulation) return false;
   simulation.recenter(position);
-  const surface = pondWater.getObjectByName("tellus-pond-surface");
+  const surface = pondWater.getObjectByName("tellus-pond-ripple-surface");
   if (!surface) return false;
   surface.position.set(simulation.center.x, waterLevel, simulation.center.z);
   return true;
