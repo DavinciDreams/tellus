@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tellus world tools exploration</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="min-h-screen overflow-hidden bg-[#070a09] text-stone-100 antialiased" style="font-family: Inter, ui-sans-serif, system-ui, sans-serif;">
+  <main class="relative min-h-screen overflow-hidden bg-[#0b0f0d]">
+    <img
+      src="https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=2400&q=86"
+      alt=""
+      class="absolute inset-0 h-full w-full object-cover opacity-45"
+    />
+    <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(7,12,9,0.08),rgba(7,10,9,0.84))]"></div>
+
+    <header class="relative z-20 flex items-center justify-between border-b border-white/10 bg-[#090d0b]/80 px-4 py-3 backdrop-blur-xl sm:px-6">
+      <div class="flex min-w-0 items-center gap-3">
+        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-200/20 bg-emerald-300/10 text-sm font-semibold tracking-tight text-emerald-100">T</div>
+        <div class="hidden sm:block">
+          <div class="text-sm font-medium tracking-tight">Tellus</div>
+          <div class="text-[11px] text-stone-400">World Weaver</div>
+        </div>
+        <button class="ml-1 flex min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.055] px-3 py-2 text-left hover:border-white/20 hover:bg-white/[0.085] focus:outline-none focus:ring-2 focus:ring-emerald-300/50" aria-label="Open current world settings">
+          <i data-lucide="globe-2" class="h-4 w-4 shrink-0 text-emerald-200"></i>
+          <span class="min-w-0">
+            <span class="block truncate text-xs font-medium">Cedar Valley</span>
+            <span class="block truncate text-[10px] text-stone-400">Current world · Saved</span>
+          </span>
+          <i data-lucide="chevron-down" class="h-3.5 w-3.5 shrink-0 text-stone-500"></i>
+        </button>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.045] text-stone-300 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-300/50" aria-label="Help and developer tools">
+          <i data-lucide="circle-help" class="h-4 w-4"></i>
+        </button>
+        <button class="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.055] px-2.5 py-2 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-300/50" aria-label="Open account menu">
+          <span class="flex h-6 w-6 items-center justify-center rounded-lg bg-amber-200/15 text-[10px] font-semibold text-amber-100">LW</span>
+          <span class="hidden text-xs font-medium sm:block">Lisa</span>
+          <i data-lucide="chevron-down" class="h-3.5 w-3.5 text-stone-500"></i>
+        </button>
+      </div>
+    </header>
+
+    <section class="relative z-10 min-h-[calc(100vh-65px)]">
+      <div class="absolute left-4 top-4 w-[min(292px,calc(100vw-32px))] rounded-2xl border border-white/10 bg-[#0b100d]/80 p-3 shadow-2xl backdrop-blur-xl sm:left-6 sm:top-6">
+        <div class="mb-3 flex items-center justify-between">
+          <div>
+            <div class="text-xs font-medium">Cedar Valley</div>
+            <div class="mt-0.5 text-[10px] text-stone-400">World overview</div>
+          </div>
+          <button class="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-300/50" aria-label="Expand map">
+            <i data-lucide="maximize-2" class="h-3.5 w-3.5"></i>
+          </button>
+        </div>
+        <button class="group relative block aspect-[16/9] w-full overflow-hidden rounded-xl border border-white/10 bg-[#16231b] text-left focus:outline-none focus:ring-2 focus:ring-emerald-300/50" aria-label="Expand world map">
+          <div class="absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_30%_30%,#5f8a65_0_8%,transparent_9%),radial-gradient(circle_at_65%_55%,#3c694c_0_12%,transparent_13%),linear-gradient(135deg,#253d2d,#6a7751_50%,#273b32)]"></div>
+          <div class="absolute left-[44%] top-[48%] h-3 w-3 rounded-full border-2 border-white bg-emerald-400 shadow-[0_0_0_5px_rgba(52,211,153,0.18)]"></div>
+          <div class="absolute right-[20%] top-[27%] h-2.5 w-2.5 rounded-full bg-sky-300 ring-4 ring-sky-300/20"></div>
+          <div class="absolute bottom-2 left-2 rounded-md border border-white/10 bg-black/35 px-2 py-1 text-[9px] text-stone-200 backdrop-blur">Click map to expand · M</div>
+        </button>
+        <div class="mt-3 grid grid-cols-3 gap-2 text-[10px]">
+          <button class="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-2 text-left hover:bg-white/[0.08]"><span class="block text-stone-500">Players</span><strong class="mt-0.5 block font-medium">3 here</strong></button>
+          <button class="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-2 text-left hover:bg-white/[0.08]"><span class="block text-stone-500">Wildlife</span><strong class="mt-0.5 block font-medium">8 deer</strong></button>
+          <button class="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-2 text-left hover:bg-white/[0.08]"><span class="block text-stone-500">Portals</span><strong class="mt-0.5 block font-medium">2 open</strong></button>
+        </div>
+      </div>
+
+      <aside id="drawer" class="absolute bottom-24 right-4 top-4 z-20 flex w-[min(390px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0a0f0c]/90 shadow-2xl backdrop-blur-2xl sm:right-6 sm:top-6">
+        <div class="border-b border-white/10 px-5 py-4">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div id="drawer-kicker" class="mb-1 text-[10px] font-medium uppercase tracking-[0.18em] text-emerald-200">Living world</div>
+              <h1 id="drawer-title" class="text-xl font-semibold tracking-tight">Nature</h1>
+              <p id="drawer-copy" class="mt-1 text-xs leading-5 text-stone-400">Shape the ecology, then let the world live.</p>
+            </div>
+            <button class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-300/50" aria-label="Close drawer">
+              <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+          </div>
+        </div>
+
+        <div id="nature-panel" class="domain-panel flex-1 overflow-y-auto p-4">
+          <div class="rounded-xl border border-emerald-200/15 bg-emerald-200/[0.065] p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-sm font-medium">Temperate meadow</div>
+                <div class="mt-1 text-xs text-stone-400">Active biome · balanced flora · wildlife enabled</div>
+              </div>
+              <span class="rounded-full border border-emerald-200/20 bg-emerald-200/10 px-2 py-1 text-[10px] text-emerald-100">Healthy</span>
+            </div>
+            <div class="mt-4 grid grid-cols-3 gap-2">
+              <div class="rounded-lg bg-black/20 p-2.5"><div class="text-[10px] text-stone-500">Coverage</div><div class="mt-1 text-sm font-medium">68%</div></div>
+              <div class="rounded-lg bg-black/20 p-2.5"><div class="text-[10px] text-stone-500">Species</div><div class="mt-1 text-sm font-medium">12</div></div>
+              <div class="rounded-lg bg-black/20 p-2.5"><div class="text-[10px] text-stone-500">Wildlife</div><div class="mt-1 text-sm font-medium">8</div></div>
+            </div>
+          </div>
+
+          <div class="mt-4 grid grid-cols-3 gap-2" role="tablist" aria-label="Nature sections">
+            <button class="rounded-xl border border-emerald-200/25 bg-emerald-200/10 px-2 py-3 text-xs text-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300/50" role="tab" aria-selected="true"><i data-lucide="palette" class="mx-auto mb-1.5 h-4 w-4"></i>Biomes</button>
+            <button class="rounded-xl border border-white/10 bg-white/[0.035] px-2 py-3 text-xs text-stone-300 hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-emerald-300/50" role="tab"><i data-lucide="sprout" class="mx-auto mb-1.5 h-4 w-4"></i>Flora</button>
+            <button class="rounded-xl border border-white/10 bg-white/[0.035] px-2 py-3 text-xs text-stone-300 hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-emerald-300/50" role="tab"><i data-lucide="paw-print" class="mx-auto mb-1.5 h-4 w-4"></i>Wildlife</button>
+          </div>
+
+          <div class="mt-5 flex items-center justify-between">
+            <div>
+              <div class="text-xs font-medium">Common actions</div>
+              <div class="mt-0.5 text-[10px] text-stone-500">Start with an outcome; tune later.</div>
+            </div>
+          </div>
+          <div class="mt-3 space-y-2">
+            <button class="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3 text-left hover:border-emerald-200/20 hover:bg-white/[0.075] focus:outline-none focus:ring-2 focus:ring-emerald-300/50">
+              <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-200/10 text-violet-100"><i data-lucide="swatch-book" class="h-5 w-5"></i></span>
+              <span class="min-w-0 flex-1"><strong class="block text-xs font-medium">Change biome</strong><small class="mt-1 block text-[10px] leading-4 text-stone-400">Choose a preset or open Biome Studio.</small></span>
+              <i data-lucide="chevron-right" class="h-4 w-4 text-stone-600"></i>
+            </button>
+            <button class="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3 text-left hover:border-emerald-200/20 hover:bg-white/[0.075] focus:outline-none focus:ring-2 focus:ring-emerald-300/50">
+              <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-200/10 text-emerald-100"><i data-lucide="trees" class="h-5 w-5"></i></span>
+              <span class="min-w-0 flex-1"><strong class="block text-xs font-medium">Populate flora</strong><small class="mt-1 block text-[10px] leading-4 text-stone-400">Let the biome fill suitable ground automatically.</small></span>
+              <i data-lucide="chevron-right" class="h-4 w-4 text-stone-600"></i>
+            </button>
+            <button class="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3 text-left hover:border-emerald-200/20 hover:bg-white/[0.075] focus:outline-none focus:ring-2 focus:ring-emerald-300/50">
+              <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-200/10 text-amber-100"><i data-lucide="origami" class="h-5 w-5"></i></span>
+              <span class="min-w-0 flex-1"><strong class="block text-xs font-medium">Add wildlife</strong><small class="mt-1 block text-[10px] leading-4 text-stone-400">Choose a species and population, not individual commands.</small></span>
+              <i data-lucide="chevron-right" class="h-4 w-4 text-stone-600"></i>
+            </button>
+          </div>
+
+          <details class="mt-4 rounded-xl border border-white/10 bg-black/15 p-3">
+            <summary class="cursor-pointer text-xs font-medium text-stone-300 focus:outline-none focus:ring-2 focus:ring-emerald-300/50">Manual placement and advanced tools</summary>
+            <p class="mt-2 text-[10px] leading-4 text-stone-500">Single plants, scatter brushes, biome JSON import/export, and owner diagnostics live here.</p>
+          </details>
+        </div>
+
+        <div id="generic-panel" class="domain-panel hidden flex-1 overflow-y-auto p-4">
+          <div class="grid grid-cols-2 gap-3">
+            <article class="rounded-xl border border-white/10 bg-white/[0.04] p-4"><div class="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-200/10 text-emerald-100"><i data-lucide="sparkles" class="h-4 w-4"></i></div><div class="text-xs font-medium">Primary outcome</div><p class="mt-1.5 text-[10px] leading-4 text-stone-500">The most common action appears first, with a short explanation.</p></article>
+            <article class="rounded-xl border border-white/10 bg-white/[0.04] p-4"><div class="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-sky-200/10 text-sky-100"><i data-lucide="layers-3" class="h-4 w-4"></i></div><div class="text-xs font-medium">Browse or edit</div><p class="mt-1.5 text-[10px] leading-4 text-stone-500">Stable labeled sections replace hidden icon-only modes.</p></article>
+            <article class="col-span-2 rounded-xl border border-white/10 bg-black/15 p-4"><div class="flex items-center justify-between"><div><div class="text-xs font-medium">Advanced</div><p class="mt-1 text-[10px] text-stone-500">Technical settings remain available without dominating the drawer.</p></div><i data-lucide="chevron-down" class="h-4 w-4 text-stone-600"></i></div></article>
+          </div>
+        </div>
+      </aside>
+
+      <div class="absolute bottom-24 left-1/2 z-20 hidden -translate-x-1/2 rounded-xl border border-white/10 bg-[#0a0f0c]/88 px-3 py-2 shadow-xl backdrop-blur-xl md:flex md:items-center md:gap-2" aria-label="Selected object controls">
+        <span class="mr-1 text-[10px] text-stone-500">Cottage selected</span>
+        <button class="rounded-lg bg-white/[0.07] p-2 hover:bg-white/10" aria-label="Move selected object"><i data-lucide="move-3d" class="h-4 w-4"></i></button>
+        <button class="rounded-lg bg-white/[0.07] p-2 hover:bg-white/10" aria-label="Rotate selected object"><i data-lucide="rotate-3d" class="h-4 w-4"></i></button>
+        <button class="rounded-lg bg-white/[0.07] p-2 hover:bg-white/10" aria-label="Scale selected object"><i data-lucide="scaling" class="h-4 w-4"></i></button>
+        <button class="rounded-lg bg-white/[0.07] p-2 hover:bg-white/10" aria-label="More selected object actions"><i data-lucide="ellipsis" class="h-4 w-4"></i></button>
+      </div>
+
+      <nav class="absolute bottom-4 left-1/2 z-30 flex max-w-[calc(100vw-24px)] -translate-x-1/2 items-end gap-1 overflow-x-auto rounded-2xl border border-white/10 bg-[#090d0b]/88 p-1.5 shadow-2xl backdrop-blur-2xl" aria-label="Toolbelt">
+        <button data-domain="create" data-title="Create" data-kicker="Generate" data-copy="Make something new from a prompt or reference image." class="dock-button flex min-w-[62px] flex-col items-center gap-1 rounded-xl bg-emerald-300 px-3 py-2 text-[10px] font-medium text-emerald-950 focus:outline-none focus:ring-2 focus:ring-emerald-100"><i data-lucide="sparkles" class="h-[18px] w-[18px]"></i><span>Create</span></button>
+        <button data-domain="assets" data-title="Assets" data-kicker="Reusable library" data-copy="Search and place world-ready objects, buildings, flora, and fauna." class="dock-button flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-3 py-2 text-[10px] text-stone-300 hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-emerald-300/50"><i data-lucide="boxes" class="h-[18px] w-[18px]"></i><span>Assets</span></button>
+        <button data-domain="build" data-title="Build" data-kicker="Structures" data-copy="Place a complete building with a usable inside by default." class="dock-button hidden min-w-[62px] flex-col items-center gap-1 rounded-xl px-3 py-2 text-[10px] text-stone-300 hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-emerald-300/50 sm:flex"><i data-lucide="building-2" class="h-[18px] w-[18px]"></i><span>Build</span></button>
+        <button data-domain="nature" data-title="Nature" data-kicker="Living world" data-copy="Shape the ecology, then let the world live." class="dock-button hidden min-w-[62px] flex-col items-center gap-1 rounded-xl bg-white/[0.08] px-3 py-2 text-[10px] text-white ring-1 ring-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-300/50 sm:flex"><i data-lucide="leaf" class="h-[18px] w-[18px]"></i><span>Nature</span></button>
+        <button data-domain="terrain" data-title="Terrain" data-kicker="Direct editing" data-copy="Sculpt ground height or paint its surface." class="dock-button hidden min-w-[62px] flex-col items-center gap-1 rounded-xl px-3 py-2 text-[10px] text-stone-300 hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-emerald-300/50 sm:flex"><i data-lucide="mountain" class="h-[18px] w-[18px]"></i><span>Terrain</span></button>
+        <button data-domain="tools" data-title="World tools" data-kicker="Build · Nature · Terrain" data-copy="Choose a focused world-making tool." class="dock-button flex min-w-[68px] flex-col items-center gap-1 rounded-xl px-3 py-2 text-[10px] text-stone-300 hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-emerald-300/50 sm:hidden"><i data-lucide="panel-top-open" class="h-[18px] w-[18px]"></i><span>World tools</span></button>
+        <span class="mx-1 hidden h-8 w-px self-center bg-white/10 sm:block"></span>
+        <button data-domain="travel" data-title="Travel" data-kicker="Destinations" data-copy="Visit worlds and portals, or create a new world." class="dock-button flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-3 py-2 text-[10px] text-stone-300 hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-emerald-300/50"><i data-lucide="plane" class="h-[18px] w-[18px]"></i><span>Travel</span></button>
+        <button data-domain="messages" data-title="Messages" data-kicker="Conversations" data-copy="World chat, direct messages, agent threads, and activity." class="dock-button relative flex min-w-[66px] flex-col items-center gap-1 rounded-xl px-3 py-2 text-[10px] text-stone-300 hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-emerald-300/50"><span class="absolute right-2 top-1.5 h-2 w-2 rounded-full bg-rose-400 ring-2 ring-[#101411]"></span><i data-lucide="message-circle" class="h-[18px] w-[18px]"></i><span>Messages</span></button>
+        <button data-domain="people" data-title="People" data-kicker="Friends and agents" data-copy="Friends, requests, nearby people, owned agents, and your avatar." class="dock-button relative flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-3 py-2 text-[10px] text-stone-300 hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-emerald-300/50"><span class="absolute right-2 top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-300 px-1 text-[8px] font-semibold text-amber-950">2</span><i data-lucide="users" class="h-[18px] w-[18px]"></i><span>People</span></button>
+      </nav>
+    </section>
+  </main>
+
+  <script>
+    const panels = document.querySelectorAll('.domain-panel');
+    const buttons = document.querySelectorAll('.dock-button');
+    const title = document.getElementById('drawer-title');
+    const kicker = document.getElementById('drawer-kicker');
+    const copy = document.getElementById('drawer-copy');
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        buttons.forEach((candidate) => {
+          candidate.classList.remove('bg-white/[0.08]', 'text-white', 'ring-1', 'ring-white/10');
+          if (candidate.dataset.domain !== 'create') candidate.classList.add('text-stone-300');
+        });
+        if (button.dataset.domain !== 'create') {
+          button.classList.add('bg-white/[0.08]', 'text-white', 'ring-1', 'ring-white/10');
+          button.classList.remove('text-stone-300');
+        }
+        title.textContent = button.dataset.title;
+        kicker.textContent = button.dataset.kicker;
+        copy.textContent = button.dataset.copy;
+        panels.forEach((panel) => panel.classList.add('hidden'));
+        document.getElementById(button.dataset.domain === 'nature' ? 'nature-panel' : 'generic-panel').classList.remove('hidden');
+      });
+    });
+    lucide.createIcons({ attrs: { 'stroke-width': 1.5 } });
+  </script>
+</body>
+</html>
