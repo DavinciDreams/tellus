@@ -20,6 +20,7 @@ export interface EvoflowTerrainSource {
   previewUrl: string;
   heightScale: number;
   heightOffset: number;
+  waterMode: "ocean" | "lake" | "dry";
 }
 
 export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTerrainSource> = {
@@ -33,6 +34,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     previewUrl: "/evoflow/demo_coral_canyon/world_1c1a355ce3af/assets/preview.png",
     heightScale: 30,
     heightOffset: -1.8,
+    waterMode: "ocean",
   },
   "evoflow-coral-canyon-child": {
     id: "evoflow-coral-canyon-child",
@@ -44,6 +46,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     previewUrl: "/evoflow/terrain_variety/world_river_canyon/assets/preview.png",
     heightScale: 30,
     heightOffset: -1,
+    waterMode: "lake",
   },
   "evoflow-spires": {
     id: "evoflow-spires",
@@ -55,6 +58,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     previewUrl: "/evoflow/terrain_variety/world_alpine_spires/assets/preview.png",
     heightScale: 34,
     heightOffset: -0.4,
+    waterMode: "lake",
   },
   "evoflow-glass-ridge": {
     id: "evoflow-glass-ridge",
@@ -66,6 +70,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     previewUrl: "/evoflow/terrain_variety/world_glass_ridge/assets/preview.png",
     heightScale: 35,
     heightOffset: -3.1,
+    waterMode: "lake",
   },
   "evoflow-lichen-basin": {
     id: "evoflow-lichen-basin",
@@ -77,6 +82,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     previewUrl: "/evoflow/terrain_variety/world_lichen_caldera/assets/preview.png",
     heightScale: 33,
     heightOffset: -0.8,
+    waterMode: "lake",
   },
   "evoflow-copper-terraces": {
     id: "evoflow-copper-terraces",
@@ -88,6 +94,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     previewUrl: "/evoflow/terrain_variety/world_copper_mesas/assets/preview.png",
     heightScale: 32,
     heightOffset: -8.1,
+    waterMode: "dry",
   },
   "evoflow-basalt-teeth": {
     id: "evoflow-basalt-teeth",
@@ -99,6 +106,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     previewUrl: "/evoflow/terrain_variety/world_basalt_badlands/assets/preview.png",
     heightScale: 34,
     heightOffset: 0.5,
+    waterMode: "lake",
   },
   "evoflow-coral-fold": {
     id: "evoflow-coral-fold",
@@ -110,6 +118,7 @@ export const evoflowTerrainSources: Record<EvoflowTerrainSource["id"], EvoflowTe
     previewUrl: "/evoflow/terrain_variety/world_coral_archipelago/assets/preview.png",
     heightScale: 32,
     heightOffset: -4,
+    waterMode: "ocean",
   },
 };
 
@@ -119,4 +128,10 @@ export function evoflowTerrainSourceFor(
   return template in evoflowTerrainSources
     ? evoflowTerrainSources[template as EvoflowTerrainSource["id"]]
     : null;
+}
+
+export function evoflowWaterModeFor(
+  template: WorldTemplateId,
+): EvoflowTerrainSource["waterMode"] | null {
+  return evoflowTerrainSourceFor(template)?.waterMode ?? null;
 }

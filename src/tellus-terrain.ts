@@ -278,7 +278,7 @@ function evoflowUv(cx: number, cz: number): { u: number; v: number } {
   };
 }
 
-function evoflowBaseTerrainHeight(cx: number, cz: number, r: number): number | null {
+function evoflowRawTerrainHeight(cx: number, cz: number): number | null {
   if (!activeEvoflowRaster) return null;
   const { u, v } = evoflowUv(cx, cz);
   const raw = sampleRasterChannel(
@@ -290,13 +290,25 @@ function evoflowBaseTerrainHeight(cx: number, cz: number, r: number): number | n
   );
   const normalized = raw / 255;
   const source = activeEvoflowRaster.source;
+  return (normalized - 0.33) * source.heightScale + source.heightOffset;
+}
+
+/** Height encoded by EvoFlow before the classic island shoreline falloff is applied. */
+export function activeEvoflowRawTerrainHeight(cx: number, cz: number): number | null {
+  return evoflowRawTerrainHeight(cx, cz);
+}
+
+function evoflowBaseTerrainHeight(cx: number, cz: number, r: number): number | null {
+  const rawHeight = evoflowRawTerrainHeight(cx, cz);
+  if (rawHeight === null || !activeEvoflowRaster) return null;
+  const source = activeEvoflowRaster.source;
   const shoreFade = 1 - smoothstep(
     CLASSIC_WORLD_RADIUS * 0.84,
     CLASSIC_WORLD_RADIUS * 0.99,
     r,
   );
   const rimDrop = Math.max(0, (r - CLASSIC_WORLD_RADIUS * 0.9) / (CLASSIC_WORLD_RADIUS * 0.1)) * 4.5;
-  return (normalized - 0.33) * source.heightScale * Math.max(0.28, shoreFade) + source.heightOffset - rimDrop;
+  return (rawHeight - source.heightOffset) * Math.max(0.28, shoreFade) + source.heightOffset - rimDrop;
 }
 
 export function activeEvoflowBaseTerrainHeight(cx: number, cz: number, r: number): number | null {

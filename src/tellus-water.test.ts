@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
+  createOceanSurface,
   createPondWater,
+  disposeObject,
   positionPondRipplePatch,
   triggerPondRipple,
   updatePondRipples,
@@ -9,6 +11,18 @@ import {
 import { pondPositionToUv } from "./tellus-pond-simulation";
 
 describe("interactive pond water", () => {
+  it("uses a calm bounded reflective plane for inland lakes", () => {
+    const lake = createOceanSurface(false, undefined, { mode: "lake", width: 640, depth: 480 });
+    const material = lake.material as THREE.ShaderMaterial;
+    const reflection = lake.getObjectByName("tellus-ocean-reflection") as THREE.Mesh;
+
+    expect(lake.name).toBe("tellus-inland-water-plane");
+    expect(lake.geometry).toBeInstanceOf(THREE.PlaneGeometry);
+    expect(material.uniforms.uPondCalm.value).toBe(1);
+    expect((reflection.material as THREE.ShaderMaterial).uniforms.motionStrength.value).toBe(0.22);
+    disposeObject(lake);
+  });
+
   it("starts as a calm physical surface with dormant ripple meshes", () => {
     const pond = createPondWater({
       center: { x: 10, z: -5 },
@@ -22,6 +36,7 @@ describe("interactive pond water", () => {
     const ripples = pond.getObjectByName("tellus-pond-ripples") as THREE.Group;
     expect(surface.material).toBeInstanceOf(THREE.MeshPhysicalMaterial);
     expect(surface.userData.pondStillWater).toBe(true);
+    expect(surface.getObjectByName("tellus-pond-reflection")).toBeDefined();
     expect(ripples.children).toHaveLength(7);
     expect(ripples.children.every((ripple) => !ripple.visible)).toBe(true);
   });
@@ -51,7 +66,7 @@ describe("interactive pond water", () => {
     expect(triggerPondRipple(pond, { x: 25, z: -5 }, 1000, 1)).toBe(false);
   });
 
-  it("uses a localized height-field surface for the Basalt pond", () => {
+  it("layers a localized height-field ripple patch over reflective lake water", () => {
     const pond = createPondWater({
       center: { x: 10, z: -5 },
       radius: 8,
@@ -60,27 +75,45 @@ describe("interactive pond water", () => {
       waterSettings: { style: "lagoon", opacity: 0.68, waveStrength: 0.8 },
     });
     const surface = pond.getObjectByName("tellus-pond-surface") as THREE.Mesh;
-    const material = surface.material as THREE.ShaderMaterial;
+    const rippleSurface = pond.getObjectByName("tellus-pond-ripple-surface") as THREE.Mesh;
+    const material = rippleSurface.material as THREE.ShaderMaterial;
 
-    expect(surface.geometry).toBeInstanceOf(THREE.PlaneGeometry);
+    expect(surface.geometry).toBeInstanceOf(THREE.CircleGeometry);
+    expect(surface.material).toBeInstanceOf(THREE.MeshPhysicalMaterial);
+    expect(surface.getObjectByName("tellus-pond-reflection")).toBeDefined();
+    expect(rippleSurface.geometry).toBeInstanceOf(THREE.PlaneGeometry);
     expect(material).toBeInstanceOf(THREE.ShaderMaterial);
     expect(material.userData.tellusSimulatedPond).toBe(true);
-    expect(surface.userData.pondSimulatedWater).toBe(true);
+    expect(rippleSurface.userData.pondSimulatedWater).toBe(true);
     expect(triggerPondRipple(pond, { x: 12, z: -4 }, 1000, 1.2)).toBe(true);
     expect(pond.userData.pondRippleSimulation.pendingDropCount).toBe(3);
     expect(triggerPondRipple(pond, { x: 30, z: -4 }, 1000, 1.2)).toBe(true);
-    expect(surface.position.x).toBe(30);
+    expect(rippleSurface.position.x).toBe(30);
 
     const uv = pondPositionToUv({ x: 10, z: -5 }, 8, { x: 12, z: -4 });
     expect(uv?.x).toBeCloseTo(0.625);
     expect(uv?.y).toBeCloseTo(0.4375);
 
     expect(positionPondRipplePatch(pond, { x: 40, z: 20 }, 2.4)).toBe(true);
-    expect(surface.position.x).toBe(40);
-    expect(surface.position.y).toBe(2.4);
-    expect(surface.position.z).toBe(20);
+    expect(rippleSurface.position.x).toBe(40);
+    expect(rippleSurface.position.y).toBe(2.4);
+    expect(rippleSurface.position.z).toBe(20);
     expect(triggerPondRipple(pond, { x: 40, z: 20 }, 2000, 1)).toBe(true);
     expect(pond.userData.pondRippleSimulation.pendingDropCount).toBe(3);
+    pond.userData.disposePondSimulation();
+  });
+
+  it("can render only the ripple overlay when a world supplies the reflective lake plane", () => {
+    const pond = createPondWater({
+      center: { x: 0, z: 0 },
+      radius: 18,
+      waterLevel: 0.14,
+      simulated: true,
+      baseSurface: false,
+    });
+
+    expect(pond.getObjectByName("tellus-pond-surface")?.visible).toBe(false);
+    expect(pond.getObjectByName("tellus-pond-ripple-surface")).toBeDefined();
     pond.userData.disposePondSimulation();
   });
 });

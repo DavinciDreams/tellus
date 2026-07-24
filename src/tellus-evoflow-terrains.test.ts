@@ -4,7 +4,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 
-import { evoflowTerrainSources } from "./tellus-evoflow-terrains";
+import { evoflowTerrainSources, evoflowWaterModeFor } from "./tellus-evoflow-terrains";
 
 const publicPath = (url: string): string => path.join(process.cwd(), "public", url.replace(/^\//, ""));
 
@@ -62,6 +62,15 @@ describe("Evoflow terrain sources", () => {
       "branching-badlands",
       "archipelago",
     ]));
+  });
+
+  it("distinguishes ocean, inland-water, and dry highland terrain", () => {
+    expect(evoflowWaterModeFor("evoflow-coral-fold")).toBe("ocean");
+    expect(evoflowWaterModeFor("evoflow-basalt-teeth")).toBe("lake");
+    expect(evoflowWaterModeFor("evoflow-coral-canyon-child")).toBe("lake");
+    expect(evoflowWaterModeFor("evoflow-spires")).toBe("lake");
+    expect(evoflowWaterModeFor("evoflow-glass-ridge")).toBe("lake");
+    expect(evoflowWaterModeFor("evoflow-copper-terraces")).toBe("dry");
   });
 
   it("keeps the curated silhouettes measurably different and their spawn centers walkable", async () => {

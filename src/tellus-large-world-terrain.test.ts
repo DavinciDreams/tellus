@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  CLASSIC_WORLD_RADIUS,
   CHUNK_SPAN,
   SEA_LEVEL,
   setChunkedWorldChunks,
@@ -9,7 +10,9 @@ import {
   largeWorldBaseHeight,
   largeWorldSlope,
   largeWorldTerrainKind,
+  evoflowContinentalLakebedHeight,
   evoflowChunkedWaterbedHeight,
+  evoflowRasterEdgeBlend,
   usesContinentalChunkedTerrain,
 } from "./tellus-large-world-terrain";
 import { runtimeConfig } from "./tellus-runtime-config";
@@ -107,6 +110,26 @@ describe("large-world terrain", () => {
       SEA_LEVEL - 1.4,
     );
     expect(evoflowChunkedWaterbedHeight(SEA_LEVEL + 0.45, "beach")).toBe(SEA_LEVEL + 0.45);
+  });
+
+  it("fades continental EvoFlow rasters before their square source boundary", () => {
+    expect(evoflowRasterEdgeBlend(0, 0)).toBe(1);
+    expect(evoflowRasterEdgeBlend(CLASSIC_WORLD_RADIUS * 0.9, 0)).toBeGreaterThan(0);
+    expect(evoflowRasterEdgeBlend(CLASSIC_WORLD_RADIUS * 0.9, 0)).toBeLessThan(1);
+    expect(evoflowRasterEdgeBlend(CLASSIC_WORLD_RADIUS, 0)).toBe(0);
+    expect(evoflowRasterEdgeBlend(0, CLASSIC_WORLD_RADIUS + 1)).toBe(0);
+  });
+
+  it("blends lakebeds back into continental terrain at raster edges", () => {
+    const terrainHeight = 8;
+    const lakeCenter = evoflowContinentalLakebedHeight(terrainHeight, -4, 1);
+    const lakeTransition = evoflowContinentalLakebedHeight(terrainHeight, -4, 0.35);
+    const outsideRaster = evoflowContinentalLakebedHeight(terrainHeight, -4, 0);
+
+    expect(lakeCenter).toBeLessThan(SEA_LEVEL);
+    expect(lakeTransition).toBeGreaterThan(lakeCenter);
+    expect(lakeTransition).toBeLessThan(terrainHeight);
+    expect(outsideRaster).toBe(terrainHeight);
   });
 
   afterEach(() => {
@@ -325,9 +348,9 @@ describe("large-world terrain", () => {
         expect(kinds.has("dirt")).toBe(true);
       }
       if (template === "evoflow-copper-terraces") {
-        expect(kinds.has("beach")).toBe(true);
         expect(kinds.has("dirt")).toBe(true);
         expect(kinds.has("meadow")).toBe(false);
+        expect(kinds.has("water")).toBe(false);
       }
     }
   });
@@ -344,6 +367,29 @@ describe("large-world terrain", () => {
     );
 
     expect(new Set(signatures.values()).size).toBe(signatures.size);
+  });
+
+  it("keeps 24-chunk EvoFlow highlands continental while coral worlds remain oceanic", () => {
+    setChunkedWorldChunks({ w: 24, h: 24 });
+
+    for (const template of [
+      "evoflow-spires",
+      "evoflow-glass-ridge",
+      "evoflow-lichen-basin",
+      "evoflow-copper-terraces",
+      "evoflow-basalt-teeth",
+      "evoflow-coral-canyon-child",
+    ] as WorldTemplateId[]) {
+      runtimeConfig.worldId = `chunked-24-${template}`;
+      runtimeConfig.worldTemplate = template;
+      expect(usesContinentalChunkedTerrain(), template).toBe(true);
+    }
+
+    for (const template of ["evoflow-coral-canyon", "evoflow-coral-fold"] as WorldTemplateId[]) {
+      runtimeConfig.worldId = `chunked-24-${template}`;
+      runtimeConfig.worldTemplate = template;
+      expect(usesContinentalChunkedTerrain(), template).toBe(false);
+    }
   });
 
   it("applies procedural land-shape overrides to large continental chunked worlds", () => {

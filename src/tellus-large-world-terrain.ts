@@ -14,10 +14,11 @@ import {
   parseWorldTemplateId,
   resolveLandShapeConfig,
 } from "./tellus-world-templates";
-import { evoflowTerrainSourceFor } from "./tellus-evoflow-terrains";
+import { evoflowTerrainSourceFor, evoflowWaterModeFor } from "./tellus-evoflow-terrains";
 import {
   activeEvoflowBiomeCell,
   activeEvoflowBaseTerrainHeight,
+  activeEvoflowRawTerrainHeight,
   activeEvoflowTerrainKind,
 } from "./tellus-terrain";
 
@@ -306,6 +307,27 @@ export function evoflowChunkedWaterbedHeight(height: number, kind: TerrainKind |
   return clamp(height, SEA_LEVEL - 1.4, SEA_LEVEL - 0.65);
 }
 
+/**
+ * Fade the square EvoFlow raster into continental terrain before its imported edge is reached.
+ * The transition spans a little over one 96-unit chunk in a 24-chunk showcase world, preventing
+ * the raster bounds from appearing as a straight cliff or right-angled shoreline.
+ */
+export function evoflowRasterEdgeBlend(cx: number, cz: number): number {
+  const edgeDistance = Math.max(Math.abs(cx), Math.abs(cz));
+  return 1 - smoothstep(CLASSIC_WORLD_RADIUS * 0.82, CLASSIC_WORLD_RADIUS, edgeDistance);
+}
+
+export function evoflowContinentalLakebedHeight(
+  terrainHeight: number,
+  rasterHeight: number,
+  rasterBlend: number,
+): number {
+  const lakeBank = (1 - smoothstep(-2, 2.5, rasterHeight)) * clamp(rasterBlend, 0, 1);
+  if (lakeBank <= 0.001) return terrainHeight;
+  const waterbed = evoflowChunkedWaterbedHeight(terrainHeight, "water");
+  return terrainHeight * (1 - lakeBank) + waterbed * lakeBank;
+}
+
 export function usesContinentalChunkedTerrain(
   worldId = runtimeConfig.worldId,
   template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus"),
@@ -313,6 +335,8 @@ export function usesContinentalChunkedTerrain(
   if (!getChunkedWorldChunks()) return false;
   if (template === "tellus") return false;
   if (template === "flight-range") return true;
+  const evoflowWaterMode = evoflowWaterModeFor(template);
+  if (evoflowWaterMode) return evoflowWaterMode !== "ocean";
   const chunkedMatch = /^chunked-(\d+)(?:-(.*))?$/.exec(worldId.trim().toLowerCase());
   if (!chunkedMatch) return false;
   const chunkSize = Number(chunkedMatch[1]);
@@ -563,19 +587,31 @@ function continentalBaseHeight(x: number, z: number): number {
   }
 
   let templateSurface = templateLift;
+  let templateRasterHeight: number | null = null;
+  let templateRasterBlend = 0;
   if (templatePoint) {
     const shape = resolveLandShapeConfig(template, runtimeConfig.landShape);
     const { cx, cz, r } = templatePoint;
     const centeredMask = evoflow
       ? 1 - smoothstep(CLASSIC_WORLD_RADIUS * 0.92, CLASSIC_WORLD_RADIUS * 1.18, r)
       : 1 - smoothstep(CLASSIC_WORLD_RADIUS * 2.4, CLASSIC_WORLD_RADIUS * 7.5, r);
-    const rasterHeight = evoflow ? activeEvoflowBaseTerrainHeight(cx, cz, r) : null;
-    const profile = (rasterHeight ?? templateProfileHeight(template, cx, cz, r)) * 1.7;
+    const rasterHeight = evoflow ? activeEvoflowRawTerrainHeight(cx, cz) : null;
+    templateRasterBlend = evoflow ? evoflowRasterEdgeBlend(cx, cz) : 0;
+    templateRasterHeight = rasterHeight === null || templateRasterBlend <= 0 ? null : rasterHeight;
+    const fallbackProfile = templateProfileHeight(template, cx, cz, r);
+    const blendedProfile = rasterHeight === null
+      ? fallbackProfile
+      : fallbackProfile * (1 - templateRasterBlend) + rasterHeight * templateRasterBlend;
+    const profile = blendedProfile * 1.7;
     const generated = terrainDetailHeight(shape, cx, cz, r) + shape.baseOffset;
     templateSurface += (profile + generated) * centeredMask;
   }
 
-  return 4.2 + continent + hills + detail + ridgeFold + brokenRidge + terrace + templateSurface - broadValley;
+  const height = 4.2 + continent + hills + detail + ridgeFold + brokenRidge + terrace + templateSurface - broadValley;
+  if (evoflowWaterModeFor(template) === "lake" && templateRasterHeight !== null) {
+    return evoflowContinentalLakebedHeight(height, templateRasterHeight, templateRasterBlend);
+  }
+  return height;
 }
 
 export function largeWorldBaseHeight(x: number, z: number): number {
@@ -730,9 +766,12 @@ export function largeWorldTerrainKind(
     return "grass";
   }
   if (isEvoflowTemplate(template)) {
-    const point = chunkedTemplatePoint(x, z, 10);
-    const kind = point ? activeEvoflowTerrainKind(point.cx, point.cz, y) : null;
-    if (kind) return kind;
+    const point = chunkedTemplatePoint(x, z, templateWorldScaleMultiplier(template));
+    const rasterBlend = point ? evoflowRasterEdgeBlend(point.cx, point.cz) : 0;
+    const kind = point && rasterBlend > 0.05 ? activeEvoflowTerrainKind(point.cx, point.cz, y) : null;
+    const waterMode = evoflowWaterModeFor(template);
+    if (waterMode === "lake" && y < SEA_LEVEL - 0.1) return "water";
+    if (kind && kind !== "water") return kind;
     if (point && point.r > CLASSIC_WORLD_RADIUS * 1.05) return "beach";
     if (slope > 0.7 || y > 14) return "rock";
     return y < SEA_LEVEL + 0.5 ? "beach" : "dirt";
@@ -758,7 +797,7 @@ export function largeWorldBiomeCellAt(
 ): WorldBiomeCell | null {
   const template = parseWorldTemplateId(runtimeConfig.worldTemplate, "tellus");
   if (!isEvoflowTemplate(template)) return null;
-  const point = chunkedIslandPoint(x, z);
+  const point = chunkedTemplatePoint(x, z, templateWorldScaleMultiplier(template));
   if (!point) return null;
   return activeEvoflowBiomeCell(point.cx, point.cz, y);
 }

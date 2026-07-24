@@ -185,7 +185,7 @@ import {
   type MakerAgentSummary,
 } from "./tellus-maker-agents";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, shouldIgnoreDefaultTellusTemplate, templateForWorldId, templateSuppressesAutoVegetation } from "./tellus-world-templates";
-import { evoflowTerrainSourceFor } from "./tellus-evoflow-terrains";
+import { evoflowTerrainSourceFor, evoflowWaterModeFor } from "./tellus-evoflow-terrains";
 import {
   ASSET_SURFACE_CONTEXTS,
   inferAssetSurfaceContexts,
@@ -1148,9 +1148,12 @@ function createTellusWorld(
   );
   const isChunked = isChunkedWorldId(runtimeConfig.worldId);
   const isContinentalChunkedWorld = isChunked && usesContinentalChunkedTerrain();
-  const usesSimulatedBasaltPond =
-    activeWorldTemplate === "evoflow-basalt-teeth" ||
-    runtimeConfig.worldId.toLowerCase().includes("basalt");
+  const evoflowWaterMode = evoflowWaterModeFor(activeWorldTemplate);
+  const usesChunkedLakeWater = isChunked && evoflowWaterMode === "lake";
+  const supportsChunkedWater = isChunked && (!isContinentalChunkedWorld || usesChunkedLakeWater);
+  const usesSimulatedPondWater = !isChunked || usesChunkedLakeWater;
+  const showsWorldWaterSurface = !isChunked || !isContinentalChunkedWorld || usesChunkedLakeWater;
+  const chunkedDims = isChunked ? getChunkedWorldChunks() : null;
 
   // ── Entry loading screen + spawn grounding ────────────────────────────────────────────────────
   // The first couple seconds after entering a world pay one-time costs: the spawn chunk builds, the
@@ -1196,18 +1199,20 @@ function createTellusWorld(
   // matter the world scale — bigger worlds stretch the same ~50K-vertex mesh instead of multiplying
   // it (operator: range over thickness; worlds get larger for less).
   const terrainRenderSegments = useWebGPU ? 224 : 144;
-  const configureBasaltPondBase = (material: THREE.Material | THREE.Material[]) => {
-    if (!usesSimulatedBasaltPond || Array.isArray(material) || !(material instanceof THREE.ShaderMaterial)) return;
+  const configureCalmLakeBase = (material: THREE.Material | THREE.Material[]) => {
+    if (!usesChunkedLakeWater || Array.isArray(material) || !(material instanceof THREE.ShaderMaterial)) return;
     if (material.uniforms.uPondCalm) material.uniforms.uPondCalm.value = 1;
     material.userData.tellusCalmPondBase = true;
   };
   // Rich TSL water on the WebGPU path; WebGL keeps the lightweight fallback material.
-  const ocean = createOceanSurface(useWebGPU, runtimeConfig.waterSettings);
-  configureBasaltPondBase(ocean.material);
-  if (usesSimulatedBasaltPond) {
-    const planarReflection = ocean.getObjectByName("tellus-ocean-reflection");
-    if (planarReflection) planarReflection.visible = false;
-  }
+  const ocean = createOceanSurface(useWebGPU, runtimeConfig.waterSettings, usesChunkedLakeWater
+    ? {
+        mode: "lake",
+        width: (chunkedDims?.w ?? 1) * CHUNK_SPAN,
+        depth: (chunkedDims?.h ?? 1) * CHUNK_SPAN,
+      }
+    : { mode: "ocean" });
+  configureCalmLakeBase(ocean.material);
   const archipelago = createDistantArchipelago(useWebGPU);
   let chunkRenderer: ChunkRenderer | null = null;
   let lastActiveChunkCount = -1; // defer placed-asset grounding when the active chunk set changes
@@ -1216,7 +1221,6 @@ function createTellusWorld(
   let lastChunkStreamGroundingAt = 0;
   const chunkStreamGroundingQueue: string[] = [];
   const queuedChunkStreamGrounding = new Set<string>();
-  const chunkedDims = isChunked ? getChunkedWorldChunks() : null;
   const chunkedCenterForWorld = isChunked ? chunkedWorldCenter() : null;
   if (chunkedCenterForWorld) {
     ocean.position.x = chunkedCenterForWorld.x;
@@ -1284,7 +1288,7 @@ function createTellusWorld(
     };
   };
   const isChunkedWaterPoint = (x: number, z: number): boolean => {
-    if (!isChunked || isContinentalChunkedWorld) return false;
+    if (!supportsChunkedWater) return false;
     if (waterFeatureContains(x, z, 0.5)) return true;
     const height = chunkRenderer?.sampleHeight(x, z) ?? largeWorldBaseHeight(x, z);
     if (!Number.isFinite(height)) return false;
@@ -1335,23 +1339,24 @@ function createTellusWorld(
     }
     return fallback ? { ...fallback } : { x: clamped.x, y: chunkedWaterSurfaceY(clamped.x, clamped.z), z: clamped.z };
   };
-  const waterVehiclePositionForCurrentWorld = (x: number, z: number, fallback?: Vec3): Vec3 =>
-    isChunked && !isContinentalChunkedWorld
-      ? chunkedWaterVehiclePosition(x, z, fallback)
-      : waterVehiclePosition(x, z, fallback);
+  const waterVehiclePositionForCurrentWorld = (x: number, z: number, fallback?: Vec3): Vec3 => {
+    if (!isChunked) return waterVehiclePosition(x, z, fallback);
+    if (supportsChunkedWater) return chunkedWaterVehiclePosition(x, z, fallback);
+    return fallback ? { ...fallback } : { x, y: largeWorldBaseHeight(x, z), z };
+  };
   const movedVehiclePositionForCurrentWorld = (
     thing: GeneratedThing,
     x: number,
     z: number,
     fallback?: Vec3,
   ): Vec3 =>
-    isChunked && vehicleMode(thing) === "water"
+    supportsChunkedWater && vehicleMode(thing) === "water"
       ? chunkedWaterVehiclePosition(x, z, fallback)
       : movedVehiclePosition(thing, x, z, fallback);
-  const waterVehicleNeedsRelocation = (position: Vec3): boolean =>
-    isChunked && !isContinentalChunkedWorld
-      ? !isChunkedWaterPoint(position.x, position.z)
-      : waterBlockedByLand(position);
+  const waterVehicleNeedsRelocation = (position: Vec3): boolean => {
+    if (!isChunked) return waterBlockedByLand(position);
+    return !supportsChunkedWater || !isChunkedWaterPoint(position.x, position.z);
+  };
   const procPlantPreference = (() => {
     try {
       return window.localStorage.getItem("tellus.procplants");
@@ -1789,20 +1794,21 @@ function createTellusWorld(
     radius: waterFeatureRadius,
     waterLevel: waterFeatureLevel(),
     animated: useWebGPU,
-    simulated: usesSimulatedBasaltPond,
+    simulated: usesSimulatedPondWater,
+    baseSurface: !isChunked,
     waterSettings: runtimeConfig.waterSettings,
   });
   const pondRippleContains = (x: number, z: number, pad = 0): boolean =>
-    usesSimulatedBasaltPond ? isChunkedWaterPoint(x, z) : waterFeatureContains(x, z, pad);
+    usesChunkedLakeWater ? isChunkedWaterPoint(x, z) : waterFeatureContains(x, z, pad);
   const pondRippleWaterLevelAt = (x: number, z: number): number =>
-    usesSimulatedBasaltPond ? chunkedWaterSurfaceY(x, z) + 0.025 : waterFeatureLevel();
+    usesChunkedLakeWater ? chunkedWaterSurfaceY(x, z) + 0.025 : waterFeatureLevel();
   const disturbPond = (
     position: { x: number; z: number },
     nowMs: number,
     strength = 1,
   ): boolean => {
     if (!pondWater.visible || !pondRippleContains(position.x, position.z, -0.12)) return false;
-    if (usesSimulatedBasaltPond) {
+    if (usesSimulatedPondWater) {
       positionPondRipplePatch(
         pondWater,
         position,
@@ -1817,9 +1823,9 @@ function createTellusWorld(
   const floatingRim = createFloatingRim();
   if (isChunked) {
     floatingRim.visible = false;
-    pondWater.visible = usesSimulatedBasaltPond;
+    pondWater.visible = usesChunkedLakeWater;
     if (isContinentalChunkedWorld) {
-      ocean.visible = false;
+      ocean.visible = usesChunkedLakeWater;
       archipelago.visible = false;
     }
   }
@@ -2297,7 +2303,7 @@ function createTellusWorld(
     const u = sceneUrl.trim();
     if (!u || u === interiorSceneUrl) return;
     interiorSceneUrl = u;
-    ocean.visible = !isContinentalChunkedWorld;
+    ocean.visible = false;
     for (const m of [archipelago, terrain, pondWater, flowerPatchGroup, floatingRim]) m.visible = false;
     setChunkedFlatGround(0); // ground the player on the room floor (no heightfield inside)
     // The procedural room is centered at the origin; drop the player INTO the room (origin, flat floor)
@@ -2385,10 +2391,10 @@ function createTellusWorld(
     interiorObject = null;
     interiorSceneUrl = null;
     rapierPhysics?.clearStatics();
-    ocean.visible = !isContinentalChunkedWorld;
+    ocean.visible = showsWorldWaterSurface;
     archipelago.visible = !isContinentalChunkedWorld;
     terrain.visible = !isChunked;
-    pondWater.visible = !isChunked || usesSimulatedBasaltPond;
+    pondWater.visible = !isChunked || usesChunkedLakeWater;
     flowerPatchGroup.visible = true;
     floatingRim.visible = !isChunked;
     if (preInteriorCameraMode !== null) {
@@ -3935,7 +3941,7 @@ function createTellusWorld(
     ocean.material = useWebGPU
       ? createBackdropWaterMaterial(runtimeConfig.waterSettings)
       : createFallbackOceanMaterial(runtimeConfig.waterSettings);
-    configureBasaltPondBase(ocean.material);
+    configureCalmLakeBase(ocean.material);
     disposeMaterial(previousOceanMaterial);
 
     const rebuiltPond = createPondWater({
@@ -3943,7 +3949,8 @@ function createTellusWorld(
       radius: waterFeatureRadius,
       waterLevel: waterFeatureLevel(),
       animated: useWebGPU,
-      simulated: usesSimulatedBasaltPond,
+      simulated: usesSimulatedPondWater,
+      baseSurface: !isChunked,
       waterSettings: runtimeConfig.waterSettings,
     });
     const disposePreviousPondSimulation = pondWater.userData.disposePondSimulation as
@@ -7605,7 +7612,7 @@ function createTellusWorld(
   };
 
   const chunkedWaterVehicleDisembarkPosition = (boat: GeneratedThing): Vec3 | null => {
-    if (!isChunked || isContinentalChunkedWorld || vehicleMode(boat) !== "water") return null;
+    if (!supportsChunkedWater || vehicleMode(boat) !== "water") return null;
     const footprint = thingFootprint(boat);
     const startRadius = Math.max(3.2, (footprint?.radius ?? boat.scale * 1.8) + 1.4);
     const preferredAngles = [
