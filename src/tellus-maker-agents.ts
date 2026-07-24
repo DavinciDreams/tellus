@@ -12,7 +12,16 @@ export interface MakerAgentSummary {
   offlinePersistence: boolean;
   lastTickAt?: string | null;
   avatarId?: string | null;
+  lastEvaluation: MakerAgentEvaluationSummary | null;
   isDefault: boolean;
+}
+
+export interface MakerAgentEvaluationSummary {
+  jobId: string;
+  status: string;
+  decision: string | null;
+  summary: string | null;
+  at: string | null;
 }
 
 export interface MakerAgentDirectory {
@@ -56,6 +65,21 @@ function boolValue(value: unknown): boolean {
   return value === true;
 }
 
+function normalizeLastEvaluation(value: unknown): MakerAgentEvaluationSummary | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const jobId = stringValue(row.jobId).trim();
+  const status = stringValue(row.status).trim().slice(0, 40);
+  if (!jobId || !status) return null;
+  return {
+    jobId,
+    status,
+    decision: typeof row.decision === "string" ? row.decision.trim().slice(0, 80) || null : null,
+    summary: typeof row.summary === "string" ? row.summary.trim().slice(0, 240) || null : null,
+    at: typeof row.at === "string" ? row.at : null,
+  };
+}
+
 export function normalizeMakerAgentSummary(value: unknown): MakerAgentSummary | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
@@ -74,6 +98,7 @@ export function normalizeMakerAgentSummary(value: unknown): MakerAgentSummary | 
     offlinePersistence: boolValue(row.offlinePersistence),
     lastTickAt: typeof row.lastTickAt === "string" ? row.lastTickAt : null,
     avatarId: typeof row.avatarId === "string" ? row.avatarId : null,
+    lastEvaluation: normalizeLastEvaluation(row.lastEvaluation),
     isDefault: boolValue(row.isDefault),
   };
 }
