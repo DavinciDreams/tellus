@@ -20,6 +20,7 @@ import {
 } from "./tellus-scene-builders";
 import { loadRuntimeConfig, runtimeConfig } from "./tellus-runtime-config";
 import type { GeneratedThing, Vec3 } from "./tellus-types";
+import { agentViewCameraPose } from "./agent-view-camera";
 import {
   parseLandShapeOverrides,
   parseWorldTemplateId,
@@ -58,6 +59,7 @@ interface WorldStateSnapshot {
 let latestPresence: StatePresence[] = [];
 let terrainRevision = -1;
 let ready = false;
+let lastPollAt = 0;
 
 const boot = async () => {
   await loadRuntimeConfig().catch(() => undefined);
@@ -221,6 +223,24 @@ const boot = async () => {
   };
 
   // ── state polling (HTTP only — no /live, so no ghost presence in the world) ──
+  const applySnapshot = (snapshot: WorldStateSnapshot) => {
+    if (Array.isArray(snapshot.generated)) syncThings(snapshot.generated);
+    if (Array.isArray(snapshot.presence)) syncPresence(snapshot.presence);
+    const terrainState = snapshot.terrain as { revision?: number } | undefined;
+    if (terrainState && typeof terrainState.revision === "number" && terrainState.revision !== terrainRevision) {
+      terrainRevision = terrainState.revision;
+      try {
+        applyTellusTerrainState(terrainState as never);
+        terrain.geometry.dispose();
+        terrain.geometry = createTerrainGeometry(144);
+        pond.position.y = pondWaterLevel();
+      } catch {
+        /* keep the old terrain on a parse hiccup */
+      }
+    }
+    ready = true;
+    lastPollAt = Date.now();
+  };
   const poll = async () => {
     try {
       const res = await fetch(
@@ -228,21 +248,7 @@ const boot = async () => {
       );
       if (!res.ok) return;
       const snapshot = (await res.json()) as WorldStateSnapshot;
-      if (Array.isArray(snapshot.generated)) syncThings(snapshot.generated);
-      if (Array.isArray(snapshot.presence)) syncPresence(snapshot.presence);
-      const terrainState = snapshot.terrain as { revision?: number } | undefined;
-      if (terrainState && typeof terrainState.revision === "number" && terrainState.revision !== terrainRevision) {
-        terrainRevision = terrainState.revision;
-        try {
-          applyTellusTerrainState(terrainState as never);
-          terrain.geometry.dispose();
-          terrain.geometry = createTerrainGeometry(144);
-          pond.position.y = pondWaterLevel();
-        } catch {
-          /* keep the old terrain on a parse hiccup */
-        }
-      }
-      ready = true;
+      applySnapshot(snapshot);
     } catch {
       /* transient — keep last state */
     }
@@ -264,9 +270,20 @@ const boot = async () => {
   }, 500);
 
   // ── the capture API the browser-driver calls ──
-  const captureFor = async (visitorId: string, w = 256, h = 144): Promise<string | null> => {
+  const captureForAngle = async (
+    visitorId: string,
+    yawDegrees = 0,
+    pitchDegrees = -8,
+    w = 256,
+    h = 144,
+  ): Promise<string | null> => {
+    // Evaluation follows an action closely; refresh once before the angle burst instead of relying on the
+    // five-second warm-cache poll and accidentally photographing pre-action state.
+    if (Date.now() - lastPollAt > 500) await poll();
     const p = latestPresence.find((x) => x.visitorId === visitorId);
     if (!p?.position) return null;
+    w = Math.min(1024, Math.max(128, Math.round(w)));
+    h = Math.min(576, Math.max(72, Math.round(h)));
     povCamera.aspect = w / h;
     povCamera.updateProjectionMatrix();
     // Eye height follows the visitor's avatar scale (a giant's POV is at its head, not its knees).
@@ -274,18 +291,25 @@ const boot = async () => {
       typeof p.avatarScale === "number" && Number.isFinite(p.avatarScale) && p.avatarScale > 0
         ? Math.min(8, Math.max(0.1, p.avatarScale))
         : 1;
-    const eye = new THREE.Vector3(p.position.x, p.position.y + 2.4 * eyeScale, p.position.z);
-    // face the island center-ish (presence carries no heading) with a slight downward tilt
-    const look = new THREE.Vector3(-p.position.x * 0.2, p.position.y + 0.6, -p.position.z * 0.2);
-    if (eye.distanceTo(look) < 2) look.set(eye.x + 6, eye.y - 1.2, eye.z);
-    povCamera.position.copy(eye);
-    povCamera.lookAt(look);
+    const pose = agentViewCameraPose(p.position, eyeScale, yawDegrees, pitchDegrees);
+    povCamera.position.set(pose.eye.x, pose.eye.y, pose.eye.z);
+    povCamera.lookAt(pose.target.x, pose.target.y, pose.target.z);
     canvas.width = w;
     canvas.height = h;
     renderer.setSize(w, h, false);
-    renderer.render(scene, povCamera);
+    // A first-person evidence frame must not contain the observer's own capsule.
+    const self = presenceMeshes.get(visitorId);
+    const wasVisible = self?.visible;
+    if (self) self.visible = false;
+    try {
+      renderer.render(scene, povCamera);
+    } finally {
+      if (self) self.visible = wasVisible ?? true;
+    }
     return canvas.toDataURL("image/jpeg", 0.6);
   };
+  const captureFor = async (visitorId: string, w = 256, h = 144): Promise<string | null> =>
+    captureForAngle(visitorId, 0, -8, w, h);
 
   (window as unknown as { agentView: object }).agentView = {
     get ready() {
@@ -293,6 +317,8 @@ const boot = async () => {
     },
     worldId,
     captureFor,
+    captureForAngle,
+    applySnapshot,
   };
 };
 

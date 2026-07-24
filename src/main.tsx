@@ -13163,6 +13163,15 @@ function App(): React.ReactElement {
                             {isHere ? "Here" : worldDisplayName(canonicalWorldId(agent.worldId))}
                             {agent.optedIn ? (agent.enabled ? " · awake" : " · sleeping") : " · stopped"}
                           </span>
+                          {agent.lastEvaluation && (
+                            <div className="maker-agent-card__evaluation" data-status={agent.lastEvaluation.status}>
+                              <span className="maker-agent-card__evaluation-status">
+                                Evaluation: {agent.lastEvaluation.status}
+                                {agent.lastEvaluation.decision ? ` · ${agent.lastEvaluation.decision}` : ""}
+                              </span>
+                              {agent.lastEvaluation.summary && <span>{agent.lastEvaluation.summary}</span>}
+                            </div>
+                          )}
                           <div className="maker-agent-card__actions">
                             <button
                               type="button"

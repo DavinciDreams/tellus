@@ -1786,6 +1786,34 @@ textarea::placeholder {
   opacity: 0.65;
 }
 
+.maker-agent-card__evaluation {
+  display: grid;
+  gap: 2px;
+  padding: 5px 6px;
+  border-left: 2px solid #7a8597;
+  border-radius: 3px;
+  background: rgb(255 255 255 / 4%);
+  color: rgb(255 255 255 / 72%);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.maker-agent-card__evaluation[data-status="passed"] {
+  border-left-color: #7bc958;
+}
+
+.maker-agent-card__evaluation[data-status="refine"],
+.maker-agent-card__evaluation[data-status="blocked"],
+.maker-agent-card__evaluation[data-status="failed"] {
+  border-left-color: #d6a95d;
+}
+
+.maker-agent-card__evaluation-status {
+  color: var(--hud-gold-bright);
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
 .maker-agent-roster__error {
   color: #ff9a9a;
   opacity: 1;

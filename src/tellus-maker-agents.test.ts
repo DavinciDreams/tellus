@@ -13,6 +13,14 @@ describe("normalizeMakerAgentSummary", () => {
       optedIn: true,
       ownerPresent: false,
       offlinePersistence: true,
+      lastEvaluation: {
+        jobId: "eval-1",
+        status: "refine",
+        decision: "refine-action",
+        summary: "The arch is offset.",
+        at: "2026-07-23T12:00:00Z",
+        renderBytes: "must-not-leak",
+      },
       isDefault: true,
       sessionToken: "must-not-leak",
     })).toEqual({
@@ -27,6 +35,13 @@ describe("normalizeMakerAgentSummary", () => {
       offlinePersistence: true,
       lastTickAt: null,
       avatarId: null,
+      lastEvaluation: {
+        jobId: "eval-1",
+        status: "refine",
+        decision: "refine-action",
+        summary: "The arch is offset.",
+        at: "2026-07-23T12:00:00Z",
+      },
       isDefault: true,
     });
   });
