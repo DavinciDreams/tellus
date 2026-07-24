@@ -174,7 +174,16 @@ import { generateInteriorRoom, normalizeInteriorBiomeMaterial, type InteriorBiom
 import { installSessionFetch, getSession, issueTellusLiveTicket, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, openTellusAccountPanel, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
-import { buildAgentMapLocation, resolveAgentMoveTarget } from "./tellus-agent-location";
+import { buildAgentMapLocation, resolveBlockableAgentMoveTarget } from "./tellus-agent-location";
+import {
+  MakerAgentApiError,
+  createMakerAgent,
+  deleteMakerAgent,
+  fetchMakerAgents,
+  runMakerAgentAction,
+  type MakerAgentDirectory,
+  type MakerAgentSummary,
+} from "./tellus-maker-agents";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, shouldIgnoreDefaultTellusTemplate, templateForWorldId, templateSuppressesAutoVegetation } from "./tellus-world-templates";
 import { evoflowTerrainSourceFor } from "./tellus-evoflow-terrains";
 import {
@@ -3851,6 +3860,17 @@ function createTellusWorld(
     const height = terrainHeight(x, z);
     return { height, kind: terrainKind(x, z, height), loaded: true };
   };
+
+  const isAgentPlacementWater = (x: number, z: number): boolean => {
+    if (interiorObject) return false;
+    return isChunked ? isChunkedWaterPoint(x, z) : sampleMapPoint(x, z).kind === "water";
+  };
+  const requiresDryLand = (kind: GeneratedKind): boolean =>
+    kind === "tree" ||
+    kind === "flower" ||
+    kind === "path" ||
+    kind === "shrine" ||
+    kind === "seed";
 
   let worldChatPollTimer: number | undefined;
   const pollWorldChatSnapshot = async () => {
@@ -8296,7 +8316,9 @@ function createTellusWorld(
       option.max,
     );
     const placed: ProceduralAssetPlacement[] = [];
-    for (let i = 0; i < total; i++) {
+    const maxAttempts = total * 4;
+    for (let attempt = 0; attempt < maxAttempts && placed.length < total; attempt++) {
+      const i = placed.length;
       const seed = (rng() * 0xffffffff) >>> 0;
       const angle = rng() * Math.PI * 2;
       const brushRadius = Math.max(1.5, option.radius * 0.55);
@@ -8311,6 +8333,7 @@ function createTellusWorld(
         y: 0,
         z: center.z + Math.cos(angle) * distance,
       };
+      if (isAgentPlacementWater(location.x, location.z)) continue;
       const scale = option.scale(0.82 + rng() * 0.42);
       const plantPlacement = placeProcPlantAsset(option, seed, location, scale);
       if (plantPlacement) {
@@ -11060,12 +11083,77 @@ function createTellusWorld(
       const a = args ?? {};
       switch (verb) {
         case "moveSelf": {
-          const moved = resolveAgentMoveTarget(
+          const mountedThing = sailingThingId ? thingById(sailingThingId) : undefined;
+          if (sailingThingId && !mountedThing) sailingThingId = undefined;
+          if (mountedThing) {
+            const previousMountPosition = { ...mountedThing.position };
+            const moved = resolveBlockableAgentMoveTarget(
+              a,
+              mountedThing.position,
+              8,
+              (x, z) => movedVehiclePositionForCurrentWorld(
+                mountedThing,
+                x,
+                z,
+                mountedThing.position,
+              ),
+              () => null,
+            );
+            mountedThing.position = moved.position;
+            const dx = moved.position.x - previousMountPosition.x;
+            const dz = moved.position.z - previousMountPosition.z;
+            const isMoving = Math.hypot(dx, dz) > 0.001;
+            if (isMoving) mountedThing.rotationY = Math.atan2(dx, dz);
+            updateMountedAnimation(mountedThing, isMoving, false);
+            updateThingMeshPosition(mountedThing);
+            visitorPosition = riderPositionForThing(mountedThing);
+            publishGeneratedThing(mountedThing);
+            syncAnchoredPortalsForThing(mountedThing);
+            sendPresenceUpdate(true);
+            publish();
+            return {
+              ok: true,
+              worldId: runtimeConfig.worldId,
+              position: { ...visitorPosition },
+              mountedThingId: mountedThing.id,
+              mountedPosition: { ...mountedThing.position },
+              mode: vehicleMode(mountedThing),
+              target: moved.target,
+              distanceRemaining: moved.distanceRemaining,
+              reached: moved.reached,
+            };
+          }
+          const currentPositionIsWater = isAgentPlacementWater(visitorPosition.x, visitorPosition.z);
+          const moved = resolveBlockableAgentMoveTarget(
             a,
             visitorPosition,
             8,
-            (x, z) => groundedPosition(x, z, visitorPosition),
+            (x, z) => {
+              const target = isChunked ? clampChunkedPoint(x, z) : { x, z };
+              return groundedPositionForCurrentSurface(target.x, target.z, visitorPosition);
+            },
+            (x, z) => {
+              const target = isChunked ? clampChunkedPoint(x, z) : { x, z };
+              if (currentPositionIsWater || !isAgentPlacementWater(target.x, target.z)) return null;
+              return {
+                ...target,
+                kind: "water",
+                reason: "moveSelf cannot enter water or ocean in this world",
+              };
+            },
           );
+          if (moved.blocked) {
+            return {
+              ok: false,
+              error: moved.blocked.reason,
+              worldId: runtimeConfig.worldId,
+              position: { ...visitorPosition },
+              target: moved.target,
+              distanceRemaining: moved.distanceRemaining,
+              reached: false,
+              blocked: moved.blocked,
+            };
+          }
           visitorPosition = moved.position;
           sendPresenceUpdate(true);
           return {
@@ -11137,9 +11225,21 @@ function createTellusWorld(
             suggestions.find((candidate) => candidate.modelUrl === assetId) ??
             suggestions[0];
           if (!model) return { ok: false, error: "No reusable asset matched" };
+          const location = nearToLocation(a.near);
+          const modelKind = inferGeneratedKind(
+            model.description?.trim() || model.name,
+            visitorId as GenerateRequest["creatorId"],
+          );
+          if (
+            typeof location === "object" &&
+            requiresDryLand(modelKind) &&
+            isAgentPlacementWater(location.x, location.z)
+          ) {
+            return { ok: false, error: "This asset requires dry land; move ashore before placing it" };
+          }
           const thing = addLibraryAsset(model, {
             creatorId: visitorId as GenerateRequest["creatorId"],
-            location: nearToLocation(a.near),
+            location,
           });
           return { ok: true, id: thing.id, reused: model.id, name: model.name };
         }
@@ -11158,6 +11258,13 @@ function createTellusWorld(
             : option.scale();
           const plantLocation =
             typeof location === "string" ? { ...visitorPosition } : location;
+          if (isAgentPlacementWater(plantLocation.x, plantLocation.z)) {
+            return {
+              ok: false,
+              error: "placeProceduralAsset requires dry land; move ashore before planting",
+              position: plantLocation,
+            };
+          }
           const plantPlacement = placeProcPlantAsset(option, seed, plantLocation, scale);
           if (plantPlacement) {
             return { ok: true, id: plantPlacement.id, archetypeId: option.id, label: option.label, chunkedVegetation: true };
@@ -11182,7 +11289,14 @@ function createTellusWorld(
         case "scatterProceduralAsset": {
           const archetypeId = typeof a.archetypeId === "string" ? a.archetypeId : typeof a.id === "string" ? a.id : "";
           const placed = scatterProceduralAsset(archetypeId, typeof a.count === "number" ? a.count : undefined);
-          if (!placed.length) return { ok: false, error: "scatterProceduralAsset requires a valid archetypeId" };
+          if (!placed.length) {
+            return {
+              ok: false,
+              error: proceduralAssetOption(archetypeId)
+                ? "No dry planting locations were found nearby; move ashore before scattering vegetation"
+                : "scatterProceduralAsset requires a valid archetypeId",
+            };
+          }
           return {
             ok: true,
             archetypeId,
@@ -11192,10 +11306,20 @@ function createTellusWorld(
         }
         case "generate": {
           if (typeof a.prompt !== "string" || !a.prompt.trim()) return { ok: false, error: "generate requires a prompt" };
+          const prompt = a.prompt.trim();
+          const location = nearToLocation(a.near);
+          const kind = inferGeneratedKind(prompt, visitorId as GenerateRequest["creatorId"]);
+          if (
+            typeof location === "object" &&
+            requiresDryLand(kind) &&
+            isAgentPlacementWater(location.x, location.z)
+          ) {
+            return { ok: false, error: "This creation requires dry land; move ashore before generating it" };
+          }
           const forceNew = a.force === true || a.generateNew === true || a.variant === true;
           if (!forceNew) {
             const suggestions = await reusableAssetsForPrompt(
-              a.prompt.trim(),
+              prompt,
               4,
               assetContextFromUnknown(a.contexts ?? a.context),
             );
@@ -11216,8 +11340,8 @@ function createTellusWorld(
             }
           }
           const thing = generate({
-            prompt: a.prompt.trim(),
-            location: nearToLocation(a.near),
+            prompt,
+            location,
             // Attribute creations to THIS visitor (e.g. an embodied agent's id) instead of the generic
             // "visitor", so the world + dashboards credit the actual creator.
             creatorId: visitorId as GenerateRequest["creatorId"],
@@ -12377,6 +12501,16 @@ function App(): React.ReactElement {
   const [agentPersonaDraft, setAgentPersonaDraft] = useState("");
   const [agentBusy, setAgentBusy] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
+  // Maker-owned roster. Null means not loaded; `makerAgentsSupported=false` is the mixed-version fallback
+  // while Tellus is ahead of a Hyades deployment that does not expose /api/tellus/agents yet.
+  const [makerAgents, setMakerAgents] = useState<MakerAgentDirectory | null>(null);
+  const [makerAgentsSupported, setMakerAgentsSupported] = useState(true);
+  const [makerAgentsError, setMakerAgentsError] = useState<string | null>(null);
+  const [makerAgentBusyId, setMakerAgentBusyId] = useState<string | null>(null);
+  const [makerAgentCreateOpen, setMakerAgentCreateOpen] = useState(false);
+  const [makerAgentNameDraft, setMakerAgentNameDraft] = useState("");
+  const [makerAgentPersonaDraft, setMakerAgentPersonaDraft] = useState("");
+  const [makerAgentDeleteConfirm, setMakerAgentDeleteConfirm] = useState<string | null>(null);
   // Agent chat thread: the server-side agent's dialog (assistant=dialog, tool=dimmed) merged with the lines
   // YOU send it. Your lines append locally on send; the agent's replies arrive via the transcript poll and
   // are merged (content-deduped) so the thread reads as a conversation. POV viewport toggle alongside.
@@ -12488,7 +12622,135 @@ function App(): React.ReactElement {
     void worldRef.current?.setP2pDevices(selectedMic || undefined, id || undefined).then(attachSelfPreview);
   };
 
-  // ── "Your Agent" panel handlers (self-contained; pure fetch against the Hyades world agent API) ──
+  // ── Maker-owned roster (new plural API; singular companion UI below remains the default agent) ──
+  const refreshMakerAgents = useCallback(async (signal?: AbortSignal): Promise<MakerAgentDirectory | null> => {
+    if (!account?.accountId) {
+      setMakerAgents(null);
+      return null;
+    }
+    try {
+      const directory = await fetchMakerAgents(signal);
+      setMakerAgents(directory);
+      setMakerAgentsSupported(true);
+      setMakerAgentsError(null);
+      return directory;
+    } catch (error) {
+      if (signal?.aborted) return null;
+      // Safe rolling order: an older Hyades returns 404/405. Keep the existing default-companion panel
+      // functional and hide only the plural controls until the backend lands.
+      if (error instanceof MakerAgentApiError && (error.status === 404 || error.status === 405)) {
+        setMakerAgentsSupported(false);
+        setMakerAgents(null);
+        return null;
+      }
+      // Some pre-route gateways answer 405 without CORS headers, which Fetch intentionally exposes only as
+      // a TypeError. Treat that like the same mixed-version absence; the existing singular panel still owns
+      // the visible connectivity error if Hyades is genuinely unreachable.
+      if (error instanceof TypeError) {
+        setMakerAgentsSupported(false);
+        setMakerAgents(null);
+        return null;
+      }
+      setMakerAgentsError(error instanceof Error ? error.message : "Could not load your agents.");
+      return null;
+    }
+  }, [account?.accountId]);
+
+  useEffect(() => {
+    if (!agentPanelOpen || !account?.accountId || !makerAgentsSupported) return;
+    const controller = new AbortController();
+    void refreshMakerAgents(controller.signal);
+    const id = window.setInterval(() => void refreshMakerAgents(controller.signal), 5_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(id);
+    };
+  }, [account?.accountId, agentPanelOpen, makerAgentsSupported, refreshMakerAgents]);
+
+  const updateMakerAgentRow = useCallback((updated: MakerAgentSummary) => {
+    setMakerAgents((current) => current ? {
+      ...current,
+      agents: current.agents.map((agent) => agent.agentId === updated.agentId
+        ? { ...updated, isDefault: agent.isDefault || updated.isDefault }
+        : agent),
+    } : current);
+  }, []);
+
+  const onCreateMakerAgent = useCallback(async () => {
+    const name = makerAgentNameDraft.trim();
+    if (!name) {
+      setMakerAgentsError("Give the new agent a name.");
+      return;
+    }
+    setMakerAgentBusyId("create");
+    setMakerAgentsError(null);
+    try {
+      await createMakerAgent({
+        worldId: canonicalWorldId(runtimeConfig.worldId),
+        name,
+        persona: makerAgentPersonaDraft.trim(),
+      });
+      await refreshMakerAgents();
+      setMakerAgentNameDraft("");
+      setMakerAgentPersonaDraft("");
+      setMakerAgentCreateOpen(false);
+    } catch (error) {
+      setMakerAgentsError(error instanceof Error ? error.message : "Could not create agent.");
+    } finally {
+      setMakerAgentBusyId(null);
+    }
+  }, [makerAgentNameDraft, makerAgentPersonaDraft, refreshMakerAgents]);
+
+  const onMakerAgentAction = useCallback(async (
+    agent: MakerAgentSummary,
+    action: "start" | "stop" | "place",
+  ) => {
+    setMakerAgentBusyId(agent.agentId);
+    setMakerAgentsError(null);
+    try {
+      const updated = await runMakerAgentAction(
+        agent.agentId,
+        action,
+        action === "place" ? canonicalWorldId(runtimeConfig.worldId) : undefined,
+      );
+      updateMakerAgentRow(updated);
+      // The existing rich companion panel addresses the directory default. Refresh it after changing the
+      // default through plural controls so status/viewport/chat never lag behind the roster.
+      if (agent.isDefault) setAgentStatus(null);
+      await refreshMakerAgents();
+    } catch (error) {
+      setMakerAgentsError(error instanceof Error ? error.message : `Could not ${action} agent.`);
+    } finally {
+      setMakerAgentBusyId(null);
+    }
+  }, [refreshMakerAgents, updateMakerAgentRow]);
+
+  const onDeleteMakerAgent = useCallback(async (agent: MakerAgentSummary) => {
+    if (makerAgentDeleteConfirm !== agent.agentId) {
+      setMakerAgentDeleteConfirm(agent.agentId);
+      return;
+    }
+    setMakerAgentBusyId(agent.agentId);
+    setMakerAgentsError(null);
+    try {
+      await deleteMakerAgent(agent.agentId);
+      const directory = await refreshMakerAgents();
+      setMakerAgentDeleteConfirm(null);
+      if (agent.isDefault) {
+        setAgentStatus(null);
+        setAgentChat([]);
+        agentMergedKeysRef.current = new Set();
+        // If another agent became default, the singular status poll will adopt it on its next pass.
+        if (!directory?.defaultAgentId) setAgentViewportOn(false);
+      }
+    } catch (error) {
+      setMakerAgentsError(error instanceof Error ? error.message : "Could not delete agent.");
+    } finally {
+      setMakerAgentBusyId(null);
+    }
+  }, [makerAgentDeleteConfirm, refreshMakerAgents]);
+
+  // ── "Your Agent" panel handlers (rich controls for the maker directory's default agent) ──
   const fetchAgentStatus = useCallback(async (signal?: AbortSignal): Promise<AgentStatus | null> => {
     const res = await fetch(tellusAgentUrl("status"), { signal });
     if (!res.ok) throw new Error(`status ${res.status}`);
@@ -12776,6 +13038,7 @@ function App(): React.ReactElement {
   // the old floating center-screen agent aside — same handlers, same fetch wiring, just relocated.
   const renderAgentTab = () => {
     const optedIn = agentStatus?.optedIn ?? false;
+    const currentMakerWorldId = canonicalWorldId(runtimeConfig.worldId);
     const running =
       optedIn &&
       ((agentStatus?.ownerPresent ?? false) || (agentStatus?.offlinePersistence ?? false)) &&
@@ -12832,7 +13095,125 @@ function App(): React.ReactElement {
 
         {agentSettingsOpen && (
           <div className="agent-tab-settings">
-            <span style={{ fontSize: 10, opacity: 0.6 }} title="Each world has its own agent — its memories live in that world.">
+            {account?.accountId && makerAgentsSupported && (
+              <section className="maker-agent-roster" aria-label="Your agents">
+                <div className="maker-agent-roster__header">
+                  <span>
+                    Your agents{makerAgents ? ` (${makerAgents.agents.length})` : ""}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={makerAgentBusyId !== null}
+                    onClick={() => setMakerAgentCreateOpen((open) => !open)}
+                    style={p2pBtnStyle(makerAgentCreateOpen)}
+                  >
+                    <Plus size={12} /> {makerAgentCreateOpen ? "Cancel" : "New"}
+                  </button>
+                </div>
+
+                {makerAgentCreateOpen && (
+                  <div className="maker-agent-create">
+                    <input
+                      value={makerAgentNameDraft}
+                      maxLength={80}
+                      onChange={(event) => setMakerAgentNameDraft(event.target.value)}
+                      placeholder="Agent name"
+                      aria-label="New agent name"
+                    />
+                    <textarea
+                      value={makerAgentPersonaDraft}
+                      maxLength={8000}
+                      rows={3}
+                      onChange={(event) => setMakerAgentPersonaDraft(event.target.value)}
+                      placeholder="Personality or role (optional)"
+                      aria-label="New agent personality"
+                    />
+                    <button
+                      type="button"
+                      disabled={makerAgentBusyId !== null || !makerAgentNameDraft.trim()}
+                      onClick={() => void onCreateMakerAgent()}
+                      style={p2pBtnStyle(true)}
+                    >
+                      {makerAgentBusyId === "create" ? "Creating…" : `Create in ${worldDisplayName(currentMakerWorldId)}`}
+                    </button>
+                  </div>
+                )}
+
+                {!makerAgents ? (
+                  <span className="maker-agent-roster__empty">Loading agents…</span>
+                ) : makerAgents.agents.length === 0 ? (
+                  <span className="maker-agent-roster__empty">No agents yet. Create one to inhabit this world.</span>
+                ) : (
+                  <div className="maker-agent-list">
+                    {makerAgents.agents.map((agent) => {
+                      const busy = makerAgentBusyId === agent.agentId;
+                      const isHere = canonicalWorldId(agent.worldId) === currentMakerWorldId;
+                      return (
+                        <article key={agent.agentId} className={agent.isDefault ? "maker-agent-card is-default" : "maker-agent-card"}>
+                          <div className="maker-agent-card__identity">
+                            <span
+                              className="maker-agent-card__dot"
+                              data-running={agent.enabled ? "true" : "false"}
+                              aria-hidden="true"
+                            />
+                            <strong>{agent.name}</strong>
+                            {agent.isDefault && <span className="maker-agent-card__badge">Companion</span>}
+                          </div>
+                          <span className="maker-agent-card__world">
+                            {isHere ? "Here" : worldDisplayName(canonicalWorldId(agent.worldId))}
+                            {agent.optedIn ? (agent.enabled ? " · awake" : " · sleeping") : " · stopped"}
+                          </span>
+                          <div className="maker-agent-card__actions">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              aria-label={`${agent.optedIn ? "Stop" : "Start"} ${agent.name}`}
+                              onClick={() => void onMakerAgentAction(agent, agent.optedIn ? "stop" : "start")}
+                              style={p2pBtnStyle(agent.optedIn)}
+                            >
+                              {busy ? "…" : agent.optedIn ? "Stop" : "Start"}
+                            </button>
+                            {!isHere && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                aria-label={`Bring ${agent.name} to ${worldDisplayName(currentMakerWorldId)}`}
+                                onClick={() => void onMakerAgentAction(agent, "place")}
+                                style={p2pBtnStyle(false)}
+                              >
+                                Bring here
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              disabled={busy}
+                              aria-label={`${makerAgentDeleteConfirm === agent.agentId ? "Confirm delete" : "Delete"} ${agent.name}`}
+                              title={makerAgentDeleteConfirm === agent.agentId ? "Delete permanently" : "Delete agent"}
+                              onClick={() => void onDeleteMakerAgent(agent)}
+                              style={{ ...p2pBtnStyle(false), flex: "0 0 auto", paddingInline: 8 }}
+                            >
+                              {makerAgentDeleteConfirm === agent.agentId ? "Confirm" : <Trash2 size={12} />}
+                            </button>
+                            {makerAgentDeleteConfirm === agent.agentId && (
+                              <button
+                                type="button"
+                                onClick={() => setMakerAgentDeleteConfirm(null)}
+                                style={{ ...p2pBtnStyle(false), flex: "0 0 auto", paddingInline: 8 }}
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+                {makerAgentsError && <span className="maker-agent-roster__error">{makerAgentsError}</span>}
+              </section>
+            )}
+
+            <span style={{ fontSize: 10, opacity: 0.6 }} title="Your companion keeps its identity and memories when it moves between worlds.">
               in “{worldDisplayName(canonicalWorldId(agentStatus?.worldId || activeWorldId || runtimeConfig.worldId))}”
             </span>
             {!agentStatus?.offlinePersistence && <PremiumUpsellChip />}
@@ -15799,16 +16180,20 @@ function App(): React.ReactElement {
       const agentWorldId = canonicalWorldId(agentStatus.worldId || currentWorldId);
       const key = `agent:${agentStatus.visitorId}`;
       const existing = byKey.get(key);
+      const existingInAgentWorld =
+        existing?.worldId && canonicalWorldId(existing.worldId) === agentWorldId
+          ? existing
+          : undefined;
       byKey.set(key, {
         visitorId: agentStatus.visitorId,
-        name: existing?.name || actorName({ visitorId: agentStatus.visitorId, name: "Your agent" }),
+        name: existingInAgentWorld?.name || actorName({ visitorId: agentStatus.visitorId, name: "Your agent" }),
         kind: "agent",
-        worldId: existing?.worldId || agentWorldId,
-        position: existing?.position,
-        online: existing?.online ?? Boolean(agentStatus.enabled || agentStatus.ownerPresent || agentStatus.offlinePersistence),
-        currentWorld: existing?.currentWorld ?? agentWorldId === currentWorldId,
+        worldId: existingInAgentWorld?.worldId || agentWorldId,
+        position: existingInAgentWorld?.position,
+        online: existingInAgentWorld?.online ?? Boolean(agentStatus.enabled || agentStatus.ownerPresent || agentStatus.offlinePersistence),
+        currentWorld: existingInAgentWorld?.currentWorld ?? agentWorldId === currentWorldId,
         canMessage: true,
-        lastSeenAt: existing?.lastSeenAt || agentStatus.lastTickAt || undefined,
+        lastSeenAt: existingInAgentWorld?.lastSeenAt || agentStatus.lastTickAt || undefined,
       });
     }
 
@@ -15859,21 +16244,30 @@ function App(): React.ReactElement {
     setWorldChatDmTarget(target);
     setWorldChatInput("");
   };
+  const finiteContactPosition = (contact: OnlineContact): Vec3 | undefined => {
+    const position = contact.position;
+    return position &&
+      Number.isFinite(position.x) &&
+      Number.isFinite(position.z)
+      ? position
+      : undefined;
+  };
   const goToOnlineContact = (contact: OnlineContact) => {
     if (!contact.worldId || !contact.online) return;
+    const position = finiteContactPosition(contact);
     if (contact.worldId === currentWorldId) {
-      if (contact.position) worldRef.current?.warpTo(contact.position.x, contact.position.z);
+      if (position) worldRef.current?.warpTo(position.x, position.z);
       return;
     }
-    if (!contact.position) {
+    if (!position) {
       sharedLocationRef.current = null;
       switchWorld(canonicalWorldId(contact.worldId));
       return;
     }
     const nextLocation = {
       worldId: canonicalWorldId(contact.worldId),
-      x: contact.position.x,
-      z: contact.position.z,
+      x: position.x,
+      z: position.z,
       consumed: false,
     };
     sharedLocationRef.current = nextLocation;
@@ -16229,7 +16623,7 @@ function App(): React.ReactElement {
                               <span className="mini-chat-friend-name" title={target.userId}>{target.name}<small>{statusText}</small></span>
                               <div className="mini-chat-friend-actions">
                                 <button type="button" disabled={!target.canMessage} onClick={() => setWorldChatDmTarget(target)}>Message</button>
-                                <button type="button" disabled={!target.online || !target.worldId || (target.currentWorld && !target.position)} onClick={() => goToOnlineContact(target)}>Go</button>
+                                <button type="button" disabled={!target.online || !target.worldId || (target.currentWorld && !finiteContactPosition(target))} onClick={() => goToOnlineContact(target)}>Go</button>
                                 <button type="button" disabled={friendMutationsBusy.has(`remove:${target.userId}`)} onClick={() => void mutateFriendship("remove", target.userId!)}>Remove</button>
                               </div>
                             </li>
@@ -16295,7 +16689,7 @@ function App(): React.ReactElement {
                           <button
                             type="button"
                             className="mini-chat-contact-go"
-                            disabled={target.currentWorld && !target.position}
+                            disabled={target.currentWorld && !finiteContactPosition(target)}
                             aria-label={target.currentWorld ? `Go to ${target.name}` : `Travel to ${target.name}'s world`}
                             onClick={(event) => {
                               event.stopPropagation();

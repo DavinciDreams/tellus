@@ -1667,6 +1667,130 @@ textarea::placeholder {
   background: rgb(0 0 0 / 24%);
 }
 
+.maker-agent-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+
+.maker-agent-roster__header,
+.maker-agent-card__identity,
+.maker-agent-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.maker-agent-roster__header {
+  justify-content: space-between;
+  color: var(--hud-gold-bright);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.25px;
+  text-transform: uppercase;
+}
+
+.maker-agent-roster__header button,
+.maker-agent-card__actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.maker-agent-create,
+.maker-agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.maker-agent-create {
+  padding: 7px;
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 7px;
+  background: rgb(0 0 0 / 24%);
+}
+
+.maker-agent-create input,
+.maker-agent-create textarea {
+  width: 100%;
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 5px;
+  background: rgb(0 0 0 / 35%);
+  color: var(--hud-text);
+  font: 500 11px/1.35 ui-sans-serif, system-ui;
+  padding: 6px 7px;
+}
+
+.maker-agent-create textarea {
+  resize: vertical;
+}
+
+.maker-agent-card {
+  display: grid;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 7px;
+  background: rgb(0 0 0 / 22%);
+}
+
+.maker-agent-card.is-default {
+  border-color: rgb(222 188 86 / 42%);
+  background: rgb(222 188 86 / 7%);
+}
+
+.maker-agent-card__identity {
+  min-width: 0;
+  font-size: 11px;
+}
+
+.maker-agent-card__identity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.maker-agent-card__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #7a8597;
+}
+
+.maker-agent-card__dot[data-running="true"] {
+  background: #7bc958;
+  box-shadow: 0 0 6px rgb(123 201 88 / 70%);
+}
+
+.maker-agent-card__badge {
+  margin-left: auto;
+  border: 1px solid rgb(222 188 86 / 38%);
+  border-radius: 999px;
+  color: var(--hud-gold-bright);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.35px;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
+
+.maker-agent-card__world,
+.maker-agent-roster__empty,
+.maker-agent-roster__error {
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.maker-agent-roster__error {
+  color: #ff9a9a;
+  opacity: 1;
+}
+
 .agent-tab-transcript {
   flex: 1 1 auto;
   min-height: 64px;
