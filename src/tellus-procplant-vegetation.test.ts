@@ -88,25 +88,25 @@ describe("procplant vegetation", () => {
     expect(branchModuleLodForTree(1, 52, detailDistance, 60)).toBe(1);
   });
 
-  it("keeps conifer foliage as authored-size sprays inside the upper crown", () => {
+  it("keeps conifer sprays full-sized and distributed through the crown", () => {
     const base = procPlantPresets.alpineFir;
-    const fullSize = buildProcPlantGraph({
+    const baseline = buildProcPlantGraph({
       ...base,
-      foliage: { ...base.foliage!, mass: 1, tipBias: 0.9, size: 1 },
+      foliage: { ...base.foliage!, mass: 1, tipBias: 0, size: 1 },
     }, 73);
-    const authoredSize = buildProcPlantGraph({
+    const curated = buildProcPlantGraph({
       ...base,
       foliage: { ...base.foliage!, mass: 1, tipBias: 0.9, size: 0.25 },
     }, 73);
-    const fullSprays = fullSize.organs.filter((organ) => organ.kind === "coniferSpray");
-    const authoredSprays = authoredSize.organs.filter((organ) => organ.kind === "coniferSpray");
+    const baselineSprays = baseline.organs.filter((organ) => organ.kind === "coniferSpray");
+    const curatedSprays = curated.organs.filter((organ) => organ.kind === "coniferSpray");
 
-    expect(authoredSprays.length).toBeGreaterThan(8);
-    expect(authoredSprays.length).toBe(fullSprays.length);
-    expect(authoredSize.organs.some((organ) => organ.kind === "leaf")).toBe(false);
-    expect(Math.min(...authoredSprays.map((organ) => organ.t))).toBeGreaterThanOrEqual(0.26);
-    for (let index = 0; index < authoredSprays.length; index++) {
-      expect(authoredSprays[index]!.scale).toBeCloseTo(fullSprays[index]!.scale * 0.25, 6);
+    expect(curatedSprays.length).toBeGreaterThan(8);
+    expect(curatedSprays.length).toBe(baselineSprays.length);
+    expect(curated.organs.some((organ) => organ.kind === "leaf")).toBe(false);
+    expect(Math.min(...curatedSprays.map((organ) => organ.t))).toBeLessThan(0.26);
+    for (let index = 0; index < curatedSprays.length; index++) {
+      expect(curatedSprays[index]!.scale).toBeCloseTo(baselineSprays[index]!.scale, 6);
     }
   });
 
