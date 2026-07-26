@@ -51,7 +51,6 @@ try {
     const snapshot = window.__tellusTreeLodPerf?.();
     return snapshot?.ready && snapshot.candidateId === "extreme-cone" && snapshot.density === 96;
   });
-  await page.waitForTimeout(500);
   const forestStructure = await page.evaluate(() => window.__tellusTreeLodPerf?.());
   if (!forestStructure) throw new Error("Tree LOD performance hook was unavailable");
 

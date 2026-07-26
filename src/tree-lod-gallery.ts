@@ -404,7 +404,14 @@ const loadedCache = new Map<CandidateId, Promise<LoadedCandidate>>();
 let selectedId: CandidateId = "pine-pack-flat";
 let activeBuildToken = 0;
 let completedBuildToken = 0;
+let lastRenderedBuildToken = 0;
 let lastBuildMs = 0;
+let lastRendererStats = {
+  calls: 0,
+  triangles: 0,
+  geometries: 0,
+  textures: 0,
+};
 
 const distanceMarkers = [
   { label: "near", meters: 35 },
@@ -896,21 +903,26 @@ const animate = () => {
     if (selectedId === "billboard") child.lookAt(camera.position.x, child.position.y, camera.position.z);
   }
   renderer.render(scene, camera);
-  requestAnimationFrame(animate);
-};
-
-window.__tellusTreeLodPerf = () => ({
-  ready: completedBuildToken === activeBuildToken && completedBuildToken > 0,
-  candidateId: selectedId,
-  density: Number(densitySlider.value),
-  treeObjects: treeGroup.children.length,
-  buildMs: Math.round(lastBuildMs * 10) / 10,
-  renderer: {
+  lastRenderedBuildToken = completedBuildToken;
+  lastRendererStats = {
     calls: renderer.info.render.calls,
     triangles: renderer.info.render.triangles,
     geometries: renderer.info.memory.geometries,
     textures: renderer.info.memory.textures,
-  },
+  };
+  requestAnimationFrame(animate);
+};
+
+window.__tellusTreeLodPerf = () => ({
+  ready:
+    completedBuildToken === activeBuildToken &&
+    lastRenderedBuildToken === activeBuildToken &&
+    completedBuildToken > 0,
+  candidateId: selectedId,
+  density: Number(densitySlider.value),
+  treeObjects: treeGroup.children.length,
+  buildMs: Math.round(lastBuildMs * 10) / 10,
+  renderer: { ...lastRendererStats },
 });
 
 rebuildMarkers();
