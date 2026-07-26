@@ -1,6 +1,11 @@
 # TellusWorldState — Hyades Module Spec
 
-**Status:** Draft for Hyades team implementation
+**Status (2026-07): historical migration specification; the Hyades
+authoritative-world migration and server-side embodied-agent direction are
+implemented.** Wire-contract rationale remains useful, but old Cloudflare,
+browser-autonomy, `/api/chat`, and `world-feedback` migration notes are not a
+description of the current client. Use `README.md`, `src/tellus-world-client.ts`,
+`src/tellus-maker-agents.ts`, and the live Hyades contract for current behavior.
 **Owner (client side):** Tellus
 **Target runtime:** Hyades Orleans cluster (.NET) + ASP.NET Core edge gateway
 **Audience:** Hyades engineers implementing the durable world-state service and the in-cluster game agent
@@ -337,12 +342,12 @@ Verbs (`sendAction`, `src/main.tsx:6381`) — each maps to one or more `WorldAct
 
 Keep the same clamps and grounding rules; the world grain should re-validate them server-side (don't trust the agent's arithmetic).
 
-### 9.2 Decision loop
+### 9.2 Decision loop (current direction)
 
-- Driven by an Orleans **reminder** (durable, survives reactivation) at the cadence the client used: asset action ~every `AUTONOMOUS_ASSET_INTERVAL_MS = 60_000`, reflection offset at half that (`src/main.tsx:369`).
-- Each tick: build observation → call Hyades **chat module** for the next `{verb, args}` (the README describes this as "ask `/api/chat` for its next `generate()` prompt about once per minute, with reflective `interact()` moments between") → dispatch.
-- Honor a per-world **pause** flag (the existing "pause AI" control) and per-agent enablement (`enabledAgents` config: subset of `["johnny","mira","sol","atlas"]`, default `["johnny"]`).
-- Optional: world-feedback vision step (`api/world-feedback.ts`) — render or summarize the world for the agent. Out of scope for v1 unless cheap to wire to the existing Hyades vision module.
+- Hyades owns the durable tick/reminder, observation, model decision, tool dispatch, budget, backoff, and lifecycle policy.
+- Starting an agent is explicit. The maker roster exposes start/stop/place/delete actions and Hyades may sleep agents according to owner-presence and premium/offline-persistence policy.
+- Tellus does not run the autonomous decision loop or call a browser `/api/chat` loop. It renders agent presence and world patches and provides the default companion's chat/persona/memory controls.
+- Evaluation evidence uses the bounded `agent-view` capture surface; Hyades remains authoritative for the evaluation decision and returned summary.
 
 ### 9.3 Identity
 

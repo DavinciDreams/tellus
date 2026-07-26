@@ -4,6 +4,35 @@ This note records which ideas from the current plant-modeling references fit Tel
 deterministic branch-module renderer. It is an implementation guide, not a claim that Tellus ports or
 reproduces any paper's full method.
 
+**Status (2026-07): the first realism and loading pass is shipped.** Deciduous
+crown spread, junction blending, folded broadleaf surfaces, rounded nearby
+trunks, cached Weber-Penn growth data, stable structural LOD, and restored dense
+conifer sprays are in the runtime and Biome Mixer where applicable.
+
+## Current implementation and performance contract
+
+- Authored broadleaf `crownSpread` lengthens primary horizontal scaffolds most
+  and lateral forks more gently. It does not stretch the trunk or increase the
+  module, branch, or leaf budgets.
+- Broadleaf organs share one compact folded surface per geometry key. Per-leaf
+  transforms and colors provide variation without adding a mesh, material, or
+  draw call for every leaf.
+- Conifers stay on their dedicated full-size needle-spray geometry throughout
+  the crown and never fall through to folded broadleaf cards.
+- Tree placement and scale remain stable as chunks cross LOD rings. Near trees
+  retain at least the connected medium crown; farther trees can thin structural
+  modules and organs or use supported impostors.
+- Weber-Penn growth hierarchies use a bounded eight-entry cache and are reused
+  when only bake or foliage options change. Chunk builds also reuse seed-bucketed
+  templates, static instance buffers, and cached ecology mixes.
+- Moving players receive a quick sparse build. Cold templates and full density
+  refine gradually after movement stops under bounded per-update build counts
+  and millisecond budgets.
+
+These are quality-preserving reductions in generation and rendering work. They
+have build/test/browser coverage, but the July realism pass did not record a
+controlled before/after FPS benchmark.
+
 ## FloraForge
 
 Reference: [FloraForge](https://github.com/baskargroup/FloraForge) and its published
@@ -74,7 +103,7 @@ Useful ideas:
 - Use strand/profile detail selectively; it improves close branch surfaces but is much more expensive
   than shared tapered segment instances.
 
-Applied in this branch:
+Implemented in Tellus:
 
 - Broadleaf `spread` lengthens horizontal primary scaffolds most strongly and their lateral forks more
   gently. It does not stretch the trunk or increase the module budget.
@@ -100,7 +129,7 @@ aggregation. EcoViz is not itself a source for detailed branch-junction geometry
 
 ## Recommended sequence
 
-1. Validate the folded leaf template across broadleaf species and preserve its silhouette in impostor bakes.
+1. Continue validating the shipped folded leaf template across broadleaf species and preserve its silhouette in impostor bakes.
 2. Add an optional low-resolution radial crown guide for asymmetric, lobed broadleaf silhouettes.
 3. Connect ecology/stand data to height, crown diameter, DBH, and cohort density.
 4. Add richer close-only collars and branch cross sections after profiling their geometry and build cost.

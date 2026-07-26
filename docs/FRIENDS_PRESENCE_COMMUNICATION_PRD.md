@@ -1,6 +1,9 @@
 # Tellus Friends, Presence, and Cross-World Communication PRD
 
-**Status:** Proposed
+**Status (2026-07): Phase 1 implemented; cross-world/offline DM delivery and
+cross-world call signaling remain proposed.** Tellus now has an authenticated
+friends list, request/accept/decline/remove flows, targeted batch presence for
+friends, and stable signed-in identity on the live world socket.
 
 **Issue:** [MonumentalSystems/hyades#35](https://github.com/MonumentalSystems/hyades/issues/35) (Hyades-side foundation — closed as completed, `0.5.301`)
 
@@ -8,17 +11,21 @@
 
 **Depends on:** `ITellusPresenceRegistryGrain` (shipped), `ITellusWorldGrain` DM privacy filtering (shipped), the existing P2P WebRTC mesh (`src/webrtc-mesh.ts`, shipped)
 
-**Primary milestone:** A friends list that shows who is online and in which world, replacing the client's polling-based cross-world presence hack with the shipped registry.
+**Primary milestone:** Shipped — the friends list shows who is online and in which world using the presence registry rather than polling every known world.
 
 ## 1. Executive summary
 
-Hyades shipped the missing piece first: a durable, cross-world presence registry (`ITellusPresenceRegistryGrain`, `0.5.301`) that answers "is user X online, and in which world" in one query, plus two gateway routes (`GET /api/tellus/presence`, `GET /api/tellus/presence/online`). Tellus does not yet use it. The client still runs a REST-polling workaround (`crossWorldPresence`, up to 12 worlds polled every 10s) to approximate the same answer, and has no durable friends list, no cross-world DM delivery, and no offline DM delivery.
+Hyades provides a durable cross-world presence registry that answers "is user X online, and in which world" in one query. Tellus now consumes its targeted batch route through `src/tellus-presence-client.ts` and manages relationships through `src/tellus-friends-client.ts`. Same-world chat/DM identity uses the authenticated live ticket and account display name. Durable cross-world and offline DM delivery are not yet part of the client contract.
 
 This project has three independent, sequential increments:
 
-1. **Presence + friends list:** replace the polling hack with the registry; add a durable per-user friends list; show online/offline + current world for each friend.
-2. **Cross-world DM delivery:** decouple DMs from the per-world transient chat log so a message reaches its recipient regardless of which world they're in, and is held for delivery if they're offline.
-3. **P2P call routing:** use presence to decide whether a friend is reachable via the existing same-world WebRTC mesh, or (later, larger scope) needs cross-world signaling relay.
+1. **Presence + friends list — shipped:** registry-backed status, durable relationships, and online/current-world display.
+2. **Cross-world DM delivery — proposed:** decouple DMs from the per-world transient chat log so a message reaches its recipient regardless of world and can wait for an offline recipient.
+3. **P2P call routing — proposed:** use presence to decide whether a friend is reachable through the existing same-world WebRTC mesh or needs a future cross-world signaling relay.
+
+Sections 2–18 preserve the original problem analysis and delivery design. Treat
+`src/tellus-friends-client.ts`, `src/tellus-presence-client.ts`, and the live
+Hyades routes as authoritative for the shipped Phase 1 contract.
 
 Only increment 1 is scoped in detail here. Increments 2 and 3 are described at a goals/non-goals level so their dependencies are visible, but each gets its own PRD before implementation.
 

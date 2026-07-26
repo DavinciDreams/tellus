@@ -56,7 +56,12 @@ Coding agents should read `AGENTS.md` first. Tool-specific files such as
   `src/tellus-rapier-physics.ts`, `src/tellus-terrain.ts`
 - Rendering, lag, terrain, and vegetation: `src/main.tsx`,
   `src/tellus-terrain.ts`, `src/tellus-scene-builders.ts`,
-  `src/tellus-vegetation*.ts`
+  `src/tellus-procplant-vegetation.ts`, `src/tellus-asset-impostor.ts`
+- Ecology and procedural plants: `src/tellus-ecology.ts`,
+  `src/tellus-procplants.ts`, `src/tellus-procplant-biomes.ts`,
+  `src/tellus-branch-modules.ts`
+- Maker-owned agents: `src/tellus-maker-agents.ts`, `src/agent-view.ts`,
+  `src/agent-view-camera.ts`
 - Hyades/world API clients: `src/tellus-world-client.ts`,
   `src/tellus-auth.ts`, `src/tellus-runtime-config.ts`
 

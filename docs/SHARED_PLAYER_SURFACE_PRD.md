@@ -1,5 +1,11 @@
 # PRD: Shared Player Surface and World Weaver Permissions
 
+**Status (2026-07): proposed convergence work.** Server-side embodied agents,
+maker ownership, authenticated live identity, water-aware agent movement, and
+the public MCP surface are shipped, but they do not yet share one complete
+capability/permission API. References below to browser-run autonomous agents
+describe the historical baseline rather than current Tellus behavior.
+
 ## Summary
 
 Tellus should treat humans, MCP-controlled agents, autonomous agents, and future NPCs as the same kind of embodied world participant: a player actor. The difference between them is the controller, not the world capabilities.
