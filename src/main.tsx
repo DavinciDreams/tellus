@@ -180,6 +180,7 @@ import {
   createMakerAgent,
   deleteMakerAgent,
   fetchMakerAgents,
+  renameMakerAgent,
   runMakerAgentAction,
   type MakerAgentDirectory,
   type MakerAgentSummary,
@@ -287,6 +288,8 @@ interface AgentStatus {
   corePrompt: string;
   visitorId: string;
   agentId: string;
+  /** Maker-controlled presentation name. The immutable visitorId remains the chat/address identity. */
+  displayName?: string;
   idleBackoffLevel: number;
   intervalSeconds: number;
   pausedReason: string | null;
@@ -7848,9 +7851,9 @@ function createTellusWorld(
 
     addLog({
       agentId: request.creatorId,
-      agentName: "Visitor",
+      agentName: displayNameForVisitor(String(request.creatorId)),
       tool: "generate",
-      text: `Visitor generated ${thing.kind}: ${request.prompt}`,
+      text: `${displayNameForVisitor(String(request.creatorId))} generated ${thing.kind}: ${request.prompt}`,
     });
     announceWorldChat(`${displayNameForVisitor(String(request.creatorId))} started building ${thing.kind}: ${request.prompt}`, thing.position);
     publishGeneratedThing(thing);
@@ -12517,7 +12520,13 @@ function App(): React.ReactElement {
   const [makerAgentCreateOpen, setMakerAgentCreateOpen] = useState(false);
   const [makerAgentNameDraft, setMakerAgentNameDraft] = useState("");
   const [makerAgentPersonaDraft, setMakerAgentPersonaDraft] = useState("");
+  const [makerAgentRenameId, setMakerAgentRenameId] = useState<string | null>(null);
+  const [makerAgentRenameDraft, setMakerAgentRenameDraft] = useState("");
   const [makerAgentDeleteConfirm, setMakerAgentDeleteConfirm] = useState<string | null>(null);
+  const defaultMakerAgent = makerAgents?.agents.find((agent) => agent.isDefault);
+  const activeAgentName = agentStatus?.displayName?.trim()
+    || defaultMakerAgent?.name.trim()
+    || (agentStatus?.visitorId ? friendlyVisitorName(agentStatus.visitorId) : "Agent");
   // Agent chat thread: the server-side agent's dialog (assistant=dialog, tool=dimmed) merged with the lines
   // YOU send it. Your lines append locally on send; the agent's replies arrive via the transcript poll and
   // are merged (content-deduped) so the thread reads as a conversation. POV viewport toggle alongside.
@@ -12757,6 +12766,29 @@ function App(): React.ReactElement {
     }
   }, [makerAgentDeleteConfirm, refreshMakerAgents]);
 
+  const onRenameMakerAgent = useCallback(async (agent: MakerAgentSummary) => {
+    const name = makerAgentRenameDraft.trim();
+    if (!name) {
+      setMakerAgentsError("Give the agent a name.");
+      return;
+    }
+    setMakerAgentBusyId(agent.agentId);
+    setMakerAgentsError(null);
+    try {
+      const updated = await renameMakerAgent(agent.agentId, name);
+      updateMakerAgentRow(updated);
+      setMakerAgentRenameId(null);
+      setMakerAgentRenameDraft("");
+      if (agent.isDefault) {
+        setAgentStatus((current) => current ? { ...current, displayName: updated.name } : current);
+      }
+    } catch (error) {
+      setMakerAgentsError(error instanceof Error ? error.message : "Could not rename agent.");
+    } finally {
+      setMakerAgentBusyId(null);
+    }
+  }, [makerAgentRenameDraft, updateMakerAgentRow]);
+
   // ── "Your Agent" panel handlers (rich controls for the maker directory's default agent) ──
   const fetchAgentStatus = useCallback(async (signal?: AbortSignal): Promise<AgentStatus | null> => {
     const res = await fetch(tellusAgentUrl("status"), { signal });
@@ -12892,7 +12924,7 @@ function App(): React.ReactElement {
     const text = rawText.trim();
     if (!text) return false;
     if (!agentStatus?.optedIn) {
-      setAgentError("Start your agent before talking to it.");
+      setAgentError(`Start ${activeAgentName} before talking to them.`);
       return false;
     }
     // Pre-seed the dedup key so the same line coming back from the transcript poll (as a `user` message)
@@ -12909,7 +12941,7 @@ function App(): React.ReactElement {
       if (!res.ok) {
         setAgentError(
           res.status === 409
-            ? "Start your agent before talking to it."
+            ? `Start ${activeAgentName} before talking to them.`
             : `Send failed (${res.status})`,
         );
         return false;
@@ -12919,7 +12951,7 @@ function App(): React.ReactElement {
       setAgentError(err instanceof Error ? err.message : "Send failed.");
       return false;
     }
-  }, [agentStatus?.optedIn]);
+  }, [activeAgentName, agentStatus?.optedIn]);
 
   const onAgentSend = useCallback(async () => {
     const sent = await sendAgentMessage(agentChatInput);
@@ -13033,7 +13065,9 @@ function App(): React.ReactElement {
           wordBreak: "break-word",
         }}
       >
-        <b style={{ opacity: 0.7, fontWeight: 600 }}>{item.who === "you" ? "You: " : ""}</b>
+        <b style={{ opacity: 0.7, fontWeight: 600 }}>
+          {item.who === "you" ? "You: " : `${activeAgentName}: `}
+        </b>
         {item.text}
       </span>
     );
@@ -13170,6 +13204,37 @@ function App(): React.ReactElement {
                             {isHere ? "Here" : worldDisplayName(canonicalWorldId(agent.worldId))}
                             {agent.optedIn ? (agent.enabled ? " · awake" : " · sleeping") : " · stopped"}
                           </span>
+                          {makerAgentRenameId === agent.agentId && (
+                            <div className="maker-agent-card__actions">
+                              <input
+                                value={makerAgentRenameDraft}
+                                maxLength={80}
+                                autoFocus
+                                onChange={(event) => setMakerAgentRenameDraft(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") void onRenameMakerAgent(agent);
+                                  if (event.key === "Escape") setMakerAgentRenameId(null);
+                                }}
+                                aria-label={`New name for ${agent.name}`}
+                              />
+                              <button
+                                type="button"
+                                disabled={busy || !makerAgentRenameDraft.trim()}
+                                onClick={() => void onRenameMakerAgent(agent)}
+                                style={p2pBtnStyle(true)}
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => setMakerAgentRenameId(null)}
+                                style={p2pBtnStyle(false)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
                           {agent.lastEvaluation && (
                             <div className="maker-agent-card__evaluation" data-status={agent.lastEvaluation.status}>
                               <span className="maker-agent-card__evaluation-status">
@@ -13180,6 +13245,19 @@ function App(): React.ReactElement {
                             </div>
                           )}
                           <div className="maker-agent-card__actions">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              aria-label={`Rename ${agent.name}`}
+                              onClick={() => {
+                                setMakerAgentRenameId(agent.agentId);
+                                setMakerAgentRenameDraft(agent.name);
+                                setMakerAgentDeleteConfirm(null);
+                              }}
+                              style={p2pBtnStyle(makerAgentRenameId === agent.agentId)}
+                            >
+                              Rename
+                            </button>
                             <button
                               type="button"
                               disabled={busy}
@@ -13559,7 +13637,7 @@ function App(): React.ReactElement {
               void onAgentSend();
             }
           }}
-          placeholder={optedIn ? "Talk to your agent..." : "Start your agent first (Settings)"}
+          placeholder={optedIn ? `Message ${activeAgentName}...` : `Start ${activeAgentName} first (Settings)`}
           disabled={!optedIn}
           rows={5}
         />
@@ -13568,7 +13646,7 @@ function App(): React.ReactElement {
             <button
               type="button"
               className={agentSpeech.listening ? "agent-tab-mic active" : "agent-tab-mic"}
-              title={agentSpeech.listening ? "Listening..." : "Speak to your agent"}
+              title={agentSpeech.listening ? "Listening..." : `Speak to ${activeAgentName}`}
               disabled={!optedIn}
               onClick={agentSpeech.start}
             >
@@ -16202,7 +16280,10 @@ function App(): React.ReactElement {
           : undefined;
       byKey.set(key, {
         visitorId: agentStatus.visitorId,
-        name: existingInAgentWorld?.name || actorName({ visitorId: agentStatus.visitorId, name: "Your agent" }),
+        name: existingInAgentWorld?.name || actorName({
+          visitorId: agentStatus.visitorId,
+          name: agentStatus.displayName || activeAgentName,
+        }),
         kind: "agent",
         worldId: existingInAgentWorld?.worldId || agentWorldId,
         position: existingInAgentWorld?.position,
@@ -16223,6 +16304,8 @@ function App(): React.ReactElement {
         return a.name.localeCompare(b.name);
       });
   }, [
+    activeAgentName,
+    agentStatus?.displayName,
     agentStatus?.enabled,
     agentStatus?.lastTickAt,
     agentStatus?.offlinePersistence,
@@ -16561,7 +16644,7 @@ function App(): React.ReactElement {
             <header>
               <span>
                 {chatTab === "agent"
-                  ? "Your Agent"
+                  ? activeAgentName
                   : worldChatChannel === "dm"
                     ? worldChatDmTarget
                       ? `DM - ${worldChatDmTarget.name}`
@@ -16583,7 +16666,7 @@ function App(): React.ReactElement {
                     if (tab === "world" || tab === "dm") setWorldChatChannel(tab);
                   }}
                 >
-                  {tab === "dm" ? "DMs" : tab[0].toUpperCase() + tab.slice(1)}
+                  {tab === "dm" ? "DMs" : tab === "agent" ? activeAgentName : "World"}
                 </button>
               ))}
             </nav>
@@ -17730,7 +17813,7 @@ function App(): React.ReactElement {
             {agentRemoteViewSrc && !agentRemoteViewFailed ? (
               <img
                 src={agentRemoteViewSrc}
-                alt="Latest view from your agent"
+                alt={`Latest view from ${activeAgentName}`}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
             ) : (
@@ -17792,7 +17875,7 @@ function App(): React.ReactElement {
               }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: "#dfe7d8" }}>Chat</span>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "#dfe7d8" }}>Chat with {activeAgentName}</span>
                 <button
                   type="button"
                   onClick={() => setChatExpanded(false)}
@@ -17828,8 +17911,8 @@ function App(): React.ReactElement {
                 {agentChat.length === 0 && !agentStatus?.processing ? (
                   <span style={{ fontSize: 12, opacity: 0.5, fontStyle: "italic" }}>
                     {agentStatus?.optedIn
-                      ? "Say hello to your agent below."
-                      : "Start your agent, then say hello below."}
+                      ? `Say hello to ${activeAgentName} below.`
+                      : `Start ${activeAgentName}, then say hello below.`}
                   </span>
                 ) : (
                   agentFeed.map(renderAgentFeedItem)
@@ -17851,7 +17934,7 @@ function App(): React.ReactElement {
                       void onAgentSend();
                     }
                   }}
-                  placeholder={agentStatus?.optedIn ? "Talk to your agent…" : "Start your agent first"}
+                  placeholder={agentStatus?.optedIn ? `Message ${activeAgentName}…` : `Start ${activeAgentName} first`}
                   disabled={!agentStatus?.optedIn}
                   style={{
                     flex: 1,

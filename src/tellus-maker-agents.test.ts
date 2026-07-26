@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { normalizeMakerAgentDirectory, normalizeMakerAgentSummary } from "./tellus-maker-agents";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { normalizeMakerAgentDirectory, normalizeMakerAgentSummary, renameMakerAgent } from "./tellus-maker-agents";
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("normalizeMakerAgentSummary", () => {
   it("keeps only the public maker-agent lifecycle shape", () => {
@@ -63,5 +65,25 @@ describe("normalizeMakerAgentDirectory", () => {
       defaultAgentId: "good",
       agents: [{ agentId: "good", worldId: "garden" }],
     });
+  });
+});
+
+describe("renameMakerAgent", () => {
+  it("patches only the friendly name at the stable agent address", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      agentId: "agent-one",
+      name: "Mira",
+      worldId: "garden",
+      visitorId: "agent:agent-one",
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const renamed = await renameMakerAgent("agent-one", "Mira");
+
+    expect(renamed.name).toBe("Mira");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/tellus\/agents\/agent-one$/),
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ name: "Mira" }) }),
+    );
   });
 });
