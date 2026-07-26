@@ -1,8 +1,59 @@
 # Release Notes
 
-Tellus — the 3D web "world" game client (React + three.js), backed by the in-cluster Hyades world.
+Tellus — the shared 3D web world client (React + Three.js), backed by Hyades.
 Newest first. Versions are the deployed image tag (`192.168.1.187:30500/tellus:<tag>`); a `v<tag>` git tag
-on the gnostr-cloud `master` triggers the CI build + rollout.
+on Gnostr `master` triggers the CI build and rollout.
+
+## 0.8.194 — 2026-07-26
+
+- **Editable agent friendly names.** Makers can rename any directory-owned
+  agent from the roster. Renaming changes presentation only: the stable agent
+  id, grain address, maker, world placement, memories, and conversation remain
+  unchanged.
+- **Names throughout the experience.** The active agent's friendly name now
+  appears in Agent/Chat tabs, conversation attribution, message prompts,
+  viewport labels, presence-derived contacts, generation logs, and roster
+  controls instead of a generic `Agent` label.
+- **Live backend contract.** Hyades `0.5.310` provides the authenticated
+  `PATCH /api/tellus/agents/{agentId}` route and refreshes trusted display names
+  into world presence without treating a wire name as identity.
+- Release validation passed the frozen Bun install, 313 client tests, and the
+  production build. Gnostr `v0.8.194` completed the multi-arch `dgx-deploy`
+  rollout, and the served production bundle was checked for the rename and
+  friendly-chat UI.
+
+## 0.8.193 — 2026-07-24
+
+- **Cohesive authored ecology.** All ten ecology biomes now have mixer-authored
+  global defaults, with saved world/terrain overrides preserved. Tundra uses its
+  authored small-pine preset, and terrain, plant communities, and building
+  material defaults continue to share one ecology resolver.
+- **Stable, scalable forests.** Seeded trees retain their position and scale
+  across LOD rings. Mid/far chunks thin connected branches and organs instead of
+  replacing the forest population; supported WebGL asset impostors and bounded
+  WebGPU runtime impostors reduce distant geometry further.
+- **More realistic procedural trees.** Deciduous crowns develop broader lateral
+  scaffolds; broadleaf leaves gain petioles, curl, asymmetry, twist, and midrib
+  camber; nearby trunks remain round. Weber-Penn growth data is cached for faster
+  variant loading. Conifers use restored full-size, full-crown needle sprays and
+  never fall through to broadleaf cards.
+- **New EvoFlow worlds and water.** River Canyon, Alpine Spires, Glass Ridge,
+  Lichen Caldera, Copper Mesas, Basalt Badlands, and Coral Archipelago join Main
+  as curated creation choices. Semantic channels remain water, Coral uses a
+  calmer lagoon profile, and Basalt ponds support localized GPU ripple trains.
+- **World and social operations.** Admins can manage live worlds and run one
+  allowlisted legacy-world cleanup. Authenticated friend presence and DM labels
+  now use stable identities while preserving anonymous fallback behavior.
+- **Maker-owned agents.** Makers can create and manage multiple named agents,
+  move them between worlds, and inspect lifecycle state. Agent evaluation adds
+  deterministic evidence-camera poses and concise latest-result status in the
+  roster.
+- **Safer embodied navigation.** On-foot agents avoid entering water and no
+  longer build or scatter land features there. Stranded agents can recover, and
+  mounted movement preserves boat, ground, and air behavior.
+- Production validation passed the full test/typecheck/build gates and the tag
+  rollout was verified through Gnostr CI and the bundles served by
+  <https://tellus.garden/>.
 
 ## 0.8.11
 - **Every VRM avatar can play any animation.** VRM avatars used to preload exactly four clips

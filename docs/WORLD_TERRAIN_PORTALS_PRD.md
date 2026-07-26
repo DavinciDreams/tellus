@@ -1,5 +1,11 @@
 # PRD: Tellus Worlds, Tile Terrain, Portals, and Indoor Spaces
 
+**Status (2026-07): partially implemented.** Classic and chunked worlds,
+curated EvoFlow terrain packages, semantic water channels, world switching,
+shared portals, and admin cleanup controls are shipped. Full real-world
+3D-tiles/globe coverage and the generalized interior/module model remain future
+work.
+
 ## Purpose
 
 Tellus is moving from a single procedural island toward a network of connected, persistent 3D spaces: classic procedural worlds, chunked editable worlds, tile-backed large worlds, and indoor scenes entered through doors or portals.

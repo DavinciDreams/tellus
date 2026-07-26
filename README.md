@@ -1,13 +1,21 @@
 # Tellus
 
-Tellus is a tiny WebGPU AI terrarium: a floating disc world with a mountain,
-terrain, water, an avatar, and an autonomous agent that can `generate` any asset
-it wants and `interact` with objects in the scene.
+Tellus is a shared browser-based 3D world built with Three.js and backed by
+Hyades. Players and embodied agents can explore streamed worlds, shape terrain,
+create and reuse 3D assets, build, travel through portals, and inhabit the same
+persistent world state.
+
+The live app is <https://tellus.garden/>. The Gnostr hostname
+<https://tellus.gnostr.cloud/> serves the same deployment.
 
 ## Requirements
 
 - Bun
-- A browser with WebGPU enabled
+- A browser with WebGL 2 support
+
+WebGL is the production default. WebGPU remains available as an explicit
+developer opt-in while its terrain/material paths continue to mature; see
+[Terrain Texture Blackout Notes](docs/TERRAIN_TEXTURE_BLACKOUT_NOTES.md).
 
 ## Development
 
@@ -33,6 +41,35 @@ Tellus relying-party domain. If a local dev URL reports that the RP ID does not
 match the current origin, test auth on the deployed Tellus URL or update the
 Hyades/Tellus WebAuthn origin allow-lists together.
 
+## System overview
+
+- **World state:** Hyades grains are authoritative for persistent terrain,
+  objects, portals, presence, accounts, and embodied agents. The browser loads a
+  snapshot and then applies live patches.
+- **Biomes:** `src/tellus-ecology.ts` resolves authored biome cells, explicit
+  terrain paint, height, slope, climate, moisture, wind, salinity, light, and
+  substrate into one ecology sample. Vegetation communities and building
+  material defaults consume that same result.
+- **Procedural plants:** deterministic genomes feed procplant graphs,
+  connected branch modules, or Weber-Penn species trees. Authored global mixes
+  cover all ten ecology biomes, while saved world overrides remain supported.
+- **Vegetation performance:** chunk streaming, stable seeded placement, shared
+  instanced geometry, cached tree templates, distance/FPS-aware structural LOD,
+  deferred refinement, and optional impostors reduce work without changing the
+  underlying forest population as LOD changes.
+- **Agents:** authenticated makers can create, rename, place, and manage
+  multiple server-side agents. Stable ids remain the authority while editable
+  friendly names appear in presence, chat, logs, and the roster. Hyades owns
+  decisions and world actions; Tellus renders their point of view and latest
+  evaluation status.
+- **3D generation:** server routes can use Hyades-hosted InstantMesh/Pixal3D,
+  direct Gradio backends, Asset Forge, or local procedural fallbacks. Generated
+  assets are persisted through the shared asset library.
+
+Start with the [documentation map](docs/README.md), the
+[biome/ecology design](docs/BIOME_ECOLOGY_SPEEDTREE_PRD.md), and the
+[procplant realism notes](docs/PROCPLANT_REALISM_RESEARCH.md).
+
 ## Contributor map
 
 Tellus is intentionally friendly to small, focused contributions:
@@ -44,7 +81,13 @@ Tellus is intentionally friendly to small, focused contributions:
   Current player controls are click/tap-to-move first, drag-to-look, with
   WASD/arrows as keyboard support.
 - Rendering/performance tuning: `src/main.tsx`, `src/tellus-terrain.ts`,
-  `src/tellus-scene-builders.ts`, `src/tellus-vegetation*.ts`.
+  `src/tellus-scene-builders.ts`, `src/tellus-procplant-vegetation.ts`,
+  `src/tellus-asset-impostor.ts`.
+- Biome and procedural-plant work: `src/tellus-ecology.ts`,
+  `src/tellus-procplants.ts`, `src/tellus-procplant-biomes.ts`,
+  `src/tellus-branch-modules.ts`, `src/tellus-biome-mix.ts`.
+- Embodied-agent controls and evaluation views: `src/tellus-maker-agents.ts`,
+  `src/agent-view.ts`, `src/agent-view-camera.ts`.
 - Backend wire clients and Hyades URL handling:
   `src/tellus-world-client.ts`, `src/tellus-auth.ts`,
   `src/tellus-runtime-config.ts`, `src/tellus-urls-identity.ts`.
@@ -111,48 +154,51 @@ concept image → image-to-3D → asset store), **LLM** chat and **vision**
 (`/v1/chat/completions`), and the **asset library** (`/api/assets/*`, proxied
 server-side to the 3D Asset Manager store). Deploy assets live under `deploy/`.
 
-## Coolify
+## Deployment
 
-Deploy Tellus as a Dockerfile-based app. The container listens on port `3000`
-and serves both the built WebGPU client and the required `/api/*` routes.
+Production Tellus is deployed through Gnostr Cloud. GitHub uses `master`, the
+Gnostr repository uses `master`, and a fresh immutable `v*` tag triggers the
+`build-deploy` job in `.gnostr-cloud-ci.yml`. That job builds the multi-arch
+container, pushes it to the internal registry, and rolls the `tellus` k3s
+deployment on the `dgx-deploy` runner.
 
-Set these Coolify environment variables:
+See [Gnostr Cloud setup](docs/GNOSTR_CLOUD_SETUP.md) for the operator workflow,
+authentication convention, CI checks, and live-bundle verification. A GitHub or
+Gnostr ref update alone is not evidence that production changed; verify the CI
+job and the assets served by <https://tellus.garden/>.
 
-```text
-PORT=3000
-VITE_TELLUS_GENERATION_PROVIDER=instantmesh-gradio
-VITE_TELLUS_PLAYER_GENERATION_PROVIDER=instantmesh-gradio
-VITE_TELLUS_AGENT_GENERATION_PROVIDER=pixal3d-gradio
-INSTANTMESH_GRADIO_BASE_URL=http://192.168.1.177:43839
-INSTANTMESH_SAMPLE_STEPS=30
-ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
-ZAI_API_KEY=...
-ZAI_MODEL=GLM-5.1
-```
-
-`INSTANTMESH_GRADIO_BASE_URL` only needs to be reachable from the Coolify
-server. A LAN URL is good when Coolify is on the same network as InstantMesh.
-Off-network hosts such as Vercel need a public URL, VPN, reverse proxy, or
-tunnel.
+[Coolify](deploy/COOLIFY.md) remains an optional self-hosting path. It is not the
+current production deployment.
 
 ## 3D Generation
 
-Tellus supports three generation modes:
+Tellus supports these generation providers:
 
 ```text
-VITE_TELLUS_GENERATION_PROVIDER=instantmesh-gradio
-VITE_TELLUS_GENERATION_PROVIDER=asset-forge
 VITE_TELLUS_GENERATION_PROVIDER=local
+VITE_TELLUS_GENERATION_PROVIDER=asset-forge
+VITE_TELLUS_GENERATION_PROVIDER=instantmesh-gradio
+VITE_TELLUS_GENERATION_PROVIDER=pixal3d-gradio
+VITE_TELLUS_GENERATION_PROVIDER=anigen-gradio
 ```
 
 `local` keeps the fast procedural meshes. `asset-forge` calls the Asset Forge
 pipeline. `instantmesh-gradio` calls a direct InstantMesh Gradio adapter through
-Tellus' own `/api/generate-3d` endpoint.
+Tellus' own `/api/generate-3d` endpoint; Pixal3D and Anigen use the same
+asynchronous job surface for higher-quality or animated outputs.
 
-Tellus can route players and agents through different direct generators. The
-default is fast player creation through `VITE_TELLUS_PLAYER_GENERATION_PROVIDER=instantmesh-gradio`
-and slower autonomous agent creation through
-`VITE_TELLUS_AGENT_GENERATION_PROVIDER=pixal3d-gradio`.
+When the world-level provider is `local` or `asset-forge`, it applies to every
+creator. For direct generation, Tellus can route players and agents separately:
+
+```text
+VITE_TELLUS_PLAYER_GENERATION_PROVIDER=instantmesh-gradio
+VITE_TELLUS_AGENT_GENERATION_PROVIDER=pixal3d-gradio
+```
+
+The deployed server can set `TELLUS_3D_BACKEND=hyades` so those browser-visible
+provider choices are executed by Hyades `/3d/jobs`; bearer credentials stay on
+the server. Direct Gradio URLs are mainly for local testing or a self-hosted
+deployment.
 
 For direct InstantMesh:
 
@@ -180,10 +226,9 @@ TELLUS_OPTIMIZE_TEXTURE_QUALITY=82
 TELLUS_OPTIMIZE_SIMPLIFY_ERROR=0.0001
 ```
 
-For deployed builds, `INSTANTMESH_GRADIO_BASE_URL` must be a URL that the
-deployed server can reach. LAN addresses work for same-network hosts such as a
-home Coolify server; off-network hosts such as Vercel need a public or tunneled
-URL.
+For direct-mode deployments, `INSTANTMESH_GRADIO_BASE_URL` must be reachable by
+the Tellus server. A LAN URL works only when the server shares that network;
+otherwise use Hyades or a private/public routed endpoint.
 
 InstantMesh is image-to-3D, while Tellus agents speak in text prompts. Tellus
 therefore runs a middle step:
@@ -304,57 +349,74 @@ If the API is unset or fails, Tellus keeps using its local procedural meshes.
 
 ## Live Agents
 
-Tellus can run its agents through an OpenAI-compatible Hyades/Nemotron endpoint
-without exposing the bearer key in browser code. Local dev uses the Vite proxy;
-Vercel uses the `/api/chat` serverless function.
+Embodied agents run in Hyades, not in the browser. An authenticated maker can
+use the Agent panel to create multiple named agents with optional personas,
+rename them without changing their identity or memory, start or stop them,
+bring them to the current world, and delete them. The directory reports each
+agent's friendly name, world, and lifecycle state, identifies the default
+companion, and shows its latest evaluation status, decision, and summary.
+Friendly names are presentation only: immutable agent and visitor ids still
+drive authorization, addressing, presence reconciliation, and deduplication.
 
-```text
-HYADES_BASE_URL=http://192.168.1.187
-HYADES_API_KEY=sk-hy-...
-VITE_TELLUS_AGENT_MODEL=GLM-5.1
-ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
-ZAI_API_KEY=...
-ZAI_MODEL=GLM-5.1
-```
+The default companion retains the richer chat, persona, memory, viewport, and
+capture controls. Evaluation captures use deterministic bounded camera poses;
+Hyades can push an authoritative snapshot immediately before capture, and the
+observed agent is hidden from its own evidence image. Older Hyades deployments
+remain compatible: plural controls are hidden when `/api/tellus/agents` is
+unavailable, missing evaluation fields are treated as mixed-version data, and
+rename errors remain local to the roster operation.
 
-When configured, the enabled agent asks `/api/chat` for its next `generate()`
-prompt about once per minute, with reflective `interact()` moments in between.
-If the endpoint is unavailable, it falls back to local scripted behavior. By
-default only Johnny is enabled, and he is configured as a general world-forger
-that can request any visible 3D asset. `/api/tts` is also proxied for the Hyades
-TTS endpoint, ready for a later voice pass.
-
-Tellus reads `public/tellus-config.json` at runtime. The committed file is
-deploy-safe and intentionally has no local asset paths, so Vercel can build even
-when large local files are not in git. For machine-local overrides, create
-`public/tellus-config.local.json`; it is ignored by git and loaded after the
-committed config:
+Tellus reads `public/tellus-config.json` at runtime. For machine-local
+overrides, create `public/tellus-config.local.json`; it is ignored by git and
+loaded after the committed config:
 
 ```json
 {
   "assetForgeApiBase": "https://your-asset-forge.example.com",
   "worldApiBase": "https://hyades.gnostr.cloud",
   "worldId": "your-world-id",
+  "generationProvider": "pixal3d-gradio",
+  "playerGenerationProvider": "instantmesh-gradio",
+  "agentGenerationProvider": "pixal3d-gradio",
   "skyboxUrl": "https://cdn.example.com/tellus/sky.glb",
-  "worldTemplate": "tellus",
-  "enabledAgents": ["johnny"],
-  "avatars": {
-    "johnny": "https://cdn.example.com/tellus/johnny.glb",
-    "mira": "https://cdn.example.com/tellus/mira.glb",
-    "sol": "https://cdn.example.com/tellus/sol.glb"
-  }
+  "worldTemplate": "tellus"
 }
 ```
 
-To turn more autonomous agents back on later, set `enabledAgents` to any subset
-of `["johnny", "mira", "sol", "atlas"]`.
+See [Embodied Agents](docs/EMBODIED_AGENTS_PLAN.md) for the current ownership
+model and remaining work.
 
-On Vercel, set `VITE_ASSET_FORGE_API_BASE` and the `VITE_TELLUS_*_AVATAR_URL`
-variables when you want the URLs baked into a build, or replace
-`public/tellus-config.json` during deployment if your hosting setup supports
-runtime config injection.
+### Agent roadmap
 
-## World Templates
+The deployed baseline is Tellus `v0.8.194` with Hyades `0.5.310`: maker-owned
+plural agents, portal relocation, nearby-actor perception, evaluation evidence,
+water-safe land behavior, and editable friendly names are live. The next work is
+explicitly status-labelled rather than implied to be shipped:
+
+- **Architecture review:** [Hyades PR #43](https://github.com/MonumentalSystems/hyades/pull/43)
+  proposes reusable world triggers, durable/coalesced inbox delivery, and
+  `makerPresent` / `eventDriven` / `resident` runtime policies so a concierge or
+  activity steward can initiate interaction.
+- **Proposed agent platform:** [Hyades issue #39](https://github.com/MonumentalSystems/hyades/issues/39)
+  tracks progressive capability discovery, typed agent social principals,
+  cross-world/offline DMs, collaboration workspaces, and procedural/Blender
+  asset workshops.
+- **Proposed deterministic activities:**
+  [World modules and minigames](docs/WORLD_MODULES_MINIGAMES_PRD.md) keeps rules,
+  race timing, checkpoints, and results in an authoritative module service while
+  agents act as guides, teammates, or stewards.
+
+These links describe direction and review boundaries, not release commitments.
+
+## Worlds and Templates
+
+The default creation slate contains Main plus seven deterministic EvoFlow
+terrain families: River Canyon, Alpine Spires, Glass Ridge, Lichen Caldera,
+Copper Mesas, Basalt Badlands, and Coral Archipelago. Each terrain package
+commits a height map, semantic map, preview, and genome. Semantic water remains
+water through chunk classification, so channels and archipelagos use the shared
+water surface instead of becoming painted ground. Older and interior templates
+remain available under Advanced.
 
 Tellus is designed to be copied as a world template. For each deployed copy,
 change at least:

@@ -1,10 +1,33 @@
 # Tellus Biome Ecology and Procedural Tree Realism PRD
 
+**Status (2026-07): implemented baseline, active realism work.** The shared
+ecology resolver, ten authored biome defaults, procedural-tree realism traits,
+biome-aware building materials, stable vegetation LOD, and impostor seams are
+shipped. The far-canopy aggregation and richer forestry/seasonality work remain
+future phases.
+
 ## Summary
 
-Tellus should move from direct terrain-paint vegetation rules to an ecological resolver that maps terrain, substrate, climate, moisture, seasonality, elevation, and local light into vegetation communities and building material palettes. The same biome model should drive procplant species selection, forest composition, edge blending, and local construction materials.
+Tellus now uses an ecological resolver rather than direct terrain-paint-only vegetation rules. It maps terrain, substrate, climate, moisture, seasonality, elevation, and local light into vegetation communities and building material palettes. The same biome model drives procplant species selection, forest composition, and local construction materials.
 
-The tree layer should be treated as the highest-impact realism surface. Procplants now supports procedural genomes and Weber/Penn tree skeletons; the next phase is to build toward a Three.js-native SpeedTree-like stack: species genomes, ecological suitability, crown mass, branch/crown art-direction controls, LOD/impostor readiness, wind tiers, and deterministic variation.
+The tree layer remains the highest-impact realism surface. Procplants supports procedural genomes, connected branch-module graphs, and Weber-Penn tree skeletons, with species suitability, crown mass, branch/crown art direction, deterministic variation, structural LOD, and impostor integration. The long-term direction remains a browser-native equivalent of the useful authoring and runtime parts of SpeedTree rather than a clone.
+
+## Current Runtime Flow
+
+1. `resolveEcologySample()` combines explicit terrain paint, authored/evolved
+   biome cells, terrain height and slope, and deterministic environmental
+   heuristics. A one-to-one painted biome wins over a coarser biome cell; an
+   authored cell wins over the heuristic fallback.
+2. `resolveProcPlantCommunity()` scores registered plant profiles by biome,
+   substrate, warmth, moisture, elevation, seasonality, salinity, wind, light,
+   and authored dominance.
+3. The vegetation renderer applies a saved custom biome mix when present,
+   otherwise the authored default for the resolved ecology biome, with legacy
+   terrain fallbacks retained for older worlds.
+4. The same ecology sample feeds building material defaults through
+   `buildingMaterialForEcology()`.
+5. Chunk seeds keep placement deterministic. Geometry can simplify across LOD
+   rings, but tree positions and scale remain stable.
 
 ## Goals
 
@@ -15,7 +38,7 @@ The tree layer should be treated as the highest-impact realism surface. Procplan
 - Feed the same biome resolver into building generation so local materials and form language match nearby vegetation and terrain.
 - Build tree realism around reusable procedural genomes rather than isolated handcrafted archetypes.
 - Keep all output deterministic per world/chunk/seed.
-- Maintain performance through capped geometry budgets, instancing, LOD, and future impostors.
+- Maintain performance through capped geometry budgets, instancing, cached templates, bounded chunk builds, structural LOD, and impostors.
 
 ## Non-Goals
 
@@ -157,7 +180,7 @@ The ecology resolver should also produce a material palette for buildings:
 
 Buildings should consume the dominant ecology biome plus local substrate/material affordances. A clay estuary and a rocky coast should not produce the same wall/roof palette.
 
-## Implementation Plan
+## Implementation Status
 
 ### Implementation Notes
 
@@ -165,32 +188,46 @@ Buildings should consume the dominant ecology biome plus local substrate/materia
 
 ### Phase 1: Ecology Resolver
 
-- Add `tellus-ecology.ts`.
-- Define biome archetypes, substrates, material palettes, and plant profiles.
-- Replace direct `terrainPaint -> procplant candidate list` with `EcologySample -> weighted ProcPlantBiomePatch[]`.
-- Keep terrain paint as an input and maintain backward-compatible fallbacks.
-- Add tests for biome/substrate selection and edge blending.
+**Implemented.**
+
+- `tellus-ecology.ts` owns the shared resolver and building-material bridge.
+- Ten biome archetypes, substrates, material palettes, plant profiles, and authored default mixes are registered.
+- `EcologySample -> weighted community` replaced the direct `terrainPaint -> candidate list` path.
+- Terrain paint remains an explicit input with backward-compatible fallbacks.
+- Biome/substrate/default-mix behavior has focused regression coverage.
 
 ### Phase 2: Tree Realism
 
-- Add tree realism traits to procplant genomes.
-- Apply crown spread/taper, trunk flare, trunk bend, wind sway tiers, and deterministic color variation in the Weber/Penn template adapter.
-- Keep foliage mass capped by LOD budget.
-- Add tests that tree realism traits alter geometry deterministically.
+**Implemented baseline; continuing.**
+
+- Procplant genomes carry tree-realism and branch-module art-direction traits.
+- Crown spread/taper, trunk flare/bend, junction blending, foliage shaping, and deterministic color variation affect live geometry.
+- Foliage mass remains capped by LOD and organ budgets.
+- Geometry changes and deterministic contracts have focused regression coverage.
 
 ### Phase 3: Biome Buildings
 
-- Connect ecology material palettes to `tellus-building.ts`.
-- Add building form hints: raised/lowered, wall thickness, roof pitch, overhang, central hearth/courtyard/tent.
-- Ensure building UI can show ecology-derived defaults while allowing manual override.
+**Implemented material bridge; form-language expansion remains planned.**
+
+- Ecology material palettes are connected to building defaults.
+- Planned: richer form hints such as raised/lowered massing, wall thickness, roof pitch, overhang, hearth, courtyard, and tent forms.
+- Planned: a clearer UI explanation of ecology-derived defaults alongside manual override.
 
 ### Phase 4: LOD and Impostors
 
-- Define vegetation LOD contracts shared by procplants and Weber/Penn trees.
-- Use existing LOD/impostor work where available.
-- Add chunk-level budget tests and perf readouts by biome.
+**Implemented individual-tree LOD and impostor seams; far-canopy aggregation remains planned.**
+
+- Procplants, branch-module trees, and Weber-Penn-backed genomes share stable placement and structural LOD contracts.
+- Asset-store impostors work on supported WebGL paths; bounded runtime baking is available to explicit WebGPU sessions.
+- Chunk diagnostics expose build time, queues, structural LOD counts, instances, and impostors.
+- Planned: biome-specific performance baselines and aggregated far-canopy rendering.
 
 ## Acceptance Criteria
+
+The shipped baseline meets the deterministic ecology, distinct biome mix,
+building-material bridge, near-tree geometry, test, and production-build
+criteria below. Edge blending, seasonal presentation, and stand-level forestry
+controls remain areas for deeper validation.
 
 - A single terrain paint can produce different vegetation depending on climate/substrate.
 - At least six biome families produce visibly distinct tree mixes.
@@ -203,7 +240,7 @@ Buildings should consume the dominant ecology biome plus local substrate/materia
 
 ## Open Questions
 
-- Where should authored climate live: world template, world biome cells, terrain generator, or all three?
-- Should substrate be paint-derived first, then editable as a separate terrain layer later?
+- Authored climate can enter through world biome cells and terrain/world generation, with deterministic terrain heuristics as the fallback.
+- Substrate is currently paint-derived; a separately editable substrate layer remains optional future work.
 - How much seasonality should be visible immediately versus saved for a later seasonal rendering pass?
-- Should biome material palettes live with ecology, building generation, or a shared world-material module?
+- Building material selection currently lives at the shared ecology seam; richer construction form palettes may grow in a dedicated building module without duplicating biome resolution.

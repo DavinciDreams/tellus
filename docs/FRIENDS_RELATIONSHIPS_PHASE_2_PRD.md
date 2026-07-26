@@ -1,18 +1,26 @@
 # Tellus Durable Friends Relationships — Phase 2 PRD
 
-**Status:** Proposed
+**Status (2026-07): implemented.** Authenticated users can send, accept,
+decline, and remove durable friendships; accepted friends are joined with
+registry-backed presence. Cross-world/offline DM delivery remains a later
+phase.
 
 **Parent:** `docs/FRIENDS_PRESENCE_COMMUNICATION_PRD.md`
 
-**Depends on:** Hyades `ITellusPresenceRegistryGrain` (`0.5.301`), Tellus presence integration (`feat/friends-presence`, PR #126), Tellus account sessions
+**Implemented client seams:** `src/tellus-friends-client.ts`,
+`src/tellus-presence-client.ts`, Tellus account sessions, and the Chat friends
+surface in `src/main.tsx`.
 
 **Primary milestone:** An authenticated player can send, accept, decline, and remove a durable friendship; Tellus shows accepted friends with registry-backed online/offline and current-world status.
 
 ## 1. Summary
 
-Phase 1 replaces Tellus's multi-world polling workaround with the shipped Hyades presence registry. It intentionally does not create friend relationships: Hyades has no durable friends contract or gateway routes yet.
-
-Phase 2 adds that missing social graph. Friendships are mutual and account-level, pending requests are explicit, and relationship mutations are atomic. Tellus then queries presence only for accepted friend ids and joins those results onto the durable list. Cross-world/offline DM delivery remains Phase 3.
+Phase 1 replaced Tellus's multi-world polling workaround with the Hyades
+presence registry. Phase 2 added the durable social graph: friendships are
+mutual and account-level, pending requests are explicit, and relationship
+mutations use authenticated routes. Tellus queries presence only for accepted
+friend ids and joins those results onto the durable list. Cross-world/offline DM
+delivery remains Phase 3.
 
 ## 2. Security correction to the parent PRD
 

@@ -1,6 +1,9 @@
 # Tellus Friends, Presence, and Cross-World Communication PRD
 
-**Status:** Proposed
+**Status (2026-07): Phase 1 implemented; cross-world/offline DM delivery and
+cross-world call signaling remain proposed.** Tellus now has an authenticated
+friends list, request/accept/decline/remove flows, targeted batch presence for
+friends, and stable signed-in identity on the live world socket.
 
 **Issue:** [MonumentalSystems/hyades#35](https://github.com/MonumentalSystems/hyades/issues/35) (Hyades-side foundation — closed as completed, `0.5.301`)
 
@@ -8,29 +11,33 @@
 
 **Depends on:** `ITellusPresenceRegistryGrain` (shipped), `ITellusWorldGrain` DM privacy filtering (shipped), the existing P2P WebRTC mesh (`src/webrtc-mesh.ts`, shipped)
 
-**Primary milestone:** A friends list that shows who is online and in which world, replacing the client's polling-based cross-world presence hack with the shipped registry.
+**Primary milestone:** Shipped — the friends list shows who is online and in which world using the presence registry rather than polling every known world.
 
 ## 1. Executive summary
 
-Hyades shipped the missing piece first: a durable, cross-world presence registry (`ITellusPresenceRegistryGrain`, `0.5.301`) that answers "is user X online, and in which world" in one query, plus two gateway routes (`GET /api/tellus/presence`, `GET /api/tellus/presence/online`). Tellus does not yet use it. The client still runs a REST-polling workaround (`crossWorldPresence`, up to 12 worlds polled every 10s) to approximate the same answer, and has no durable friends list, no cross-world DM delivery, and no offline DM delivery.
+Hyades provides a durable cross-world presence registry that answers "is user X online, and in which world" in one query. Tellus now consumes its targeted batch route through `src/tellus-presence-client.ts` and manages relationships through `src/tellus-friends-client.ts`. Same-world chat/DM identity uses the authenticated live ticket and account display name. Durable cross-world and offline DM delivery are not yet part of the client contract.
 
 This project has three independent, sequential increments:
 
-1. **Presence + friends list:** replace the polling hack with the registry; add a durable per-user friends list; show online/offline + current world for each friend.
-2. **Cross-world DM delivery:** decouple DMs from the per-world transient chat log so a message reaches its recipient regardless of which world they're in, and is held for delivery if they're offline.
-3. **P2P call routing:** use presence to decide whether a friend is reachable via the existing same-world WebRTC mesh, or (later, larger scope) needs cross-world signaling relay.
+1. **Presence + friends list — shipped:** registry-backed status, durable relationships, and online/current-world display.
+2. **Cross-world DM delivery — proposed:** decouple DMs from the per-world transient chat log so a message reaches its recipient regardless of world and can wait for an offline recipient.
+3. **P2P call routing — proposed:** use presence to decide whether a friend is reachable through the existing same-world WebRTC mesh or needs a future cross-world signaling relay.
+
+Sections 2–18 preserve the original problem analysis and delivery design. Treat
+`src/tellus-friends-client.ts`, `src/tellus-presence-client.ts`, and the live
+Hyades routes as authoritative for the shipped Phase 1 contract.
 
 Only increment 1 is scoped in detail here. Increments 2 and 3 are described at a goals/non-goals level so their dependencies are visible, but each gets its own PRD before implementation.
 
 Phase 2's implementation-ready relationship contract is now specified in
 [`FRIENDS_RELATIONSHIPS_PHASE_2_PRD.md`](./FRIENDS_RELATIONSHIPS_PHASE_2_PRD.md).
 
-## 2. Problem statement
+## 2. Original problem statement (historical)
 
-Messaging, a friends list, cross-world presence, and P2P calling all fail (or can't exist) for the same root reason: **there was no cross-world identity/presence layer.** That gap is now closed on the Hyades side; Tellus has not caught up.
+At the time this PRD was written, messaging, a friends list, cross-world presence, and P2P calling all failed (or could not exist) for the same root reason: **there was no cross-world identity/presence layer.** The presence and friendship portions of that gap are now closed in both Hyades and Tellus; durable cross-world/offline delivery and cross-world call signaling remain open.
 
-- **Presence today (client):** `crossWorldPresence` (`src/main.tsx:11990`) polls `/api/world/{worldId}/state` for a fixed list of known worlds on an interval, merging each world's presence array into local state. This is O(known worlds) HTTP requests every poll, only covers worlds the client already knows to ask about, and re-derives from scratch every cycle.
-- **Friends list:** does not exist. `chatTargets` (`src/main.tsx:15341`) is derived entirely from whoever happens to currently be visible via `crossWorldPresence` or the local world's presence — there is no durable, user-curated list of "these are my friends," and nobody appears in it unless the polling loop happens to have found them recently.
+- **Original presence client:** `crossWorldPresence` polled `/api/world/{worldId}/state` for a fixed list of known worlds, merging each world's presence array into local state. The shipped registry client replaced this O(known worlds) workaround.
+- **Original friends surface:** `chatTargets` was derived entirely from recently visible actors. The shipped authenticated friends client and relationship UI replaced that ephemeral-only model.
 - **DM delivery:** `WorldChatMessage` with `channel: "dm"` (`src/world-protocol.ts:96-108`) lives inside one world's transient chat log. Server-side privacy is already correctly enforced (`GatewayTellusWorld.TellusChatVisibleToSocket`, `0.5.279`) — a DM reaches only its sender and recipient — but only if the recipient is connected to *that world's* socket at the time. A DM to someone in a different world, or offline, silently goes nowhere. This is very likely why DMs have "never quite worked": not a privacy bug, an architectural reach limit.
 - **P2P voice/video:** `webrtc-mesh.ts` is a complete, working full-mesh implementation, but signaling rides the same per-world WebSocket, so two people can only connect if already in the same world's session.
 
