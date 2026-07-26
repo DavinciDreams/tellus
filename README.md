@@ -34,6 +34,11 @@ bun run test
 bun run build
 ```
 
+CI also measures whole-source test coverage and runs a deterministic vegetation
+render budget. Run the same checks locally with `bun run test:coverage` and
+`bun run perf:render`; see [Testing and Performance](docs/TESTING_AND_PERFORMANCE.md)
+for the current baseline and what each gate protects.
+
 The Vite dev server talks to the live Hyades backend by default through
 `public/tellus-config.json`. You can explore worlds locally without logging in,
 but passkey sign-in is origin-sensitive: production passkeys are bound to the

@@ -21,6 +21,16 @@ bun run test
 bun run build
 ```
 
+Changes that affect tested behavior or rendering should also run:
+
+```bash
+bun run test:coverage
+bun run perf:render
+```
+
+See [`docs/TESTING_AND_PERFORMANCE.md`](docs/TESTING_AND_PERFORMANCE.md) for
+the current baseline and performance-budget rationale.
+
 ## Auth and backend notes
 
 The local client uses `public/tellus-config.json` and usually points at the live

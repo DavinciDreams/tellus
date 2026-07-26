@@ -403,6 +403,8 @@ const loader = createGltfLoader();
 const loadedCache = new Map<CandidateId, Promise<LoadedCandidate>>();
 let selectedId: CandidateId = "pine-pack-flat";
 let activeBuildToken = 0;
+let completedBuildToken = 0;
+let lastBuildMs = 0;
 
 const distanceMarkers = [
   { label: "near", meters: 35 },
@@ -747,6 +749,7 @@ const rebuildMarkers = () => {
 };
 
 const rebuildScene = async () => {
+  const buildStartedAt = performance.now();
   const token = ++activeBuildToken;
   clearObject(treeGroup);
   const candidate = candidates.find((item) => item.id === selectedId) ?? candidates[0]!;
@@ -819,6 +822,8 @@ const rebuildScene = async () => {
       return `<span>${marker.label}<small>${formatFeet(marker.meters)} / ${Math.max(1, Math.round(px))} px</small></span>`;
     })
     .join("");
+  completedBuildToken = token;
+  lastBuildMs = performance.now() - buildStartedAt;
 };
 
 const setCameraMode = () => {
@@ -893,6 +898,20 @@ const animate = () => {
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 };
+
+window.__tellusTreeLodPerf = () => ({
+  ready: completedBuildToken === activeBuildToken && completedBuildToken > 0,
+  candidateId: selectedId,
+  density: Number(densitySlider.value),
+  treeObjects: treeGroup.children.length,
+  buildMs: Math.round(lastBuildMs * 10) / 10,
+  renderer: {
+    calls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+    geometries: renderer.info.memory.geometries,
+    textures: renderer.info.memory.textures,
+  },
+});
 
 rebuildMarkers();
 setCameraMode();
