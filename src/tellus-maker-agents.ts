@@ -162,6 +162,18 @@ export async function runMakerAgentAction(
   return agent;
 }
 
+export async function renameMakerAgent(agentId: string, name: string): Promise<MakerAgentSummary> {
+  const response = await fetch(makerAgentsUrl(agentId), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) throw await errorFrom(response, `Could not rename agent (${response.status}).`);
+  const agent = normalizeMakerAgentSummary(await response.json());
+  if (!agent) throw new MakerAgentApiError(response.status, "The server returned an invalid agent.");
+  return agent;
+}
+
 export async function deleteMakerAgent(agentId: string): Promise<void> {
   const response = await fetch(makerAgentsUrl(agentId), { method: "DELETE" });
   if (!response.ok) throw await errorFrom(response, `Could not delete agent (${response.status}).`);
