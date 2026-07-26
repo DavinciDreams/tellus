@@ -32,12 +32,12 @@ Only increment 1 is scoped in detail here. Increments 2 and 3 are described at a
 Phase 2's implementation-ready relationship contract is now specified in
 [`FRIENDS_RELATIONSHIPS_PHASE_2_PRD.md`](./FRIENDS_RELATIONSHIPS_PHASE_2_PRD.md).
 
-## 2. Problem statement
+## 2. Original problem statement (historical)
 
-Messaging, a friends list, cross-world presence, and P2P calling all fail (or can't exist) for the same root reason: **there was no cross-world identity/presence layer.** That gap is now closed on the Hyades side; Tellus has not caught up.
+At the time this PRD was written, messaging, a friends list, cross-world presence, and P2P calling all failed (or could not exist) for the same root reason: **there was no cross-world identity/presence layer.** The presence and friendship portions of that gap are now closed in both Hyades and Tellus; durable cross-world/offline delivery and cross-world call signaling remain open.
 
-- **Presence today (client):** `crossWorldPresence` (`src/main.tsx:11990`) polls `/api/world/{worldId}/state` for a fixed list of known worlds on an interval, merging each world's presence array into local state. This is O(known worlds) HTTP requests every poll, only covers worlds the client already knows to ask about, and re-derives from scratch every cycle.
-- **Friends list:** does not exist. `chatTargets` (`src/main.tsx:15341`) is derived entirely from whoever happens to currently be visible via `crossWorldPresence` or the local world's presence — there is no durable, user-curated list of "these are my friends," and nobody appears in it unless the polling loop happens to have found them recently.
+- **Original presence client:** `crossWorldPresence` polled `/api/world/{worldId}/state` for a fixed list of known worlds, merging each world's presence array into local state. The shipped registry client replaced this O(known worlds) workaround.
+- **Original friends surface:** `chatTargets` was derived entirely from recently visible actors. The shipped authenticated friends client and relationship UI replaced that ephemeral-only model.
 - **DM delivery:** `WorldChatMessage` with `channel: "dm"` (`src/world-protocol.ts:96-108`) lives inside one world's transient chat log. Server-side privacy is already correctly enforced (`GatewayTellusWorld.TellusChatVisibleToSocket`, `0.5.279`) — a DM reaches only its sender and recipient — but only if the recipient is connected to *that world's* socket at the time. A DM to someone in a different world, or offline, silently goes nowhere. This is very likely why DMs have "never quite worked": not a privacy bug, an architectural reach limit.
 - **P2P voice/video:** `webrtc-mesh.ts` is a complete, working full-mesh implementation, but signaling rides the same per-world WebSocket, so two people can only connect if already in the same world's session.
 

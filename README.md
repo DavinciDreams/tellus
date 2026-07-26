@@ -57,9 +57,11 @@ Hyades/Tellus WebAuthn origin allow-lists together.
   instanced geometry, cached tree templates, distance/FPS-aware structural LOD,
   deferred refinement, and optional impostors reduce work without changing the
   underlying forest population as LOD changes.
-- **Agents:** authenticated makers can create and manage multiple server-side
-  agents. Hyades owns their decisions and world actions; Tellus renders their
-  presence, chat, point of view, and latest evaluation status.
+- **Agents:** authenticated makers can create, rename, place, and manage
+  multiple server-side agents. Stable ids remain the authority while editable
+  friendly names appear in presence, chat, logs, and the roster. Hyades owns
+  decisions and world actions; Tellus renders their point of view and latest
+  evaluation status.
 - **3D generation:** server routes can use Hyades-hosted InstantMesh/Pixal3D,
   direct Gradio backends, Asset Forge, or local procedural fallbacks. Generated
   assets are persisted through the shared asset library.
@@ -349,17 +351,20 @@ If the API is unset or fails, Tellus keeps using its local procedural meshes.
 
 Embodied agents run in Hyades, not in the browser. An authenticated maker can
 use the Agent panel to create multiple named agents with optional personas,
-start or stop them, bring them to the current world, and delete them. The
-directory reports each agent's world and lifecycle state, identifies the
-default companion, and shows its latest evaluation status, decision, and
-summary when the backend provides those fields.
+rename them without changing their identity or memory, start or stop them,
+bring them to the current world, and delete them. The directory reports each
+agent's friendly name, world, and lifecycle state, identifies the default
+companion, and shows its latest evaluation status, decision, and summary.
+Friendly names are presentation only: immutable agent and visitor ids still
+drive authorization, addressing, presence reconciliation, and deduplication.
 
 The default companion retains the richer chat, persona, memory, viewport, and
 capture controls. Evaluation captures use deterministic bounded camera poses;
 Hyades can push an authoritative snapshot immediately before capture, and the
 observed agent is hidden from its own evidence image. Older Hyades deployments
 remain compatible: plural controls are hidden when `/api/tellus/agents` is
-unavailable, and missing evaluation fields are treated as mixed-version data.
+unavailable, missing evaluation fields are treated as mixed-version data, and
+rename errors remain local to the roster operation.
 
 Tellus reads `public/tellus-config.json` at runtime. For machine-local
 overrides, create `public/tellus-config.local.json`; it is ignored by git and
@@ -380,6 +385,28 @@ loaded after the committed config:
 
 See [Embodied Agents](docs/EMBODIED_AGENTS_PLAN.md) for the current ownership
 model and remaining work.
+
+### Agent roadmap
+
+The deployed baseline is Tellus `v0.8.194` with Hyades `0.5.310`: maker-owned
+plural agents, portal relocation, nearby-actor perception, evaluation evidence,
+water-safe land behavior, and editable friendly names are live. The next work is
+explicitly status-labelled rather than implied to be shipped:
+
+- **Architecture review:** [Hyades PR #43](https://github.com/MonumentalSystems/hyades/pull/43)
+  proposes reusable world triggers, durable/coalesced inbox delivery, and
+  `makerPresent` / `eventDriven` / `resident` runtime policies so a concierge or
+  activity steward can initiate interaction.
+- **Proposed agent platform:** [Hyades issue #39](https://github.com/MonumentalSystems/hyades/issues/39)
+  tracks progressive capability discovery, typed agent social principals,
+  cross-world/offline DMs, collaboration workspaces, and procedural/Blender
+  asset workshops.
+- **Proposed deterministic activities:**
+  [World modules and minigames](docs/WORLD_MODULES_MINIGAMES_PRD.md) keeps rules,
+  race timing, checkpoints, and results in an authoritative module service while
+  agents act as guides, teammates, or stewards.
+
+These links describe direction and review boundaries, not release commitments.
 
 ## Worlds and Templates
 

@@ -41,6 +41,29 @@ route or phase.
 These documents preserve design rationale and may include planned APIs. Check
 their status note before treating an endpoint or phase as shipped behavior.
 
+## Active roadmap and review
+
+- [Embodied agents](./EMBODIED_AGENTS_PLAN.md) — shipped maker-owned agents,
+  evaluation, and friendly-name contracts followed by the status-labelled
+  trigger, social, capability, collaboration, and workshop roadmap.
+- [Hyades world-trigger PR #43](https://github.com/MonumentalSystems/hyades/pull/43)
+  — draft architecture review for reusable world triggers, event-driven
+  residents, consent-safe first contact, and deterministic module handoff.
+- [Hyades maker-agent issue #39](https://github.com/MonumentalSystems/hyades/issues/39)
+  — ongoing backend review thread for progressive capabilities, agent social
+  principals, collaboration grains, and creative workshops.
+- [World modules and minigames](./WORLD_MODULES_MINIGAMES_PRD.md) — proposed
+  authoritative activity/module boundary, including races and agent roles.
+- [Shared player surface](./SHARED_PLAYER_SURFACE_PRD.md) — proposed convergence
+  of player, autonomous-agent, and MCP capabilities.
+- [Tellus messages/presence UI PR #150](https://github.com/DavinciDreams/tellus/pull/150)
+  — draft information-architecture follow-up for the social and world-tool
+  surfaces; it is not a shipped client feature.
+
+Open branches and PRDs describe active investigation, not a release promise.
+Use the status text in each item and the current release notes to distinguish
+deployed behavior from design work.
+
 ## Research and roadmaps
 
 - [Architecture roadmap](./ARCHITECTURE_ROADMAP.md)

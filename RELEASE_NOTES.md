@@ -4,6 +4,24 @@ Tellus — the shared 3D web world client (React + Three.js), backed by Hyades.
 Newest first. Versions are the deployed image tag (`192.168.1.187:30500/tellus:<tag>`); a `v<tag>` git tag
 on Gnostr `master` triggers the CI build and rollout.
 
+## 0.8.194 — 2026-07-26
+
+- **Editable agent friendly names.** Makers can rename any directory-owned
+  agent from the roster. Renaming changes presentation only: the stable agent
+  id, grain address, maker, world placement, memories, and conversation remain
+  unchanged.
+- **Names throughout the experience.** The active agent's friendly name now
+  appears in Agent/Chat tabs, conversation attribution, message prompts,
+  viewport labels, presence-derived contacts, generation logs, and roster
+  controls instead of a generic `Agent` label.
+- **Live backend contract.** Hyades `0.5.310` provides the authenticated
+  `PATCH /api/tellus/agents/{agentId}` route and refreshes trusted display names
+  into world presence without treating a wire name as identity.
+- Release validation passed the frozen Bun install, 313 client tests, and the
+  production build. Gnostr `v0.8.194` completed the multi-arch `dgx-deploy`
+  rollout, and the served production bundle was checked for the rename and
+  friendly-chat UI.
+
 ## 0.8.193 — 2026-07-24
 
 - **Cohesive authored ecology.** All ten ecology biomes now have mixer-authored
