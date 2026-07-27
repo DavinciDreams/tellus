@@ -182,9 +182,16 @@ import {
   fetchMakerAgents,
   renameMakerAgent,
   runMakerAgentAction,
+  setMakerAgentRuntimePolicy,
+  type AgentRuntimePolicy,
   type MakerAgentDirectory,
   type MakerAgentSummary,
 } from "./tellus-maker-agents";
+import {
+  createWorldTriggerVolumeGroup,
+  disposeWorldTriggerVolumeGroup,
+} from "./tellus-world-trigger-volumes";
+import { WorldTriggersPanel } from "./world-triggers-panel";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, shouldIgnoreDefaultTellusTemplate, templateForWorldId, templateSuppressesAutoVegetation } from "./tellus-world-templates";
 import { evoflowTerrainSourceFor, evoflowWaterModeFor } from "./tellus-evoflow-terrains";
 import {
@@ -1115,6 +1122,17 @@ function createTellusWorld(
     );
 
   const scene = new THREE.Scene();
+  let worldTriggerVolumeGroup: THREE.Group | null = null;
+  const setWorldTriggerVolumes = (definitions: Parameters<TellusWorldApi["setWorldTriggerVolumes"]>[0]) => {
+    if (worldTriggerVolumeGroup) {
+      scene.remove(worldTriggerVolumeGroup);
+      disposeWorldTriggerVolumeGroup(worldTriggerVolumeGroup);
+      worldTriggerVolumeGroup = null;
+    }
+    if (!definitions?.length || destroyed) return;
+    worldTriggerVolumeGroup = createWorldTriggerVolumeGroup(definitions);
+    scene.add(worldTriggerVolumeGroup);
+  };
   scene.background = new THREE.Color(0xa7c3ef);
   scene.fog = new THREE.Fog(0xa7c3ef, 72 * WORLD_SCALE, 230 * WORLD_SCALE);
   // Ambient reflections for PBR assets (GLBs look muddy without an environment); intensity follows
@@ -11821,6 +11839,7 @@ function createTellusWorld(
     submitVisitorPrompt,
     sendWorldChat,
     sampleMapPoint,
+    setWorldTriggerVolumes,
     snapshot,
     getFps: () => fpsValue,
     setRxEnabled: (on: boolean) => {
@@ -11900,6 +11919,7 @@ function createTellusWorld(
         window.clearInterval(worldChatPollTimer);
       }
       agentViewTarget?.dispose();
+      setWorldTriggerVolumes(null);
       vegetation.dispose();
       procplants.dispose();
       chunkRenderer?.dispose();
@@ -12692,6 +12712,10 @@ function App(): React.ReactElement {
     } : current);
   }, []);
 
+  const previewWorldTriggerVolumes = useCallback((definitions: Parameters<TellusWorldApi["setWorldTriggerVolumes"]>[0]) => {
+    worldRef.current?.setWorldTriggerVolumes(definitions);
+  }, []);
+
   const onCreateMakerAgent = useCallback(async () => {
     const name = makerAgentNameDraft.trim();
     if (!name) {
@@ -12788,6 +12812,21 @@ function App(): React.ReactElement {
       setMakerAgentBusyId(null);
     }
   }, [makerAgentRenameDraft, updateMakerAgentRow]);
+
+  const onMakerAgentRuntimePolicy = useCallback(async (
+    agent: MakerAgentSummary,
+    runtimePolicy: AgentRuntimePolicy,
+  ) => {
+    setMakerAgentBusyId(agent.agentId);
+    setMakerAgentsError(null);
+    try {
+      updateMakerAgentRow(await setMakerAgentRuntimePolicy(agent.agentId, runtimePolicy));
+    } catch (error) {
+      setMakerAgentsError(error instanceof Error ? error.message : "Could not update agent presence.");
+    } finally {
+      setMakerAgentBusyId(null);
+    }
+  }, [updateMakerAgentRow]);
 
   // ── "Your Agent" panel handlers (rich controls for the maker directory's default agent) ──
   const fetchAgentStatus = useCallback(async (signal?: AbortSignal): Promise<AgentStatus | null> => {
@@ -13204,6 +13243,20 @@ function App(): React.ReactElement {
                             {isHere ? "Here" : worldDisplayName(canonicalWorldId(agent.worldId))}
                             {agent.optedIn ? (agent.enabled ? " · awake" : " · sleeping") : " · stopped"}
                           </span>
+                          <label className="maker-agent-card__runtime">
+                            Presence
+                            <select
+                              value={agent.runtimePolicy}
+                              disabled={busy}
+                              onChange={(event) => void onMakerAgentRuntimePolicy(agent, event.target.value as AgentRuntimePolicy)}
+                              aria-label={`Presence policy for ${agent.name}`}
+                            >
+                              <option value="makerPresent">With me</option>
+                              <option value="eventDriven">Wake for events</option>
+                              <option value="resident">Always resident</option>
+                            </select>
+                            {agent.eventWakesLastMinute > 0 && <span>{agent.eventWakesLastMinute} event wake{agent.eventWakesLastMinute === 1 ? "" : "s"}/min</span>}
+                          </label>
                           {makerAgentRenameId === agent.agentId && (
                             <div className="maker-agent-card__actions">
                               <input
@@ -13302,6 +13355,15 @@ function App(): React.ReactElement {
                       );
                     })}
                   </div>
+                )}
+                {makerAgents && (
+                  <WorldTriggersPanel
+                    worldId={currentMakerWorldId}
+                    agents={makerAgents.agents}
+                    visitorPosition={snapshot.visitorPosition}
+                    onAgentUpdated={updateMakerAgentRow}
+                    onPreview={previewWorldTriggerVolumes}
+                  />
                 )}
                 {makerAgentsError && <span className="maker-agent-roster__error">{makerAgentsError}</span>}
               </section>

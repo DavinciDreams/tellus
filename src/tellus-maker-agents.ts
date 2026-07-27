@@ -14,7 +14,11 @@ export interface MakerAgentSummary {
   avatarId?: string | null;
   lastEvaluation: MakerAgentEvaluationSummary | null;
   isDefault: boolean;
+  runtimePolicy: AgentRuntimePolicy;
+  eventWakesLastMinute: number;
 }
+
+export type AgentRuntimePolicy = "makerPresent" | "eventDriven" | "resident";
 
 export interface MakerAgentEvaluationSummary {
   jobId: string;
@@ -57,12 +61,25 @@ export function makerAgentsUrl(agentId?: string, action?: MakerAgentAction): str
   return action ? `${agent}/${action}` : agent;
 }
 
+export function makerAgentRuntimePolicyUrl(agentId: string): string {
+  return `${makerAgentsUrl(agentId)}/runtime-policy`;
+}
+
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
 function boolValue(value: unknown): boolean {
   return value === true;
+}
+
+function runtimePolicyValue(value: unknown): AgentRuntimePolicy {
+  return value === "eventDriven" || value === "resident" ? value : "makerPresent";
+}
+
+function nonNegativeInteger(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number.NaN;
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
 }
 
 function normalizeLastEvaluation(value: unknown): MakerAgentEvaluationSummary | null {
@@ -100,6 +117,8 @@ export function normalizeMakerAgentSummary(value: unknown): MakerAgentSummary | 
     avatarId: typeof row.avatarId === "string" ? row.avatarId : null,
     lastEvaluation: normalizeLastEvaluation(row.lastEvaluation),
     isDefault: boolValue(row.isDefault),
+    runtimePolicy: runtimePolicyValue(row.runtimePolicy),
+    eventWakesLastMinute: nonNegativeInteger(row.eventWakesLastMinute),
   };
 }
 
@@ -169,6 +188,21 @@ export async function renameMakerAgent(agentId: string, name: string): Promise<M
     body: JSON.stringify({ name }),
   });
   if (!response.ok) throw await errorFrom(response, `Could not rename agent (${response.status}).`);
+  const agent = normalizeMakerAgentSummary(await response.json());
+  if (!agent) throw new MakerAgentApiError(response.status, "The server returned an invalid agent.");
+  return agent;
+}
+
+export async function setMakerAgentRuntimePolicy(
+  agentId: string,
+  runtimePolicy: AgentRuntimePolicy,
+): Promise<MakerAgentSummary> {
+  const response = await fetch(makerAgentRuntimePolicyUrl(agentId), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ runtimePolicy }),
+  });
+  if (!response.ok) throw await errorFrom(response, `Could not update runtime policy (${response.status}).`);
   const agent = normalizeMakerAgentSummary(await response.json());
   if (!agent) throw new MakerAgentApiError(response.status, "The server returned an invalid agent.");
   return agent;

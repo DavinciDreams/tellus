@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { normalizeMakerAgentDirectory, normalizeMakerAgentSummary, renameMakerAgent } from "./tellus-maker-agents";
+import {
+  normalizeMakerAgentDirectory,
+  normalizeMakerAgentSummary,
+  renameMakerAgent,
+  setMakerAgentRuntimePolicy,
+} from "./tellus-maker-agents";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -24,6 +29,8 @@ describe("normalizeMakerAgentSummary", () => {
         renderBytes: "must-not-leak",
       },
       isDefault: true,
+      runtimePolicy: "eventDriven",
+      eventWakesLastMinute: 3,
       sessionToken: "must-not-leak",
     })).toEqual({
       agentId: "agent-one",
@@ -45,12 +52,35 @@ describe("normalizeMakerAgentSummary", () => {
         at: "2026-07-23T12:00:00Z",
       },
       isDefault: true,
+      runtimePolicy: "eventDriven",
+      eventWakesLastMinute: 3,
     });
   });
 
   it("rejects rows without stable identity or placement", () => {
     expect(normalizeMakerAgentSummary({ agentId: "", worldId: "main" })).toBeNull();
     expect(normalizeMakerAgentSummary({ agentId: "agent-one", worldId: "" })).toBeNull();
+  });
+});
+
+describe("setMakerAgentRuntimePolicy", () => {
+  it("patches the dedicated runtime-policy route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      agentId: "agent-one",
+      name: "Mira",
+      worldId: "garden",
+      visitorId: "agent:agent-one",
+      runtimePolicy: "resident",
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const updated = await setMakerAgentRuntimePolicy("agent-one", "resident");
+
+    expect(updated.runtimePolicy).toBe("resident");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/tellus\/agents\/agent-one\/runtime-policy$/),
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ runtimePolicy: "resident" }) }),
+    );
   });
 });
 
