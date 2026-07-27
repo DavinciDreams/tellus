@@ -54,3 +54,4 @@ public/skybox/**/*.png
 
 # vitest coverage output
 coverage/
+performance-results/
