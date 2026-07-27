@@ -47,8 +47,9 @@ their status note before treating an endpoint or phase as shipped behavior.
   evaluation, and friendly-name contracts followed by the status-labelled
   trigger, social, capability, collaboration, and workshop roadmap.
 - [Hyades world-trigger PR #43](https://github.com/MonumentalSystems/hyades/pull/43)
-  — draft architecture review for reusable world triggers, event-driven
-  residents, consent-safe first contact, and deterministic module handoff.
+  — guarded implementation of reusable world triggers and event-driven
+  residents, paired with Tellus owner controls, diagnostics, and consent-safe
+  world/nearby first contact.
 - [Hyades maker-agent issue #39](https://github.com/MonumentalSystems/hyades/issues/39)
   — ongoing backend review thread for progressive capabilities, agent social
   principals, collaboration grains, and creative workshops.

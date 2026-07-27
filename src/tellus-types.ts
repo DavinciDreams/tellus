@@ -164,6 +164,18 @@ export interface Vec3 {
   z: number;
 }
 
+export interface WorldTriggerVolumeSpec {
+  triggerId: string;
+  enabled: boolean;
+  shape: {
+    kind: "sphere" | "box";
+    center: Vec3;
+    radius: number;
+    halfExtents: Vec3;
+    yawDegrees: number;
+  };
+}
+
 export interface GeneratedThing {
   id: string;
   kind: GeneratedKind;
@@ -419,6 +431,7 @@ export interface TellusWorldApi {
     senderName?: string,
   ): WorldChatMessage | null;
   sampleMapPoint(x: number, z: number): { height: number; kind: TerrainKind; loaded: boolean };
+  setWorldTriggerVolumes(definitions: readonly WorldTriggerVolumeSpec[] | null): void;
   snapshot(): TellusSnapshot;
   getFps(): number;
   // ── P2P video controls (RX inbound video, TX local camera) ──

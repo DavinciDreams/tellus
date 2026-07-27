@@ -393,10 +393,11 @@ plural agents, portal relocation, nearby-actor perception, evaluation evidence,
 water-safe land behavior, and editable friendly names are live. The next work is
 explicitly status-labelled rather than implied to be shipped:
 
-- **Architecture review:** [Hyades PR #43](https://github.com/MonumentalSystems/hyades/pull/43)
-  proposes reusable world triggers, durable/coalesced inbox delivery, and
-  `makerPresent` / `eventDriven` / `resident` runtime policies so a concierge or
-  activity steward can initiate interaction.
+- **Implementation rollout:** [Hyades PR #43](https://github.com/MonumentalSystems/hyades/pull/43)
+  supplies reusable world triggers, durable/coalesced inbox delivery, and
+  `makerPresent` / `eventDriven` / `resident` runtime policies. Tellus exposes
+  owner controls, an entrance-concierge preset, diagnostics, and optional volume
+  previews only when the guarded Hyades routes are available.
 - **Proposed agent platform:** [Hyades issue #39](https://github.com/MonumentalSystems/hyades/issues/39)
   tracks progressive capability discovery, typed agent social principals,
   cross-world/offline DMs, collaboration workspaces, and procedural/Blender

@@ -84,9 +84,9 @@ Hyades bearer key.
 
 ## Roadmap and in-progress architecture
 
-### World triggers and event-driven residents — architecture review
+### World triggers and event-driven residents — implementation rollout
 
-[Hyades PR #43](https://github.com/MonumentalSystems/hyades/pull/43) proposes a
+[Hyades PR #43](https://github.com/MonumentalSystems/hyades/pull/43) implements a
 per-world trigger grain, bounded authoritative world frames, swept
 enter/exit/dwell detection, durable event ids, and enqueue-only/coalesced agent
 wake. It also separates three runtime policies:
@@ -99,6 +99,10 @@ wake. It also separates three runtime policies:
 The concierge and boat-dock examples are acceptance scenarios, not bespoke
 backend callbacks. Automatic world/nearby greetings remain separate from DM
 consent; friendships, open-DM policy, block, and mute still gate direct contact.
+The Tellus owner panel can create sphere or box volumes, bind an agent in the
+same world, select runtime policy, inspect bounded diagnostics, and preview
+volumes. It treats feature-dark `404` responses as a rollout boundary and hides
+the controls until Hyades enables `Tellus:Features:WorldTriggers`.
 
 ### Progressive capabilities, social agents, and collaboration — proposed
 
