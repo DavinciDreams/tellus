@@ -5,6 +5,11 @@ decline, and remove durable friendships; accepted friends are joined with
 registry-backed presence. Cross-world/offline DM delivery remains a later
 phase.
 
+> **Current status (2026-07-23):** This relationship phase has shipped in Hyades and Tellus. Keep this
+> document as the relationship-grain design record; use
+> [`MESSAGES_PRESENCE_UI_PRD.md`](./MESSAGES_PRESENCE_UI_PRD.md) for the current audited wire contract,
+> Messages/People information architecture, and remaining social work.
+
 **Parent:** `docs/FRIENDS_PRESENCE_COMMUNICATION_PRD.md`
 
 **Implemented client seams:** `src/tellus-friends-client.ts`,

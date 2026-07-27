@@ -5,6 +5,11 @@ cross-world call signaling remain proposed.** Tellus now has an authenticated
 friends list, request/accept/decline/remove flows, targeted batch presence for
 friends, and stable signed-in identity on the live world socket.
 
+> **Current status (2026-07-23):** The presence integration and authenticated durable friends slice described
+> here have shipped in Hyades and Tellus. This document remains the historical phase plan. Use
+> [`MESSAGES_PRESENCE_UI_PRD.md`](./MESSAGES_PRESENCE_UI_PRD.md) for the current audited contracts, user
+> experience, progressive-disclosure model, and remaining backend requirements.
+
 **Issue:** [MonumentalSystems/hyades#35](https://github.com/MonumentalSystems/hyades/issues/35) (Hyades-side foundation — closed as completed, `0.5.301`)
 
 **Product surfaces:** Tellus client, Hyades world service, Hyades gateway
