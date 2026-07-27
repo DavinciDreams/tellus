@@ -7,6 +7,9 @@ route or phase.
 
 ## Current systems and operations
 
+- [Testing and performance checks](./TESTING_AND_PERFORMANCE.md) — coverage
+  baseline, CI gates, vegetation render budgets, and fixed-GPU FPS guidance.
+
 - [Gnostr Cloud setup](./GNOSTR_CLOUD_SETUP.md) — production release workflow,
   CI inspection, and live verification.
 - [Biome ecology and procedural tree realism](./BIOME_ECOLOGY_SPEEDTREE_PRD.md)

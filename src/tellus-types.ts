@@ -654,6 +654,19 @@ declare global {
     };
     __tellusPerfReport?: () => unknown;
     __tellusPerfReset?: () => boolean;
+    __tellusTreeLodPerf?: () => {
+      ready: boolean;
+      candidateId: string;
+      density: number;
+      treeObjects: number;
+      buildMs: number;
+      renderer: {
+        calls: number;
+        triangles: number;
+        geometries: number;
+        textures: number;
+      };
+    };
     __tellusSetTerrainOnly?: (enabled?: boolean) => boolean;
     __tellusSetLowGpu?: (enabled?: boolean) => boolean;
     __tellusSetRenderEvery?: (frames?: number) => number;

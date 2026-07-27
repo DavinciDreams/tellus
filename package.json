@@ -19,7 +19,9 @@
     "terrain:evoflow-variety": "node scripts/generate-evoflow-terrain-variety.mjs",
     "terrain:yosemite": "node scripts/bake-yosemite-dem.mjs --chunks=20",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --passWithNoTests --testTimeout=30000 --coverage",
+    "perf:render": "bun run build && node scripts/check-render-performance.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",
@@ -46,6 +48,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/three": "0.183.1",
+    "@vitest/coverage-v8": "4.1.0",
     "geotiff": "^3.0.5",
     "playwright": "^1.61.1",
     "typescript": "^5.9.3",
