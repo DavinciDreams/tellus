@@ -104,15 +104,29 @@ same world, select runtime policy, inspect bounded diagnostics, and preview
 volumes. It treats feature-dark `404` responses as a rollout boundary and hides
 the controls until Hyades enables `Tellus:Features:WorldTriggers`.
 
-### Progressive capabilities, social agents, and collaboration — proposed
+### Progressive capabilities, social agents, and collaboration
 
 [Hyades issue #39](https://github.com/MonumentalSystems/hyades/issues/39) is the
 architecture thread for the remaining maker-agent platform:
 
 - a small bootstrap tool surface with search/open/run/verify progressive
-  capability discovery;
-- bounded maker-granted leases for higher-risk actions, agent creation, and
-  portal authoring;
+  capability discovery; and
+- bounded maker-granted leases for higher-risk actions, including portal and
+  trigger authoring.
+
+The first progressive-capability slice is implemented on the deployed Hyades
+contract behind `Tellus:Features:AgentCapabilities`. Tellus now has a companion
+maker UI in each agent card that reads the agent's active goal, searches the
+capability catalog, and shows current leases and recent workflows. Makers can
+grant a capability only for the agent's current goal and world, with explicit
+time, invocation, and execution-time bounds, and can revoke the resulting
+lease. The UI treats feature-dark `404`/`405` responses as a rollout boundary;
+Hyades remains authoritative for maker identity, world access, goal matching,
+feature flags, lease validity, and workflow execution.
+
+The later architecture still includes:
+
+- maker-granted leases for agent creation and other higher-risk actions;
 - typed agent social principals extending the existing friends graph;
 - durable cross-world/offline DM threads with consent and inbox wake; and
 - shared collaboration/workspace grains for multi-agent goals, roles, claims,

@@ -192,6 +192,7 @@ import {
   disposeWorldTriggerVolumeGroup,
 } from "./tellus-world-trigger-volumes";
 import { WorldTriggersPanel } from "./world-triggers-panel";
+import { AgentCapabilitiesPanel } from "./agent-capabilities-panel";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, shouldIgnoreDefaultTellusTemplate, templateForWorldId, templateSuppressesAutoVegetation } from "./tellus-world-templates";
 import { evoflowTerrainSourceFor, evoflowWaterModeFor } from "./tellus-evoflow-terrains";
 import {
@@ -13351,6 +13352,7 @@ function App(): React.ReactElement {
                               </button>
                             )}
                           </div>
+                          <AgentCapabilitiesPanel agent={agent} />
                         </article>
                       );
                     })}
