@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { ChevronDown, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { ChevronDown, RefreshCw, ShieldCheck, UsersRound, X } from "lucide-react";
 import type { MakerAgentSummary } from "./tellus-maker-agents";
 import {
   AgentCapabilityApiError,
+  fetchDelegatedAgentCreationLease,
   fetchAgentCapabilityCatalog,
   fetchAgentCapabilityState,
+  grantDelegatedAgentCreationLease,
   grantAgentCapabilityLease,
+  revokeDelegatedAgentCreationLease,
   revokeAgentCapabilityLease,
   type AgentCapabilityManifest,
   type AgentCapabilityState,
+  type DelegatedAgentCreationLease,
 } from "./tellus-agent-capabilities";
 
 interface AgentCapabilitiesPanelProps {
@@ -46,25 +50,48 @@ export function AgentCapabilitiesPanel({ agent }: AgentCapabilitiesPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [rolloutPending, setRolloutPending] = useState(false);
+  const [delegatedRolloutPending, setDelegatedRolloutPending] = useState(false);
+  const [delegatedLease, setDelegatedLease] = useState<DelegatedAgentCreationLease | null>(null);
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [invocations, setInvocations] = useState(8);
   const [budgetSeconds, setBudgetSeconds] = useState(120);
+  const [childCount, setChildCount] = useState(1);
+  const [maxLineageDepth, setMaxLineageDepth] = useState(1);
+  const [maxDailyTokenBudget, setMaxDailyTokenBudget] = useState(5_000);
+  const [allowedWorlds, setAllowedWorlds] = useState(agent.worldId);
+  const [templateId, setTemplateId] = useState("collaborator");
+  const [defaultChildName, setDefaultChildName] = useState("Collaborator");
+  const [persona, setPersona] = useState("");
+  const [startChildren, setStartChildren] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal, search = "") => {
     setLoading(true);
     setError(null);
     try {
-      const [nextState, nextManifests] = await Promise.all([
+      const delegatedPromise = fetchDelegatedAgentCreationLease(agent.agentId, signal)
+        .then((lease) => ({ lease, unavailable: false }))
+        .catch((caught: unknown) => {
+          if (caught instanceof AgentCapabilityApiError && (caught.status === 404 || caught.status === 405)) {
+            return { lease: null, unavailable: true };
+          }
+          throw caught;
+        });
+      const [nextState, nextManifests, nextDelegated] = await Promise.all([
         fetchAgentCapabilityState(agent.agentId, signal),
         fetchAgentCapabilityCatalog(search, signal),
+        delegatedPromise,
       ]);
       setState(nextState);
       setManifests(nextManifests);
+      setDelegatedLease(nextDelegated.lease);
+      setDelegatedRolloutPending(nextDelegated.unavailable);
       setRolloutPending(false);
     } catch (caught) {
       if (signal?.aborted) return;
       if (caught instanceof AgentCapabilityApiError && (caught.status === 404 || caught.status === 405)) {
         setRolloutPending(true);
+        setDelegatedRolloutPending(true);
+        setDelegatedLease(null);
         setState(EMPTY_STATE);
         setManifests([]);
       } else {
@@ -83,9 +110,10 @@ export function AgentCapabilitiesPanel({ agent }: AgentCapabilitiesPanelProps) {
   }, [load, open]);
 
   const makerManifests = useMemo(
-    () => manifests.filter((manifest) => manifest.grantMode === "maker"),
+    () => manifests.filter((manifest) => manifest.grantMode === "maker" && manifest.id !== "agents.create"),
     [manifests],
   );
+  const delegatedCreationManifest = manifests.find((manifest) => manifest.id === "agents.create") ?? null;
 
   const approve = useCallback(async (manifest: AgentCapabilityManifest) => {
     const goal = state.activeGoal;
@@ -128,6 +156,75 @@ export function AgentCapabilitiesPanel({ agent }: AgentCapabilitiesPanelProps) {
       setBusyId(null);
     }
   }, [agent.agentId, agent.name, load, query]);
+
+  const approveDelegatedCreation = useCallback(async () => {
+    const goal = state.activeGoal;
+    if (!goal) {
+      setError(`${agent.name} needs an active goal before you can delegate agent creation.`);
+      return;
+    }
+    const worlds = Array.from(new Set(allowedWorlds.split(",").map((world) => world.trim()).filter(Boolean))).slice(0, 32);
+    if (!templateId.trim() || !persona.trim() || worlds.length === 0) {
+      setError("Template id, persona, and at least one allowed world are required.");
+      return;
+    }
+    setBusyId("agents.create");
+    setError(null);
+    setNotice(null);
+    try {
+      await grantDelegatedAgentCreationLease(agent.agentId, {
+        goalId: goal.goalId,
+        durationMinutes: clampInteger(durationMinutes, 1, 1_440, 30),
+        childCount: clampInteger(childCount, 1, 16, 1),
+        maxLineageDepth: clampInteger(maxLineageDepth, 1, 8, 1),
+        personaTemplates: [{
+          templateId: templateId.trim().slice(0, 80),
+          persona: persona.trim().slice(0, 8_000),
+          defaultName: defaultChildName.trim().slice(0, 80) || null,
+        }],
+        worldIds: worlds,
+        maxDailyTokenBudget: clampInteger(maxDailyTokenBudget, 1, 20_000_000, 5_000),
+        startChildren,
+      });
+      setNotice(`Agent creation approved for ${agent.name}'s active goal.`);
+      await load(undefined, query);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not approve delegated creation.");
+    } finally {
+      setBusyId(null);
+    }
+  }, [
+    agent.agentId,
+    agent.name,
+    allowedWorlds,
+    childCount,
+    defaultChildName,
+    durationMinutes,
+    load,
+    maxDailyTokenBudget,
+    maxLineageDepth,
+    persona,
+    query,
+    startChildren,
+    state.activeGoal,
+    templateId,
+  ]);
+
+  const revokeDelegatedCreation = useCallback(async () => {
+    if (!delegatedLease) return;
+    setBusyId(delegatedLease.leaseId);
+    setError(null);
+    setNotice(null);
+    try {
+      await revokeDelegatedAgentCreationLease(agent.agentId, delegatedLease.leaseId);
+      setNotice(`Agent creation revoked for ${agent.name}.`);
+      await load(undefined, query);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not revoke delegated creation.");
+    } finally {
+      setBusyId(null);
+    }
+  }, [agent.agentId, agent.name, delegatedLease, load, query]);
 
   return (
     <section className="agent-capabilities" aria-label={`Capabilities for ${agent.name}`}>
@@ -265,6 +362,152 @@ export function AgentCapabilitiesPanel({ agent }: AgentCapabilitiesPanelProps) {
                   </span>
                 )}
               </div>
+
+              {delegatedCreationManifest && (
+                <div className="agent-capabilities__delegation">
+                  <div className="agent-capabilities__delegation-title">
+                    <span>
+                      <UsersRound size={12} aria-hidden="true" />
+                      <strong>Delegated agent creation</strong>
+                    </span>
+                    <small>Children stay directly owned and billed by you.</small>
+                  </div>
+
+                  {delegatedRolloutPending ? (
+                    <p className="agent-capabilities__pending" role="status">
+                      Creation approvals are installed and waiting for Hyades to enable the delegated-creation flag.
+                    </p>
+                  ) : (
+                    <>
+                      {delegatedLease ? (
+                        <article className="agent-capability-card agent-capability-card--delegated">
+                          <div>
+                            <strong>{delegatedLease.remainingChildren} child approvals remaining</strong>
+                            <span>
+                              {expiryLabel(delegatedLease.expiresAtMs)} · depth {delegatedLease.maxLineageDepth}
+                              {` · ${delegatedLease.maxDailyTokenBudget.toLocaleString()} tokens/day`}
+                            </span>
+                            <small>
+                              {delegatedLease.personaTemplates.map((template) => template.templateId).join(", ")}
+                              {` · ${delegatedLease.worldIds.join(", ")}`}
+                            </small>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={busyId !== null}
+                            onClick={() => void revokeDelegatedCreation()}
+                          >
+                            <X size={11} aria-hidden="true" /> Revoke
+                          </button>
+                        </article>
+                      ) : (
+                        <span className="agent-capabilities__muted">No active creation approval.</span>
+                      )}
+
+                      <form
+                        className="agent-capabilities__delegation-form"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void approveDelegatedCreation();
+                        }}
+                      >
+                        <label>
+                          Template id
+                          <input
+                            value={templateId}
+                            maxLength={80}
+                            onChange={(event) => setTemplateId(event.target.value)}
+                            placeholder="crop-keeper"
+                            required
+                          />
+                        </label>
+                        <label>
+                          Default child name
+                          <input
+                            value={defaultChildName}
+                            maxLength={80}
+                            onChange={(event) => setDefaultChildName(event.target.value)}
+                            placeholder="Crop Keeper"
+                          />
+                        </label>
+                        <label className="agent-capabilities__delegation-wide">
+                          Approved persona
+                          <textarea
+                            value={persona}
+                            maxLength={8_000}
+                            onChange={(event) => setPersona(event.target.value)}
+                            placeholder="Tend the orchard, coordinate harvest work, and report evidence."
+                            required
+                          />
+                        </label>
+                        <label className="agent-capabilities__delegation-wide">
+                          Allowed initial worlds
+                          <input
+                            value={allowedWorlds}
+                            maxLength={2_000}
+                            onChange={(event) => setAllowedWorlds(event.target.value)}
+                            placeholder="world-one, world-two"
+                            required
+                          />
+                          <small>Comma-separated world ids; Hyades verifies your access.</small>
+                        </label>
+                        <label>
+                          Children
+                          <input
+                            type="number"
+                            min={1}
+                            max={16}
+                            value={childCount}
+                            onChange={(event) => setChildCount(Number(event.target.value))}
+                          />
+                        </label>
+                        <label>
+                          Max depth
+                          <input
+                            type="number"
+                            min={1}
+                            max={8}
+                            value={maxLineageDepth}
+                            onChange={(event) => setMaxLineageDepth(Number(event.target.value))}
+                          />
+                        </label>
+                        <label>
+                          Daily tokens
+                          <input
+                            type="number"
+                            min={1}
+                            max={20_000_000}
+                            value={maxDailyTokenBudget}
+                            onChange={(event) => setMaxDailyTokenBudget(Number(event.target.value))}
+                          />
+                        </label>
+                        <label className="agent-capabilities__delegation-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={startChildren}
+                            onChange={(event) => setStartChildren(event.target.checked)}
+                          />
+                          Start children immediately
+                        </label>
+                        <button
+                          type="submit"
+                          className="agent-capabilities__delegation-submit"
+                          disabled={!state.activeGoal || busyId !== null}
+                        >
+                          {busyId === "agents.create"
+                            ? "Approving…"
+                            : delegatedLease ? "Replace creation approval" : "Approve agent creation"}
+                        </button>
+                        {!state.activeGoal && (
+                          <span className="agent-capabilities__muted agent-capabilities__delegation-wide">
+                            Approval becomes available after the agent sets an active goal.
+                          </span>
+                        )}
+                      </form>
+                    </>
+                  )}
+                </div>
+              )}
 
               <div className="agent-capabilities__leases">
                 <strong>Current leases ({state.leases.length})</strong>

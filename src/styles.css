@@ -2032,7 +2032,8 @@ textarea::placeholder {
 }
 
 .agent-capabilities button,
-.agent-capabilities input {
+.agent-capabilities input,
+.agent-capabilities textarea {
   border: 1px solid var(--hud-border-soft);
   border-radius: 5px;
   background: rgb(0 0 0 / 35%);
@@ -2055,7 +2056,8 @@ textarea::placeholder {
 }
 
 .agent-capabilities button:focus-visible,
-.agent-capabilities input:focus-visible {
+.agent-capabilities input:focus-visible,
+.agent-capabilities textarea:focus-visible {
   outline: 2px solid var(--hud-gold-bright);
   outline-offset: 2px;
 }
@@ -2099,6 +2101,7 @@ textarea::placeholder {
 .agent-capabilities__body,
 .agent-capabilities__goal,
 .agent-capabilities__approvals,
+.agent-capabilities__delegation,
 .agent-capabilities__leases,
 .agent-capabilities__workflows {
   display: grid;
@@ -2143,6 +2146,7 @@ textarea::placeholder {
 
 .agent-capabilities__goal > strong,
 .agent-capabilities__approvals > strong,
+.agent-capabilities__delegation-title strong,
 .agent-capabilities__leases > strong,
 .agent-capabilities__workflows > strong {
   color: var(--hud-gold-bright);
@@ -2226,6 +2230,85 @@ textarea::placeholder {
 
 .agent-capability-card small {
   color: var(--hud-gold-bright);
+}
+
+.agent-capabilities__delegation {
+  padding: 7px;
+  border: 1px solid rgb(222 188 86 / 24%);
+  border-radius: 7px;
+  background: rgb(222 188 86 / 5%);
+}
+
+.agent-capabilities__delegation-title {
+  display: grid;
+  gap: 2px;
+}
+
+.agent-capabilities__delegation-title > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--hud-gold-bright);
+}
+
+.agent-capabilities__delegation-title small {
+  color: var(--hud-muted);
+  font-size: 8px;
+}
+
+.agent-capability-card--delegated {
+  align-items: flex-start;
+}
+
+.agent-capabilities__delegation-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.agent-capabilities__delegation-form label {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  color: var(--hud-muted);
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.agent-capabilities__delegation-form label small {
+  font-size: 7px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-transform: none;
+}
+
+.agent-capabilities__delegation-form input,
+.agent-capabilities__delegation-form textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.agent-capabilities__delegation-form textarea {
+  min-height: 58px;
+  resize: vertical;
+}
+
+.agent-capabilities__delegation-wide,
+.agent-capabilities__delegation-submit {
+  grid-column: 1 / -1;
+}
+
+.agent-capabilities__delegation-checkbox {
+  display: flex !important;
+  grid-column: 1 / -1;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  text-transform: none !important;
+}
+
+.agent-capabilities__delegation-checkbox input {
+  width: auto;
 }
 
 .agent-capabilities__leases ul,
