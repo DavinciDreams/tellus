@@ -219,7 +219,18 @@ import {
   sendFriendRequest,
   setFriendsRefreshIntervalMs,
   type FriendsSnapshot,
+  type SocialPrincipalKind,
+  type SocialPrincipalTarget,
 } from "./tellus-friends-client";
+import {
+  DirectMessagesApiError,
+  directMessageDiagnostics,
+  fetchDirectMessageInbox,
+  fetchDirectMessageThread,
+  sendDirectMessage,
+  type DirectMessage,
+  type DirectMessageThreadSummary,
+} from "./tellus-social-client";
 import {
   buildWorldThingRuntimeProfile,
   defaultScaleForRealisticKind,
@@ -312,6 +323,8 @@ interface AgentStatus {
 interface OnlineContact {
   visitorId: string;
   userId?: string;
+  principalKind?: SocialPrincipalKind;
+  principalId?: string;
   name: string;
   kind: "player" | "agent";
   worldId?: string;
@@ -3325,7 +3338,11 @@ function createTellusWorld(
     vegetation: vegetation.stats(),
     procplants: procplants.stats(),
     generatedAssets: generatedAssetPerfStats(),
-    friendsPresence: { ...presenceRegistryDiagnostics(), relationships: friendsDiagnostics() },
+    friendsPresence: {
+      ...presenceRegistryDiagnostics(),
+      relationships: friendsDiagnostics(),
+      directMessages: directMessageDiagnostics(),
+    },
     debug: {
       terrainOnly: terrainOnlyDebug(),
       lowGpu: lowGpuDebug(),
@@ -12374,6 +12391,10 @@ function App(): React.ReactElement {
     visitorId: string;
     name: string;
     kind: "player" | "agent";
+    principalKind?: SocialPrincipalKind;
+    principalId?: string;
+    durable?: boolean;
+    currentWorld?: boolean;
     worldId?: string;
     position?: Vec3;
   } | null>(null);
@@ -12383,6 +12404,12 @@ function App(): React.ReactElement {
   const [friendsStatus, setFriendsStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [friendsNotice, setFriendsNotice] = useState<{ kind: "status" | "error"; text: string } | null>(null);
   const [friendMutationsBusy, setFriendMutationsBusy] = useState<ReadonlySet<string>>(() => new Set());
+  const [directMessageThreads, setDirectMessageThreads] = useState<DirectMessageThreadSummary[]>([]);
+  const [directMessagesStatus, setDirectMessagesStatus] = useState<"idle" | "loading" | "ready" | "unavailable" | "error">("idle");
+  const [directMessageThread, setDirectMessageThread] = useState<DirectMessage[]>([]);
+  const [directMessageThreadStatus, setDirectMessageThreadStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [directMessageNotice, setDirectMessageNotice] = useState<{ kind: "status" | "error"; text: string } | null>(null);
+  const [directMessageSending, setDirectMessageSending] = useState(false);
   const [portalTargetWorldId, setPortalTargetWorldId] = useState("");
   // Hidden FPS overlay: triple-click the "Tellus World Weaver" brand box to toggle.
   const [showFps, setShowFps] = useState(false);
@@ -16131,6 +16158,30 @@ function App(): React.ReactElement {
     }
   }, [account?.accountId]);
 
+  const refreshDirectMessageInbox = useCallback(async (signal?: AbortSignal, showLoading = false) => {
+    if (!account?.accountId) return false;
+    if (showLoading) setDirectMessagesStatus("loading");
+    try {
+      const threads = await fetchDirectMessageInbox(signal);
+      setDirectMessageThreads(threads);
+      setDirectMessagesStatus("ready");
+      setDirectMessageNotice((current) => current?.kind === "error" ? null : current);
+      return true;
+    } catch (error) {
+      if (signal?.aborted) return false;
+      if (error instanceof DirectMessagesApiError && (error.status === 404 || error.status === 405)) {
+        setDirectMessagesStatus("unavailable");
+        return false;
+      }
+      setDirectMessagesStatus("error");
+      setDirectMessageNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "Messages are temporarily unavailable.",
+      });
+      return false;
+    }
+  }, [account?.accountId]);
+
   useEffect(() => {
     if (!account?.accountId) return;
     const controller = new AbortController();
@@ -16146,6 +16197,12 @@ function App(): React.ReactElement {
       setRegistryPresenceStatus("idle");
       setFriendsNotice(null);
       setFriendMutationsBusy(new Set());
+      setDirectMessageThreads([]);
+      setDirectMessagesStatus("idle");
+      setDirectMessageThread([]);
+      setDirectMessageThreadStatus("idle");
+      setDirectMessageNotice(null);
+      setDirectMessageSending(false);
       return;
     }
     if (!worldChatOpen || chatTab !== "dm") return;
@@ -16163,7 +16220,84 @@ function App(): React.ReactElement {
     };
   }, [account?.accountId, chatTab, refreshFriends, worldChatOpen]);
 
-  const friendUserIds = useMemo(() => friendsSnapshot.friends.map((friend) => friend.userId), [friendsSnapshot.friends]);
+  useEffect(() => {
+    if (!account?.accountId || !worldChatOpen || chatTab !== "dm") return;
+    const controller = new AbortController();
+    const refresh = (showLoading = false) => {
+      if (document.visibilityState === "hidden") return;
+      void refreshDirectMessageInbox(controller.signal, showLoading);
+    };
+    refresh(true);
+    const interval = window.setInterval(() => refresh(), 15_000);
+    const onFocus = () => refresh();
+    const onVisibilityChange = () => refresh();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [account?.accountId, chatTab, refreshDirectMessageInbox, worldChatOpen]);
+
+  useEffect(() => {
+    if (
+      !account?.accountId ||
+      !worldChatOpen ||
+      chatTab !== "dm" ||
+      !worldChatDmTarget?.durable ||
+      !worldChatDmTarget.principalKind ||
+      !worldChatDmTarget.principalId
+    ) {
+      setDirectMessageThreadStatus("idle");
+      return;
+    }
+    if (directMessagesStatus === "unavailable") {
+      setDirectMessageThreadStatus("error");
+      setDirectMessageNotice({ kind: "error", text: "Cross-world messages are not available on this Hyades deployment yet." });
+      return;
+    }
+    const target = { kind: worldChatDmTarget.principalKind, principalId: worldChatDmTarget.principalId };
+    const controller = new AbortController();
+    setDirectMessageThread([]);
+    setDirectMessageThreadStatus("loading");
+    setDirectMessageNotice(null);
+    void fetchDirectMessageThread(target, { limit: 50, signal: controller.signal })
+      .then((page) => {
+        setDirectMessageThread(page.messages);
+        setDirectMessageThreadStatus("ready");
+        setDirectMessageThreads((current) => current.map((thread) =>
+          thread.counterpart.kind === target.kind && thread.counterpart.id === target.principalId
+            ? { ...thread, unreadCount: 0 }
+            : thread));
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof DirectMessagesApiError && (error.status === 404 || error.status === 405)) {
+          setDirectMessagesStatus("unavailable");
+        }
+        setDirectMessageThreadStatus("error");
+        setDirectMessageNotice({
+          kind: "error",
+          text: error instanceof Error ? error.message : "This conversation is temporarily unavailable.",
+        });
+      });
+    return () => controller.abort();
+  }, [
+    account?.accountId,
+    chatTab,
+    directMessagesStatus,
+    worldChatDmTarget?.durable,
+    worldChatDmTarget?.principalId,
+    worldChatDmTarget?.principalKind,
+    worldChatOpen,
+  ]);
+
+  const friendUserIds = useMemo(
+    () => friendsSnapshot.friends.filter((friend) => friend.kind === "account").map((friend) => friend.principalId),
+    [friendsSnapshot.friends],
+  );
   useEffect(() => {
     if (!account?.accountId || !worldChatOpen || chatTab !== "dm") return;
     if (friendUserIds.length === 0) {
@@ -16198,19 +16332,19 @@ function App(): React.ReactElement {
 
   const mutateFriendship = useCallback(async (
     action: "request" | "accept" | "decline" | "remove",
-    userId: string,
+    target: SocialPrincipalTarget,
   ) => {
-    const busyKey = `${action}:${userId}`;
+    const busyKey = `${action}:${target.kind}:${target.principalId}`;
     setFriendMutationsBusy((current) => new Set(current).add(busyKey));
     setFriendsNotice(null);
     try {
       const result = action === "request"
-        ? await sendFriendRequest(userId)
+        ? await sendFriendRequest(target)
         : action === "accept"
-          ? await acceptFriendRequest(userId)
+          ? await acceptFriendRequest(target)
           : action === "decline"
-            ? await declineFriendRequest(userId)
-            : await removeFriend(userId);
+            ? await declineFriendRequest(target)
+            : await removeFriend(target);
       const refreshed = await refreshFriends();
       if (!refreshed) return;
       const actionLabel = action === "request" ? "Friend request updated" : action === "accept" ? "Friend added" : action === "decline" ? "Request declined" : "Friendship updated";
@@ -16281,6 +16415,10 @@ function App(): React.ReactElement {
       const next: OnlineContact = {
         visitorId: presence.visitorId,
         userId: presence.ownerUserId,
+        principalKind: kind === "agent" ? "agent" : presence.ownerUserId ? "account" : undefined,
+        principalId: kind === "agent"
+          ? presence.visitorId.replace(/^agent:/, "")
+          : presence.ownerUserId,
         name: actorName(presence),
         kind,
         worldId,
@@ -16308,25 +16446,30 @@ function App(): React.ReactElement {
     for (const visitor of [...remoteAgents, ...remotePlayers]) merge(visitor, currentWorldId, true);
     const presenceByUser = new Map(registryPresence.map((entry) => [entry.userId, entry]));
     for (const friend of friendsSnapshot.friends) {
-      if (friend.userId === snapshot.userId || friend.userId === account?.accountId) continue;
-      const key = `player:${friend.userId}`;
+      if (friend.kind === "account" && (friend.principalId === snapshot.userId || friend.principalId === account?.accountId)) continue;
+      const contactKind = friend.kind === "agent" ? "agent" : "player";
+      const key = friend.kind === "agent" ? `agent:agent:${friend.principalId}` : `player:${friend.principalId}`;
       const existing = byKey.get(key);
-      const presence = presenceByUser.get(friend.userId);
+      const presence = friend.kind === "account" ? presenceByUser.get(friend.principalId) : undefined;
       const presenceWorldId = presence?.worldId ? canonicalWorldId(presence.worldId) : undefined;
       const currentWorld = existing?.currentWorld ?? presenceWorldId === currentWorldId;
       const locallyPresent = Boolean(existing?.currentWorld && existing.online);
-      const presenceKnown = locallyPresent || registryPresenceStatus === "ready";
-      const online = locallyPresent || Boolean(registryPresenceStatus === "ready" && presence?.online);
+      const presenceKnown = friend.kind === "agent" ? Boolean(existing) : locallyPresent || registryPresenceStatus === "ready";
+      const online = friend.kind === "agent"
+        ? Boolean(existing?.online)
+        : locallyPresent || Boolean(registryPresenceStatus === "ready" && presence?.online);
       byKey.set(key, {
-        visitorId: existing?.visitorId ?? `user:${friend.userId}`,
+        visitorId: existing?.visitorId ?? (friend.kind === "agent" ? `agent:${friend.principalId}` : `user:${friend.principalId}`),
         userId: friend.userId,
-        name: presence?.name || existing?.name || friend.userId.slice(0, 12),
-        kind: "player",
+        principalKind: friend.kind,
+        principalId: friend.principalId,
+        name: friend.displayName || presence?.name || existing?.name || friend.principalId.slice(0, 12),
+        kind: contactKind,
         worldId: existing?.worldId ?? presenceWorldId,
         position: existing?.position,
         online,
         currentWorld,
-        canMessage: Boolean(existing?.canMessage && currentWorld && online),
+        canMessage: directMessagesStatus !== "unavailable" || Boolean(existing?.canMessage && currentWorld && online),
         lastSeenAt: existing?.lastSeenAt || presence?.lastSeenAt,
         isFriend: true,
         friendSinceMs: friend.sinceMs,
@@ -16344,6 +16487,8 @@ function App(): React.ReactElement {
           : undefined;
       byKey.set(key, {
         visitorId: agentStatus.visitorId,
+        principalKind: "agent",
+        principalId: agentStatus.agentId || agentStatus.visitorId.replace(/^agent:/, ""),
         name: existingInAgentWorld?.name || actorName({
           visitorId: agentStatus.visitorId,
           name: agentStatus.displayName || activeAgentName,
@@ -16379,6 +16524,7 @@ function App(): React.ReactElement {
     agentStatus?.worldId,
     registryPresence,
     registryPresenceStatus,
+    directMessagesStatus,
     friendsSnapshot.friends,
     account?.accountId,
     currentWorldId,
@@ -16389,16 +16535,51 @@ function App(): React.ReactElement {
   ]);
   const friendContacts = chatTargets.filter((contact) => contact.isFriend);
   const nearbyContacts = chatTargets.filter((contact) => !contact.isFriend && contact.currentWorld);
-  const relationshipUserIds = useMemo(() => new Set([
-    ...friendsSnapshot.friends.map((entry) => entry.userId),
-    ...friendsSnapshot.pendingIncoming.map((entry) => entry.userId),
-    ...friendsSnapshot.pendingOutgoing.map((entry) => entry.userId),
+  const directMessageUnreadCount = directMessageThreads.reduce((sum, thread) => sum + thread.unreadCount, 0);
+  const relationshipPrincipals = useMemo(() => new Set([
+    ...friendsSnapshot.friends.map((entry) => `${entry.kind}:${entry.principalId}`),
+    ...friendsSnapshot.pendingIncoming.map((entry) => `${entry.kind}:${entry.principalId}`),
+    ...friendsSnapshot.pendingOutgoing.map((entry) => `${entry.kind}:${entry.principalId}`),
   ]), [friendsSnapshot]);
+  const selectDirectChatTarget = (target: OnlineContact) => {
+    setWorldChatDmTarget({
+      ...target,
+      durable: Boolean(
+        target.isFriend &&
+        target.principalKind &&
+        target.principalId &&
+        directMessagesStatus !== "unavailable"
+      ),
+    });
+    setWorldChatChannel("dm");
+    setChatTab("dm");
+    setWorldChatInput("");
+    setDirectMessageNotice(null);
+  };
+  const selectDirectMessageThread = (thread: DirectMessageThreadSummary) => {
+    const kind = thread.counterpart.kind;
+    setWorldChatDmTarget({
+      visitorId: kind === "agent" ? `agent:${thread.counterpart.id}` : `user:${thread.counterpart.id}`,
+      name: thread.counterpartDisplayName || thread.counterpart.id.slice(0, 12),
+      kind: kind === "agent" ? "agent" : "player",
+      principalKind: kind,
+      principalId: thread.counterpart.id,
+      durable: true,
+    });
+    setWorldChatChannel("dm");
+    setChatTab("dm");
+    setWorldChatInput("");
+    setDirectMessageNotice(null);
+  };
   const openDirectChatFor = (visitor: { visitorId: string; name?: string; position?: Vec3 }) => {
+    const agent = visitor.visitorId.startsWith("agent:");
     const target = {
       visitorId: visitor.visitorId,
       name: actorName(visitor),
-      kind: visitor.visitorId.startsWith("agent:") ? "agent" as const : "player" as const,
+      kind: agent ? "agent" as const : "player" as const,
+      principalKind: agent ? "agent" as const : undefined,
+      principalId: agent ? visitor.visitorId.replace(/^agent:/, "") : undefined,
+      durable: false,
       worldId: currentWorldId,
       position: visitor.position,
     };
@@ -16466,8 +16647,54 @@ function App(): React.ReactElement {
     if (!message.position || !snapshot.visitorPosition) return true;
     return distance2D(snapshot.visitorPosition, message.position) <= 36;
   });
+  const sendDurableDirectMessage = async () => {
+    if (
+      !worldChatDmTarget?.durable ||
+      !worldChatDmTarget.principalKind ||
+      !worldChatDmTarget.principalId ||
+      !worldChatInput.trim() ||
+      directMessageSending
+    ) return;
+    const target = {
+      kind: worldChatDmTarget.principalKind,
+      principalId: worldChatDmTarget.principalId,
+    };
+    const text = worldChatInput.trim();
+    const idempotencyKey = globalThis.crypto?.randomUUID?.()
+      ?? `tellus-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setDirectMessageSending(true);
+    setDirectMessageNotice(null);
+    try {
+      const result = await sendDirectMessage(target, text, idempotencyKey);
+      setDirectMessageThread((current) => current.some((message) => message.messageId === result.message.messageId)
+        ? current
+        : [...current, result.message]);
+      setDirectMessageThreadStatus("ready");
+      setWorldChatInput("");
+      if (result.deliveryPending) {
+        setDirectMessageNotice({
+          kind: "status",
+          text: result.wakeScheduled
+            ? `${worldChatDmTarget.name} has been notified.`
+            : "Message saved; delivery will continue in the background.",
+        });
+      }
+      void refreshDirectMessageInbox();
+    } catch (error) {
+      setDirectMessageNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "The message could not be sent.",
+      });
+    } finally {
+      setDirectMessageSending(false);
+    }
+  };
   const sendWorldChatMessage = () => {
     if (worldChatChannel === "dm" && !worldChatDmTarget) return;
+    if (worldChatChannel === "dm" && worldChatDmTarget?.durable) {
+      void sendDurableDirectMessage();
+      return;
+    }
     if (
       worldChatChannel === "dm" &&
       worldChatDmTarget?.visitorId &&
@@ -16730,7 +16957,9 @@ function App(): React.ReactElement {
                     if (tab === "world" || tab === "dm") setWorldChatChannel(tab);
                   }}
                 >
-                  {tab === "dm" ? "DMs" : tab === "agent" ? activeAgentName : "World"}
+                  {tab === "dm" ? (
+                    <>DMs{directMessageUnreadCount > 0 && <span className="mini-chat-tab-badge" aria-label={`${directMessageUnreadCount} unread messages`}>{directMessageUnreadCount}</span>}</>
+                  ) : tab === "agent" ? activeAgentName : "World"}
                 </button>
               ))}
             </nav>
@@ -16739,6 +16968,44 @@ function App(): React.ReactElement {
               <>
                 {worldChatChannel === "dm" && (
               <>
+              {account && (
+                <section className="mini-chat-threads" aria-labelledby="mini-chat-threads-title">
+                  <div className="mini-chat-friends-heading">
+                    <h3 id="mini-chat-threads-title">Conversations</h3>
+                    {directMessagesStatus === "loading" && <span>Syncing...</span>}
+                  </div>
+                  {directMessagesStatus === "unavailable" ? (
+                    <p className="mini-chat-friends-empty">Cross-world messages are not enabled yet. Nearby messages still work in this world.</p>
+                  ) : directMessageThreads.length > 0 ? (
+                    <ul>
+                      {directMessageThreads.map((thread) => {
+                        const name = thread.counterpartDisplayName || thread.counterpart.id.slice(0, 12);
+                        const active = worldChatDmTarget?.durable
+                          && worldChatDmTarget.principalKind === thread.counterpart.kind
+                          && worldChatDmTarget.principalId === thread.counterpart.id;
+                        return (
+                          <li key={thread.threadId}>
+                            <button
+                              type="button"
+                              className={active ? "active" : ""}
+                              aria-label={`Open conversation with ${name}${thread.unreadCount ? `, ${thread.unreadCount} unread` : ""}`}
+                              onClick={() => selectDirectMessageThread(thread)}
+                            >
+                              <span>{name}<small>{thread.counterpart.kind === "agent" ? "Agent" : "Friend"}</small></span>
+                              <span>
+                                <time dateTime={new Date(thread.lastMessageAtMs).toISOString()}>{new Date(thread.lastMessageAtMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
+                                {thread.unreadCount > 0 && <strong aria-label={`${thread.unreadCount} unread`}>{thread.unreadCount}</strong>}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : directMessagesStatus === "ready" ? (
+                    <p className="mini-chat-friends-empty">No durable conversations yet.</p>
+                  ) : null}
+                </section>
+              )}
               <section className="mini-chat-friends" aria-labelledby="mini-chat-friends-title">
                 <div className="mini-chat-friends-heading">
                   <h3 id="mini-chat-friends-title">Friends</h3>
@@ -16761,11 +17028,11 @@ function App(): React.ReactElement {
                         <h4>Requests</h4>
                         <ul>
                           {friendsSnapshot.pendingIncoming.map((request) => (
-                            <li key={request.userId}>
-                              <span title={request.userId}>{request.userId.slice(0, 16)}</span>
+                            <li key={`${request.kind}:${request.principalId}`}>
+                              <span title={request.principalId}>{request.displayName || request.principalId.slice(0, 16)}<small>{request.kind === "agent" ? "Agent" : "Friend"}</small></span>
                               <div>
-                                <button type="button" disabled={friendMutationsBusy.has(`accept:${request.userId}`)} onClick={() => void mutateFriendship("accept", request.userId)}>Accept</button>
-                                <button type="button" disabled={friendMutationsBusy.has(`decline:${request.userId}`)} onClick={() => void mutateFriendship("decline", request.userId)}>Decline</button>
+                                <button type="button" disabled={friendMutationsBusy.has(`accept:${request.kind}:${request.principalId}`)} onClick={() => void mutateFriendship("accept", request)}>Accept</button>
+                                <button type="button" disabled={friendMutationsBusy.has(`decline:${request.kind}:${request.principalId}`)} onClick={() => void mutateFriendship("decline", request)}>Decline</button>
                               </div>
                             </li>
                           ))}
@@ -16781,13 +17048,13 @@ function App(): React.ReactElement {
                               ? target.currentWorld ? "Online - here" : `Online - ${target.worldId ? worldDisplayName(target.worldId) : "another world"}`
                               : "Offline";
                           return (
-                            <li key={target.userId ?? target.visitorId} className={worldChatDmTarget?.visitorId === target.visitorId ? "active" : ""}>
+                            <li key={`${target.principalKind ?? target.kind}:${target.principalId ?? target.visitorId}`} className={worldChatDmTarget?.visitorId === target.visitorId ? "active" : ""}>
                               <span className={`presence-dot ${target.online ? "online" : "offline"}`} aria-hidden="true" />
                               <span className="mini-chat-friend-name" title={target.userId}>{target.name}<small>{statusText}</small></span>
                               <div className="mini-chat-friend-actions">
-                                <button type="button" disabled={!target.canMessage} onClick={() => setWorldChatDmTarget(target)}>Message</button>
+                                <button type="button" disabled={!target.canMessage} onClick={() => selectDirectChatTarget(target)}>Message</button>
                                 <button type="button" disabled={!target.online || !target.worldId || (target.currentWorld && !finiteContactPosition(target))} onClick={() => goToOnlineContact(target)}>Go</button>
-                                <button type="button" disabled={friendMutationsBusy.has(`remove:${target.userId}`)} onClick={() => void mutateFriendship("remove", target.userId!)}>Remove</button>
+                                <button type="button" disabled={!target.principalKind || !target.principalId || friendMutationsBusy.has(`remove:${target.principalKind}:${target.principalId}`)} onClick={() => target.principalKind && target.principalId && void mutateFriendship("remove", { kind: target.principalKind, principalId: target.principalId })}>Remove</button>
                               </div>
                             </li>
                           );
@@ -16803,9 +17070,9 @@ function App(): React.ReactElement {
                         <h4>Sent</h4>
                         <ul>
                           {friendsSnapshot.pendingOutgoing.map((request) => (
-                            <li key={request.userId}>
-                              <span title={request.userId}>{request.userId.slice(0, 16)} <small>Pending</small></span>
-                              <button type="button" disabled={friendMutationsBusy.has(`remove:${request.userId}`)} onClick={() => void mutateFriendship("remove", request.userId)}>Cancel</button>
+                            <li key={`${request.kind}:${request.principalId}`}>
+                              <span title={request.principalId}>{request.displayName || request.principalId.slice(0, 16)} <small>{request.kind === "agent" ? "Agent pending" : "Pending"}</small></span>
+                              <button type="button" disabled={friendMutationsBusy.has(`remove:${request.kind}:${request.principalId}`)} onClick={() => void mutateFriendship("remove", request)}>Cancel</button>
                             </li>
                           ))}
                         </ul>
@@ -16832,19 +17099,19 @@ function App(): React.ReactElement {
                             className="mini-chat-contact-main"
                             disabled={!target.canMessage}
                             aria-label={target.canMessage ? `Message ${target.name}` : `${target.name} is in another world`}
-                            onClick={() => setWorldChatDmTarget(target)}
+                            onClick={() => selectDirectChatTarget(target)}
                           >
                             <span className="presence-dot online" aria-hidden="true" />
                             <span>{target.name}</span>
                             <small>here</small>
                           </button>
-                          {account && target.kind === "player" && target.userId && !relationshipUserIds.has(target.userId) && (
+                          {account && target.principalKind && target.principalId && !relationshipPrincipals.has(`${target.principalKind}:${target.principalId}`) && (
                             <button
                               type="button"
                               className="mini-chat-contact-go"
-                              disabled={friendMutationsBusy.has(`request:${target.userId}`)}
+                              disabled={friendMutationsBusy.has(`request:${target.principalKind}:${target.principalId}`)}
                               aria-label={`Add ${target.name} as a friend`}
-                              onClick={() => void mutateFriendship("request", target.userId!)}
+                              onClick={() => target.principalKind && target.principalId && void mutateFriendship("request", { kind: target.principalKind, principalId: target.principalId })}
                             >
                               Add friend
                             </button>
@@ -16869,8 +17136,28 @@ function App(): React.ReactElement {
               </div>
               </>
             )}
+            {worldChatChannel === "dm" && worldChatDmTarget?.durable && directMessageNotice && (
+              <p className={`mini-chat-friends-notice ${directMessageNotice.kind}`} role={directMessageNotice.kind === "error" ? "alert" : "status"} aria-live="polite">
+                {directMessageNotice.text}
+              </p>
+            )}
             <div className="mini-chat-log" role="log" aria-live="polite">
-              {visibleWorldChat.slice(-24).map((message) => (
+              {worldChatChannel === "dm" && worldChatDmTarget?.durable ? directMessageThread.map((message) => {
+                const fromMe = message.sender.kind === "account" && message.sender.id === account?.accountId;
+                const senderName = fromMe
+                  ? "You"
+                  : message.senderDisplayName || worldChatDmTarget.name || message.sender.id.slice(0, 12);
+                return (
+                  <article key={message.messageId} className="mini-chat-entry dm">
+                    <strong>
+                      {senderName}
+                      <span>{fromMe ? `dm to ${worldChatDmTarget.name}` : `dm from ${senderName}`}</span>
+                    </strong>
+                    <p>{message.text}</p>
+                    <time dateTime={new Date(message.sentAtMs).toISOString()}>{new Date(message.sentAtMs).toLocaleString()}</time>
+                  </article>
+                );
+              }) : visibleWorldChat.slice(-24).map((message) => (
                 <article
                   key={message.id}
                   className={`mini-chat-entry ${message.channel}`}
@@ -16895,7 +17182,13 @@ function App(): React.ReactElement {
                   <p>{message.text}</p>
                 </article>
               ))}
-              {visibleWorldChat.length === 0 && (
+              {worldChatChannel === "dm" && worldChatDmTarget?.durable && directMessageThreadStatus === "loading" && (
+                <article className="mini-chat-entry empty"><strong>Conversation</strong><p>Loading messages...</p></article>
+              )}
+              {worldChatChannel === "dm" && worldChatDmTarget?.durable && directMessageThreadStatus === "ready" && directMessageThread.length === 0 && (
+                <article className="mini-chat-entry empty"><strong>{worldChatDmTarget.name}</strong><p>No messages yet. Say hello.</p></article>
+              )}
+              {!(worldChatChannel === "dm" && worldChatDmTarget?.durable) && visibleWorldChat.length === 0 && (
                 <article className="mini-chat-entry empty">
                   <strong>
                     {worldChatChannel === "dm"
@@ -16915,9 +17208,9 @@ function App(): React.ReactElement {
             <textarea
               className="mini-chat-input"
               value={worldChatInput}
-              maxLength={800}
+              maxLength={worldChatChannel === "dm" && worldChatDmTarget?.durable ? 2000 : 800}
               rows={2}
-              disabled={worldChatChannel === "dm" && !worldChatDmTarget}
+              disabled={(worldChatChannel === "dm" && !worldChatDmTarget) || directMessageSending || (Boolean(worldChatDmTarget?.durable) && directMessagesStatus === "unavailable")}
               placeholder={
                 worldChatChannel === "dm"
                   ? worldChatDmTarget
@@ -16939,10 +17232,10 @@ function App(): React.ReactElement {
               <button
                 type="button"
                 className="mini-chat-submit"
-                disabled={!worldChatInput.trim() || (worldChatChannel === "dm" && !worldChatDmTarget)}
+                disabled={!worldChatInput.trim() || (worldChatChannel === "dm" && !worldChatDmTarget) || directMessageSending || (Boolean(worldChatDmTarget?.durable) && directMessagesStatus === "unavailable")}
                 onClick={sendWorldChatMessage}
               >
-                Send
+                {directMessageSending ? "Sending..." : "Send"}
               </button>
               <div className="mini-chat-call-controls" aria-label="Voice and video controls">
                 <button

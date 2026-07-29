@@ -1173,7 +1173,8 @@ textarea::placeholder {
   text-transform: uppercase;
 }
 
-.mini-chat-friends {
+.mini-chat-friends,
+.mini-chat-threads {
   display: grid;
   gap: 7px;
   border: 1px solid var(--hud-border-soft);
@@ -1198,13 +1199,17 @@ textarea::placeholder {
 }
 
 .mini-chat-friends h3,
+.mini-chat-threads h3,
 .mini-chat-friends h4,
 .mini-chat-friends p,
-.mini-chat-friends ul {
+.mini-chat-friends ul,
+.mini-chat-threads p,
+.mini-chat-threads ul {
   margin: 0;
 }
 
-.mini-chat-friends h3 {
+.mini-chat-friends h3,
+.mini-chat-threads h3 {
   color: var(--hud-gold-bright);
   font-size: 10px;
   letter-spacing: 0.08em;
@@ -1221,6 +1226,79 @@ textarea::placeholder {
   gap: 5px;
   padding: 0;
   list-style: none;
+}
+
+.mini-chat-tab-badge {
+  min-width: 16px;
+  margin-left: 5px;
+  border-radius: 999px;
+  background: var(--hud-gold-bright);
+  color: #11251f;
+  font-size: 8px;
+  padding: 1px 4px;
+}
+
+.mini-chat-threads ul {
+  display: grid;
+  max-height: 112px;
+  gap: 4px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.mini-chat-threads button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid transparent;
+  background: rgb(0 0 0 / 14%);
+  color: var(--hud-text);
+  cursor: pointer;
+  padding: 5px 6px;
+  text-align: left;
+}
+
+.mini-chat-threads button:hover,
+.mini-chat-threads button:focus-visible,
+.mini-chat-threads button.active {
+  border-color: var(--hud-border-soft);
+  background: rgb(255 244 185 / 8%);
+  outline: none;
+}
+
+.mini-chat-threads button > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  font-size: 10px;
+}
+
+.mini-chat-threads button > span:first-child {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-chat-threads small,
+.mini-chat-threads time {
+  color: var(--hud-muted);
+  font-size: 8px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.mini-chat-threads strong {
+  min-width: 16px;
+  border-radius: 999px;
+  background: var(--hud-gold-bright);
+  color: #11251f;
+  font-size: 8px;
+  padding: 2px 5px;
+  text-align: center;
 }
 
 .mini-chat-friend-group {
@@ -1429,6 +1507,14 @@ textarea::placeholder {
   color: var(--hud-text);
   font-size: 12px;
   line-height: 1.25;
+}
+
+.mini-chat-entry > time {
+  display: block;
+  margin-top: 3px;
+  color: var(--hud-muted);
+  font-size: 8px;
+  text-align: right;
 }
 
 .mini-chat-input {
