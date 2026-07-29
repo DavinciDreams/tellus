@@ -108,6 +108,15 @@ describe("Tellus terrain defaults", () => {
     expect(isIntentionallyOffsetFromGround(thingAt(ground + 0.1))).toBe(false);
   });
 
+  it("uses the explicit vertical-offset contract even below the old grounding epsilon", () => {
+    const explicitlyLifted = { ...thingAt(0.02), verticalOffset: 0.02 };
+    const explicitlyGrounded = { ...thingAt(0), verticalOffset: 0 };
+
+    expect(isIntentionallyOffsetFromGround(explicitlyLifted)).toBe(true);
+    expect(isIntentionallyOffsetFromGround({ ...explicitlyLifted, verticalOffset: 0.08 })).toBe(true);
+    expect(isIntentionallyOffsetFromGround(explicitlyGrounded)).toBe(false);
+  });
+
   it("preserves manual height offsets when moving ground mounts", () => {
     setChunkedFlatGround(3);
     const lifted = movedVehiclePosition(mountAt(5), 12, 18, { x: 0, y: 5, z: 0 });
