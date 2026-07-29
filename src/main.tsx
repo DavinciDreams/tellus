@@ -160,7 +160,7 @@ import { applyActiveBiomeMixRegistryForWorld } from "./tellus-biome-mix";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, assetStoreLodModelUrl, assetStoreOptimizedAssetUrls, toAssetId } from "./tellus-urls-identity";
 import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, isIntentionallyOffsetFromGround, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded, activeEvoflowWorldBiomeCellAt } from "./tellus-terrain";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
-import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, positionPondRipplePatch, triggerPondRipple, updatePondRipples, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
+import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, generatedModelHasRuntimeAnimations, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, positionPondRipplePatch, triggerPondRipple, updatePondRipples, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial, terrainKindCode, terrainTextureDiagnostics } from "./tellus-terrain-material";
 import { largeWorldBaseHeight, largeWorldBiomeCellAt, largeWorldTerrainKind, usesContinentalChunkedTerrain } from "./tellus-large-world-terrain";
 import {
@@ -234,6 +234,7 @@ import {
 import {
   buildWorldThingRuntimeProfile,
   defaultScaleForRealisticKind,
+  inferAssetVehicleMode,
   normalizeWorldThingAssetIdentity,
   seatPositionForWorldThing,
   type WorldThingRuntimeProfile,
@@ -5855,7 +5856,13 @@ function createTellusWorld(
   };
 
   const isVisiblyOffsetFromLiveGround = (thing: GeneratedThing): boolean => {
+    if (typeof thing.verticalOffset === "number" && Number.isFinite(thing.verticalOffset)) {
+      return Math.abs(thing.verticalOffset) > 0.001;
+    }
     const offset = liveGroundOffsetFrom(thing);
+    // A chunked placement created before its terrain tile streamed in carries the old flat fallback y=0.
+    // Without an explicit offset this is a provisional ground value, not an intentional 20m burial.
+    if (isChunked && Math.abs(thing.position.y) <= 0.05) return false;
     return offset !== null
       ? Math.abs(offset) > 0.05
       : isIntentionallyOffsetFromGround(thing);
@@ -6032,6 +6039,8 @@ function createTellusWorld(
     scale: thing.scale,
     color: thing.color,
     verticalOffset: thing.verticalOffset,
+    vehicleMode: thing.vehicleMode,
+    hasAnimations: thing.hasAnimations,
     assetStoreModelId: thing.assetStoreModelId,
     modelUrl: thing.modelUrl,
     pipelineId: thing.modelUrl ? undefined : thing.pipelineId,
@@ -6070,6 +6079,8 @@ function createTellusWorld(
       scale: roundedGeneratedNumber(thing.scale),
       color: thing.color,
       verticalOffset: roundedGeneratedNumber(thing.verticalOffset),
+      vehicleMode: thing.vehicleMode ?? "",
+      hasAnimations: thing.hasAnimations ?? false,
       assetStoreModelId: thing.assetStoreModelId ?? "",
       modelUrl: thing.modelUrl ?? "",
       pipelineId: thing.pipelineId ?? "",
@@ -6386,6 +6397,20 @@ function createTellusWorld(
     generatedModelLoadStats.lastRenderUrl = resolved.renderModelUrl;
     try {
       const model = await loadGeneratedModel(resolved.renderModelUrl, thing, useWebGPU);
+      if (
+        hasAssetStoreLod &&
+        (thing.hasAnimations === true || (thing.animationClips?.length ?? 0) > 0) &&
+        !generatedModelHasRuntimeAnimations(model)
+      ) {
+        generatedModelLoadStats.lodFallbacks += 1;
+        const fallback = await loadGeneratedModel(resolved.canonicalModelUrl, thing, useWebGPU);
+        fallback.userData.loadedModelUrl = resolved.canonicalModelUrl;
+        fallback.userData.loadedAssetRenderUrl = resolved.canonicalModelUrl;
+        fallback.userData.loadedAssetStoreModelId = resolved.assetStoreModelId;
+        fallback.userData.loadedAssetLodLevel = undefined;
+        fallback.userData.loadedAssetLodFallbackReason = "missing-animations";
+        return fallback;
+      }
       model.userData.loadedModelUrl = resolved.canonicalModelUrl;
       model.userData.loadedAssetRenderUrl = resolved.renderModelUrl;
       model.userData.loadedAssetStoreModelId = resolved.assetStoreModelId;
@@ -6751,6 +6776,8 @@ function createTellusWorld(
       existing.verticalOffset = normalized.verticalOffset === undefined
         ? existing.verticalOffset ?? inferredLocalWaterOffset
         : normalized.verticalOffset;
+      existing.vehicleMode = normalized.vehicleMode ?? existing.vehicleMode;
+      existing.hasAnimations = normalized.hasAnimations ?? existing.hasAnimations;
       if (vehicleMode(existing) === "water" && existing.verticalOffset !== undefined) {
         const surface = waterVehiclePositionForCurrentWorld(existing.position.x, existing.position.z);
         existing.position.y = surface.y + clamp(existing.verticalOffset, -40, 40);
@@ -6805,6 +6832,8 @@ function createTellusWorld(
       scale: normalized.scale,
       color: normalized.color,
       verticalOffset: normalized.verticalOffset,
+      vehicleMode: normalized.vehicleMode,
+      hasAnimations: normalized.hasAnimations,
       assetStoreModelId: normalized.assetStoreModelId,
       modelUrl: normalized.modelUrl,
       pipelineId: normalized.pipelineId,
@@ -7331,9 +7360,11 @@ function createTellusWorld(
       ? interiorPlacementFloorHeightAt(thing.position.x, thing.position.z, thing.position.y)
       : groundHeightAt(thing.position.x, thing.position.z);
     const manualHeightOffset =
-      oldGroundY !== null && Number.isFinite(oldGroundY)
-        ? Math.max(0, thing.position.y - oldGroundY)
-        : 0;
+      typeof thing.verticalOffset === "number" && Number.isFinite(thing.verticalOffset)
+        ? thing.verticalOffset
+        : oldGroundY !== null && Number.isFinite(oldGroundY)
+          ? thing.position.y - oldGroundY
+          : 0;
     const position =
       isVehicleThing(thing) || sailingThingId === id
         ? movedVehiclePositionForCurrentWorld(
@@ -7364,7 +7395,7 @@ function createTellusWorld(
       !preserveCurrentY &&
       !isVehicleThing(thing) &&
       sailingThingId !== id &&
-      manualHeightOffset > 0
+      Math.abs(manualHeightOffset) > 0.001
     ) {
       const newGroundY = interiorObject
         ? interiorPlacementFloorHeightAt(position.x, position.z, position.y)
@@ -7374,6 +7405,11 @@ function createTellusWorld(
       }
     }
     thing.position = position;
+    if (targetY !== undefined) {
+      thing.verticalOffset = undefined;
+    } else if (!isVehicleThing(thing) && Math.abs(manualHeightOffset) > 0.001) {
+      thing.verticalOffset = clamp(manualHeightOffset, -40, 40);
+    }
     if (sailingThingId === id) {
       visitorPosition = riderPositionForThing(thing);
     }
@@ -7410,10 +7446,15 @@ function createTellusWorld(
       scale: source.scale,
       color: source.color,
       verticalOffset: source.verticalOffset,
+      vehicleMode: source.vehicleMode,
+      hasAnimations: source.hasAnimations,
       assetStoreModelId: source.assetStoreModelId,
       modelUrl: source.modelUrl,
       pipelineId: source.pipelineId,
       generationStatus: source.generationStatus,
+      animation: source.animation,
+      petOwnerId: source.petOwnerId,
+      animationClips: source.animationClips,
     };
     generated.push(clone);
     const mesh = shouldShowGenerationSwirl(clone)
@@ -7486,9 +7527,11 @@ function createTellusWorld(
       ...thing.position,
       y: clamp(thing.position.y + amount, minY, maxY),
     };
-    if (vehicleMode(thing) === "water") {
-      const surface = waterVehiclePositionForCurrentWorld(thing.position.x, thing.position.z);
-      thing.verticalOffset = clamp(thing.position.y - surface.y, -40, 40);
+    const surfaceY = vehicleMode(thing) === "water"
+      ? waterVehiclePositionForCurrentWorld(thing.position.x, thing.position.z).y
+      : footprintGroundY(thing) ?? groundHeightAt(thing.position.x, thing.position.z);
+    if (surfaceY !== null && Number.isFinite(surfaceY)) {
+      thing.verticalOffset = clamp(thing.position.y - surfaceY, -40, 40);
     }
     if (sailingThingId === id) {
       visitorPosition = riderPositionForThing(thing);
@@ -8204,6 +8247,8 @@ function createTellusWorld(
       assetStoreModelId,
       modelUrl,
       generationStatus: "ready",
+      vehicleMode: inferAssetVehicleMode(model),
+      hasAnimations: (model.animationClips?.length ?? 0) > 0,
       animationClips: model.animationClips,
     };
     generated.push(thing);
@@ -10076,7 +10121,12 @@ function createTellusWorld(
         mountGroundCheckNextAt = 0; // freshly mounted — don't wait out a stale throttle window
       }
       const mounted = thingById(sailingThingId);
-      if (mounted && !isFreeMovingVehicle(mounted) && now >= mountGroundCheckNextAt) {
+      if (
+        mounted &&
+        !isFreeMovingVehicle(mounted) &&
+        mounted.verticalOffset === undefined &&
+        now >= mountGroundCheckNextAt
+      ) {
         mountGroundCheckNextAt = now + PET_GROUND_RAYCAST_INTERVAL_MS;
         const liveGround = footprintGroundY(mounted);
         if (liveGround !== null && Number.isFinite(liveGround) && liveGround > mounted.position.y + 0.05) {
@@ -14737,6 +14787,9 @@ function App(): React.ReactElement {
         rotationZ: thing.rotationZ,
         scale: thing.scale,
         color: thing.color,
+        verticalOffset: thing.verticalOffset,
+        vehicleMode: thing.vehicleMode,
+        hasAnimations: thing.hasAnimations,
         assetStoreModelId: thing.assetStoreModelId,
         modelUrl: thing.modelUrl,
         pipelineId: thing.modelUrl ? undefined : thing.pipelineId,
@@ -14771,6 +14824,9 @@ function App(): React.ReactElement {
       rotationZ: thing.rotationZ,
       scale: thing.scale,
       color: thing.color,
+      verticalOffset: thing.verticalOffset,
+      vehicleMode: thing.vehicleMode,
+      hasAnimations: thing.hasAnimations,
       assetStoreModelId: thing.assetStoreModelId,
       modelUrl: thing.modelUrl,
       pipelineId: thing.modelUrl ? undefined : thing.pipelineId,
@@ -15606,6 +15662,11 @@ function App(): React.ReactElement {
             typeof item.ownerUserId === "string" ? item.ownerUserId : undefined,
           petOwnerId:
             typeof item.petOwnerId === "string" ? item.petOwnerId : undefined,
+          vehicleMode:
+            item.vehicleMode === "water" || item.vehicleMode === "air" || item.vehicleMode === "ground"
+              ? item.vehicleMode
+              : undefined,
+          hasAnimations: typeof item.hasAnimations === "boolean" ? item.hasAnimations : undefined,
           position: {
             x: position.x,
             y: position.y,

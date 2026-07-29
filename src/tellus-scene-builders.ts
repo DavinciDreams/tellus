@@ -990,8 +990,20 @@ export function fitModelToHeight(model: THREE.Object3D, targetHeight: number): T
   const size = bounds.getSize(new THREE.Vector3());
   const center = bounds.getCenter(new THREE.Vector3());
   const scale = size.y > 0 ? targetHeight / size.y : 1;
-  model.scale.setScalar(scale);
-  model.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
+
+  // Keep authored/model-space correction separate from the world transform. Downloaded GLBs often
+  // have an origin far from their visible feet. Applying both corrections to `model.position` made the
+  // subsequent world placement overwrite the fit translation, so the placeholder appeared grounded
+  // and the real model jumped as soon as it finished loading. The outer root owns world placement;
+  // the visual child owns scale/centering/grounding and must never be rewritten by reconciliation.
+  const placementRoot = new THREE.Group();
+  placementRoot.name = model.name ? `${model.name}-placement` : "fitted-placement";
+  const fittedVisualRoot = new THREE.Group();
+  fittedVisualRoot.name = model.name ? `${model.name}-fit` : "fitted-visual";
+  fittedVisualRoot.scale.setScalar(scale);
+  fittedVisualRoot.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
+  fittedVisualRoot.add(model);
+  placementRoot.add(fittedVisualRoot);
   model.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     // Static and rigidly animated meshes have reliable transformed geometry bounds, so let the
@@ -1001,12 +1013,9 @@ export function fitModelToHeight(model: THREE.Object3D, targetHeight: number): T
     child.castShadow = true;
     child.receiveShadow = true;
   });
-  // Fit just grounded the model's visible body bottom to local y=0 (position.y = -bounds.min.y*scale).
-  // Record that so placeObjectAboveGround uses an offset of 0 (origin == foot) for this model instead
-  // of re-measuring world bounds, which is unstable for rotated models and floats GLBs that carry
-  // stray geometry far below the body (the "asset won't drop to ground" bug).
-  model.userData.fitGrounded = true;
-  return model;
+  placementRoot.userData.fitGrounded = true;
+  placementRoot.userData.fittedVisualRoot = fittedVisualRoot;
+  return placementRoot;
 }
 
 export function placeObjectAboveGround(
@@ -1029,6 +1038,11 @@ export function placeObjectAboveGround(
   // move/sculpt — a model whose art sits oddly relative to its origin can be nudged with lift/lower.
   void clearance;
   object.position.y = position.y;
+}
+
+export function generatedModelHasRuntimeAnimations(model: THREE.Object3D): boolean {
+  const animations = model.userData.animations;
+  return Array.isArray(animations) && animations.some((clip) => clip instanceof THREE.AnimationClip);
 }
 
 export async function loadGltfObject(url: string): Promise<THREE.Object3D> {

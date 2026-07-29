@@ -303,6 +303,7 @@ const parseAssetLibraryModels = (rawModels: unknown): AssetLibraryModel[] => {
         // endpoint-backed result sets.
         viewable: record.viewable !== false,
         tags: stringArrayField(record, "tags", "keywords"),
+        assetTypes: stringArrayField(record, "asset_types", "assetTypes"),
         animationClips: parseAnimationMetadataList(record),
         effectiveMeshStats: parseMeshStats(record.effective_mesh_stats ?? record.effectiveMeshStats),
         lodReady: booleanField(record, "lod_ready", "lodReady"),

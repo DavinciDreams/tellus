@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import type { GeneratedThing } from "./tellus-types";
-import { createGeneratedMesh, fitModelToHeight, inferGeneratedKind } from "./tellus-scene-builders";
+import {
+  createGeneratedMesh,
+  fitModelToHeight,
+  generatedModelHasRuntimeAnimations,
+  inferGeneratedKind,
+  placeObjectAboveGround,
+} from "./tellus-scene-builders";
 
 describe("Tellus generated scene helpers", () => {
   it("classifies unicorn assets as animals", () => {
@@ -50,5 +56,41 @@ describe("Tellus generated scene helpers", () => {
 
     expect(staticMesh.frustumCulled).toBe(true);
     expect(skinnedMesh.frustumCulled).toBe(false);
+  });
+
+  it("keeps fitted visual grounding independent from repeated world placement", () => {
+    const source = new THREE.Group();
+    source.name = "offset-asset";
+    source.scale.setScalar(1.5);
+    const visual = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 2));
+    visual.position.set(8, 12, -5);
+    source.add(visual);
+
+    const fitted = fitModelToHeight(source, 2);
+    expect(fitted).not.toBe(source);
+    expect(source.scale.x).toBeCloseTo(1.5, 6);
+
+    placeObjectAboveGround(fitted, { x: 40, y: 7.25, z: -12 });
+    let bounds = new THREE.Box3().setFromObject(fitted);
+    let center = bounds.getCenter(new THREE.Vector3());
+    expect(bounds.min.y).toBeCloseTo(7.25, 6);
+    expect(center.x).toBeCloseTo(40, 6);
+    expect(center.z).toBeCloseTo(-12, 6);
+
+    placeObjectAboveGround(fitted, { x: -3, y: 19.5, z: 4 });
+    bounds = new THREE.Box3().setFromObject(fitted);
+    center = bounds.getCenter(new THREE.Vector3());
+    expect(bounds.min.y).toBeCloseTo(19.5, 6);
+    expect(center.x).toBeCloseTo(-3, 6);
+    expect(center.z).toBeCloseTo(4, 6);
+  });
+
+  it("reports animation capability from the actually loaded render variant", () => {
+    const staticLod = new THREE.Group();
+    const animatedVariant = new THREE.Group();
+    animatedVariant.userData.animations = [new THREE.AnimationClip("Idle", 1, [])];
+
+    expect(generatedModelHasRuntimeAnimations(staticLod)).toBe(false);
+    expect(generatedModelHasRuntimeAnimations(animatedVariant)).toBe(true);
   });
 });

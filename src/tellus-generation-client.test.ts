@@ -248,6 +248,7 @@ describe("asset library browsing", () => {
               file_format: "glb",
               has_thumbnail: true,
               has_game_optimized: true,
+              asset_types: ["animal", "animated"],
               runtime_metadata: { animations: [{ name: "Idle" }, { name: "Walk" }] },
             },
             {
@@ -288,6 +289,7 @@ describe("asset library browsing", () => {
         file_format: "glb",
         hasThumbnail: true,
         hasGameOptimized: true,
+        assetTypes: ["animal", "animated"],
         animationClips: [expect.objectContaining({ name: "Idle" }), expect.objectContaining({ name: "Walk" })],
       }),
     ]);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildWorldThingRuntimeProfile,
   defaultScaleForRealisticKind,
+  inferAssetVehicleMode,
   normalizeWorldThingAssetIdentity,
   STANDARD_HUMANOID_HEIGHT,
   worldThingVehicleMode,
@@ -102,6 +103,23 @@ describe("world object runtime profile", () => {
         }),
       ),
     ).toBe("ground");
+  });
+
+  it("recognizes saddled deer and harnessed bears without making every wild animal rideable", () => {
+    expect(worldThingVehicleMode(thing({ kind: "animal", prompt: "Fantasy Reindeer with Saddle & Harness" }))).toBe("ground");
+    expect(worldThingVehicleMode(thing({ kind: "animal", prompt: "Brown Bear with Riding Harness" }))).toBe("ground");
+    expect(worldThingVehicleMode(thing({ kind: "animal", prompt: "Wild brown bear" }))).toBeNull();
+  });
+
+  it("persists an explicit mode inferred from asset-store tags", () => {
+    expect(
+      inferAssetVehicleMode({
+        name: "Fantasy Reindeer",
+        tags: ["animal", "saddle", "riding mount"],
+        assetTypes: ["rigged", "animated"],
+      }),
+    ).toBe("ground");
+    expect(worldThingVehicleMode(thing({ kind: "animal", prompt: "Unnamed creature", vehicleMode: "ground" }))).toBe("ground");
   });
 
   it("classifies porpoises as water actors", () => {
