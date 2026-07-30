@@ -135,7 +135,9 @@ procedural asset-workshop client over the durable Hyades job: agents or makers
 can submit bounded briefs and allow-listed references, inspect passes,
 deterministic gates and registry artifacts, then approve, revise, or reject.
 The UI treats feature-dark routes as a rollout boundary and never places an
-asset as a side effect of approval. The isolated Blender adapter remains Phase 5.
+asset as a side effect of approval. Phase 5 adds the isolated Blender choice and
+only exposes server-curated workflow IDs; no Python, script, macro, tool-path,
+or credential input crosses the public client contract.
 
 ### Deterministic activities and creative workshops — proposed
 
@@ -147,9 +149,9 @@ authoritative module service and lets triggers wake a steward around it.
 Creative-workshop jobs sit behind durable, budgeted orchestration. Phase 4's
 procedural path requires GLB, resource-bound, provenance, and registry-ingest
 evidence plus maker approval before the normal placement workflow can use its
-stable model URL. Phase 5 Blender/MCP access must use isolated
-workers, curated macros, quotas, allow-listed export paths, validation, and no
-arbitrary autonomous Python or Hyades secrets.
+stable model URL. Phase 5's Blender adapter adds isolated-worker validation
+gates and curated workflows. Hyades supplies the server-owned macro vocabulary;
+the browser cannot submit arbitrary autonomous Python or receive Hyades secrets.
 
 ### Ongoing client work
 

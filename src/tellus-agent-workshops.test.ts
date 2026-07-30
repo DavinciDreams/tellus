@@ -17,6 +17,7 @@ const workshop = {
   worldId: "garden",
   goalId: "dock-kit",
   backend: "Procedural",
+  curatedWorkflowId: null,
   brief: "A modular boat dock kit",
   status: "AwaitingMaker",
   summary: "Validated and registered.",
@@ -52,6 +53,7 @@ describe("asset workshop contract", () => {
     expect(normalized).toMatchObject({
       status: "awaiting-maker",
       backend: "procedural",
+      curatedWorkflowId: null,
       artifacts: [{ kind: "glb", byteLength: 2048 }],
     });
     expect(normalized?.validations).toContainEqual(expect.objectContaining({ gate: "glb.valid", passed: true }));
@@ -95,6 +97,33 @@ describe("asset workshop contract", () => {
     expect(body).not.toHaveProperty("makerUserId");
     expect(body).not.toHaveProperty("agentKey");
     expect(body).not.toHaveProperty("worldId");
+    expect(body).not.toHaveProperty("curatedWorkflowId");
+  });
+
+  it("normalizes and submits a curated Blender workflow without executable input", async () => {
+    const blenderWorkshop = { ...workshop, backend: 1, curatedWorkflowId: "rig-and-preview" };
+    expect(normalizeAssetWorkshop(blenderWorkshop)).toMatchObject({
+      backend: "blender",
+      curatedWorkflowId: "rig-and-preview",
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(blenderWorkshop), {
+      status: 202,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    await startAssetWorkshop("builder-one", {
+      goalId: "dock-kit",
+      idempotencyKey: "dock-kit-blender-v1",
+      backend: "blender",
+      curatedWorkflowId: "rig-and-preview",
+      brief: "Rig the approved deer mesh and produce a turntable preview.",
+      referenceUrls: ["https://reference.example/deer.glb"],
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body).toMatchObject({ backend: "blender", curatedWorkflowId: "rig-and-preview" });
+    expect(body).not.toHaveProperty("python");
+    expect(body).not.toHaveProperty("script");
+    expect(body).not.toHaveProperty("macros");
   });
 
   it("sends bounded maker review intent and surfaces dark-state errors", async () => {
