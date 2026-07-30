@@ -1,12 +1,21 @@
 import { worldApiUrl } from "./tellus-runtime-config";
 
-export interface FriendLink {
+export type SocialPrincipalKind = "account" | "agent";
+
+export interface SocialPrincipalTarget {
+  kind: SocialPrincipalKind;
+  principalId: string;
+}
+
+export interface FriendLink extends SocialPrincipalTarget {
   userId: string;
+  displayName?: string;
   sinceMs: number;
 }
 
-export interface FriendRequestLink {
+export interface FriendRequestLink extends SocialPrincipalTarget {
   userId: string;
+  displayName?: string;
   requestedAtMs: number;
 }
 
@@ -63,21 +72,29 @@ function cleanString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function parsePrincipalKind(value: unknown): SocialPrincipalKind {
+  return typeof value === "string" && value.toLowerCase() === "agent" ? "agent" : "account";
+}
+
 function parseLinks(value: unknown, timestampKey: "since" | "requestedAt"): Array<FriendLink | FriendRequestLink> {
   if (!Array.isArray(value)) return [];
   const byUser = new Map<string, FriendLink | FriendRequestLink>();
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
     const row = item as Record<string, unknown>;
-    const userId = cleanString(row.userId);
+    const principalId = cleanString(row.principalId) ?? cleanString(row.userId);
     const timestamp = row[timestampKey];
-    if (!userId || typeof timestamp !== "number" || !Number.isFinite(timestamp) || timestamp < 0) continue;
+    if (!principalId || typeof timestamp !== "number" || !Number.isFinite(timestamp) || timestamp < 0) continue;
+    const kind = parsePrincipalKind(row.kind);
+    const userId = cleanString(row.userId) ?? principalId;
+    const displayName = cleanString(row.displayName);
     const parsed = timestampKey === "since"
-      ? { userId, sinceMs: timestamp }
-      : { userId, requestedAtMs: timestamp };
-    const previous = byUser.get(userId);
+      ? { userId, principalId, kind, ...(displayName ? { displayName } : {}), sinceMs: timestamp }
+      : { userId, principalId, kind, ...(displayName ? { displayName } : {}), requestedAtMs: timestamp };
+    const key = `${kind}:${principalId}`;
+    const previous = byUser.get(key);
     const previousTimestamp = previous && "sinceMs" in previous ? previous.sinceMs : previous?.requestedAtMs ?? -1;
-    if (timestamp >= previousTimestamp) byUser.set(userId, parsed);
+    if (timestamp >= previousTimestamp) byUser.set(key, parsed);
   }
   return [...byUser.values()];
 }
@@ -143,17 +160,24 @@ export async function fetchFriends(signal?: AbortSignal): Promise<FriendsSnapsho
 
 async function mutateFriend(
   action: "request" | "accept" | "decline" | "remove",
-  userId: string,
+  target: string | SocialPrincipalTarget,
   signal?: AbortSignal,
 ): Promise<FriendMutationResponse> {
-  const targetUserId = userId.trim();
-  if (!targetUserId) throw new FriendsApiError(400, "Choose a valid user.");
+  const explicit = typeof target !== "string";
+  const typed = explicit && target.kind === "agent";
+  const principalId = (explicit ? target.principalId : target).trim();
+  const kind = typed ? "agent" : "account";
+  if (!principalId) throw new FriendsApiError(400, "Choose a valid friend.");
   const remove = action === "remove";
-  const path = remove ? `/api/tellus/friends/${encodeURIComponent(targetUserId)}` : `/api/tellus/friends/${action}`;
+  const path = remove
+    ? typed
+      ? `/api/tellus/friends/${kind}/${encodeURIComponent(principalId)}`
+      : `/api/tellus/friends/${encodeURIComponent(principalId)}`
+    : `/api/tellus/friends/${action}`;
   const response = await fetch(worldApiUrl(path), {
     method: remove ? "DELETE" : "POST",
     headers: remove ? undefined : { "Content-Type": "application/json" },
-    body: remove ? undefined : JSON.stringify({ userId: targetUserId }),
+    body: remove ? undefined : JSON.stringify(typed ? { kind, principalId } : { userId: principalId }),
     signal,
   });
   if (!response.ok) throw await responseError(response);
@@ -166,7 +190,7 @@ async function mutateFriend(
   return result;
 }
 
-export const sendFriendRequest = (userId: string, signal?: AbortSignal) => mutateFriend("request", userId, signal);
-export const acceptFriendRequest = (userId: string, signal?: AbortSignal) => mutateFriend("accept", userId, signal);
-export const declineFriendRequest = (userId: string, signal?: AbortSignal) => mutateFriend("decline", userId, signal);
-export const removeFriend = (userId: string, signal?: AbortSignal) => mutateFriend("remove", userId, signal);
+export const sendFriendRequest = (target: string | SocialPrincipalTarget, signal?: AbortSignal) => mutateFriend("request", target, signal);
+export const acceptFriendRequest = (target: string | SocialPrincipalTarget, signal?: AbortSignal) => mutateFriend("accept", target, signal);
+export const declineFriendRequest = (target: string | SocialPrincipalTarget, signal?: AbortSignal) => mutateFriend("decline", target, signal);
+export const removeFriend = (target: string | SocialPrincipalTarget, signal?: AbortSignal) => mutateFriend("remove", target, signal);

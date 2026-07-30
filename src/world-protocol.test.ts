@@ -244,6 +244,10 @@ describe("world protocol validators", () => {
     expect(isWorldGeneratedThing({ ...thing, animation: 7 })).toBe(false);
     expect(isWorldGeneratedThing({ ...thing, verticalOffset: -1.25 })).toBe(true);
     expect(isWorldGeneratedThing({ ...thing, verticalOffset: "below" })).toBe(false);
+    expect(isWorldGeneratedThing({ ...thing, vehicleMode: "ground" })).toBe(true);
+    expect(isWorldGeneratedThing({ ...thing, vehicleMode: "teleport" })).toBe(false);
+    expect(isWorldGeneratedThing({ ...thing, hasAnimations: true })).toBe(true);
+    expect(isWorldGeneratedThing({ ...thing, hasAnimations: "yes" })).toBe(false);
   });
 
   it("upsert actions round-trip the animation field", () => {

@@ -281,7 +281,7 @@ Discord is a later destination, not a requirement for the base UI. Discord login
 
 ## 9. Current contract audit
 
-The following matrix was checked against Hyades `origin/master` at `a60ed680`. Hyades PR #41 was also reviewed; it adds agent evaluation/evidence routes and status fields but does not implement the social contracts listed as future below.
+The base matrix was checked against Hyades `origin/master` at `a60ed680`. The agent-social additions below were checked against Hyades PR #46 at `665a187`; they remain feature-gated until that change is merged and deployed with `Tellus:Features:AgentSocial` enabled.
 
 ### 9.1 Available now
 
@@ -308,15 +308,28 @@ Important contract details:
 - Friend responses provide ids, not resolved public profiles. The current account `label` is not exposed as a unique searchable public handle.
 - Agent status is authoritative for the agent’s current `worldId`; the maker directory’s world is a repairable listing hint.
 - Maker-agent rows include lifecycle state and provenance (`createdByPrincipalId`, `supervisorAgentId`, `lineageDepth`) but current Tellus types do not yet consume all additive fields.
-- Current agent presence inside a world uses visitor ids shaped `agent:{agentId}`. That does not make the agent a principal in the friends registry or cross-world presence registry.
+- Base world presence uses visitor ids shaped `agent:{agentId}`. With agent social enabled, the stable global agent id separately becomes a typed friends/message principal; the visitor id still is not cross-world presence authority.
 
-### 9.2 Required new or amended contracts
+### 9.2 Agent social target contract
+
+Hyades PR #46 adds these contracts behind `Tellus:Features:AgentSocial`:
+
+| Capability | Hyades contract | Frontend implication |
+|---|---|---|
+| Typed friendships | Existing friend routes accept `{ kind, principalId }`; list rows add `kind`, `principalId`, and `displayName`; typed removal is `DELETE /api/tellus/friends/{kind}/{principalId}` | Account-only response fields remain compatible while Tellus can show friendly agent names and consent actions |
+| Durable inbox | `GET /api/tellus/dms` | One account inbox contains account and agent counterparts, friendly names, last-message time, and unread counts |
+| Durable thread | `GET /api/tellus/dms/{kind}/{principalId}?beforeMs=&limit=` | Cross-world, cross-session history is cursored and opening a thread advances the authenticated account's read cursor |
+| Durable send | `POST /api/tellus/dms/{kind}/{principalId}` with `{ text, idempotencyKey }` | Tellus retries safely and reports agent wake or background delivery state without inventing online presence |
+| Agent social actions | Agent grain social operations use the same typed friendship, inbox, and thread grains | Agents can initiate consented conversations and friendships through their own authoritative grain identity |
+
+When the feature is dark, the durable-message routes return 404 and agent friend requests remain indistinguishable from an unknown principal. Tellus must then retain same-world messaging and clearly label cross-world messaging unavailable. Agent presence is not exposed through the human batch-presence route, so a missing agent presence row is **Unknown**, not Offline.
+
+### 9.3 Remaining required contracts
 
 | Need | Proposed contract responsibility | Why current contracts are insufficient |
 |---|---|---|
 | Public identity lookup | Exact-handle resolver returning a minimal public profile and stable account principal | Friends accepts raw account ids; no public username search exists |
 | Invite | Opaque invite grain/token with inviter principal, destination, expiry, access policy, and optional use/revocation limits | Current URL contains only world/x/z and cannot confirm inviter identity |
-| Durable player DMs | Pair-keyed thread grain plus per-principal inbox/unread index; idempotent sends and cursored reads | Same-world DM is bounded world chat and cannot deliver offline/cross-world |
 | Per-agent maker chat | Routes keyed by owned `agentId` for send, transcript/events, cursor, and unread state | Current maker routes manage agents, while `/world/{world}/agent/say` targets only the default compatibility agent |
 | Activity/notification outbox | Durable event ids, category, actor/subject, timestamp, severity, read state, and delivery attempts | Client polling cannot reliably notify after the browser is closed |
 | Notification preferences | Account-level rules, quiet hours, per-actor overrides, destination grants | Local storage cannot coordinate devices or external delivery |
@@ -324,19 +337,12 @@ Important contract details:
 | Discord account link | OAuth identity link and separately revocable notification destination grant | No Discord auth/link route exists today |
 | Presence privacy | Visibility policy and authorization for roster/batch reads | Current global online roster is broad and has no user visibility preference |
 
-### 9.3 Planned in Hyades, not available now
+### 9.4 Still planned after the agent-social target
 
-The Hyades maker-agent PRD describes these as Phase 3, not current wire contracts:
-
-- stable agent ids as namespaced social principals (`agent:{id}` alongside `acct:{id}`);
-- agent lifecycle-backed cross-world presence;
-- extending the existing friends registry to typed player/agent pairs;
-- durable pair-keyed DM thread grains and per-principal inboxes;
-- friendship or explicit open-DM consent for new threads;
-- enqueue-only agent delivery with a coalesced non-reentrant wake;
-- a later collaboration/workspace grain for shared multi-agent projects.
-
-The Tellus UI may reserve component and type seams for these capabilities, but it must hide or label them unavailable until deployed routes and authorization are verified.
+- account-facing agent presence and privacy policy beyond friend-linked names;
+- independently addressable maker-to-owned-agent inbox threads, rather than the default-agent compatibility transcript;
+- durable activity/notification outbox and preferences;
+- a collaboration/workspace grain for shared multi-agent projects.
 
 ## 10. Proposed backend shapes
 
@@ -460,16 +466,16 @@ No new Hyades social grain is required for this phase, but per-agent threads, ex
 
 ### Phase 3 — Durable messages and activity
 
-- Ship durable player DM threads, inbox/unread state, and cursored sync.
+- Ship durable player/agent DM threads, inbox/unread state, idempotent sends, and cursored sync. The Tellus client now has a feature-detected implementation for the Hyades PR #46 contract.
 - Ship per-owned-agent message routes and event cursors.
 - Ship durable activity/notification outbox and account-level preferences.
 - Enable browser notifications and reliable post-session agent completion notices.
 
 ### Phase 4 — Typed agent social system
 
-- Extend presence and friendship contracts to namespaced player/agent principals.
-- Add consented agent contacts and durable agent-to-agent threads.
-- Expose Agent contacts and agent social activity only after deployed contract verification.
+- Extend friendship contracts to namespaced player/agent principals. Implemented in the Hyades PR #46 target and consumed additively by Tellus.
+- Add consented agent contacts and durable agent-to-agent threads. The shared grain contract is implemented; broader account-facing agent presence remains future work.
+- Expose Agent contacts and agent social activity only after deployed contract verification. Tellus falls back to same-world messaging while the feature flag is dark.
 
 ### Phase 5 — Calls and external destinations
 

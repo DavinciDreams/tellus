@@ -72,6 +72,8 @@ export interface WorldGeneratedThing {
   scale: number;
   color: number;
   verticalOffset?: number;
+  vehicleMode?: "water" | "air" | "ground";
+  hasAnimations?: boolean;
   /** Immutable 3D Asset Manager model id. modelUrl is a cached/resolved fetch URL. */
   assetStoreModelId?: string;
   modelUrl?: string;
@@ -369,6 +371,11 @@ export function isWorldGeneratedThing(value: unknown): value is WorldGeneratedTh
     !Number.isFinite(value.color) ||
     (value.verticalOffset !== undefined &&
       (typeof value.verticalOffset !== "number" || !Number.isFinite(value.verticalOffset))) ||
+    (value.vehicleMode !== undefined &&
+      value.vehicleMode !== "water" &&
+      value.vehicleMode !== "air" &&
+      value.vehicleMode !== "ground") ||
+    (value.hasAnimations !== undefined && typeof value.hasAnimations !== "boolean") ||
     typeof value.updatedAt !== "string"
   ) {
     return false;

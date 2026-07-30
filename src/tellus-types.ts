@@ -191,6 +191,12 @@ export interface GeneratedThing {
   /** Explicit vertical displacement from the active placement surface. Persisted so delayed
    * server echoes cannot reinterpret a deliberately submerged or raised asset as grounded. */
   verticalOffset?: number;
+  /** Explicit movement/ride mode. Asset metadata sets this once so mounts do not depend on a
+   * fragile prompt-name whitelist after snapshot/server round-trips. */
+  vehicleMode?: VehicleMode;
+  /** Durable capability bit used to avoid serving clipless LODs after the richer catalog metadata has
+   * been discarded or is unavailable on another client. */
+  hasAnimations?: boolean;
   /** Immutable 3D Asset Manager model id. modelUrl is only a cached serving hint. */
   assetStoreModelId?: string;
   modelUrl?: string;
@@ -225,6 +231,7 @@ export interface AssetLibraryModel {
   /** Store reports the model can actually be rendered/served (conversion done, a view URL exists). */
   viewable?: boolean;
   tags?: string[];
+  assetTypes?: string[];
   animationClips?: AssetAnimationMetadata[];
   effectiveMeshStats?: AssetMeshStats;
   lodReady?: boolean;

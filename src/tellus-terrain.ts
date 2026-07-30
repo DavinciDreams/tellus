@@ -877,6 +877,9 @@ export function isIntentionallyElevated(thing: GeneratedThing): boolean {
 }
 
 export function isIntentionallyOffsetFromGround(thing: GeneratedThing): boolean {
+  if (typeof thing.verticalOffset === "number" && Number.isFinite(thing.verticalOffset)) {
+    return Math.abs(thing.verticalOffset) > 0.001;
+  }
   const groundY = groundHeightAt(thing.position.x, thing.position.z);
   return groundY !== null && Math.abs(thing.position.y - groundY) > 0.35;
 }

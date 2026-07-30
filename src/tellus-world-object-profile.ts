@@ -1,4 +1,4 @@
-import type { GeneratedKind, GeneratedThing, Vec3 } from "./tellus-types";
+import type { AssetLibraryModel, GeneratedKind, GeneratedThing, Vec3 } from "./tellus-types";
 import type { VehicleMode } from "./tellus-types";
 import { airMountTerms, groundMountTerms, waterMountTerms } from "./tellus-constants";
 import { assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl } from "./tellus-urls-identity";
@@ -100,7 +100,29 @@ export function normalizeWorldThingAssetIdentity(
   };
 }
 
-export function worldThingVehicleMode(thing: Pick<GeneratedThing, "kind" | "prompt">): VehicleMode | null {
+export function inferAssetVehicleMode(
+  model: Pick<AssetLibraryModel, "name" | "description" | "tags" | "assetTypes">,
+): VehicleMode | undefined {
+  const lower = [model.name, model.description, ...(model.tags ?? []), ...(model.assetTypes ?? [])]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  const hasTerm = (terms: readonly string[]): boolean =>
+    terms.some((term) => new RegExp(`(^|\\W)${escapeRegex(term)}(\\W|$)`, "i").test(lower));
+  if (hasTerm(airMountTerms) || /\b(flying mount|air mount)\b/.test(lower)) return "air";
+  if (hasTerm(waterMountTerms) || /\b(water mount|rideable boat)\b/.test(lower)) return "water";
+  const hasGroundSpecies = /\b(horse|pony|stag|elk|camel|llama|reindeer|deer|bear|wolf)\b/.test(lower);
+  const hasRideGear = /\b(mount|rideable|riding|saddle|saddled|harness|tack|bridle)\b/.test(lower);
+  if (hasTerm(groundMountTerms) || (hasGroundSpecies && hasRideGear)) return "ground";
+  return undefined;
+}
+
+export function worldThingVehicleMode(
+  thing: Pick<GeneratedThing, "kind" | "prompt" | "vehicleMode">,
+): VehicleMode | null {
+  if (thing.vehicleMode === "water" || thing.vehicleMode === "air" || thing.vehicleMode === "ground") {
+    return thing.vehicleMode;
+  }
   const lower = thing.prompt.toLowerCase();
   const hasVehicleTerm = (terms: readonly string[]): boolean =>
     terms.some((term) => new RegExp(`(^|\\W)${escapeRegex(term)}(\\W|$)`, "i").test(lower));
@@ -130,6 +152,9 @@ export function worldThingVehicleMode(thing: Pick<GeneratedThing, "kind" | "prom
   }
   if (
     hasVehicleTerm(groundMountTerms) ||
+    (thing.kind === "animal" &&
+      /\b(reindeer|deer|bear|wolf)\b/.test(lower) &&
+      /\b(mount|rideable|riding|saddle|saddled|harness|tack|bridle)\b/.test(lower)) ||
     lower.includes("vehicle") ||
     lower.includes("cart") ||
     lower.includes("wagon") ||
