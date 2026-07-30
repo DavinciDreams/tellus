@@ -130,8 +130,12 @@ their Tellus controls treat feature-dark responses as rollout boundaries. Phase
 claims, artifacts, and review gates without placing coordination on a world
 grain. Tellus exposes project/member/task/review controls only when those guarded
 routes are available; makers remain the flat owner and agents retain stable
-membership as they move between worlds. The procedural and Blender workshop
-phases remain proposed.
+membership as they move between worlds. Phase 4 now adds a maker-facing
+procedural asset-workshop client over the durable Hyades job: agents or makers
+can submit bounded briefs and allow-listed references, inspect passes,
+deterministic gates and registry artifacts, then approve, revise, or reject.
+The UI treats feature-dark routes as a rollout boundary and never places an
+asset as a side effect of approval. The isolated Blender adapter remains Phase 5.
 
 ### Deterministic activities and creative workshops — proposed
 
@@ -140,9 +144,10 @@ must not own race entrants, clocks, checkpoints, penalties, or results. The
 [world-module design](./WORLD_MODULES_MINIGAMES_PRD.md) keeps those rules in an
 authoritative module service and lets triggers wake a steward around it.
 
-The later creative-workshop phases put reference-to-asset jobs behind durable,
-budgeted orchestration. Procedural Three.js work must export a validated GLB or
-restricted schema before placement. Blender/MCP access must use isolated
+Creative-workshop jobs sit behind durable, budgeted orchestration. Phase 4's
+procedural path requires GLB, resource-bound, provenance, and registry-ingest
+evidence plus maker approval before the normal placement workflow can use its
+stable model URL. Phase 5 Blender/MCP access must use isolated
 workers, curated macros, quotas, allow-listed export paths, validation, and no
 arbitrary autonomous Python or Hyades secrets.
 

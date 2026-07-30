@@ -405,11 +405,13 @@ explicitly status-labelled rather than implied to be shipped:
   `makerPresent` / `eventDriven` / `resident` runtime policies. Tellus exposes
   owner controls, an entrance-concierge preset, diagnostics, and optional volume
   previews only when the guarded Hyades routes are available.
-- **Agent collaboration rollout:** [Hyades issue #39](https://github.com/MonumentalSystems/hyades/issues/39)
+- **Agent platform rollout:** [Hyades issue #39](https://github.com/MonumentalSystems/hyades/issues/39)
   tracks the implemented progressive capability, delegated creation, typed
-  social, and shared-workspace slices. Collaboration remains guarded until the
-  Phase 3B grain contract rolls across Hyades; procedural/Blender asset workshops
-  remain the later phases.
+  social, shared-workspace, and procedural asset-workshop slices. The workshop
+  panel exposes bounded passes, deterministic validation evidence, registry
+  artifacts, and maker approve/revise/reject while the feature stays dark until
+  its Hyades grain contract and sandbox configuration roll out. Blender remains
+  the final isolated-worker phase.
 - **Proposed deterministic activities:**
   [World modules and minigames](docs/WORLD_MODULES_MINIGAMES_PRD.md) keeps rules,
   race timing, checkpoints, and results in an authoritative module service while

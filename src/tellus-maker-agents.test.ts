@@ -51,6 +51,7 @@ describe("normalizeMakerAgentSummary", () => {
         summary: "The arch is offset.",
         at: "2026-07-23T12:00:00Z",
       },
+      lastAssetWorkshop: null,
       isDefault: true,
       runtimePolicy: "eventDriven",
       eventWakesLastMinute: 3,
