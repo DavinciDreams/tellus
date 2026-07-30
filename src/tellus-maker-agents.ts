@@ -13,6 +13,7 @@ export interface MakerAgentSummary {
   lastTickAt?: string | null;
   avatarId?: string | null;
   lastEvaluation: MakerAgentEvaluationSummary | null;
+  lastAssetWorkshop: MakerAgentWorkshopSummary | null;
   isDefault: boolean;
   runtimePolicy: AgentRuntimePolicy;
   eventWakesLastMinute: number;
@@ -26,6 +27,14 @@ export interface MakerAgentEvaluationSummary {
   decision: string | null;
   summary: string | null;
   at: string | null;
+}
+
+export interface MakerAgentWorkshopSummary {
+  jobId: string;
+  status: string;
+  summary: string | null;
+  modelUrl: string | null;
+  reviewRevision: number;
 }
 
 export interface MakerAgentDirectory {
@@ -97,6 +106,21 @@ function normalizeLastEvaluation(value: unknown): MakerAgentEvaluationSummary | 
   };
 }
 
+function normalizeLastAssetWorkshop(value: unknown): MakerAgentWorkshopSummary | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const jobId = stringValue(row.jobId).trim();
+  const status = stringValue(row.status).trim().slice(0, 40);
+  if (!jobId || !status) return null;
+  return {
+    jobId,
+    status,
+    summary: typeof row.summary === "string" ? row.summary.trim().slice(0, 1_200) || null : null,
+    modelUrl: typeof row.modelUrl === "string" ? row.modelUrl.trim().slice(0, 2_000) || null : null,
+    reviewRevision: nonNegativeInteger(row.reviewRevision),
+  };
+}
+
 export function normalizeMakerAgentSummary(value: unknown): MakerAgentSummary | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
@@ -116,6 +140,7 @@ export function normalizeMakerAgentSummary(value: unknown): MakerAgentSummary | 
     lastTickAt: typeof row.lastTickAt === "string" ? row.lastTickAt : null,
     avatarId: typeof row.avatarId === "string" ? row.avatarId : null,
     lastEvaluation: normalizeLastEvaluation(row.lastEvaluation),
+    lastAssetWorkshop: normalizeLastAssetWorkshop(row.lastAssetWorkshop),
     isDefault: boolValue(row.isDefault),
     runtimePolicy: runtimePolicyValue(row.runtimePolicy),
     eventWakesLastMinute: nonNegativeInteger(row.eventWakesLastMinute),
