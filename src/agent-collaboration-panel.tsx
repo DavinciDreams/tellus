@@ -11,6 +11,7 @@ import {
   mutateCollaborationTask,
   removeCollaborationMember,
   setCollaborationMember,
+  setCollaborationWorkspaceClosed,
   type CollaborationRole,
   type CollaborationWorkspace,
   type CollaborationWorkspaceSummary,
@@ -209,6 +210,27 @@ export function AgentCollaborationPanel({ agents, currentWorldId }: AgentCollabo
     setMemberToAdd("");
   }, [memberRole, memberToAdd, updateMember]);
 
+  const setWorkspaceClosed = useCallback(async (closed: boolean) => {
+    if (!workspace) return;
+    setBusy("workspace-lifecycle");
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await setCollaborationWorkspaceClosed(
+        workspace.workspaceId,
+        closed,
+        collaborationIdempotencyKey(closed ? "close-project" : "reopen-project"),
+      );
+      setWorkspace(updated);
+      setNotice(closed ? "Project closed. Its history remains available." : "Project reopened for new work.");
+      await loadList();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : `Could not ${closed ? "close" : "reopen"} project.`);
+    } finally {
+      setBusy(null);
+    }
+  }, [loadList, workspace]);
+
   const addTask = useCallback(async () => {
     if (!workspace || !taskTitle.trim()) return;
     setBusy("create-task");
@@ -336,6 +358,13 @@ export function AgentCollaborationPanel({ agents, currentWorldId }: AgentCollabo
                     <span><ClipboardList size={13} aria-hidden="true" /><strong>{workspace.name}</strong></span>
                     <small>revision {workspace.revision}{workspace.worldId ? ` · ${workspace.worldId}` : ""}</small>
                     <p>{workspace.sharedGoal}</p>
+                    <button
+                      type="button"
+                      disabled={busy !== null || (!workspace.closed && workspace.tasks.some((task) => !["approved", "rejected"].includes(task.status)))}
+                      onClick={() => void setWorkspaceClosed(!workspace.closed)}
+                    >
+                      {workspace.closed ? "Reopen project" : "Close project"}
+                    </button>
                   </header>
 
                   <div className="agent-collaboration__members">
@@ -370,13 +399,13 @@ export function AgentCollaborationPanel({ agents, currentWorldId }: AgentCollabo
 
                   <form className="agent-collaboration__task-form" onSubmit={(event) => { event.preventDefault(); void addTask(); }}>
                     <strong>New task</strong>
-                    <input value={taskTitle} maxLength={160} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Task title" aria-label="Task title" required />
-                    <textarea value={taskDescription} maxLength={4_000} onChange={(event) => setTaskDescription(event.target.value)} placeholder="Success conditions or context" aria-label="Task description" />
-                    <select value={taskAssignee} onChange={(event) => setTaskAssignee(event.target.value)} aria-label="Assign task">
+                    <input disabled={workspace.closed} value={taskTitle} maxLength={160} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Task title" aria-label="Task title" required />
+                    <textarea disabled={workspace.closed} value={taskDescription} maxLength={4_000} onChange={(event) => setTaskDescription(event.target.value)} placeholder="Success conditions or context" aria-label="Task description" />
+                    <select disabled={workspace.closed} value={taskAssignee} onChange={(event) => setTaskAssignee(event.target.value)} aria-label="Assign task">
                       <option value="">Open claim</option>
                       {workspace.members.map((member) => <option key={member.agentId} value={member.agentId}>{agentNames.get(member.agentId) ?? member.agentId}</option>)}
                     </select>
-                    <button type="submit" disabled={!taskTitle.trim() || busy !== null}>{busy === "create-task" ? "Adding…" : "Add task"}</button>
+                    <button type="submit" disabled={workspace.closed || !taskTitle.trim() || busy !== null}>{busy === "create-task" ? "Adding…" : "Add task"}</button>
                   </form>
 
                   <div className="agent-collaboration__tasks">
