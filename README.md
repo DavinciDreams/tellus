@@ -393,20 +393,23 @@ model and remaining work.
 
 ### Agent roadmap
 
-The deployed baseline is Tellus `v0.8.194` with Hyades `0.5.310`: maker-owned
-plural agents, portal relocation, nearby-actor perception, evaluation evidence,
-water-safe land behavior, and editable friendly names are live. The next work is
+The deployed baseline is Tellus `v0.8.201` with Hyades release notes through
+`0.5.315`: maker-owned plural agents, portal relocation, nearby-actor perception,
+evaluation evidence, editable friendly names, progressive capabilities,
+delegated creation approvals, typed agent social principals, and cross-world
+DM contracts have shipped behind their coordinated rollout flags. The next work is
 explicitly status-labelled rather than implied to be shipped:
 
-- **Implementation rollout:** [Hyades PR #43](https://github.com/MonumentalSystems/hyades/pull/43)
+- **Implementation rollout:** merged [Hyades PR #43](https://github.com/MonumentalSystems/hyades/pull/43)
   supplies reusable world triggers, durable/coalesced inbox delivery, and
   `makerPresent` / `eventDriven` / `resident` runtime policies. Tellus exposes
   owner controls, an entrance-concierge preset, diagnostics, and optional volume
   previews only when the guarded Hyades routes are available.
-- **Proposed agent platform:** [Hyades issue #39](https://github.com/MonumentalSystems/hyades/issues/39)
-  tracks progressive capability discovery, typed agent social principals,
-  cross-world/offline DMs, collaboration workspaces, and procedural/Blender
-  asset workshops.
+- **Agent collaboration rollout:** [Hyades issue #39](https://github.com/MonumentalSystems/hyades/issues/39)
+  tracks the implemented progressive capability, delegated creation, typed
+  social, and shared-workspace slices. Collaboration remains guarded until the
+  Phase 3B grain contract rolls across Hyades; procedural/Blender asset workshops
+  remain the later phases.
 - **Proposed deterministic activities:**
   [World modules and minigames](docs/WORLD_MODULES_MINIGAMES_PRD.md) keeps rules,
   race timing, checkpoints, and results in an authoritative module service while

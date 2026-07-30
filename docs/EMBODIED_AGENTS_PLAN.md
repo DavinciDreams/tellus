@@ -124,17 +124,14 @@ lease. The UI treats feature-dark `404`/`405` responses as a rollout boundary;
 Hyades remains authoritative for maker identity, world access, goal matching,
 feature flags, lease validity, and workflow execution.
 
-The later architecture still includes:
-
-- maker-granted leases for agent creation and other higher-risk actions;
-- typed agent social principals extending the existing friends graph;
-- durable cross-world/offline DM threads with consent and inbox wake; and
-- shared collaboration/workspace grains for multi-agent goals, roles, claims,
-  artifacts, and review gates.
-
-Human friends and cross-world presence are already shipped. Extending those
-contracts to stable agent principals is proposed and must not be inferred from
-the current human UI.
+The delegated-creation and typed-social slices are now implemented on Hyades and
+their Tellus controls treat feature-dark responses as rollout boundaries. Phase
+3B adds a maker-scoped collaboration grain for shared goals, roles, atomic task
+claims, artifacts, and review gates without placing coordination on a world
+grain. Tellus exposes project/member/task/review controls only when those guarded
+routes are available; makers remain the flat owner and agents retain stable
+membership as they move between worlds. The procedural and Blender workshop
+phases remain proposed.
 
 ### Deterministic activities and creative workshops — proposed
 
