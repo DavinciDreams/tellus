@@ -193,6 +193,7 @@ import {
 } from "./tellus-world-trigger-volumes";
 import { WorldTriggersPanel } from "./world-triggers-panel";
 import { AgentCapabilitiesPanel } from "./agent-capabilities-panel";
+import { AgentCollaborationPanel } from "./agent-collaboration-panel";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, shouldIgnoreDefaultTellusTemplate, templateForWorldId, templateSuppressesAutoVegetation } from "./tellus-world-templates";
 import { evoflowTerrainSourceFor, evoflowWaterModeFor } from "./tellus-evoflow-terrains";
 import {
@@ -13434,6 +13435,12 @@ function App(): React.ReactElement {
                       );
                     })}
                   </div>
+                )}
+                {makerAgents && makerAgents.agents.length > 0 && (
+                  <AgentCollaborationPanel
+                    agents={makerAgents.agents}
+                    currentWorldId={currentMakerWorldId}
+                  />
                 )}
                 {makerAgents && (
                   <WorldTriggersPanel
