@@ -74,6 +74,38 @@ export interface AgentCapabilityLeaseGrantInput {
   worldIds: string[];
 }
 
+export interface DelegatedAgentPersonaTemplate {
+  templateId: string;
+  persona: string;
+  defaultName: string | null;
+}
+
+export interface DelegatedAgentCreationLease {
+  leaseId: string;
+  parentAgentId: string;
+  grantedByPrincipalId: string;
+  grantedAtMs: number;
+  expiresAtMs: number;
+  remainingChildren: number;
+  maxLineageDepth: number;
+  personaTemplates: DelegatedAgentPersonaTemplate[];
+  worldIds: string[];
+  maxDailyTokenBudget: number;
+  startChildren: boolean;
+  goalId: string;
+}
+
+export interface DelegatedAgentCreationLeaseGrantInput {
+  goalId: string;
+  durationMinutes: number;
+  childCount: number;
+  maxLineageDepth: number;
+  personaTemplates: DelegatedAgentPersonaTemplate[];
+  worldIds: string[];
+  maxDailyTokenBudget: number;
+  startChildren: boolean;
+}
+
 export class AgentCapabilityApiError extends Error {
   readonly status: number;
 
@@ -100,6 +132,11 @@ export function agentCapabilitiesUrl(agentId: string): string {
 
 export function agentCapabilityLeasesUrl(agentId: string, leaseId?: string): string {
   const base = `${apiRoot()}/api/tellus/agents/${encodeURIComponent(agentId)}/capability-leases`;
+  return leaseId ? `${base}/${encodeURIComponent(leaseId)}` : base;
+}
+
+export function delegatedAgentCreationLeaseUrl(agentId: string, leaseId?: string): string {
+  const base = `${apiRoot()}/api/tellus/agents/${encodeURIComponent(agentId)}/delegated-creation-lease`;
   return leaseId ? `${base}/${encodeURIComponent(leaseId)}` : base;
 }
 
@@ -240,6 +277,45 @@ function normalizeWorkflow(value: unknown): AgentCapabilityWorkflow | null {
   };
 }
 
+function normalizePersonaTemplate(value: unknown): DelegatedAgentPersonaTemplate | null {
+  const row = recordValue(value);
+  if (!row) return null;
+  const templateId = stringValue(row.templateId, 80);
+  const persona = stringValue(row.persona, 8_000);
+  if (!templateId || !persona) return null;
+  return {
+    templateId,
+    persona,
+    defaultName: nullableString(row.defaultName, 80),
+  };
+}
+
+export function normalizeDelegatedAgentCreationLease(value: unknown): DelegatedAgentCreationLease | null {
+  const row = recordValue(value);
+  if (!row) return null;
+  const leaseId = stringValue(row.leaseId, 120);
+  const parentAgentId = stringValue(row.parentAgentId, 120);
+  const goalId = stringValue(row.goalId, 120);
+  if (!leaseId || !parentAgentId || !goalId) return null;
+  return {
+    leaseId,
+    parentAgentId,
+    grantedByPrincipalId: stringValue(row.grantedByPrincipalId, 240),
+    grantedAtMs: integerValue(row.grantedAtMs),
+    expiresAtMs: integerValue(row.expiresAtMs),
+    remainingChildren: integerValue(row.remainingChildren),
+    maxLineageDepth: integerValue(row.maxLineageDepth),
+    personaTemplates: Array.isArray(row.personaTemplates)
+      ? row.personaTemplates.map(normalizePersonaTemplate)
+        .filter((template): template is DelegatedAgentPersonaTemplate => template !== null)
+      : [],
+    worldIds: stringList(row.worldIds),
+    maxDailyTokenBudget: integerValue(row.maxDailyTokenBudget),
+    startChildren: row.startChildren === true,
+    goalId,
+  };
+}
+
 export function normalizeCapabilityState(value: unknown): AgentCapabilityState {
   const row = recordValue(value);
   if (!row) return { activeGoal: null, leases: [], workflows: [] };
@@ -307,4 +383,35 @@ export async function grantAgentCapabilityLease(
 export async function revokeAgentCapabilityLease(agentId: string, leaseId: string): Promise<void> {
   const response = await fetch(agentCapabilityLeasesUrl(agentId, leaseId), { method: "DELETE" });
   if (!response.ok) throw await errorFrom(response, `Could not revoke capability (${response.status}).`);
+}
+
+export async function fetchDelegatedAgentCreationLease(
+  agentId: string,
+  signal?: AbortSignal,
+): Promise<DelegatedAgentCreationLease | null> {
+  const response = await fetch(delegatedAgentCreationLeaseUrl(agentId), { signal });
+  if (!response.ok) throw await errorFrom(response, `Could not load delegated creation lease (${response.status}).`);
+  const body = recordValue(await response.json());
+  return normalizeDelegatedAgentCreationLease(body?.lease);
+}
+
+export async function grantDelegatedAgentCreationLease(
+  agentId: string,
+  input: DelegatedAgentCreationLeaseGrantInput,
+): Promise<DelegatedAgentCreationLease> {
+  const response = await fetch(delegatedAgentCreationLeaseUrl(agentId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw await errorFrom(response, `Could not approve delegated creation (${response.status}).`);
+  const body = recordValue(await response.json());
+  const lease = normalizeDelegatedAgentCreationLease(body?.lease);
+  if (!lease) throw new AgentCapabilityApiError(response.status, "The server returned an invalid delegated creation lease.");
+  return lease;
+}
+
+export async function revokeDelegatedAgentCreationLease(agentId: string, leaseId: string): Promise<void> {
+  const response = await fetch(delegatedAgentCreationLeaseUrl(agentId, leaseId), { method: "DELETE" });
+  if (!response.ok) throw await errorFrom(response, `Could not revoke delegated creation (${response.status}).`);
 }

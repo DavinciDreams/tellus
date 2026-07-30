@@ -3,9 +3,13 @@ import {
   AgentCapabilityApiError,
   agentCapabilityCatalogUrl,
   agentCapabilityLeasesUrl,
+  delegatedAgentCreationLeaseUrl,
+  fetchDelegatedAgentCreationLease,
   grantAgentCapabilityLease,
+  grantDelegatedAgentCreationLease,
   normalizeCapabilityManifest,
   normalizeCapabilityState,
+  normalizeDelegatedAgentCreationLease,
 } from "./tellus-agent-capabilities";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -78,12 +82,48 @@ describe("capability contract normalization", () => {
       workflows: [{ workflowId: "workflow-1", status: "completed" }],
     });
   });
+
+  it("normalizes the bounded delegated creation lease without trusting extra fields", () => {
+    expect(normalizeDelegatedAgentCreationLease({
+      leaseId: "agents-create-1",
+      parentAgentId: "steward",
+      grantedByPrincipalId: "acct:maker",
+      grantedAtMs: 10,
+      expiresAtMs: 20,
+      remainingChildren: 2,
+      maxLineageDepth: 3,
+      personaTemplates: [
+        { templateId: "builder", persona: "Build carefully.", defaultName: "Mason", secret: "drop" },
+        { templateId: "missing-persona" },
+      ],
+      worldIds: ["garden", "castle"],
+      maxDailyTokenBudget: 5_000,
+      startChildren: true,
+      goalId: "build-team",
+      makerUserId: "must-not-leak",
+    })).toEqual({
+      leaseId: "agents-create-1",
+      parentAgentId: "steward",
+      grantedByPrincipalId: "acct:maker",
+      grantedAtMs: 10,
+      expiresAtMs: 20,
+      remainingChildren: 2,
+      maxLineageDepth: 3,
+      personaTemplates: [{ templateId: "builder", persona: "Build carefully.", defaultName: "Mason" }],
+      worldIds: ["garden", "castle"],
+      maxDailyTokenBudget: 5_000,
+      startChildren: true,
+      goalId: "build-team",
+    });
+  });
 });
 
 describe("capability API", () => {
   it("bounds catalog searches and encodes stable path segments", () => {
     expect(agentCapabilityCatalogUrl(" portal gate ", 99)).toMatch(/\/api\/tellus\/capabilities\?q=portal\+gate&limit=16$/);
     expect(agentCapabilityLeasesUrl("agent/one", "lease one")).toMatch(/\/api\/tellus\/agents\/agent%2Fone\/capability-leases\/lease%20one$/);
+    expect(delegatedAgentCreationLeaseUrl("agent/one", "lease one"))
+      .toMatch(/\/api\/tellus\/agents\/agent%2Fone\/delegated-creation-lease\/lease%20one$/);
   });
 
   it("posts a bounded maker grant without sending maker identity", async () => {
@@ -149,5 +189,51 @@ describe("capability API", () => {
       budgetMs: 120_000,
       worldIds: ["garden"],
     })).rejects.toMatchObject({ status: 409, message: "active goal changed" } satisfies Partial<AgentCapabilityApiError>);
+  });
+
+  it("loads an absent delegated lease and posts only maker-bounded creation fields", async () => {
+    const lease = {
+      leaseId: "agents-create-1",
+      parentAgentId: "steward",
+      grantedByPrincipalId: "acct:server-stamped",
+      grantedAtMs: 10,
+      expiresAtMs: 20,
+      remainingChildren: 1,
+      maxLineageDepth: 2,
+      personaTemplates: [{ templateId: "builder", persona: "Build carefully.", defaultName: "Mason" }],
+      worldIds: ["garden"],
+      maxDailyTokenBudget: 5_000,
+      startChildren: false,
+      goalId: "build-team",
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ accepted: true, lease }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchDelegatedAgentCreationLease("steward")).resolves.toBeNull();
+    await expect(grantDelegatedAgentCreationLease("steward", {
+      goalId: "build-team",
+      durationMinutes: 30,
+      childCount: 1,
+      maxLineageDepth: 2,
+      personaTemplates: [{ templateId: "builder", persona: "Build carefully.", defaultName: "Mason" }],
+      worldIds: ["garden"],
+      maxDailyTokenBudget: 5_000,
+      startChildren: false,
+    })).resolves.toMatchObject({ leaseId: "agents-create-1" });
+
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body).not.toHaveProperty("grantedByPrincipalId");
+    expect(body).not.toHaveProperty("parentAgentId");
+    expect(body).toMatchObject({
+      goalId: "build-team",
+      childCount: 1,
+      maxLineageDepth: 2,
+      worldIds: ["garden"],
+    });
   });
 });
