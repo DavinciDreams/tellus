@@ -410,8 +410,9 @@ explicitly status-labelled rather than implied to be shipped:
   social, shared-workspace, and procedural asset-workshop slices. The workshop
   panel exposes bounded passes, deterministic validation evidence, registry
   artifacts, and maker approve/revise/reject while the feature stays dark until
-  its Hyades grain contract and sandbox configuration roll out. Blender remains
-  the final isolated-worker phase.
+  its Hyades grain contract and sandbox configuration roll out. The final
+  Blender adapter exposes only curated workflows and remains independently dark
+  until an isolated worker endpoint and its feature flag are configured.
 - **Proposed deterministic activities:**
   [World modules and minigames](docs/WORLD_MODULES_MINIGAMES_PRD.md) keeps rules,
   race timing, checkpoints, and results in an authoritative module service while

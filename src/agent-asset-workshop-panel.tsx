@@ -16,6 +16,11 @@ interface AgentAssetWorkshopPanelProps {
 }
 
 const ACTIVE_STATUSES = new Set(["queued", "building", "validating"]);
+const BLENDER_WORKFLOWS = [
+  ["model-from-reference", "Model from reference"],
+  ["refine-existing-asset", "Refine existing asset"],
+  ["rig-and-preview", "Rig and preview"],
+] as const;
 
 function label(value: string): string {
   return value.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -29,6 +34,8 @@ export function AgentAssetWorkshopPanel({ agents }: AgentAssetWorkshopPanelProps
   const [brief, setBrief] = useState("");
   const [goalId, setGoalId] = useState("asset-workshop");
   const [referenceText, setReferenceText] = useState("");
+  const [backend, setBackend] = useState<"procedural" | "blender">("procedural");
+  const [curatedWorkflowId, setCuratedWorkflowId] = useState<string>(BLENDER_WORKFLOWS[0][0]);
   const [maxPasses, setMaxPasses] = useState(3);
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -97,9 +104,10 @@ export function AgentAssetWorkshopPanel({ agents }: AgentAssetWorkshopPanelProps
       const started = await startAssetWorkshop(selectedAgent.agentId, {
         goalId: goalId.trim().slice(0, 160) || "asset-workshop",
         idempotencyKey: assetWorkshopIdempotencyKey("maker-submit"),
-        backend: "procedural",
+        backend,
         brief: brief.trim().slice(0, 4_000),
         referenceUrls: references,
+        curatedWorkflowId: backend === "blender" ? curatedWorkflowId : undefined,
         budget: { maxPasses },
       });
       setSnapshot(started);
@@ -112,7 +120,7 @@ export function AgentAssetWorkshopPanel({ agents }: AgentAssetWorkshopPanelProps
     } finally {
       setBusy(null);
     }
-  }, [brief, goalId, maxPasses, referenceText, selectedAgent]);
+  }, [backend, brief, curatedWorkflowId, goalId, maxPasses, referenceText, selectedAgent]);
 
   const review = useCallback(async (decision: AssetWorkshopReviewDecision) => {
     if (!selectedAgent || !snapshot) return;
@@ -162,11 +170,11 @@ export function AgentAssetWorkshopPanel({ agents }: AgentAssetWorkshopPanelProps
       {open && (
         <div id={panelId} className="agent-workshop__body" aria-busy={busy !== null}>
           <p className="agent-workshop__intro">
-            Procedural workers build, render, validate, and register a GLB. Nothing is placed until you approve it.
+            Isolated workers build, render, validate, and register a GLB. Nothing is placed until you approve it.
           </p>
           {rolloutPending ? (
             <p className="agent-workshop__pending" role="status">
-              Workshop controls are installed and waiting for Hyades to enable AgentAssetWorkshop and configure its sandbox.
+              Workshop controls are installed and waiting for Hyades to enable the workshop flags and configure its isolated workers.
             </p>
           ) : (
             <>
@@ -175,6 +183,13 @@ export function AgentAssetWorkshopPanel({ agents }: AgentAssetWorkshopPanelProps
                   {agents.map((agent) => <option key={agent.agentId} value={agent.agentId}>{agent.name} · {agent.worldId}</option>)}
                 </select></label>
                 <label>Goal id<input value={goalId} maxLength={160} onChange={(event) => setGoalId(event.target.value)} /></label>
+                <label>Worker<select value={backend} onChange={(event) => setBackend(event.target.value as "procedural" | "blender")}>
+                  <option value="procedural">Procedural</option>
+                  <option value="blender">Blender</option>
+                </select></label>
+                {backend === "blender" && <label>Curated workflow<select value={curatedWorkflowId} onChange={(event) => setCuratedWorkflowId(event.target.value)}>
+                  {BLENDER_WORKFLOWS.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+                </select></label>}
                 <label className="agent-workshop__wide">Asset brief<textarea value={brief} maxLength={4_000} onChange={(event) => setBrief(event.target.value)} placeholder="What should the asset be, how should it look, and what must it be able to do?" required /></label>
                 <label className="agent-workshop__wide">Reference URLs, one per line<textarea value={referenceText} onChange={(event) => setReferenceText(event.target.value)} placeholder="Only operator allow-listed HTTPS hosts are accepted" /></label>
                 <label>Maximum passes<input type="number" min={1} max={6} value={maxPasses} onChange={(event) => setMaxPasses(Math.max(1, Math.min(6, Number(event.target.value) || 1)))} /></label>
@@ -188,7 +203,10 @@ export function AgentAssetWorkshopPanel({ agents }: AgentAssetWorkshopPanelProps
                   <header>
                     <span><Box size={13} aria-hidden="true" /><strong>{label(snapshot.status)}</strong></span>
                     <button type="button" disabled={busy !== null} onClick={() => void load(snapshot.jobId)}><RefreshCw size={10} /> Refresh</button>
-                    <small>pass {snapshot.currentPass} · revision {snapshot.reviewRevision} · {snapshot.backend}</small>
+                    <small>
+                      pass {snapshot.currentPass} · revision {snapshot.reviewRevision} · {snapshot.backend}
+                      {snapshot.curatedWorkflowId ? ` · ${label(snapshot.curatedWorkflowId)}` : ""}
+                    </small>
                     <p>{snapshot.summary || snapshot.error || snapshot.brief}</p>
                   </header>
 

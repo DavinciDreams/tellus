@@ -37,7 +37,8 @@ export interface AssetWorkshopSnapshot {
   makerUserId: string;
   worldId: string;
   goalId: string;
-  backend: "procedural";
+  backend: "procedural" | "blender";
+  curatedWorkflowId: string | null;
   brief: string;
   status: AssetWorkshopStatus;
   summary: string | null;
@@ -59,9 +60,10 @@ export interface AssetWorkshopSnapshot {
 export interface StartAssetWorkshopInput {
   goalId: string;
   idempotencyKey: string;
-  backend: "procedural";
+  backend: "procedural" | "blender";
   brief: string;
   referenceUrls: string[];
+  curatedWorkflowId?: string | null;
   budget?: { maxPasses?: number };
 }
 
@@ -113,6 +115,11 @@ function statusValue(value: unknown): AssetWorkshopStatus {
   if (status === "awaitingmaker") return "awaiting-maker";
   return ["queued", "building", "validating", "ready", "rejected", "blocked", "failed"]
     .includes(status) ? status as AssetWorkshopStatus : "failed";
+}
+
+function backendValue(value: unknown): "procedural" | "blender" {
+  const backend = String(value).toLowerCase();
+  return value === 1 || backend === "blender" ? "blender" : "procedural";
 }
 
 function normalizeArtifact(value: unknown): AssetWorkshopArtifact | null {
@@ -174,7 +181,8 @@ export function normalizeAssetWorkshop(value: unknown): AssetWorkshopSnapshot | 
     makerUserId: stringValue(row.makerUserId, 240),
     worldId: stringValue(row.worldId, 240),
     goalId: stringValue(row.goalId, 160),
-    backend: "procedural",
+    backend: backendValue(row.backend),
+    curatedWorkflowId: nullableString(row.curatedWorkflowId, 120),
     brief: stringValue(row.brief, 4_000),
     status: statusValue(row.status),
     summary: nullableString(row.summary, 1_200),
