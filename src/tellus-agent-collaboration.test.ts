@@ -8,6 +8,7 @@ import {
   mutateCollaborationTask,
   normalizeCollaborationWorkspace,
   setCollaborationMember,
+  setCollaborationWorkspaceClosed,
 } from "./tellus-agent-collaboration";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -147,6 +148,25 @@ describe("collaboration API", () => {
         status: "approved",
         summary: "Looks good.",
       }),
+    });
+  });
+
+  it("closes a project through the authenticated workspace route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      accepted: true,
+      workspace: { ...workspace, closed: true },
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(setCollaborationWorkspaceClosed("workspace-one", true, "close-key"))
+      .resolves.toMatchObject({ closed: true });
+    expect(fetchMock).toHaveBeenCalledWith(collaborationWorkspacesUrl("workspace-one"), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ closed: true, idempotencyKey: "close-key" }),
     });
   });
 

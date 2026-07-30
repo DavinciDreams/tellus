@@ -295,6 +295,19 @@ export async function createCollaborationWorkspace(
   return mutationWorkspace(response, `Could not create project (${response.status}).`);
 }
 
+export async function setCollaborationWorkspaceClosed(
+  workspaceId: string,
+  closed: boolean,
+  idempotencyKey: string,
+): Promise<CollaborationWorkspace> {
+  const response = await fetch(collaborationWorkspacesUrl(workspaceId), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ closed, idempotencyKey }),
+  });
+  return mutationWorkspace(response, `Could not ${closed ? "close" : "reopen"} project (${response.status}).`);
+}
+
 export async function setCollaborationMember(
   workspaceId: string,
   agentId: string,
