@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_AIR_GROUND_RELATIVE_OFFSET,
   applyWorldTerrainTemplate,
   baseTerrainHeight,
   groundHeightAt,
@@ -60,6 +61,14 @@ function waterMountAt(y: number): GeneratedThing {
   return {
     ...thingAt(y),
     prompt: "wooden sailing boat",
+  };
+}
+
+function airMountAt(y: number): GeneratedThing {
+  return {
+    ...thingAt(y),
+    prompt: "rideable dragon mount",
+    vehicleMode: "air",
   };
 }
 
@@ -156,6 +165,28 @@ describe("Tellus terrain defaults", () => {
 
     expect(raised.y).toBeCloseTo(surfaceY + 2);
     expect(lowered.y).toBeCloseTo(surfaceY - 2);
+  });
+
+  it("keeps air mounts at their authoritative ground-relative height", () => {
+    setChunkedFlatGround(3);
+    const customHeight = movedVehiclePosition(
+      { ...airMountAt(8), verticalOffset: 5 },
+      12,
+      18,
+      { x: 0, y: 8, z: 0 },
+    );
+    const cruiseHeight = movedVehiclePosition(
+      {
+        ...airMountAt(3 + DEFAULT_AIR_GROUND_RELATIVE_OFFSET),
+        verticalOffset: DEFAULT_AIR_GROUND_RELATIVE_OFFSET,
+      },
+      12,
+      18,
+      { x: 0, y: 3 + DEFAULT_AIR_GROUND_RELATIVE_OFFSET, z: 0 },
+    );
+
+    expect(customHeight.y).toBe(8);
+    expect(cruiseHeight.y).toBe(3 + DEFAULT_AIR_GROUND_RELATIVE_OFFSET);
   });
 
   it("keeps ground mounts moving when terrain height cannot resolve the next spot", () => {

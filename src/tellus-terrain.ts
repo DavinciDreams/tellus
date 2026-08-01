@@ -956,6 +956,8 @@ export function isFreeMovingVehicle(thing: GeneratedThing): boolean {
   return mode === "water" || mode === "air";
 }
 
+export const DEFAULT_AIR_GROUND_RELATIVE_OFFSET = 12;
+
 export function airPosition(x: number, z: number): Vec3 {
   const radius = Math.hypot(x, z);
   const maxRadius = OCEAN_RADIUS - 14;
@@ -963,10 +965,11 @@ export function airPosition(x: number, z: number): Vec3 {
   const nx = x * scale;
   const nz = z * scale;
   const groundY =
-    Math.hypot(nx, nz) <= WORLD_RADIUS
+    groundHeightAt(nx, nz) ??
+    (Math.hypot(nx, nz) <= WORLD_RADIUS
       ? terrainHeight(nx, nz)
-      : SEA_LEVEL;
-  return { x: nx, y: groundY + 12, z: nz };
+      : SEA_LEVEL);
+  return { x: nx, y: groundY + DEFAULT_AIR_GROUND_RELATIVE_OFFSET, z: nz };
 }
 
 export function movedVehiclePosition(
@@ -976,7 +979,14 @@ export function movedVehiclePosition(
   fallback?: Vec3,
 ): Vec3 {
   const mode = vehicleMode(thing);
-  if (mode === "air") return airPosition(x, z);
+  if (mode === "air") {
+    const position = airPosition(x, z);
+    return positionAtGroundRelativeOffset(
+      position,
+      position.y - DEFAULT_AIR_GROUND_RELATIVE_OFFSET,
+      thing.verticalOffset,
+    );
+  }
   if (mode === "water") {
     const position = waterVehiclePosition(x, z, fallback);
     if (

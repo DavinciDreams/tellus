@@ -36,6 +36,16 @@ describe("authoritative ground-relative placement", () => {
     expect(groundRelativeOffsetFromSurface(100, 5)).toBe(40);
   });
 
+  it("round-trips a dynamic physics pose through a published offset", () => {
+    const surfaceY = 3.25;
+    const physicsPose = { x: 8, y: 4.75, z: -6 };
+    const publishedOffset = groundRelativeOffsetFromSurface(physicsPose.y, surfaceY);
+
+    expect(positionAtGroundRelativeOffset(physicsPose, surfaceY, publishedOffset)).toEqual(
+      physicsPose,
+    );
+  });
+
   it("distinguishes an explicit custom height from grounded zero", () => {
     expect(hasAuthoredGroundRelativeOffset(0)).toBe(false);
     expect(hasAuthoredGroundRelativeOffset(undefined)).toBe(false);

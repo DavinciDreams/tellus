@@ -158,10 +158,11 @@ import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2
 import { parseWaterSettings, runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig, worldApiUrl } from "./tellus-runtime-config";
 import { applyActiveBiomeMixRegistryForWorld } from "./tellus-biome-mix";
 import { tellusWorldHttpUrl, tellusAssetLibraryUrl, tellusWorldWebSocketUrl, tellusVisitorId, tellusUserId, tellusAgentUrl, absoluteAssetForgeUrl, tellusApiUrl, absoluteTellusApiUrl, assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl, assetStoreLodModelUrl, assetStoreOptimizedAssetUrls, toAssetId } from "./tellus-urls-identity";
-import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded, activeEvoflowWorldBiomeCellAt } from "./tellus-terrain";
+import { terrainSculptOffsets, setTerrainStateDirty, setInitialWorldGeneratedThings, setInitialWorldPresence, terrainPaint, terrainStateDirty, terrainStateLoaded, terrainStateRevision, tellusWorldBackendAvailable, initialWorldGeneratedThings, initialWorldPresence, terrainPaintCode, terrainPaintKindFromCode, isTerrainPaintMode, terrainVertexColor, terrainGridIndex, distantTerrainGridIndex, terrainSculptOffsetAt, centralTerrainGridCoords, centralTerrainPaintAt, distantIslandLocalPoint, distantIslandWorldPoint, createDistantIslandSpec, distantIslandSpecs, rebuildDistantIslandSpecs, distantIslandLocalRadius, distantIslandSculptOffsetAt, distantIslandGridWorldPoint, distantTerrainGridCoords, distantTerrainPaintAt, nearestDistantIsland, distantIslandHeight, groundedPosition, groundHeightAt, normalizedDiscPosition, oceanPosition, waterBlockedByLand, waterVehiclePosition, distantIslandShorePosition, vehicleMode, isMountThing, isVehicleThing, isFreeMovingVehicle, airPosition, DEFAULT_AIR_GROUND_RELATIVE_OFFSET, movedVehiclePosition, baseTerrainHeight, terrainHeight, terrainKind, pondWaterLevel, terrainOffsetsPayload, terrainPaintPayload, distantTerrainOffsetsPayload, distantTerrainPaintPayload, tellusState, tellusStatePayload, terrainStorageKey, isResetTerrainState, saveTerrainStateLocally, loadTerrainStateLocally, applyTellusTerrainState, applyWorldTerrainTemplate, terrainFromWorldPatch, presenceFromWorldPatch, generatedFromWorldPatch, loadTellusWorldState, saveTellusWorldState, loadTellusState, loadChunkedWorldBounds, saveTellusStateSoon, saveTellusStateNow, isStalePendingGeneratedThing, setChunkedHeightProvider, setChunkedFlatGround, onTerrainTemplateLoaded, activeEvoflowWorldBiomeCellAt } from "./tellus-terrain";
 import {
   groundRelativeOffset,
   groundRelativeOffsetFromSurface,
+  hasAuthoredGroundRelativeOffset,
   positionAtGroundRelativeOffset,
 } from "./tellus-grounding";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
@@ -5856,6 +5857,25 @@ function createTellusWorld(
   const footprintGroundY = (thing: GeneratedThing): number | null =>
     footprintGroundYAt(thing, thing.position.x, thing.position.z);
 
+  const placementSurfaceYForThing = (thing: GeneratedThing): number | null => {
+    const mode = vehicleMode(thing);
+    if (mode === "water") {
+      return waterVehiclePositionForCurrentWorld(thing.position.x, thing.position.z).y;
+    }
+    if (mode === "air") {
+      const cruise = airPosition(thing.position.x, thing.position.z);
+      return cruise.y - DEFAULT_AIR_GROUND_RELATIVE_OFFSET;
+    }
+    return footprintGroundY(thing) ?? groundHeightAt(thing.position.x, thing.position.z);
+  };
+
+  const captureGroundRelativeOffsetFromPosition = (thing: GeneratedThing): boolean => {
+    const surfaceY = placementSurfaceYForThing(thing);
+    if (surfaceY === null || !Number.isFinite(surfaceY)) return false;
+    thing.verticalOffset = groundRelativeOffsetFromSurface(thing.position.y, surfaceY);
+    return true;
+  };
+
   const interiorVisiblePlacementForThing = (thing: GeneratedThing): Vec3 => {
     const floorY =
       interiorPlacementFloorHeightAt(
@@ -7106,8 +7126,26 @@ function createTellusWorld(
       const liveGround = footprintGroundYAt(thing, x, z, visitorPosition.y);
       state.lastY = liveGround !== null && Number.isFinite(liveGround) ? liveGround : null;
     }
-    return state.lastY !== null
-      ? { x, y: state.lastY, z }
+    if (state.lastY !== null) {
+      return positionAtGroundRelativeOffset(
+        { x, y: state.lastY, z },
+        state.lastY,
+        thing.verticalOffset,
+      );
+    }
+    const analyticGround = interiorObject
+      ? interiorPlacementFloorHeightAt(
+          x,
+          z,
+          thing.position.y - groundRelativeOffset(thing.verticalOffset),
+        )
+      : groundHeightAt(x, z);
+    return analyticGround !== null && Number.isFinite(analyticGround)
+      ? positionAtGroundRelativeOffset(
+          { x, y: analyticGround, z },
+          analyticGround,
+          thing.verticalOffset,
+        )
       : groundedPositionForCurrentSurface(x, z, thing.position);
   };
 
@@ -7115,8 +7153,9 @@ function createTellusWorld(
     if (isFreeMovingVehicle(pet)) return false;
     const liveGround = footprintGroundY(pet);
     if (liveGround === null || !Number.isFinite(liveGround)) return false;
-    if (liveGround <= pet.position.y + 0.05) return false;
-    pet.position = { ...pet.position, y: liveGround };
+    const targetY = liveGround + groundRelativeOffset(pet.verticalOffset);
+    if (targetY <= pet.position.y + 0.05) return false;
+    pet.position = { ...pet.position, y: targetY };
     updateThingMeshPosition(pet);
     refreshInstancedThingMatrix(pet);
     return true;
@@ -7674,7 +7713,15 @@ function createTellusWorld(
     if (mode === "water" && waterVehicleNeedsRelocation(thing.position)) {
       moveGeneratedToWater(id);
     } else if (mode === "air") {
-      thing.position = airPosition(thing.position.x, thing.position.z);
+      if (!hasAuthoredGroundRelativeOffset(thing.verticalOffset)) {
+        thing.verticalOffset = DEFAULT_AIR_GROUND_RELATIVE_OFFSET;
+      }
+      thing.position = movedVehiclePositionForCurrentWorld(
+        thing,
+        thing.position.x,
+        thing.position.z,
+        thing.position,
+      );
     }
     const boarded = thingById(id);
     if (boarded) {
@@ -7818,6 +7865,15 @@ function createTellusWorld(
     petAnimationModes.delete(id);
     petGroundRaycastState.delete(id);
     if (isPet) {
+      if (vehicleMode(thing) === "air" && !hasAuthoredGroundRelativeOffset(thing.verticalOffset)) {
+        thing.verticalOffset = DEFAULT_AIR_GROUND_RELATIVE_OFFSET;
+        thing.position = movedVehiclePositionForCurrentWorld(
+          thing,
+          thing.position.x,
+          thing.position.z,
+          thing.position,
+        );
+      }
       uninstanceThing(id);
       syncPetsToOwner(0, false);
     } else if (thing.modelUrl) {
@@ -8988,6 +9044,7 @@ function createTellusWorld(
         if (descend) y -= FLY_VERTICAL_SPEED * chunkSpeedScale * delta;
         const floor = (groundHeightAt(horiz.x, horiz.z) ?? SEA_LEVEL) + 2;
         boat.position = { x: horiz.x, y: clamp(y, floor, MAX_ALTITUDE), z: horiz.z };
+        captureGroundRelativeOffsetFromPosition(boat);
       } else {
         if (!hasInput) return;
         boat.position = movedVehiclePositionForCurrentWorld(
@@ -9201,12 +9258,14 @@ function createTellusWorld(
         const nowMs = performance.now();
         if (nowMs - lastFlightPublish > 150) {
           lastFlightPublish = nowMs;
+          captureGroundRelativeOffsetFromPosition(thing);
           publishGeneratedThing(thing);
         }
         publish();
       },
       onSettle: (p, q) => {
         applyPose(p, q);
+        captureGroundRelativeOffsetFromPosition(thing);
         publishGeneratedThing(thing);
         updateSelectionIndicator();
         publish();
