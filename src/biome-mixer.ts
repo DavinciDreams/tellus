@@ -118,6 +118,7 @@ root.innerHTML = `
         <p>Compose multi-plant communities from Tellus biomes, terrain paints, and procplants mutation JSON.</p>
       </div>
       <nav>
+        <a href="/biome-defaults.html">Biome Defaults</a>
         <a href="/tree-lod-gallery.html">Tree Lab</a>
         <a href="/">Tellus</a>
       </nav>
