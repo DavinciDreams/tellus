@@ -188,9 +188,9 @@ export interface GeneratedThing {
   rotationZ?: number;
   scale: number;
   color: number;
-  /** Explicit vertical displacement from the active placement surface. Persisted so delayed
-   * server echoes cannot reinterpret a deliberately submerged or raised asset as grounded. */
-  verticalOffset?: number;
+  /** Authoritative vertical displacement from the active placement surface. Zero means grounded;
+   * missing legacy values normalize to zero. Never infer authored height from position.y. */
+  verticalOffset: number;
   /** Explicit movement/ride mode. Asset metadata sets this once so mounts do not depend on a
    * fragile prompt-name whitelist after snapshot/server round-trips. */
   vehicleMode?: VehicleMode;

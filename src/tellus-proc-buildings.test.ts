@@ -76,6 +76,7 @@ describe("procedural building assets", () => {
       rotationY: 0,
       scale: 1,
       color: 0xffffff,
+      verticalOffset: 0,
       modelUrl: makeProceduralBuildingModelUrl("building-castle", 8),
       generationStatus: "ready",
     };

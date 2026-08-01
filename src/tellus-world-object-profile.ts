@@ -3,6 +3,7 @@ import type { VehicleMode } from "./tellus-types";
 import { airMountTerms, groundMountTerms, waterMountTerms } from "./tellus-constants";
 import { assetStoreGameOptimizedModelUrl, assetStoreIdFromModelUrl } from "./tellus-urls-identity";
 import { clamp, promptIncludesAny } from "./tellus-utils";
+import { groundRelativeOffset, hasAuthoredGroundRelativeOffset } from "./tellus-grounding";
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -286,16 +287,12 @@ export function buildWorldThingRuntimeProfile(
   thing: GeneratedThing,
   options: {
     dimensions?: WorldThingDimensions;
-    groundY?: number | null;
     mounted?: boolean;
   } = {},
 ): WorldThingRuntimeProfile {
   const mode = worldThingVehicleMode(thing);
-  const groundOffset =
-    options.groundY !== null && options.groundY !== undefined && Number.isFinite(options.groundY)
-      ? thing.position.y - options.groundY
-      : undefined;
-  const hasManualGroundOffset = groundOffset !== undefined && Math.abs(groundOffset) > 0.35;
+  const groundOffset = groundRelativeOffset(thing.verticalOffset);
+  const hasManualGroundOffset = hasAuthoredGroundRelativeOffset(thing.verticalOffset);
   const placementMode: WorldThingPlacementMode = options.mounted
     ? "mounted"
     : mode === "air"

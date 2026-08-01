@@ -24,6 +24,7 @@ describe("Tellus generated scene helpers", () => {
       rotationY: 0,
       scale: 1,
       color: 0xb9824b,
+      verticalOffset: 0,
       generationStatus: "failed",
     };
 
