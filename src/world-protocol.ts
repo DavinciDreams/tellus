@@ -304,6 +304,8 @@ export interface ChunksManifest {
   span: number; // 96
   segments: number; // 64
   chunks: ChunkManifestEntry[];
+  /** Ordered paint-code contract advertised by Hyades; absent on older/static manifests. */
+  paintKinds?: string[];
 }
 
 export interface ChunkUpdatedPatch {

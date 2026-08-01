@@ -17,7 +17,10 @@ import {
   CHUNK_SPAN,
   CHUNK_VERTEX_COUNT,
   SEA_LEVEL,
+  chunkedWorldSupportsPaint,
   setChunkedWorldChunks,
+  setChunkedWorldPaintKinds,
+  terrainPaintKinds,
 } from "./tellus-constants";
 import { runtimeConfig } from "./tellus-runtime-config";
 import type { ChunkData } from "./world-protocol";
@@ -33,6 +36,36 @@ function makeChunk(over: Partial<ChunkData> = {}): ChunkData {
     ...over,
   };
 }
+
+describe("terrain paint wire contract", () => {
+  it("matches the Hyades paint-code order", () => {
+    expect(terrainPaintKinds).toEqual([
+      "meadow",
+      "beach",
+      "dirt",
+      "rock",
+      "snow",
+      "flowers",
+      "stone",
+      "brick",
+      "grass",
+      "gravel",
+      "forest-floor",
+      "jungle-moss",
+      "desert-sand",
+    ]);
+    terrainPaintKinds.forEach((kind, index) => {
+      expect(terrainPaintCode(kind)).toBe(index + 1);
+    });
+  });
+
+  it("gates client-only paint modes against the advertised Hyades contract", () => {
+    setChunkedWorldPaintKinds(["meadow", "jungle-moss"]);
+    expect(chunkedWorldSupportsPaint("jungle-moss")).toBe(true);
+    expect(chunkedWorldSupportsPaint("desert-sand")).toBe(false);
+    setChunkedWorldPaintKinds(null);
+  });
+});
 
 const skirtVertexCount = (seg: number) => seg * 4;
 const terrainVertexCount = (seg: number) => (seg + 1) * (seg + 1) + skirtVertexCount(seg);
@@ -511,7 +544,7 @@ describe("createChunkRenderer sampleHeight (walk the sculpted chunk height)", ()
     r.dispose();
   });
 
-  it("keeps already-loaded paint when a new local stroke reloads as a partial server grid", async () => {
+  it("keeps already-loaded paint when the authoritative snapshot confirms it with a new stroke", async () => {
     const gravelPaint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
     const gravelX = CHUNK_SPAN * 0.25;
     const gravelZ = CHUNK_SPAN * 0.25;
@@ -529,6 +562,7 @@ describe("createChunkRenderer sampleHeight (walk the sculpted chunk height)", ()
     const dirtZ = CHUNK_SPAN * 0.72;
     r.applyLocalPaint("dirt", dirtX, dirtZ, 6);
     const dirtPaint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
+    dirtPaint[gravelZi * CHUNK_VERTEX_COUNT + gravelXi] = terrainPaintCode("gravel");
     const dirtXi = Math.round((dirtX / CHUNK_SPAN) * CHUNK_SEGMENTS);
     const dirtZi = Math.round((dirtZ / CHUNK_SPAN) * CHUNK_SEGMENTS);
     dirtPaint[dirtZi * CHUNK_VERTEX_COUNT + dirtXi] = terrainPaintCode("dirt");
@@ -540,6 +574,61 @@ describe("createChunkRenderer sampleHeight (walk the sculpted chunk height)", ()
 
     expect(r.samplePaint(gravelX, gravelZ)).toBe("gravel");
     expect(r.samplePaint(dirtX, dirtZ)).toBe("dirt");
+    r.dispose();
+  });
+
+  it("releases confirmed optimistic paint so later authoritative edits can replace it", async () => {
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    await loadRing(0, 0, r);
+    const x = CHUNK_SPAN * 0.5;
+    const z = CHUNK_SPAN * 0.5;
+    const xi = Math.round((x / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    const zi = Math.round((z / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    const index = zi * CHUNK_VERTEX_COUNT + xi;
+
+    r.applyLocalPaint("jungle-moss", x, z, 6);
+    const junglePaint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
+    junglePaint[index] = terrainPaintCode("jungle-moss");
+    overrides.set("0,0", { revision: 2, paint: junglePaint });
+    r.reloadChunk(0, 0);
+    r.flush();
+    await new Promise((res) => setTimeout(res, 0));
+    r.flush();
+    expect(r.samplePaint(x, z)).toBe("jungle-moss");
+
+    const dirtPaint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
+    dirtPaint[index] = terrainPaintCode("dirt");
+    overrides.set("0,0", { revision: 3, paint: dirtPaint });
+    r.reloadChunk(0, 0);
+    r.flush();
+    await new Promise((res) => setTimeout(res, 0));
+    r.flush();
+    expect(r.samplePaint(x, z)).toBe("dirt");
+    r.dispose();
+  });
+
+  it("discards rejected optimistic paint and restores the authoritative chunk", async () => {
+    const meadowPaint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
+    const x = CHUNK_SPAN * 0.5;
+    const z = CHUNK_SPAN * 0.5;
+    const xi = Math.round((x / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    const zi = Math.round((z / CHUNK_SPAN) * CHUNK_SEGMENTS);
+    meadowPaint[zi * CHUNK_VERTEX_COUNT + xi] = terrainPaintCode("meadow");
+    overrides.set("0,0", { revision: 1, paint: meadowPaint });
+
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    await loadRing(0, 0, r);
+    expect(r.samplePaint(x, z)).toBe("meadow");
+    r.applyLocalPaint("jungle-moss", x, z, 6);
+    expect(r.samplePaint(x, z)).toBe("jungle-moss");
+
+    r.discardLocalPaint();
+    r.flush();
+    await new Promise((res) => setTimeout(res, 0));
+    r.flush();
+    expect(r.samplePaint(x, z)).toBe("meadow");
     r.dispose();
   });
 
