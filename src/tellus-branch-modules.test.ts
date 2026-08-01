@@ -109,6 +109,19 @@ describe("branch module trees", () => {
     expect(wide.modules.length).toBe(narrow.modules.length);
     expect(wide.leaves.length).toBe(narrow.leaves.length);
 
+    const upward = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, tropism: 1 });
+    const downward = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, tropism: -1 });
+    const averageDirectionY = (tree: typeof baseline) =>
+      tree.segments.reduce(
+        (sum, segment) => sum + (segment.end.y - segment.start.y) / segment.end.distanceTo(segment.start),
+        0,
+      ) / tree.segments.length;
+    expect(averageDirectionY(upward)).toBeGreaterThan(averageDirectionY(downward));
+
+    const wideAngle = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, branchAngle: 2 });
+    const tightAngle = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, branchAngle: 0.3 });
+    expect(averageDirectionY(tightAngle)).toBeGreaterThan(averageDirectionY(wideAngle));
+
     const dense = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, branchDensity: 2.5 });
     const sparse = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, branchDensity: 0.3 });
     expect(dense.modules.length).toBeGreaterThan(sparse.modules.length);
@@ -119,8 +132,14 @@ describe("branch module trees", () => {
       tree.segments.reduce((sum, s) => sum + s.end.distanceTo(s.start), 0);
     expect(totalLength(vigorous)).toBeGreaterThan(totalLength(stunted));
 
-    const crowded = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, collisionBias: 1.5 });
-    expect(crowded.modules.length).toBeGreaterThan(1);
+    const collisionAvoiding = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, collisionBias: 1.5 });
+    const collisionNeutral = branchModuleTreeFromSpecies("blackOak", 7, { ...baseOptions, collisionBias: 0 });
+    const layoutDelta = collisionAvoiding.segments.reduce(
+      (sum, segment, index) => sum + segment.end.distanceTo(collisionNeutral.segments[index]!.end),
+      0,
+    );
+    expect(collisionAvoiding.segments.length).toBe(collisionNeutral.segments.length);
+    expect(layoutDelta).toBeGreaterThan(0.1);
 
     // Unset fields must reproduce the exact pre-existing shape (no behavior change for existing presets).
     const explicitDefaults = branchModuleTreeFromSpecies("blackOak", 7, {
