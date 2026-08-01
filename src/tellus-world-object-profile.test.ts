@@ -4,6 +4,7 @@ import {
   defaultScaleForRealisticKind,
   inferAssetVehicleMode,
   normalizeWorldThingAssetIdentity,
+  seatPositionForWorldThing,
   STANDARD_HUMANOID_HEIGHT,
   worldThingVehicleMode,
   worldThingTargetHeight,
@@ -77,13 +78,61 @@ describe("world object runtime profile", () => {
       position: { x: 0, y: 4, z: 0 },
     });
     const profile = buildWorldThingRuntimeProfile(horse, {
-      dimensions: { radius: 1.2, height: 2.1 },
+      dimensions: { radius: 1.2, height: 2.1, width: 1.1, depth: 3.2 },
     });
     expect(profile.placementMode).toBe("grounded");
     expect(profile.controllerKind).toBe("quadruped");
-    expect(profile.seatHeight).toBeGreaterThan(0.6);
-    expect(profile.seatHeight).toBeLessThan(1);
+    expect(profile.seatHeight).toBeGreaterThan(1);
+    expect(profile.seatHeight).toBeLessThan(1.3);
+    expect(profile.seatOffset.z).toBeLessThan(0);
     expect(profile.collisionRadius).toBeGreaterThan(0.45);
+  });
+
+  it("rotates the full local seat anchor with the mount instead of pinning every rider to its center", () => {
+    const horse = thing({
+      kind: "animal",
+      prompt: "Stylized Saddled Chestnut Horse",
+      position: { x: 10, y: 2, z: 20 },
+      rotationY: Math.PI / 2,
+    });
+    const profile = buildWorldThingRuntimeProfile(horse, {
+      dimensions: { radius: 1.6, height: 2.1, width: 1.1, depth: 3.2 },
+      mounted: true,
+    });
+    const position = seatPositionForWorldThing(horse, profile, { x: 0.2, y: 0, z: -0.1 });
+
+    expect(profile.placementMode).toBe("mounted");
+    expect(position.x).toBeCloseTo(10.456);
+    expect(position.y).toBeCloseTo(3.176);
+    expect(position.z).toBeCloseTo(19.9);
+  });
+
+  it("keeps an equine seat anchor proportional when the rendered mount is resized", () => {
+    const horse = thing({ kind: "animal", prompt: "Saddled Horse" });
+    const normal = buildWorldThingRuntimeProfile(horse, {
+      dimensions: { radius: 1.6, height: 2, width: 1, depth: 3 },
+    });
+    const resized = buildWorldThingRuntimeProfile(horse, {
+      dimensions: { radius: 3.2, height: 4, width: 2, depth: 6 },
+    });
+
+    expect(resized.seatOffset.x).toBeCloseTo(normal.seatOffset.x * 2);
+    expect(resized.seatOffset.y).toBeCloseTo(normal.seatOffset.y * 2);
+    expect(resized.seatOffset.z).toBeCloseTo(normal.seatOffset.z * 2);
+  });
+
+  it("uses different semantic seat anchors for enclosed vehicles and boats", () => {
+    const car = buildWorldThingRuntimeProfile(thing({ prompt: "small ground car", vehicleMode: "ground" }), {
+      dimensions: { radius: 1.2, height: 1.6, depth: 3.8 },
+    });
+    const boat = buildWorldThingRuntimeProfile(thing({ prompt: "wooden sailing boat" }), {
+      dimensions: { radius: 2.5, height: 2.4, depth: 7 },
+    });
+
+    expect(car.seatOffset.z).toBeGreaterThan(0);
+    expect(car.seatHeight).toBeLessThan(1);
+    expect(boat.seatOffset.z).toBeLessThan(0);
+    expect(boat.seatHeight).toBeGreaterThan(car.seatHeight);
   });
 
   it("does not classify mountain dogs as mounts", () => {

@@ -57,6 +57,8 @@ export interface WorldThingAssetIdentity {
 export interface WorldThingDimensions {
   radius: number;
   height: number;
+  width?: number;
+  depth?: number;
 }
 
 export interface WorldThingRuntimeProfile {
@@ -68,6 +70,9 @@ export interface WorldThingRuntimeProfile {
   dimensions?: WorldThingDimensions;
   groundOffset?: number;
   hasManualGroundOffset: boolean;
+  /** Rider-group origin in mount-local space. X/Z rotate with the mount; Y is measured from its origin. */
+  seatOffset: Vec3;
+  /** Compatibility/readout alias for seatOffset.y. */
   seatHeight: number;
   collisionRadius: number;
   collisionHeight: number;
@@ -318,6 +323,12 @@ export function buildWorldThingRuntimeProfile(
   const radius =
     options.dimensions?.radius ??
     Math.max(0.2, targetHeight * (buildingRecipeId ? 0.42 : 0.28));
+  const seatOffset = seatOffsetForThing(thing, {
+    radius,
+    height,
+    width: options.dimensions?.width,
+    depth: options.dimensions?.depth,
+  });
   return {
     id: thing.id,
     placementMode,
@@ -327,7 +338,8 @@ export function buildWorldThingRuntimeProfile(
     dimensions: options.dimensions,
     groundOffset,
     hasManualGroundOffset,
-    seatHeight: seatHeightForThing(thing, height),
+    seatOffset,
+    seatHeight: seatOffset.y,
     collisionRadius: buildingRecipeId
       ? clamp(radius * 0.82, 1.2, 14)
       : clamp(radius * 0.72, 0.45, 4.2),
@@ -340,22 +352,52 @@ export function seatPositionForWorldThing(
   profile: WorldThingRuntimeProfile,
   visualCenterOffset?: Vec3,
 ): Vec3 {
+  const yaw = Number.isFinite(thing.rotationY) ? thing.rotationY : 0;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const local = profile.seatOffset;
   return {
-    x: thing.position.x + (visualCenterOffset?.x ?? 0),
-    y: thing.position.y + profile.seatHeight,
-    z: thing.position.z + (visualCenterOffset?.z ?? 0),
+    x: thing.position.x + (visualCenterOffset?.x ?? 0) + local.x * cos - local.z * sin,
+    y: thing.position.y + local.y,
+    z: thing.position.z + (visualCenterOffset?.z ?? 0) + local.x * sin + local.z * cos,
   };
 }
 
-function seatHeightForThing(thing: GeneratedThing, height: number): number {
+function seatOffsetForThing(thing: GeneratedThing, dimensions: WorldThingDimensions): Vec3 {
   const mode = worldThingVehicleMode(thing);
-  // Visitor mesh origins are at the avatar's feet. For rideable animals, the mount "seat" is therefore
-  // the rider-origin height that visually drops the hips toward the saddle, not the saddle-top height.
-  if (mode === "ground" && thing.kind === "animal") return clamp(height * 0.38, 0.35, 1.45);
-  if (mode === "ground") return clamp(height * 0.62, 0.45, 2.8);
-  if (mode === "water") return clamp(height * 0.7, 0.45, 3.6);
-  if (mode === "air") return clamp(height * 0.55, 1.0, 5.5);
-  return Math.max(0.4, height) + 0.08;
+  const height = dimensions.height;
+  const depth = dimensions.depth ?? dimensions.radius * 2;
+  const lower = thing.prompt.toLowerCase();
+  // Full-height-only placement could neither find an animal's saddle (slightly aft) nor distinguish it
+  // from a vehicle/boat seat. Keep fallback anchors proportional to live rendered bounds and express
+  // fore/aft placement in mount-local space so turning the mount carries the rider around correctly.
+  if (mode === "ground" && thing.kind === "animal") {
+    const isEquine = /\b(horse|pony|donkey|mule|zebra|unicorn|deer|elk|moose|reindeer)\b/.test(lower);
+    return {
+      x: 0,
+      y: Math.max(0.05, height * (isEquine ? 0.56 : 0.5)),
+      z: -Math.max(0.02, depth * (isEquine ? 0.08 : 0.04)),
+    };
+  }
+  if (mode === "ground") {
+    const enclosed = /\b(car|truck|van|cab|cockpit)\b/.test(lower);
+    return {
+      x: 0,
+      y: Math.max(0.05, height * (enclosed ? 0.46 : 0.54)),
+      z: Math.max(0.02, depth * (enclosed ? 0.16 : 0.1)),
+    };
+  }
+  if (mode === "water") {
+    return {
+      x: 0,
+      y: Math.max(0.05, height * 0.62),
+      z: -Math.max(0.02, depth * 0.1),
+    };
+  }
+  if (mode === "air") {
+    return { x: 0, y: Math.max(0.05, height * 0.52), z: 0 };
+  }
+  return { x: 0, y: Math.max(0.4, height) + 0.08, z: 0 };
 }
 
 function isBuildingPrompt(lower: string): boolean {
