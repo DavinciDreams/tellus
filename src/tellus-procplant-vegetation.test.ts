@@ -39,6 +39,9 @@ import {
   createProcPlantVegetation,
   groundPlantDistanceDensity,
   procPlantBranchRadialSegments,
+  procPlantAllowsColdBuilds,
+  procPlantBuildWorkBudget,
+  procPlantStartupTerrainReady,
   procPlantTemplateFromAssetTemplate,
   procPlantChunkSeed,
   shouldUseCheapDistantTree,
@@ -1062,6 +1065,145 @@ describe("procplant vegetation", () => {
     vegetation.dispose();
   });
 
+  it("caps low-FPS startup work at one chunk and the baseline time budget", () => {
+    expect(procPlantBuildWorkBudget(true, 18)).toEqual({
+      maxBuilds: 1,
+      maxMs: 2.5,
+    });
+    expect(procPlantBuildWorkBudget(false, 18)).toEqual({
+      maxBuilds: 1,
+      maxMs: 2.5,
+    });
+  });
+
+  it("waits for initial chunked terrain hydration before admitting procplant builds", () => {
+    expect(procPlantStartupTerrainReady(false, undefined)).toBe(true);
+    expect(procPlantStartupTerrainReady(true, undefined)).toBe(false);
+    expect(procPlantStartupTerrainReady(true, { active: 1, pending: 24 })).toBe(false);
+    expect(procPlantStartupTerrainReady(true, { active: 25, pending: 1 })).toBe(false);
+    expect(procPlantStartupTerrainReady(true, { active: 25, pending: 0 })).toBe(true);
+  });
+
+  it("keeps cold procedural graph generation out of initial and low-FPS population passes", () => {
+    expect(procPlantAllowsColdBuilds(true, true, 60, 5_000)).toBe(false);
+    expect(procPlantAllowsColdBuilds(true, false, 18, 5_000)).toBe(false);
+    expect(procPlantAllowsColdBuilds(false, false, 60, 5_000)).toBe(false);
+    expect(procPlantAllowsColdBuilds(true, false, 60, 2_999)).toBe(false);
+    expect(procPlantAllowsColdBuilds(true, false, 60, 3_000)).toBe(true);
+  });
+
+  it("coalesces repeated terrain hydration invalidations into one rebuild per affected chunk", () => {
+    const vegetation = createProcPlantVegetation({
+      scene: new THREE.Scene(),
+      worldId: "chunked-terrain-hydration-coalescing-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -32, maxX: 32, minZ: -32, maxZ: 32 },
+      chunkSize: 16,
+      maxRing: 1,
+      densityMultiplier: 0,
+      viewMode: () => "first",
+    });
+
+    vegetation.update(0, 0, 1, 18, 0);
+    const initiallyBuilt = vegetation.stats().chunksBuilt;
+    const loadedRegion = [{ minX: -16, maxX: 16, minZ: -16, maxZ: 16 }];
+    for (let index = 0; index < 12; index++) {
+      vegetation.notifyRegionsChanged(loadedRegion);
+    }
+
+    expect(vegetation.stats().queuedRebuilds).toBeLessThanOrEqual(vegetation.stats().chunks);
+    for (
+      let index = 0;
+      index < 80 && (
+        vegetation.stats().queuedRebuilds > 0 ||
+        vegetation.stats().deferredColdChunks > 0
+      );
+      index++
+    ) {
+      vegetation.update(0, 0, 1, 18, 1_000 + index * 1_000);
+    }
+    const settled = vegetation.stats();
+    expect(settled.queuedRebuilds).toBe(0);
+    expect(settled.deferredColdChunks).toBe(0);
+    expect(settled.chunksBuilt).toBeLessThanOrEqual(settled.chunks + initiallyBuilt);
+
+    for (let index = 0; index < 20; index++) {
+      vegetation.update(0, 0, 1, 18, 30_000 + index * 300);
+    }
+    expect(vegetation.stats().chunksBuilt).toBe(settled.chunksBuilt);
+
+    vegetation.dispose();
+  });
+
+  it("keeps a deterministic forest chunk within the procplant loading structure budget", () => {
+    const worldId = "chunked-forest-loading-budget-test";
+    const forestMix: TellusBiomeMixDefinition = {
+      version: 1,
+      id: "forest-loading-budget",
+      label: "Forest Loading Budget",
+      source: "terrain-paint",
+      terrainPaint: "forest-floor",
+      targetTerrainPaint: "forest-floor",
+      seed: 73,
+      density: 1,
+      diversity: 1,
+      targetVerticesPerChunk: 12_000,
+      entries: [{
+        id: "forest-loading-blue-spruce",
+        label: "Blue Spruce",
+        source: "preset",
+        presetId: "blueSpruce",
+        weight: 1,
+        density: 1,
+        scale: 1,
+        environment: { light: 0.72, moisture: 0.58, crowding: 0.44, biomeWarmth: 0.35 },
+        seed: 91,
+        enabled: true,
+      }],
+    };
+    const vegetation = createProcPlantVegetation({
+      scene: new THREE.Scene(),
+      worldId,
+      sampleHeight: () => 12,
+      samplePaint: () => "forest-floor",
+      bounds: { minX: 0, maxX: 16, minZ: 0, maxZ: 16 },
+      chunkSize: 16,
+      maxRing: 0,
+      densityMultiplier: 1,
+      viewMode: () => "first",
+      biomeMixRegistry: {
+        version: 1,
+        worldId,
+        updatedAt: new Date(0).toISOString(),
+        mixesByEcologyBiome: {},
+        mixesByTerrainPaint: { "forest-floor": forestMix },
+      },
+    });
+
+    for (
+      let index = 0;
+      index < 20 && (
+        index === 0 ||
+        vegetation.stats().queuedRebuilds > 0 ||
+        vegetation.stats().deferredColdChunks > 0
+      );
+      index++
+    ) {
+      vegetation.update(8, 8, 12, 60, 1_000 + index * 1_000);
+    }
+    const stats = vegetation.stats();
+
+    expect(stats.chunks).toBe(1);
+    expect(stats.queuedRebuilds).toBe(0);
+    expect(stats.chunksBuilt).toBe(2);
+    expect(stats.plants).toBe(4);
+    expect(stats.stemTriangles).toBeLessThanOrEqual(50_000);
+    expect(stats.organDraws).toBeLessThanOrEqual(4);
+
+    vegetation.dispose();
+  });
+
   it("drains procplant terrain rebuild notifications without stale queues", () => {
     const scene = new THREE.Scene();
     const vegetation = createProcPlantVegetation({
@@ -1153,7 +1295,7 @@ describe("procplant vegetation", () => {
     expect(travel.grassInstances).toBeGreaterThan(0);
 
     moving = false;
-    for (let i = 0; i < 30 && vegetation.stats().deferredColdChunks > 0; i++) {
+    for (let i = 0; i < 120 && vegetation.stats().deferredColdChunks > 0; i++) {
       vegetation.update(0, 0, 1, 60, 5_000 + i * 300);
     }
     const refined = vegetation.stats();

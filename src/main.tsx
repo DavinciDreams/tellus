@@ -48,6 +48,7 @@ import {
 } from "./tellus-procplant-biomes";
 import {
   createProcPlantVegetation,
+  procPlantStartupTerrainReady,
   type ProcPlantVegetationStats,
 } from "./tellus-procplant-vegetation";
 import { staticTerrainAutoVegetationEnabled } from "./tellus-static-terrain";
@@ -1627,6 +1628,7 @@ function createTellusWorld(
     staticTerrainAllowsAutoVegetation &&
     templateAllowsAutoVegetation &&
     (isChunked || procPlantPreference === "1");
+  let procPlantTerrainHydrated = !isChunked;
   const procplants = procplantsEnabled
     ? createProcPlantVegetation({
         scene,
@@ -1647,22 +1649,20 @@ function createTellusWorld(
         densityMultiplier: procPlantDensityPreference,
         isExcluded: terrainVegetationExcluded,
         viewMode: () => cameraMode,
-        fullDetailLod: activeWorldTemplate === "tellus",
+        // Chunked worlds retain full close-range detail but use the stable distance LODs for their
+        // much wider streaming ring. Finite Tellus islands can still opt into all-ring full detail.
+        fullDetailLod: activeWorldTemplate === "tellus" && !isChunked,
         shouldPauseBuild: hasMovementKeyHeld,
         shouldDeferBuild: () => {
           const terrainStats = chunkRenderer?.stats();
-          const terrainReady = !isChunked || Boolean(
-            terrainStats &&
-            (
-              terrainStats.active > 0 ||
-              (terrainStats.ready > 0 && terrainStats.inflight === 0)
-            ),
-          );
+          if (!procPlantTerrainHydrated) {
+            procPlantTerrainHydrated = procPlantStartupTerrainReady(isChunked, terrainStats);
+          }
           const skyboxReady =
             Boolean(activeSkyboxUrl) ||
             !runtimeConfig.skyboxUrl ||
             performance.now() - worldCreatedAt > 3500;
-          return !terrainReady || !skyboxReady;
+          return !procPlantTerrainHydrated || !skyboxReady;
         },
       })
     : {

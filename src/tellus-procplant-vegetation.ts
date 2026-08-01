@@ -263,6 +263,39 @@ const LOW_FPS_BUILD_BUDGET = 1;
 const NORMAL_BUILD_BUDGET = 2;
 const LOW_FPS_BUILD_MS_BUDGET = 2.5;
 const NORMAL_BUILD_MS_BUDGET = 5;
+const COLD_REFINEMENT_MIN_FPS = 50;
+const COLD_REFINEMENT_DELAY_MS = 1_000;
+const COLD_REFINEMENT_HEALTHY_WINDOW_MS = 3_000;
+
+export const procPlantBuildWorkBudget = (stationary: boolean, fps: number) => ({
+  maxBuilds: fps < 28
+    ? LOW_FPS_BUILD_BUDGET
+    : stationary
+      ? NORMAL_BUILD_BUDGET + 2
+      : 1,
+  maxMs: fps < 28
+    ? LOW_FPS_BUILD_MS_BUDGET
+    : stationary
+      ? NORMAL_BUILD_MS_BUDGET + 3
+      : LOW_FPS_BUILD_MS_BUDGET,
+});
+
+export const procPlantStartupTerrainReady = (
+  isChunked: boolean,
+  stats: { active: number; pending: number } | null | undefined,
+): boolean => !isChunked || Boolean(stats && stats.active > 0 && stats.pending === 0);
+
+export const procPlantAllowsColdBuilds = (
+  stationary: boolean,
+  initialPopulationPending: boolean,
+  fps: number,
+  healthyFpsMs: number,
+): boolean =>
+  stationary &&
+  !initialPopulationPending &&
+  fps >= COLD_REFINEMENT_MIN_FPS &&
+  healthyFpsMs >= COLD_REFINEMENT_HEALTHY_WINDOW_MS;
+
 const MIN_PROCPLANT_GROUND_HEIGHT = SEA_LEVEL + 0.35;
 const GRASS_CARPET_TUFTS_LOD0 = 36;
 const GRASS_CARPET_TUFTS_LOD1 = 16;
@@ -914,6 +947,8 @@ export function createProcPlantVegetation(
   let buildPausedForMotion = false;
   let currentFps = 60;
   let lastLodRefreshAt = Number.NEGATIVE_INFINITY;
+  let initialPopulationCompletedAt: number | null = null;
+  let healthyFpsSince: number | null = null;
   let lodRefreshes = 0;
   let disposed = false;
   const active = new Map<string, ActiveChunk>();
@@ -1340,13 +1375,17 @@ export function createProcPlantVegetation(
     }
   }
 
-  const buildChunk = (chunk: ActiveChunk, allowColdBuilds: boolean) => {
+  const buildChunk = (
+    chunk: ActiveChunk,
+    allowColdBuilds: boolean,
+    travelBuild = !allowColdBuilds,
+    forceColdRefinement = travelBuild && densityMultiplier > 0,
+  ) => {
     // A streamed chunk must become visible quickly while the player is travelling. Full-density grass
     // and connected branch instances are retained for the settled build, but constructing all of their
     // matrices in one movement frame causes a visible hitch even when every source template is cached.
     // Travel builds therefore use the existing cheap tree silhouette and far-grass spacing, then mark
     // themselves for the same gradual refinement path used by cold cache entries.
-    const travelBuild = !allowColdBuilds;
     disposeGroup(chunk.group);
     chunk.impostors = [];
     chunk.stats = {
@@ -1369,7 +1408,7 @@ export function createProcPlantVegetation(
     // Travel mode deliberately uses sparse grass and tree silhouettes. Mark every such chunk for a
     // settled rebuild, even when all source templates were already warm in cache; otherwise grass-only
     // chunks could remain permanently at the streaming density after movement stopped.
-    chunk.needsColdRefinement = travelBuild;
+    chunk.needsColdRefinement = forceColdRefinement;
     const seed = procPlantChunkSeed(options.worldId, chunk.cx, chunk.cz, 0);
     const rand = mulberry32(seed);
     // Candidate count and density are invariant across LOD rings. A lower-detail chunk renders the
@@ -1715,12 +1754,17 @@ export function createProcPlantVegetation(
           ...(treeBackend?.kind === "lsystem" ? treeBackend : {}),
         };
         const { key: branchTreeKey } = branchModuleTreeCacheKey(branchTreeSpecies, renderSeed, branchTreeOptions);
-        const moduleTree = buildBranchModuleTreeCached(
-          branchTreeSpecies,
-          renderSeed,
-          branchTreeOptions,
-          allowColdBuilds,
-        );
+        // Streaming/startup passes stay on the normalized silhouette even if another chunk already
+        // warmed this graph. Expanding a warm graph into hundreds of branch/leaf matrices was still
+        // enough to create 0.5s+ main-thread stalls during the initial population pass.
+        const moduleTree = travelBuild
+          ? null
+          : buildBranchModuleTreeCached(
+              branchTreeSpecies,
+              renderSeed,
+              branchTreeOptions,
+              allowColdBuilds,
+            );
         if (!moduleTree) {
           // A brand-new branch graph is still deferred during movement, but the emergency silhouette
           // is normalized to the same one-unit tree height so it cannot tower over its replacement.
@@ -2074,10 +2118,28 @@ export function createProcPlantVegetation(
     prioritizeRebuildQueue(centerCx, centerCz);
     const movementIntentActive = options.shouldPauseBuild?.() ?? false;
     const stationary = !movementIntentActive && (chunksBuilt === 0 || nowMs - lastPlayerMovedAt > 650);
+    const initialPopulationPending = [...active.values()].some((chunk) => chunk.builtLod === null);
+    if (fps >= COLD_REFINEMENT_MIN_FPS) healthyFpsSince ??= nowMs;
+    else healthyFpsSince = null;
+    const healthyFpsMs = healthyFpsSince === null ? 0 : nowMs - healthyFpsSince;
+    const coldBuildsAllowed = procPlantAllowsColdBuilds(
+      stationary,
+      initialPopulationPending,
+      fps,
+      healthyFpsMs,
+    );
     // Ring changes do not invalidate visible vegetation while moving. The existing tree graph is
     // still valid; only its ideal density changed. Once streaming catches up and the player settles,
     // refine one nearest mismatched chunk at a time so forests never disappear or rebuild in a burst.
-    if (stationary && rebuildQueue.length === 0 && nowMs - lastLodRefreshAt >= 250) {
+    if (
+      stationary &&
+      !initialPopulationPending &&
+      initialPopulationCompletedAt !== null &&
+      nowMs - initialPopulationCompletedAt >= COLD_REFINEMENT_DELAY_MS &&
+      coldBuildsAllowed &&
+      rebuildQueue.length === 0 &&
+      nowMs - lastLodRefreshAt >= 250
+    ) {
       const lodCandidate = [...active.values()]
         .filter((chunk) =>
           chunk.needsColdRefinement ||
@@ -2106,30 +2168,33 @@ export function createProcPlantVegetation(
       maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
       return;
     }
-    const maxBuilds = stationary
-      ? (fps < 28 ? LOW_FPS_BUILD_BUDGET + 1 : NORMAL_BUILD_BUDGET + 2)
-      : 1;
-    const buildMsBudget = stationary
-      ? (fps < 28 ? LOW_FPS_BUILD_MS_BUDGET + 1.5 : NORMAL_BUILD_MS_BUDGET + 3)
-      : LOW_FPS_BUILD_MS_BUDGET;
+    const buildWorkBudget = procPlantBuildWorkBudget(stationary, fps);
     const buildStartedAt = performance.now();
-    let budget = maxBuilds;
+    let budget = buildWorkBudget.maxBuilds;
     while (budget > 0 && rebuildQueue.length > 0) {
       const key = rebuildQueue.shift()!;
       queued.delete(key);
       const chunk = active.get(key);
       if (!chunk || chunk.rev === terrainRev) continue;
       const chunkBuildStartedAt = performance.now();
-      buildChunk(chunk, stationary);
+      buildChunk(chunk, coldBuildsAllowed);
       const chunkBuildMs = performance.now() - chunkBuildStartedAt;
       lastBuildMs = chunkBuildMs;
       maxBuildMs = Math.max(maxBuildMs, chunkBuildMs);
       totalBuildMs += chunkBuildMs;
       chunksBuilt++;
       builtLastUpdate++;
+      if (coldBuildsAllowed) healthyFpsSince = null;
       if (!stationary) lastMovingBuildAt = nowMs;
       budget--;
-      if (performance.now() - buildStartedAt >= buildMsBudget) break;
+      if (performance.now() - buildStartedAt >= buildWorkBudget.maxMs) break;
+    }
+    if (
+      initialPopulationCompletedAt === null &&
+      rebuildQueue.length === 0 &&
+      [...active.values()].every((chunk) => chunk.builtLod !== null)
+    ) {
+      initialPopulationCompletedAt = nowMs;
     }
     lastUpdateMs = performance.now() - updateStartedAt;
     maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
