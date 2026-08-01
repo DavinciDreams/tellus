@@ -48,6 +48,10 @@ export const CLIP_IDS: Record<RigClipName, string | undefined> = {
   wave: "6a20d72890ef2a93f06a2027", // Stand Up and Wave
 };
 
+// Core mounted posture. Preload it with locomotion so boarding never spends a visible interval in
+// the standing idle while the general emote catalogue warms up.
+export const MOUNTED_SITTING_CLIP_ID = "d3678403-d5b1-44f3-84e7-65b12479ace2";
+
 // Locomotion tuning. Speeds are world units/sec (player walk speed is ~13–19 depending on world
 // scale); hysteresis keeps remote avatars (fed by ~300ms presence deltas) from flickering.
 const WALK_ENTER_SPEED = 1.6;
@@ -180,6 +184,8 @@ export interface AvatarRig {
   /** Horizontal speed in world units/sec — drives walk/idle (with hysteresis + clip timescale). */
   setMoving(speed: number): void;
   setAirborne(airborne: boolean): void;
+  /** Hold a looped seated pose while riding, falling back harmlessly when the rig has no sit clip. */
+  setMounted(mounted: boolean): void;
   /** Feed a remote presence target — derives speed/airborne from successive update deltas. */
   notePresenceUpdate(x: number, y: number, z: number, nowMs: number): void;
   /** Advance mixer (+ VRM spring bones on the VRM path). Call once per frame. */
@@ -341,6 +347,27 @@ function loadVrmaAnimation(url: string, rendererIsWebGPU: boolean): Promise<VRMA
     vrmaCache.set(url, pending);
   }
   return pending;
+}
+
+/** Keep a mounted pose's limb rotations while discarding authored hips/root translation. Tellus
+ * already places the avatar group at the saddle, so applying that translation a second time drops
+ * the seated body beneath the mount. */
+export function stripMountedRootTranslation(
+  clip: THREE.AnimationClip,
+  hipsNodeName: string | undefined,
+): THREE.AnimationClip {
+  if (!hipsNodeName) return clip;
+  const positionTrack = `${hipsNodeName}.position`;
+  clip.tracks = clip.tracks.filter((track) => track.name !== positionTrack);
+  clip.resetDuration();
+  return clip;
+}
+
+function createMountedVrmAnimationClip(animation: VRMAnimation, vrm: VRM): THREE.AnimationClip {
+  return stripMountedRootTranslation(
+    createVRMAnimationClip(animation, vrm),
+    vrm.humanoid.getNormalizedBoneNode("hips")?.name,
+  );
 }
 
 async function loadOptionalClip(
@@ -688,6 +715,8 @@ export abstract class LocomotionAvatarRig implements AvatarRig {
   // One-shot emote overlay: while set, locomotion transitions only RECORD their target (play()
   // early-returns) and the resume happens when the mixer fires "finished" for this action.
   private emoteAction: THREE.AnimationAction | undefined;
+  protected mounted = false;
+  private mountedAction: THREE.AnimationAction | undefined;
   protected disposed = false;
 
   protected constructor(root: THREE.Group, mixer: THREE.AnimationMixer) {
@@ -700,12 +729,16 @@ export abstract class LocomotionAvatarRig implements AvatarRig {
   play(name: RigClipName, fadeSec = 0.25): void {
     const next = this.actions[name];
     if (!next || this.current === name) return;
+    if (this.mounted) {
+      this.current = name;
+      return;
+    }
     if (this.emoteAction) {
       // Mid-emote: remember where locomotion wants to be; the emote's finish resumes there.
       this.current = name;
       return;
     }
-    const prev = this.current ? this.actions[this.current] : undefined;
+    const prev = this.mountedAction ?? (this.current ? this.actions[this.current] : undefined);
     next.reset();
     next.setEffectiveWeight(1);
     if (fadeSec > 0 && prev) {
@@ -726,7 +759,7 @@ export abstract class LocomotionAvatarRig implements AvatarRig {
     this.walking = wasWalking
       ? this.smoothedSpeed > WALK_EXIT_SPEED
       : this.smoothedSpeed > WALK_ENTER_SPEED;
-    if (!this.airborne && this.walking !== wasWalking) {
+    if (!this.airborne && !this.mounted && this.walking !== wasWalking) {
       this.play(this.walking ? "walk" : "idle");
     }
   }
@@ -738,13 +771,54 @@ export abstract class LocomotionAvatarRig implements AvatarRig {
     else this.exitAirborne();
   }
 
+  setMounted(mounted: boolean): void {
+    if (this.disposed || mounted === this.mounted) return;
+    this.mounted = mounted;
+    if (mounted) {
+      // Mounting is a hard locomotion boundary: never let idle/walk continue underneath a missing or
+      // still-loading sit action. A rig without a seated clip holds its rest pose deterministically.
+      for (const action of Object.values(this.actions)) action?.stop();
+      const action =
+        this.resolveEmoteAction("Sitting") ??
+        this.resolveEmoteAction("Sit") ??
+        this.resolveEmoteAction("Seated");
+      if (action) this.activateMountedAction(action);
+      return;
+    }
+    this.mountedAction?.stop();
+    this.mountedAction = undefined;
+    if (!this.emoteAction) {
+      this.current = undefined;
+      if (this.airborne) this.enterAirborne();
+      else this.play(this.walking ? "walk" : "idle", 0.18);
+    }
+  }
+
+  protected hasMountedAction(): boolean {
+    return Boolean(this.mountedAction);
+  }
+
+  protected activateMountedAction(action: THREE.AnimationAction): void {
+    if (!this.mounted || this.disposed || this.mountedAction === action) return;
+    const previous = this.current ? this.actions[this.current] : undefined;
+    previous?.fadeOut(0.18);
+    this.mountedAction?.stop();
+    this.mountedAction = action;
+    action.reset();
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    action.setEffectiveWeight(1);
+    action.timeScale = 1;
+    action.fadeIn(0.18);
+    action.play();
+  }
+
   playEmote(name: string): void {
     if (this.disposed) return;
     const action = this.resolveEmoteAction(name);
     if (!action) return; // unknown clip → ignore
     // A newer emote replaces a running one mid-flight.
     if (this.emoteAction && this.emoteAction !== action) this.emoteAction.fadeOut(0.15);
-    const prev = this.current ? this.actions[this.current] : undefined;
+    const prev = this.mountedAction ?? (this.current ? this.actions[this.current] : undefined);
     if (prev && prev !== action) prev.fadeOut(0.2);
     this.emoteAction = action;
     action.reset();
@@ -777,7 +851,9 @@ export abstract class LocomotionAvatarRig implements AvatarRig {
     action.fadeOut(0.2);
     // Resume whatever locomotion currently calls for (current was only recorded while emoting).
     this.current = undefined;
-    if (this.airborne) this.enterAirborne();
+    if (this.mounted && this.mountedAction) {
+      this.mountedAction.reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(0.2).play();
+    } else if (this.airborne) this.enterAirborne();
     else this.play(this.walking ? "walk" : "idle", 0.2);
   };
 
@@ -871,6 +947,7 @@ class VrmAvatarRig extends LocomotionAvatarRig {
     vrm: VRM,
     clips: Partial<Record<RigClipName, VRMAnimation>>,
     rendererIsWebGPU: boolean,
+    mountedClip?: VRMAnimation,
   ) {
     super(root, new THREE.AnimationMixer(vrm.scene));
     this.vrm = vrm;
@@ -881,6 +958,11 @@ class VrmAvatarRig extends LocomotionAvatarRig {
       const clip = createVRMAnimationClip(animation, vrm);
       clip.name = name;
       this.actions[name] = this.mixer.clipAction(clip);
+    }
+    if (mountedClip) {
+      const clip = createMountedVrmAnimationClip(mountedClip, vrm);
+      clip.name = "Sitting";
+      this.dynamicEmotes.set("sitting", this.mixer.clipAction(clip));
     }
     this.play("idle", 0);
   }
@@ -896,6 +978,11 @@ class VrmAvatarRig extends LocomotionAvatarRig {
   // play immediately via the base. An unknown name is loaded from the VRMA catalogue, retargeted onto
   // this VRM, cached, then played — so the first use has a small load delay and every use after is
   // instant (the VRMA binary is also shared across avatars via vrmaCache).
+  override setMounted(mounted: boolean): void {
+    super.setMounted(mounted);
+    if (mounted && !this.hasMountedAction()) this.playEmote("Sitting");
+  }
+
   override playEmote(name: string): void {
     if (this.disposed) return;
     if (this.resolveEmoteAction(name)) {
@@ -912,12 +999,17 @@ class VrmAvatarRig extends LocomotionAvatarRig {
         const animation = await loadVrmaAnimation(entry.url, this.rendererIsWebGPU);
         if (this.disposed) return;
         if (!this.dynamicEmotes.has(key)) {
-          const clip = createVRMAnimationClip(animation, this.vrm);
+          const clip = key === "sitting"
+            ? createMountedVrmAnimationClip(animation, this.vrm)
+            : createVRMAnimationClip(animation, this.vrm);
           clip.name = entry.name;
           this.dynamicEmotes.set(key, this.mixer.clipAction(clip));
         }
-        // Re-issue now that the action exists (only if no newer emote has taken over since).
-        super.playEmote(name);
+        // Mount posture is a persistent state, not a one-shot emote. If the rider dismounted while
+        // this clip was loading, leave it cached for later instead of forcing the seated pose.
+        const action = this.dynamicEmotes.get(key);
+        if (this.mounted && key === "sitting" && action) this.activateMountedAction(action);
+        else if (!this.mounted || key !== "sitting") super.playEmote(name);
       } catch {
         // Unknown/failed clip → leave the avatar as-is (matches the base "ignore unknown" contract).
       } finally {
@@ -1242,12 +1334,13 @@ export async function attachVrmAvatar(
   // fetch (resolves to the built-in clips immediately if /api/vrma isn't live yet).
   void loadVrmaCatalog();
   try {
-    const [vrm, idle, walk, jump, wave] = await Promise.all([
+    const [vrm, idle, walk, jump, wave, sitting] = await Promise.all([
       loadVrm(assetDownloadUrl(storeId ?? pickAvatarId(visitorId)), rendererIsWebGPU),
       loadOptionalClip(CLIP_IDS.idle, rendererIsWebGPU),
       loadOptionalClip(CLIP_IDS.walk, rendererIsWebGPU),
       loadOptionalClip(CLIP_IDS.jump, rendererIsWebGPU),
       loadOptionalClip(CLIP_IDS.wave, rendererIsWebGPU),
+      loadOptionalClip(MOUNTED_SITTING_CLIP_ID, rendererIsWebGPU),
     ]);
     if (!idle || !walk) {
       VRMUtils.deepDispose(vrm.scene);
@@ -1260,7 +1353,7 @@ export async function attachVrmAvatar(
       return null;
     }
     mountVrmOnAvatar(group, vrm);
-    return new VrmAvatarRig(group, vrm, { idle, walk, jump, wave }, rendererIsWebGPU);
+    return new VrmAvatarRig(group, vrm, { idle, walk, jump, wave }, rendererIsWebGPU, sitting);
   } catch (error) {
     if (!warnedVrmLoadFailure) {
       warnedVrmLoadFailure = true;

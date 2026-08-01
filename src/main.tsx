@@ -166,7 +166,7 @@ import {
   positionAtGroundRelativeOffset,
 } from "./tellus-grounding";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
-import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, generatedModelHasRuntimeAnimations, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, positionPondRipplePatch, triggerPondRipple, updatePondRipples, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
+import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, fittedModelDimensions, generatedModelHasRuntimeAnimations, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, positionPondRipplePatch, triggerPondRipple, updatePondRipples, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
 import { createTerrainMaterial, terrainKindCode, terrainTextureDiagnostics } from "./tellus-terrain-material";
 import { largeWorldBaseHeight, largeWorldBiomeCellAt, largeWorldTerrainKind, usesContinentalChunkedTerrain } from "./tellus-large-world-terrain";
 import {
@@ -5806,20 +5806,28 @@ function createTellusWorld(
   const thingFootprint = (thing: GeneratedThing): ThingFootprint | null => {
     const proceduralModel = parseProceduralModelUrl(thing.modelUrl ?? "");
     const proceduralBuilding = proceduralModel?.building;
+    const mesh = generatedMeshes.get(thing.id);
     const key = [
       thing.id,
       thing.modelUrl ?? "",
+      mesh?.uuid ?? "missing",
       thing.scale.toFixed(3),
       (thing.rotationY ?? 0).toFixed(3),
     ].join(":");
     const cached = footprintCache.get(key);
     if (cached) return cached;
-    const mesh = generatedMeshes.get(thing.id);
     if (!mesh) return null;
-    const box = measureModelBounds(mesh); // skinning-aware: bind-pose boxes of animated models are bogus
-    if (box.isEmpty()) return null;
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
+    const fitted = fittedModelDimensions(mesh);
+    const box = fitted
+      ? null
+      : measureModelBounds(mesh); // skinning-aware fallback for models without stable fitted metadata
+    if (!fitted && (!box || box.isEmpty())) return null;
+    const size = fitted
+      ? new THREE.Vector3(fitted.width, fitted.height, fitted.depth)
+      : box!.getSize(new THREE.Vector3());
+    const center = fitted
+      ? mesh.getWorldPosition(new THREE.Vector3())
+      : box!.getCenter(new THREE.Vector3());
     const fp: ThingFootprint = {
       radius: Math.max(size.x, size.z) / 2,
       height: size.y,
@@ -6776,6 +6784,7 @@ function createTellusWorld(
     }
     const existing = thingById(normalized.id);
     if (existing) {
+      const previousTargetHeight = assetTargetHeight(existing);
       const pendingUpsert = pendingGeneratedUpserts.get(existing.id);
       if (pendingUpsert) {
         const remoteSignature = generatedThingSignature(normalized);
@@ -6813,6 +6822,15 @@ function createTellusWorld(
         existing.rotationY = normalized.rotationY;
         existing.rotationZ = normalized.rotationZ ?? 0;
         existing.scale = normalized.scale;
+        const nextTargetHeight = assetTargetHeight(existing);
+        const existingMesh = generatedMeshes.get(existing.id);
+        if (
+          existingMesh &&
+          previousTargetHeight > 0 &&
+          Math.abs(nextTargetHeight - previousTargetHeight) > 0.0001
+        ) {
+          existingMesh.scale.multiplyScalar(nextTargetHeight / previousTargetHeight);
+        }
       }
       existing.color = normalized.color;
       existing.verticalOffset = normalized.verticalOffset === undefined
@@ -9315,6 +9333,10 @@ function createTellusWorld(
   };
 
   const syncMeshes = (now: number) => {
+    const mountedThing = sailingThingId ? thingById(sailingThingId) : undefined;
+    if (mountedThing && Number.isFinite(mountedThing.rotationY)) {
+      avatarFacing = mountedThing.rotationY;
+    }
     visitor.position.set(
       visitorPosition.x,
       visitorPosition.y,
@@ -10005,6 +10027,7 @@ function createTellusWorld(
     if (localRig && delta > 0) {
       const ldx = visitorPosition.x - lastLocalAvatarPos.x;
       const ldz = visitorPosition.z - lastLocalAvatarPos.z;
+      localRig.setMounted(Boolean(sailingThingId));
       localRig.setMoving(Math.hypot(ldx, ldz) / delta);
       localRig.setAirborne(playerAirborne || flying);
     }

@@ -4,6 +4,7 @@ import type { GeneratedThing } from "./tellus-types";
 import {
   createGeneratedMesh,
   fitModelToHeight,
+  fittedModelDimensions,
   generatedModelHasRuntimeAnimations,
   inferGeneratedKind,
   placeObjectAboveGround,
@@ -84,6 +85,17 @@ describe("Tellus generated scene helpers", () => {
     expect(bounds.min.y).toBeCloseTo(19.5, 6);
     expect(center.x).toBeCloseTo(-3, 6);
     expect(center.z).toBeCloseTo(4, 6);
+  });
+
+  it("keeps fitted dimensions stable through rotation and proportional through later resizing", () => {
+    const source = new THREE.Group();
+    source.add(new THREE.Mesh(new THREE.BoxGeometry(2, 4, 6)));
+    const fitted = fitModelToHeight(source, 2);
+
+    expect(fittedModelDimensions(fitted)).toEqual({ width: 1, height: 2, depth: 3 });
+    fitted.rotation.y = Math.PI / 3;
+    fitted.scale.setScalar(1.75);
+    expect(fittedModelDimensions(fitted)).toEqual({ width: 1.75, height: 3.5, depth: 5.25 });
   });
 
   it("reports animation capability from the actually loaded render variant", () => {

@@ -985,6 +985,36 @@ export function measureModelBounds(model: THREE.Object3D): THREE.Box3 {
   return new THREE.Box3().setFromObject(model, skinned);
 }
 
+export interface FittedModelDimensions {
+  width: number;
+  height: number;
+  depth: number;
+}
+
+/**
+ * Stable fitted dimensions captured before animation starts. The returned values include later
+ * resizing of the placement root, but remain independent of the current animation pose and yaw.
+ */
+export function fittedModelDimensions(model: THREE.Object3D): FittedModelDimensions | null {
+  const stored = model.userData.tellusFittedDimensions as Partial<FittedModelDimensions> | undefined;
+  if (
+    !stored ||
+    typeof stored.width !== "number" ||
+    typeof stored.height !== "number" ||
+    typeof stored.depth !== "number" ||
+    !Number.isFinite(stored.width) ||
+    !Number.isFinite(stored.height) ||
+    !Number.isFinite(stored.depth)
+  ) {
+    return null;
+  }
+  return {
+    width: Math.abs(stored.width * model.scale.x),
+    height: Math.abs(stored.height * model.scale.y),
+    depth: Math.abs(stored.depth * model.scale.z),
+  };
+}
+
 export function fitModelToHeight(model: THREE.Object3D, targetHeight: number): THREE.Object3D {
   const bounds = measureModelBounds(model);
   const size = bounds.getSize(new THREE.Vector3());
@@ -998,6 +1028,11 @@ export function fitModelToHeight(model: THREE.Object3D, targetHeight: number): T
   // the visual child owns scale/centering/grounding and must never be rewritten by reconciliation.
   const placementRoot = new THREE.Group();
   placementRoot.name = model.name ? `${model.name}-placement` : "fitted-placement";
+  placementRoot.userData.tellusFittedDimensions = {
+    width: Math.abs(size.x * scale),
+    height: Math.abs(size.y * scale),
+    depth: Math.abs(size.z * scale),
+  } satisfies FittedModelDimensions;
   const fittedVisualRoot = new THREE.Group();
   fittedVisualRoot.name = model.name ? `${model.name}-fit` : "fitted-visual";
   fittedVisualRoot.scale.setScalar(scale);
