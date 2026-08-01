@@ -71,6 +71,7 @@ export interface WorldGeneratedThing {
   rotationZ?: number;
   scale: number;
   color: number;
+  /** Ground-relative vertical placement. Zero means grounded; missing legacy values normalize to zero. */
   verticalOffset?: number;
   vehicleMode?: "water" | "air" | "ground";
   hasAnimations?: boolean;

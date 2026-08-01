@@ -1,4 +1,10 @@
 import * as THREE from "three";
+import {
+  GROUND_RELATIVE_OFFSET_EPSILON,
+  groundRelativeOffset,
+  hasAuthoredGroundRelativeOffset,
+  positionAtGroundRelativeOffset,
+} from "./tellus-grounding";
 import type {
   TerrainKind,
   TerrainPaintKind,
@@ -872,16 +878,11 @@ export function groundHeightAt(x: number, z: number): number | null {
 }
 
 export function isIntentionallyElevated(thing: GeneratedThing): boolean {
-  const groundY = groundHeightAt(thing.position.x, thing.position.z);
-  return groundY !== null && thing.position.y > groundY + 0.35;
+  return groundRelativeOffset(thing.verticalOffset) > GROUND_RELATIVE_OFFSET_EPSILON;
 }
 
 export function isIntentionallyOffsetFromGround(thing: GeneratedThing): boolean {
-  if (typeof thing.verticalOffset === "number" && Number.isFinite(thing.verticalOffset)) {
-    return Math.abs(thing.verticalOffset) > 0.001;
-  }
-  const groundY = groundHeightAt(thing.position.x, thing.position.z);
-  return groundY !== null && Math.abs(thing.position.y - groundY) > 0.35;
+  return hasAuthoredGroundRelativeOffset(thing.verticalOffset);
 }
 
 export function normalizedDiscPosition(x: number, z: number): Vec3 {
@@ -912,11 +913,7 @@ export function waterBlockedByLand(position: Vec3): boolean {
 export function waterVehiclePosition(x: number, z: number, fallback?: Vec3): Vec3 {
   const position = oceanPosition(x, z);
   if (waterBlockedByLand(position)) return fallback ? { ...fallback } : oceanPosition(WORLD_RADIUS + 5, 0);
-  if (!fallback) return position;
-  const previousSurfaceY = oceanPosition(fallback.x, fallback.z).y;
-  const manualOffset = fallback.y - previousSurfaceY;
-  if (!Number.isFinite(manualOffset) || Math.abs(manualOffset) <= 0.05) return position;
-  return { ...position, y: position.y + Math.max(-40, Math.min(40, manualOffset)) };
+  return position;
 }
 
 export function distantIslandShorePosition(spec: DistantIslandSpec, x: number, z: number): Vec3 {
@@ -980,7 +977,18 @@ export function movedVehiclePosition(
 ): Vec3 {
   const mode = vehicleMode(thing);
   if (mode === "air") return airPosition(x, z);
-  if (mode === "water") return waterVehiclePosition(x, z, fallback);
+  if (mode === "water") {
+    const position = waterVehiclePosition(x, z, fallback);
+    if (
+      fallback &&
+      position.x === fallback.x &&
+      position.y === fallback.y &&
+      position.z === fallback.z
+    ) {
+      return { ...fallback };
+    }
+    return positionAtGroundRelativeOffset(position, position.y, thing.verticalOffset);
+  }
   const position = groundedPosition(x, z, fallback);
   if (
     fallback &&
@@ -991,12 +999,7 @@ export function movedVehiclePosition(
   ) {
     return { ...fallback, x, z };
   }
-  if (!fallback) return position;
-  const previousGround = groundHeightAt(fallback.x, fallback.z);
-  if (previousGround === null || !Number.isFinite(previousGround)) return position;
-  const manualOffset = fallback.y - previousGround;
-  if (Math.abs(manualOffset) <= 0.05) return position;
-  return { ...position, y: position.y + Math.max(-40, Math.min(40, manualOffset)) };
+  return positionAtGroundRelativeOffset(position, position.y, thing.verticalOffset);
 }
 
 export function baseTerrainHeight(x: number, z: number): number {

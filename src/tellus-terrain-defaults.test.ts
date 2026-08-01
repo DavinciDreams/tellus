@@ -11,6 +11,7 @@ import {
   setChunkedFlatGround,
   setChunkedHeightProvider,
   terrainKind,
+  waterVehiclePosition,
 } from "./tellus-terrain";
 import type { GeneratedThing } from "./tellus-types";
 
@@ -43,6 +44,7 @@ function thingAt(y: number): GeneratedThing {
     rotationY: 0,
     scale: 1,
     color: 0xffffff,
+    verticalOffset: 0,
   };
 }
 
@@ -97,14 +99,15 @@ describe("Tellus terrain defaults", () => {
     expect(height).toBeLessThan(1.25);
   });
 
-  it("treats lowered objects as intentionally offset from ground", () => {
+  it("uses explicit offsets instead of inferring intent from a possibly stale position y", () => {
     applyWorldTerrainTemplate("tellus");
     const ground = baseTerrainHeight(0, 0);
 
-    expect(isIntentionallyElevated(thingAt(ground + 2))).toBe(true);
-    expect(isIntentionallyOffsetFromGround(thingAt(ground + 2))).toBe(true);
-    expect(isIntentionallyElevated(thingAt(ground - 2))).toBe(false);
-    expect(isIntentionallyOffsetFromGround(thingAt(ground - 2))).toBe(true);
+    expect(isIntentionallyElevated({ ...thingAt(ground + 2), verticalOffset: 2 })).toBe(true);
+    expect(isIntentionallyOffsetFromGround({ ...thingAt(ground + 2), verticalOffset: 2 })).toBe(true);
+    expect(isIntentionallyElevated({ ...thingAt(ground - 2), verticalOffset: -2 })).toBe(false);
+    expect(isIntentionallyOffsetFromGround({ ...thingAt(ground - 2), verticalOffset: -2 })).toBe(true);
+    expect(isIntentionallyOffsetFromGround(thingAt(ground + 2))).toBe(false);
     expect(isIntentionallyOffsetFromGround(thingAt(ground + 0.1))).toBe(false);
   });
 
@@ -119,19 +122,40 @@ describe("Tellus terrain defaults", () => {
 
   it("preserves manual height offsets when moving ground mounts", () => {
     setChunkedFlatGround(3);
-    const lifted = movedVehiclePosition(mountAt(5), 12, 18, { x: 0, y: 5, z: 0 });
+    const lifted = movedVehiclePosition(
+      { ...mountAt(5), verticalOffset: 2 },
+      12,
+      18,
+      { x: 0, y: 5, z: 0 },
+    );
     expect(lifted.y).toBe(5);
 
-    const grounded = movedVehiclePosition(mountAt(3), 12, 18, { x: 0, y: 3, z: 0 });
+    const grounded = movedVehiclePosition(
+      { ...mountAt(9), verticalOffset: 0 },
+      12,
+      18,
+      { x: 0, y: 9, z: 0 },
+    );
     expect(grounded.y).toBe(3);
   });
 
   it("preserves raised and lowered water offsets instead of snapping to the surface", () => {
-    const raised = movedVehiclePosition(waterMountAt(2.14), 120, 0, { x: 110, y: 2.14, z: 0 });
-    const lowered = movedVehiclePosition(waterMountAt(-1.86), 120, 0, { x: 110, y: -1.86, z: 0 });
+    const surfaceY = waterVehiclePosition(400, 0).y;
+    const raised = movedVehiclePosition(
+      { ...waterMountAt(2.14), verticalOffset: 2 },
+      400,
+      0,
+      { x: 380, y: 2.14, z: 0 },
+    );
+    const lowered = movedVehiclePosition(
+      { ...waterMountAt(-1.86), verticalOffset: -2 },
+      400,
+      0,
+      { x: 380, y: -1.86, z: 0 },
+    );
 
-    expect(raised.y).toBeCloseTo(2.14);
-    expect(lowered.y).toBeCloseTo(-1.86);
+    expect(raised.y).toBeCloseTo(surfaceY + 2);
+    expect(lowered.y).toBeCloseTo(surfaceY - 2);
   });
 
   it("keeps ground mounts moving when terrain height cannot resolve the next spot", () => {

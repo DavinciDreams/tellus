@@ -20,6 +20,7 @@ const thing = (overrides: Partial<GeneratedThing>): GeneratedThing => ({
   scale: 1,
   color: 0xffffff,
   ...overrides,
+  verticalOffset: overrides.verticalOffset ?? 0,
 });
 
 describe("world object runtime profile", () => {
@@ -77,7 +78,6 @@ describe("world object runtime profile", () => {
     });
     const profile = buildWorldThingRuntimeProfile(horse, {
       dimensions: { radius: 1.2, height: 2.1 },
-      groundY: 4,
     });
     expect(profile.placementMode).toBe("grounded");
     expect(profile.controllerKind).toBe("quadruped");
@@ -128,8 +128,11 @@ describe("world object runtime profile", () => {
 
   it("preserves deliberate vertical offsets as elevated placement", () => {
     const profile = buildWorldThingRuntimeProfile(
-      thing({ prompt: "floating crystal", position: { x: 0, y: 7, z: 0 } }),
-      { groundY: 4 },
+      thing({
+        prompt: "floating crystal",
+        position: { x: 0, y: 7, z: 0 },
+        verticalOffset: 3,
+      }),
     );
     expect(profile.placementMode).toBe("elevated");
     expect(profile.hasManualGroundOffset).toBe(true);
