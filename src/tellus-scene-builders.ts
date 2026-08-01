@@ -221,7 +221,134 @@ function resolvedWaterSettings(settings?: Partial<WaterSettings>): WaterSettings
   };
 }
 
-export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): THREE.ShaderMaterial {
+export interface WaterShoreDistanceField {
+  texture: THREE.DataTexture;
+  origin: THREE.Vector2;
+  size: THREE.Vector2;
+  texel: THREE.Vector2;
+  distanceRange: number;
+  resolution: number;
+  buildMs: number;
+}
+
+export interface WaterShoreDistanceFieldOptions {
+  centerX: number;
+  centerZ: number;
+  width: number;
+  depth: number;
+  isWater: (x: number, z: number) => boolean;
+  resolution?: number;
+  distanceRange?: number;
+}
+
+/**
+ * Build a compact signed-distance lookup for the water shader. Positive values are water,
+ * negative values are land, and zero follows the sampled coastline. The two-pass chamfer is
+ * linear in the texture size and runs once when a world mounts; the shader only performs a few
+ * filtered texture reads per pixel afterward.
+ */
+export function createWaterShoreDistanceField(
+  options: WaterShoreDistanceFieldOptions,
+): WaterShoreDistanceField {
+  const startedAt = performance.now();
+  const resolution = Math.round(clamp(options.resolution ?? 192, 32, 384));
+  const width = Math.max(1, options.width);
+  const depth = Math.max(1, options.depth);
+  const count = resolution * resolution;
+  const waterMask = new Uint8Array(count);
+  const distances = new Float32Array(count);
+  distances.fill(Number.POSITIVE_INFINITY);
+
+  const sampleX = (x: number) =>
+    options.centerX - width / 2 + ((x + 0.5) / resolution) * width;
+  const sampleZ = (z: number) =>
+    options.centerZ - depth / 2 + ((z + 0.5) / resolution) * depth;
+  for (let z = 0; z < resolution; z++) {
+    for (let x = 0; x < resolution; x++) {
+      waterMask[z * resolution + x] = options.isWater(sampleX(x), sampleZ(z)) ? 1 : 0;
+    }
+  }
+
+  const index = (x: number, z: number) => z * resolution + x;
+  for (let z = 0; z < resolution; z++) {
+    for (let x = 0; x < resolution; x++) {
+      const current = waterMask[index(x, z)];
+      if (
+        (x > 0 && waterMask[index(x - 1, z)] !== current) ||
+        (x + 1 < resolution && waterMask[index(x + 1, z)] !== current) ||
+        (z > 0 && waterMask[index(x, z - 1)] !== current) ||
+        (z + 1 < resolution && waterMask[index(x, z + 1)] !== current)
+      ) {
+        distances[index(x, z)] = 0;
+      }
+    }
+  }
+
+  const diagonal = Math.SQRT2;
+  for (let z = 0; z < resolution; z++) {
+    for (let x = 0; x < resolution; x++) {
+      const i = index(x, z);
+      let distance = distances[i];
+      if (x > 0) distance = Math.min(distance, distances[index(x - 1, z)] + 1);
+      if (z > 0) distance = Math.min(distance, distances[index(x, z - 1)] + 1);
+      if (x > 0 && z > 0) distance = Math.min(distance, distances[index(x - 1, z - 1)] + diagonal);
+      if (x + 1 < resolution && z > 0) {
+        distance = Math.min(distance, distances[index(x + 1, z - 1)] + diagonal);
+      }
+      distances[i] = distance;
+    }
+  }
+  for (let z = resolution - 1; z >= 0; z--) {
+    for (let x = resolution - 1; x >= 0; x--) {
+      const i = index(x, z);
+      let distance = distances[i];
+      if (x + 1 < resolution) distance = Math.min(distance, distances[index(x + 1, z)] + 1);
+      if (z + 1 < resolution) distance = Math.min(distance, distances[index(x, z + 1)] + 1);
+      if (x + 1 < resolution && z + 1 < resolution) {
+        distance = Math.min(distance, distances[index(x + 1, z + 1)] + diagonal);
+      }
+      if (x > 0 && z + 1 < resolution) {
+        distance = Math.min(distance, distances[index(x - 1, z + 1)] + diagonal);
+      }
+      distances[i] = distance;
+    }
+  }
+
+  const distanceRange = Math.max(
+    Math.max(width, depth) / resolution,
+    options.distanceRange ?? Math.min(96, Math.max(width, depth) * 0.16),
+  );
+  const worldUnitsPerPixel = Math.max(width, depth) / resolution;
+  const encoded = new Uint8Array(count);
+  for (let i = 0; i < count; i++) {
+    const distance = Number.isFinite(distances[i]) ? distances[i] * worldUnitsPerPixel : distanceRange;
+    const signedDistance = (waterMask[i] ? 1 : -1) * Math.min(distanceRange, distance);
+    encoded[i] = Math.round(clamp(0.5 + signedDistance / (distanceRange * 2), 0, 1) * 255);
+  }
+
+  const texture = new THREE.DataTexture(encoded, resolution, resolution, THREE.RedFormat);
+  texture.name = "tellus-water-shore-distance";
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return {
+    texture,
+    origin: new THREE.Vector2(options.centerX - width / 2, options.centerZ - depth / 2),
+    size: new THREE.Vector2(width, depth),
+    texel: new THREE.Vector2(1 / resolution, 1 / resolution),
+    distanceRange,
+    resolution,
+    buildMs: performance.now() - startedAt,
+  };
+}
+
+export function createFallbackOceanMaterial(
+  settings?: Partial<WaterSettings>,
+  shoreDistanceField?: WaterShoreDistanceField,
+): THREE.ShaderMaterial {
   const water = resolvedWaterSettings(settings);
   const palette = WATER_STYLE_COLORS[water.style];
   const material = new THREE.ShaderMaterial({
@@ -231,11 +358,17 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
       uShallowColor: { value: new THREE.Color(palette.shallow) },
       uFoamColor: { value: new THREE.Color(palette.foam) },
       uTintColor: { value: new THREE.Color(palette.deep).lerp(new THREE.Color(palette.shallow), 0.38) },
+      uSkyColor: { value: new THREE.Color(0x9cc4ee) },
       uOpacity: { value: water.opacity },
       uWaveStrength: { value: water.waveStrength },
       uPondCalm: { value: 0 },
       uIslandRadius: { value: WORLD_RADIUS },
       uShoreCenter: { value: new THREE.Vector2(0, 0) },
+      uShoreDistanceMap: { value: shoreDistanceField?.texture ?? null },
+      uHasShoreDistanceMap: { value: shoreDistanceField ? 1 : 0 },
+      uShoreMapOrigin: { value: shoreDistanceField?.origin.clone() ?? new THREE.Vector2() },
+      uShoreMapSize: { value: shoreDistanceField?.size.clone() ?? new THREE.Vector2(1, 1) },
+      uShoreDistanceRange: { value: shoreDistanceField?.distanceRange ?? 1 },
     },
     vertexShader: `
       varying vec2 vWorldXZ;
@@ -256,11 +389,17 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
       uniform vec3 uShallowColor;
       uniform vec3 uFoamColor;
       uniform vec3 uTintColor;
+      uniform vec3 uSkyColor;
       uniform float uOpacity;
       uniform float uWaveStrength;
       uniform float uPondCalm;
       uniform float uIslandRadius;
       uniform vec2 uShoreCenter;
+      uniform sampler2D uShoreDistanceMap;
+      uniform float uHasShoreDistanceMap;
+      uniform vec2 uShoreMapOrigin;
+      uniform vec2 uShoreMapSize;
+      uniform float uShoreDistanceRange;
       varying vec2 vWorldXZ;
       varying vec3 vWorldPosition;
       varying vec3 vWorldNormal;
@@ -289,19 +428,34 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
         return 1.0 - smoothstep(0.02, 0.86, sqrt(nearest));
       }
 
+      float sampledShoreDistance(vec2 uv) {
+        return (texture2D(uShoreDistanceMap, clamp(uv, 0.0, 1.0)).r * 2.0 - 1.0) *
+          uShoreDistanceRange;
+      }
+
       void main() {
         float wave = 0.18 + uWaveStrength * 0.82;
         vec2 waterUV = vWorldXZ;
         float t = uTime * 0.62 * wave;
+        vec2 shoreMapUv = (waterUV - uShoreMapOrigin) / uShoreMapSize;
+        float insideShoreMap = step(0.0, shoreMapUv.x) * step(shoreMapUv.x, 1.0) *
+          step(0.0, shoreMapUv.y) * step(shoreMapUv.y, 1.0);
+        float mappedShoreDistance = sampledShoreDistance(shoreMapUv);
+        float mappedWeight = uHasShoreDistanceMap * insideShoreMap;
+        float contourInfluence = mappedWeight *
+          (1.0 - smoothstep(10.0, 72.0, max(0.0, mappedShoreDistance)));
         vec2 flow = vec2(t, -t * 0.73);
         // Layered, crossing directional waves keep the ocean in motion without adding another
         // texture or render pass. The broad domain warp is inspired by the analytic spectrum in
         // https://github.com/achrefelouafi/WaterThreeJS, but tuned for Tellus's lightweight water.
         float directionalA = sin(dot(waterUV, vec2(0.052, 0.031)) + t * 1.35);
         float directionalB = cos(dot(waterUV, vec2(-0.024, 0.061)) - t * 0.92);
-        float whorl = sin(
-          length(waterUV - uShoreCenter) * 0.027 - t * 0.7 + directionalA * 1.2
+        float whorlCoordinate = mix(
+          length(waterUV - uShoreCenter),
+          mappedShoreDistance,
+          contourInfluence
         );
+        float whorl = sin(whorlCoordinate * 0.027 - t * 0.7 + directionalA * 1.2);
         vec2 whorlOffset = vec2(
           directionalB + whorl * 0.62,
           directionalA - whorl * 0.48
@@ -331,8 +485,13 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
         float glint = smoothstep(0.58, 0.96, glintCells * surface + horizon * 0.45);
         float islandDistance = length(waterUV - uShoreCenter);
         float shoreIrregularity = worley((waterUV - uShoreCenter) * 0.052 + vec2(t * 0.04, -t * 0.03));
-        float shoreDistance = islandDistance - uIslandRadius + (shoreIrregularity - 0.5) * 5.2;
-        float shoreBand = smoothstep(-1.2, 1.2, shoreDistance) * (1.0 - smoothstep(8.0, 18.0, shoreDistance));
+        float radialShoreDistance = islandDistance - uIslandRadius + (shoreIrregularity - 0.5) * 5.2;
+        float shoreDistance = mix(radialShoreDistance, mappedShoreDistance, mappedWeight);
+        // A supplied distance field is authoritative: outside its sampled domain there is no invented
+        // circular coast. This makes foam/wave fronts follow coves, islands, lakes, and channels.
+        float shoreDomain = mix(1.0, insideShoreMap, uHasShoreDistanceMap);
+        float shoreBand = smoothstep(-1.2, 1.2, shoreDistance) *
+          (1.0 - smoothstep(8.0, 18.0, shoreDistance)) * shoreDomain;
         float shoreTravel = fract(shoreDistance * 0.22 - uTime * (0.62 + wave * 0.16));
         float shoreLine = 1.0 - smoothstep(0.0, 0.2, abs(shoreTravel - 0.48));
         float shoreLine2 = 1.0 - smoothstep(0.0, 0.16, abs(fract(shoreDistance * 0.16 - uTime * 0.38) - 0.52));
@@ -349,16 +508,37 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
         float foam = smoothstep(0.62, 1.0, surface) * mix(0.1, 0.025, uPondCalm) * wave;
         water = mix(water, uFoamColor, clamp(foam + shoreFoam * 0.95, 0.0, 0.92));
         water = mix(water, vec3(1.0, 1.0, 1.0), clamp(shoreFoam * 0.62, 0.0, 0.72));
-        vec3 reflection = mix(vec3(0.48, 0.78, 1.0), uFoamColor, glint * 0.62);
-        float reflectionMix = fresnel * mix(0.32, 0.11, uPondCalm) + glint * mix(0.16, 0.035, uPondCalm);
-        water = mix(water, reflection, clamp(reflectionMix, 0.0, mix(0.48, 0.18, uPondCalm)));
+        // A continuous analytic sky response supplies reflection without a second scene render.
+        // Broad cloud-like bands follow the existing wave field, so the surface stays lively while
+        // avoiding both the planar reflector seam and a costly environment capture.
+        vec3 skyReflection = mix(
+          uSkyColor * 0.72,
+          mix(uSkyColor, uFoamColor, 0.48),
+          horizon
+        );
+        float broadCloud = smoothstep(
+          0.38,
+          0.92,
+          0.5 + directionalA * 0.32 + directionalB * 0.18
+        );
+        skyReflection = mix(skyReflection, uFoamColor, broadCloud * 0.32 + glint * 0.28);
+        float skyVariation = 0.5 + 0.5 * directionalB;
+        skyReflection *= mix(0.9, 1.08, skyVariation);
+        float reflectionMix =
+          fresnel * mix(0.46, 0.28, uPondCalm) +
+          glint * mix(0.18, 0.06, uPondCalm);
+        water = mix(
+          water,
+          skyReflection,
+          clamp(reflectionMix, 0.0, mix(0.58, 0.38, uPondCalm))
+        );
         water = mix(water, uTintColor, 0.025);
         water = mix(water, uShallowColor, 0.14);
         float horizonHaze = smoothstep(uIslandRadius * 1.25, uIslandRadius * 2.65, islandDistance);
         water = mix(water, mix(uDeepColor, uShallowColor, 0.42), horizonHaze * 0.32);
         float alpha = clamp(
-          uOpacity * (0.28 + surface * mix(0.08, 0.025, uPondCalm)) +
-            fresnel * 0.12 +
+          uOpacity * (0.46 + surface * mix(0.1, 0.045, uPondCalm)) +
+            fresnel * 0.14 +
             glint * 0.03 +
             shoreFoam * 0.28 +
             horizonHaze * 0.18,
@@ -373,7 +553,9 @@ export function createFallbackOceanMaterial(settings?: Partial<WaterSettings>): 
     depthWrite: false,
   });
   material.userData.tellusWaterShader = true;
-  material.userData.tellusWaterShaderVariant = "webgl-irregular-white-shore-haze";
+  material.userData.tellusWaterShaderVariant = shoreDistanceField
+    ? "webgl-contour-shore-distance"
+    : "webgl-irregular-white-shore-haze";
   return material;
 }
 
@@ -447,13 +629,21 @@ function createOceanReflectionLayer(
         float whorl = sin(length(vWorldPosition.xz) * 0.018 - time * 0.44 + waveA);
         vec2 distortion = vec2(waveB + whorl * 0.55, waveA - whorl * 0.42)
           * 0.0018 * motionStrength;
-        vec4 reflectedUv = vUv;
-        reflectedUv.xy += distortion * vUv.w;
-        vec4 reflected = texture2DProj(tDiffuse, reflectedUv);
+        float projectionW = max(abs(vUv.w), 0.0001);
+        vec2 projectedUv = vUv.xy / projectionW + distortion;
+        vec2 safeUv = clamp(projectedUv, 0.001, 0.999);
+        vec4 reflected = texture2D(tDiffuse, safeUv);
+        float projectionValid = step(0.0001, vUv.w);
+        float edgeFade =
+          smoothstep(0.02, 0.22, projectedUv.x) *
+          smoothstep(0.02, 0.22, projectedUv.y) *
+          smoothstep(0.02, 0.22, 1.0 - projectedUv.x) *
+          smoothstep(0.02, 0.22, 1.0 - projectedUv.y);
         float rippleBreakup =
           noise(vWorldPosition.xz * 0.065 + vec2(time * 0.025, -time * 0.018)) * 0.55 +
           noise(vWorldPosition.xz * 0.19 + vec2(-time * 0.042, time * 0.031) + 17.0) * 0.45;
-        float reflectionMask = smoothstep(0.08, 0.92, reflected.a) * mix(0.82, 1.0, rippleBreakup);
+        float reflectionMask = smoothstep(0.08, 0.92, reflected.a) *
+          mix(0.82, 1.0, rippleBreakup) * projectionValid * edgeFade;
         vec3 softened = mix(reflected.rgb, color, 0.08);
         gl_FragColor = vec4(softened, opacity * reflectionMask);
         #include <tonemapping_fragment>
@@ -514,6 +704,7 @@ export function createOceanSurface(
     mode?: "ocean" | "lake";
     width?: number;
     depth?: number;
+    shoreDistanceField?: WaterShoreDistanceField;
   } = {},
 ): THREE.Mesh {
   const mode = options.mode ?? "ocean";
@@ -522,10 +713,12 @@ export function createOceanSurface(
     : new THREE.CircleGeometry(OCEAN_RADIUS, 192);
   const material = useBackdropWater
     ? createBackdropWaterMaterial(settings)
-    : createFallbackOceanMaterial(settings);
+    : createFallbackOceanMaterial(settings, options.shoreDistanceField);
   const ocean = new THREE.Mesh(geometry, material);
   ocean.name = mode === "lake" ? "tellus-inland-water-plane" : "tellus-surrounding-ocean";
   ocean.userData.tellusWaterSurfaceMode = mode;
+  ocean.userData.tellusShoreDistanceField = options.shoreDistanceField;
+  ocean.userData.disposeWaterShoreDistanceField = () => options.shoreDistanceField?.texture.dispose();
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.y = SEA_LEVEL;
   ocean.renderOrder = -4;
@@ -953,6 +1146,10 @@ export function disposeObject(object: THREE.Object3D): void {
   if (disposeMirror) disposeMirror();
   const disposePondSimulation = object.userData?.disposePondSimulation as (() => void) | undefined;
   if (disposePondSimulation) disposePondSimulation();
+  const disposeWaterShoreDistanceField = object.userData?.disposeWaterShoreDistanceField as
+    | (() => void)
+    | undefined;
+  disposeWaterShoreDistanceField?.();
   const hasSharedBuffers = Boolean(object.userData?.sharedGltf || object.userData?.sharedProcedural);
   object.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
