@@ -357,9 +357,10 @@ export function seatPositionForWorldThing(
   const sin = Math.sin(yaw);
   const local = profile.seatOffset;
   return {
-    x: thing.position.x + (visualCenterOffset?.x ?? 0) + local.x * cos - local.z * sin,
+    // Match THREE.Object3D.rotation.y: positive yaw rotates local +Z toward world +X.
+    x: thing.position.x + (visualCenterOffset?.x ?? 0) + local.x * cos + local.z * sin,
     y: thing.position.y + local.y,
-    z: thing.position.z + (visualCenterOffset?.z ?? 0) + local.x * sin + local.z * cos,
+    z: thing.position.z + (visualCenterOffset?.z ?? 0) - local.x * sin + local.z * cos,
   };
 }
 

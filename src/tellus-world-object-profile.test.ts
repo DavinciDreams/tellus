@@ -102,7 +102,7 @@ describe("world object runtime profile", () => {
     const position = seatPositionForWorldThing(horse, profile, { x: 0.2, y: 0, z: -0.1 });
 
     expect(profile.placementMode).toBe("mounted");
-    expect(position.x).toBeCloseTo(10.456);
+    expect(position.x).toBeCloseTo(9.944);
     expect(position.y).toBeCloseTo(3.176);
     expect(position.z).toBeCloseTo(19.9);
   });
