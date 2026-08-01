@@ -292,6 +292,8 @@ export interface ChunkRenderer {
   consumeChangedRegions(): Array<{ minX: number; maxX: number; minZ: number; maxZ: number }>;
   /** Optimistic local paint for immediate feedback while the authoritative chunk patch round-trips. */
   applyLocalPaint(kind: TerrainPaintKind, worldX: number, worldZ: number, radius: number): void;
+  /** Drop unconfirmed optimistic paint and refetch the affected chunks after a rejected/failed action. */
+  discardLocalPaint(): void;
   /** Rebuild chunks whose data arrived since last frame — call once/frame next to flushTerrain(). */
   flush(maxBuilds?: number, maxMs?: number, maxFetchStarts?: number): void;
   /** Limit how many queued chunk fetches update()/prefetch() may start synchronously. */
@@ -351,6 +353,7 @@ export function createChunkRenderer(
   const lodOf = new Map<string, number>(); // intended lod for a pending fetch
   const retryAt = new Map<string, number>(); // failed fetches; retried while the chunk remains wanted
   const localPaintOverrides = new Map<string, Map<number, number>>();
+  const forceAuthoritativePaint = new Set<string>();
   const changedSurfaceChunks = new Set<string>();
   // Chunks whose ring shrank (wanting MORE detail) while the player was moving on foot — a full
   // near-ring rebuild is up to 4225 vertices with per-vertex color/skirt work (tens of ms), which blows
@@ -466,6 +469,8 @@ export function createChunkRenderer(
     lodOf.delete(k);
     retryAt.delete(k);
     deferredLodUpgrades.delete(k);
+    localPaintOverrides.delete(k);
+    forceAuthoritativePaint.delete(k);
     const a = active.get(k);
     if (a) {
       group.remove(a.mesh);
@@ -641,14 +646,21 @@ export function createChunkRenderer(
   const chunkDataWithLocalPaint = (k: string, data: ChunkData): ChunkData => {
     const overrides = localPaintOverrides.get(k);
     const existing = active.get(k);
-    if (!overrides?.size && !existing?.paint.length) return data;
-    const paint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
-    if (existing?.paint.length) {
-      for (let index = 0; index < Math.min(existing.paint.length, paint.length); index++) {
-        const code = existing.paint[index] ?? 0;
-        if (code) paint[index] = code;
+    if (!overrides?.size) return data;
+
+    // A newer authoritative revision confirms any optimistic cells that now carry the expected code.
+    // Confirmed cells leave the override map so a later server edit can replace them normally.
+    if (existing && data.revision > existing.revision) {
+      for (const [index, code] of overrides) {
+        if (data.paint[index] === code) overrides.delete(index);
+      }
+      if (overrides.size === 0) {
+        localPaintOverrides.delete(k);
+        return data;
       }
     }
+
+    const paint = new Array(CHUNK_VERTEX_COUNT * CHUNK_VERTEX_COUNT).fill(0);
     if (data.paint.length) {
       for (let index = 0; index < Math.min(data.paint.length, paint.length); index++) {
         const code = data.paint[index] ?? 0;
@@ -784,12 +796,14 @@ export function createChunkRenderer(
         existing &&
         existing.revision === data.revision &&
         existing.lodSegments === lod &&
-        existing.template === template
+        existing.template === template &&
+        !forceAuthoritativePaint.has(k)
       ) {
         ready.delete(k);
         continue;
       }
       buildOrUpdate(k, data, lod);
+      forceAuthoritativePaint.delete(k);
       ready.delete(k);
       lastFlushBuilt++;
     }
@@ -826,10 +840,6 @@ export function createChunkRenderer(
         overrides = new Map();
         localPaintOverrides.set(k, overrides);
       }
-      for (let index = 0; index < paint.length; index++) {
-        const existingCode = paint[index] ?? 0;
-        if (existingCode) overrides.set(index, existingCode);
-      }
       for (let zi = 0; zi < CHUNK_VERTEX_COUNT; zi++) {
         const z = chunkZ0 + (zi / CHUNK_SEGMENTS) * CHUNK_SPAN;
         for (let xi = 0; xi < CHUNK_VERTEX_COUNT; xi++) {
@@ -863,6 +873,18 @@ export function createChunkRenderer(
       // Local paint keeps the same server revision, but it can change both plant selection and
       // exclusion rules, so explicitly mark this chunk's ecology surface dirty.
       changedSurfaceChunks.add(k);
+    }
+  };
+
+  const discardLocalPaint = () => {
+    if (disposed || localPaintOverrides.size === 0) return;
+    const affected = [...localPaintOverrides.keys()];
+    localPaintOverrides.clear();
+    for (const k of affected) {
+      const chunk = active.get(k);
+      if (!chunk) continue;
+      forceAuthoritativePaint.add(k);
+      queueChunkFetch(chunk.cx, chunk.cz, chunk.lodSegments, -1, true);
     }
   };
 
@@ -922,6 +944,8 @@ export function createChunkRenderer(
     queuedFetches.clear();
     ready.clear();
     lodOf.clear();
+    localPaintOverrides.clear();
+    forceAuthoritativePaint.clear();
     deferredLodUpgrades.clear();
     for (const a of active.values()) {
       group.remove(a.mesh);
@@ -957,6 +981,7 @@ export function createChunkRenderer(
     rebuildTerrain,
     consumeChangedRegions,
     applyLocalPaint,
+    discardLocalPaint,
     flush,
     sampleHeight,
     samplePaint,

@@ -153,7 +153,7 @@ import {
 } from "./world-protocol";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, ProceduralAssetPlacement, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood, WaterSettings, WaterStyle } from "./tellus-types";
-import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, CHUNK_SPAN } from "./tellus-constants";
+import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, chunkedWorldSupportsPaint, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
 import { parseWaterSettings, runtimeConfig, applyRuntimeConfig, loadRuntimeConfigFile, loadRuntimeConfig, worldApiUrl } from "./tellus-runtime-config";
 import { applyActiveBiomeMixRegistryForWorld } from "./tellus-biome-mix";
@@ -4645,6 +4645,9 @@ function createTellusWorld(
         typeof parsed.actionType === "string" &&
         typeof parsed.reason === "string"
       ) {
+        if (parsed.actionType === "terrain.sculpt") {
+          chunkRenderer?.discardLocalPaint();
+        }
         if (parsed.actionType === "world.portal.upsert" || parsed.actionType === "portal.upsert") {
           const rejectedPendingIds = new Set(pendingPortalIds);
           pendingPortalIds.clear();
@@ -4897,6 +4900,16 @@ function createTellusWorld(
   // chunkRenderer.reloadChunk), not edit the compatibility 97² grid.
   const sendChunkedSculpt = (mode: TerrainEditMode, center: Vec3) => {
     if (!tellusWorldBackendAvailable) return;
+    if (isTerrainPaintMode(mode) && !chunkedWorldSupportsPaint(mode)) {
+      addLog({
+        agentId: "world",
+        agentName: "Tellus",
+        tool: "interact",
+        text: `${mode} paint is not supported by this world's terrain server, so nothing was changed.`,
+      });
+      publish();
+      return;
+    }
     if (isTerrainPaintMode(mode)) {
       chunkRenderer?.applyLocalPaint(mode, center.x, center.z, terrainPaintBrushRadius);
     }
@@ -4914,7 +4927,35 @@ function createTellusWorld(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(action),
-      }).catch((error) => console.warn("Tellus chunked sculpt failed", error));
+      })
+        .then(async (response) => {
+          const patch = await response.json().catch(() => null) as unknown;
+          if (
+            !response.ok ||
+            (isRecord(patch) && patch.type === "action.rejected")
+          ) {
+            const reason = isRecord(patch) && typeof patch.reason === "string"
+              ? patch.reason
+              : `HTTP ${response.status}`;
+            throw new Error(reason);
+          }
+          const chunkUpdate = chunkUpdatedFromWorldPatch(patch);
+          if (chunkUpdate) {
+            chunkRenderer?.reloadChunk(chunkUpdate.chunkX, chunkUpdate.chunkZ);
+          }
+        })
+        .catch((error) => {
+          if (isTerrainPaintMode(mode)) chunkRenderer?.discardLocalPaint();
+          const reason = error instanceof Error ? error.message : String(error);
+          console.warn("Tellus chunked sculpt failed", error);
+          addLog({
+            agentId: "world",
+            agentName: "Tellus",
+            tool: "interact",
+            text: `Terrain edit was not saved: ${reason}`,
+          });
+          publish();
+        });
     }
     addLog({
       agentId: "visitor",

@@ -30,6 +30,7 @@ import {
   POND_CENTER,
   TERRAIN_VERTEX_COUNT,
   setChunkedWorldChunks,
+  setChunkedWorldPaintKinds,
   setClassicPondShape,
   terrainColors,
   terrainPaintKinds,
@@ -135,6 +136,7 @@ function chunkedGroundY(x: number, z: number): number {
 export async function loadChunkedWorldBounds(): Promise<void> {
   if (!runtimeConfig.worldId.startsWith("chunked-")) {
     setChunkedWorldChunks(null);
+    setChunkedWorldPaintKinds(null);
     setChunkedFlatGround(null);
     setChunkedHeightProvider(null);
     return;
@@ -142,10 +144,12 @@ export async function loadChunkedWorldBounds(): Promise<void> {
   const idSize = /^chunked-(\d+)-/i.exec(runtimeConfig.worldId)?.[1];
   const fallbackSize = idSize ? Math.max(1, Math.min(256, Math.round(Number(idSize)))) : 64;
   setChunkedWorldChunks({ w: fallbackSize, h: fallbackSize });
+  setChunkedWorldPaintKinds(null);
   try {
     const staticManifest = await loadStaticTerrainManifest();
     if (staticManifest && typeof staticManifest.width === "number" && typeof staticManifest.height === "number") {
       setChunkedWorldChunks({ w: staticManifest.width, h: staticManifest.height });
+      setChunkedWorldPaintKinds(Array.isArray(staticManifest.paintKinds) ? staticManifest.paintKinds : null);
       setChunkedFlatGround(0);
       return;
     }
@@ -155,6 +159,11 @@ export async function loadChunkedWorldBounds(): Promise<void> {
       if (typeof m?.width === "number" && typeof m?.height === "number") {
         setChunkedWorldChunks({ w: m.width, h: m.height });
       }
+      setChunkedWorldPaintKinds(
+        Array.isArray(m?.paintKinds) && m.paintKinds.every((kind: unknown) => typeof kind === "string")
+          ? m.paintKinds
+          : null,
+      );
     }
   } catch {
     /* ignore — the streamer still works, just without an edge clamp */

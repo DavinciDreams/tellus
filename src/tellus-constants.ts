@@ -107,11 +107,19 @@ export function canonicalWorldId(worldId: string): string {
 // renderer upper-clamp the load ring (no fetches past the world edge) and the spawn land at world
 // CENTER instead of the corner (origin is a corner for chunked worlds, not the island centre).
 let chunkedWorldChunks: { w: number; h: number } | null = null;
+let chunkedWorldPaintKinds: ReadonlySet<string> | null = null;
 export function setChunkedWorldChunks(v: { w: number; h: number } | null): void {
   chunkedWorldChunks = v;
 }
 export function getChunkedWorldChunks(): { w: number; h: number } | null {
   return chunkedWorldChunks;
+}
+export function setChunkedWorldPaintKinds(kinds: readonly string[] | null): void {
+  chunkedWorldPaintKinds = kinds ? new Set(kinds) : null;
+}
+export function chunkedWorldSupportsPaint(kind: TerrainPaintKind): boolean {
+  // Missing on older/static manifests: preserve compatibility. Once advertised, the server contract wins.
+  return chunkedWorldPaintKinds?.has(kind) ?? true;
 }
 export function chunkedWorldCenter(): { x: number; z: number } | null {
   if (!chunkedWorldChunks) return null;
