@@ -50,6 +50,7 @@ import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 import { SEA_LEVEL } from "./tellus-constants";
 import type { TellusBiomeMixDefinition } from "./tellus-biome-mix";
 import type { EcologyBiomeId } from "./tellus-ecology";
+import { renderPressureSnapshotFor } from "./tellus-render-pressure";
 
 const templateBounds = (template: ProcPlantTemplate) => {
   const min = new THREE.Vector3(Infinity, Infinity, Infinity);
@@ -83,12 +84,12 @@ describe("procplant vegetation", () => {
     const detailDistance = 72;
 
     // Near trees can simplify their connected crown once, but cannot collapse to sparse LOD2.
-    expect(branchModuleLodForTree(2, 12, detailDistance, 20)).toBe(1);
-    expect(branchModuleLodForTree(2, 30, detailDistance, 20)).toBe(1);
-    expect(branchModuleLodForTree(0, 12, detailDistance, 60)).toBe(0);
-    // Far trees still respond to the existing chunk, distance, and low-FPS pressure.
-    expect(branchModuleLodForTree(0, 52, detailDistance, 20)).toBe(2);
-    expect(branchModuleLodForTree(1, 52, detailDistance, 60)).toBe(1);
+    expect(branchModuleLodForTree(2, 12, detailDistance, 2)).toBe(1);
+    expect(branchModuleLodForTree(2, 30, detailDistance, 2)).toBe(1);
+    expect(branchModuleLodForTree(0, 12, detailDistance, 0)).toBe(0);
+    // Far trees still respond to the existing chunk, distance, and shared render pressure.
+    expect(branchModuleLodForTree(0, 52, detailDistance, 2)).toBe(2);
+    expect(branchModuleLodForTree(1, 52, detailDistance, 0)).toBe(1);
   });
 
   it("keeps conifer sprays full-sized and distributed through the crown", () => {
@@ -1066,11 +1067,12 @@ describe("procplant vegetation", () => {
   });
 
   it("caps low-FPS startup work at one chunk and the baseline time budget", () => {
-    expect(procPlantBuildWorkBudget(true, 18)).toEqual({
+    const critical = renderPressureSnapshotFor("critical");
+    expect(procPlantBuildWorkBudget(true, critical)).toEqual({
       maxBuilds: 1,
       maxMs: 2.5,
     });
-    expect(procPlantBuildWorkBudget(false, 18)).toEqual({
+    expect(procPlantBuildWorkBudget(false, critical)).toEqual({
       maxBuilds: 1,
       maxMs: 2.5,
     });
@@ -1085,11 +1087,25 @@ describe("procplant vegetation", () => {
   });
 
   it("keeps cold procedural graph generation out of initial and low-FPS population passes", () => {
-    expect(procPlantAllowsColdBuilds(true, true, 60, 5_000)).toBe(false);
-    expect(procPlantAllowsColdBuilds(true, false, 18, 5_000)).toBe(false);
-    expect(procPlantAllowsColdBuilds(false, false, 60, 5_000)).toBe(false);
-    expect(procPlantAllowsColdBuilds(true, false, 60, 2_999)).toBe(false);
-    expect(procPlantAllowsColdBuilds(true, false, 60, 3_000)).toBe(true);
+    const warming = renderPressureSnapshotFor("warming");
+    const headroom = renderPressureSnapshotFor("headroom", { stableForMs: 3_000 });
+    expect(procPlantAllowsColdBuilds(true, true, headroom, 5_000, Number.NEGATIVE_INFINITY)).toBe(false);
+    expect(procPlantAllowsColdBuilds(true, false, warming, 5_000, Number.NEGATIVE_INFINITY)).toBe(false);
+    expect(procPlantAllowsColdBuilds(false, false, headroom, 5_000, Number.NEGATIVE_INFINITY)).toBe(false);
+    expect(procPlantAllowsColdBuilds(true, false, headroom, 2_999, 0)).toBe(false);
+    expect(procPlantAllowsColdBuilds(true, false, headroom, 3_000, 0)).toBe(true);
+  });
+
+  it("eventually refines a stable 30 FPS client without abandoning the shared cooldown", () => {
+    const balanced = renderPressureSnapshotFor("balanced", {
+      fps: 30,
+      frameWorkMs: 6,
+      stableForMs: 6_000,
+    });
+
+    expect(procPlantAllowsColdBuilds(true, false, balanced, 6_000, Number.NEGATIVE_INFINITY)).toBe(true);
+    expect(procPlantAllowsColdBuilds(true, false, balanced, 11_999, 6_000)).toBe(false);
+    expect(procPlantAllowsColdBuilds(true, false, balanced, 12_000, 6_000)).toBe(true);
   });
 
   it("coalesces repeated terrain hydration invalidations into one rebuild per affected chunk", () => {

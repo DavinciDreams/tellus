@@ -17,6 +17,10 @@ import {
 } from "three/tsl";
 import { SEA_LEVEL, WORLD_RADIUS } from "./tellus-constants";
 import { createGltfLoader } from "./tellus-generation-client";
+import {
+  resolveRenderPressure,
+  type RenderPressureInput,
+} from "./tellus-render-pressure";
 import type { TerrainPaintKind } from "./tellus-types";
 import { assetStoreLodModelUrl } from "./tellus-urls-identity";
 import {
@@ -57,8 +61,8 @@ import {
 //    (large-*/mega-*) from paying vertex cost for off-screen forests. Trunks feed the
 //    player-collision circle list.
 //
-// Density adapts to the live FPS through quality tiers (MIN→ULTRA); scatter density is per-paint-kind
-// (meadow lush, beach palms, snow pines, …) and respects height/slope/water/pond rules.
+// Density adapts through the shared render-pressure quality policy (MIN→ULTRA); scatter density is
+// per-paint-kind (meadow lush, beach palms, snow pines, …) and respects height/slope/water/pond rules.
 
 export interface VegetationOptions {
   scene: THREE.Scene;
@@ -95,7 +99,13 @@ export interface TreeCollider {
 }
 
 export interface VegetationSystem {
-  update(px: number, pz: number, playerY: number, fps: number, nowMs: number): void;
+  update(
+    px: number,
+    pz: number,
+    playerY: number,
+    pressure: RenderPressureInput,
+    nowMs: number,
+  ): void;
   notifyTerrainChanged(): void;
   getTreeColliders(): TreeCollider[];
   stats(): VegetationStats;
@@ -111,9 +121,8 @@ const TUFT_CANDIDATES = 460;
 
 // Quality tiers — radius streams fewer chunks AND trims the per-chunk cap. The accepted-candidate
 // prefix is tier-independent, so tier flips trim/extend growth without reshuffling it.
-// The controller targets a 30fps floor (operator call: "30fps or greater, no issues") — it sheds
-// below ~32 and keeps climbing toward GIGA whenever there's sustained headroom, so strong GPUs fill
-// a huge radius and weak ones settle wherever they hold 30+.
+// The shared pressure controller distinguishes refresh-rate caps from expensive frame work, applies
+// hysteresis once, and recommends gradual tier changes. This renderer only applies that recommendation.
 // Operator-tuned: RANGE is the luxury, thickness isn't — densities stay moderate at every tier so
 // huge radii cost less (cover thins; the distance fade hides it).
 const TIERS = [
@@ -453,9 +462,7 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
   let terrainRev = 1;
   let tier = Math.min(options.initialTier ?? (useWebGPU ? 5 : 1), TIERS.length - 1);
   const maxTier = Math.min(options.maxTier ?? (useWebGPU ? 7 : 2), TIERS.length - 1);
-  let tierGoodSince = 0;
-  let tierLowSince = 0;
-  let lastTierDropAt = 0;
+  let lastTierChangeAt = Number.NEGATIVE_INFINITY;
   let lastDiffAt = 0;
   let lastDiffX = Infinity;
   let lastDiffZ = Infinity;
@@ -1032,35 +1039,30 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
     }
   };
 
-  const update = (px: number, pz: number, playerY: number, fps: number, nowMs: number) => {
+  const update = (
+    px: number,
+    pz: number,
+    playerY: number,
+    pressureInput: RenderPressureInput,
+    nowMs: number,
+  ) => {
     if (disposed) return;
+    const pressure = resolveRenderPressure(pressureInput);
     requestTexturedTreeAssets();
     uPlayer.value.set(px, playerY, pz);
     uCamXZ.value.set(px, pz);
     uFade.value.set(TIERS[tier].radius * 0.7, TIERS[tier].radius);
     syncStreamedSectors(px, pz, nowMs);
 
-    if (fps > 0) {
-      // Hitch-proof shedding: a single GLB-decode stall used to crash several tiers in under a
-      // second (outer chunks popped off, then slowly re-grew). Dropping now requires fps < 32
-      // SUSTAINED for 1.2s, at most one tier per 2.5s.
-      if (fps < 32) {
-        if (tierLowSince === 0) tierLowSince = nowMs;
-        if (tier > 0 && nowMs - tierLowSince > 1200 && nowMs - lastTierDropAt > 2500) {
-          tier--;
-          lastTierDropAt = nowMs;
-        }
-        tierGoodSince = 0;
-      } else if (fps > 42 && tier < maxTier) {
-        tierLowSince = 0;
-        if (tierGoodSince === 0) tierGoodSince = nowMs;
-        else if (nowMs - tierGoodSince > 3000) {
-          tier++;
-          tierGoodSince = 0;
-        }
-      } else {
-        tierLowSince = 0;
-        tierGoodSince = 0;
+    // FPS/workload classification and hysteresis live in the shared pressure controller. Vegetation
+    // only applies the resulting quality recommendation gradually, so one hitch cannot collapse tiers.
+    if (nowMs - lastTierChangeAt >= pressure.qualityStepIntervalMs) {
+      if (pressure.qualityRecommendation === "reduce" && tier > 0) {
+        tier--;
+        lastTierChangeAt = nowMs;
+      } else if (pressure.qualityRecommendation === "increase" && tier < maxTier) {
+        tier++;
+        lastTierChangeAt = nowMs;
       }
     }
 
@@ -1086,8 +1088,8 @@ export function createVegetation(options: VegetationOptions): VegetationSystem {
       diffChunks(px, pz);
     }
 
-    // chunk-rebuild budget per frame: shed work when struggling, fill faster with headroom
-    let budget = fps > 0 && fps < 40 ? 1 : fps > 52 ? 3 : 2;
+    // Chunk work consumes the shared pressure budget instead of interpreting FPS independently.
+    let budget = pressure.work.maxJobs;
     while (budget > 0 && rebuildQueue.length > 0) {
       const key = rebuildQueue.shift()!;
       queued.delete(key);
