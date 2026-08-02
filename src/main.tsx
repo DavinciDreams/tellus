@@ -48,10 +48,8 @@ import {
 } from "./tellus-procplant-biomes";
 import {
   createProcPlantVegetation,
-  procPlantStartupTerrainReady,
   type ProcPlantVegetationStats,
 } from "./tellus-procplant-vegetation";
-import { createRenderPressureController } from "./tellus-render-pressure";
 import { staticTerrainAutoVegetationEnabled } from "./tellus-static-terrain";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
 import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, resetLiveMirrors } from "./tellus-procedural-assets";
@@ -495,8 +493,6 @@ function createTellusWorld(
   let fpsValue = 0;
   let fpsFrames = 0;
   let fpsSampleStart = lastTime;
-  let renderPressureController = createRenderPressureController();
-  let renderPressureSnapshot = renderPressureController.snapshot(lastTime);
   let tick = 0;
   type BrowserLongTask = {
     name: string;
@@ -534,7 +530,6 @@ function createTellusWorld(
         lastGroundingMs: number;
         maxGroundingMs: number;
       };
-      renderPressure: unknown;
       procplants: unknown;
       renderer: unknown;
       browser: {
@@ -1632,7 +1627,6 @@ function createTellusWorld(
     staticTerrainAllowsAutoVegetation &&
     templateAllowsAutoVegetation &&
     (isChunked || procPlantPreference === "1");
-  let procPlantTerrainHydrated = !isChunked;
   const procplants = procplantsEnabled
     ? createProcPlantVegetation({
         scene,
@@ -1653,20 +1647,22 @@ function createTellusWorld(
         densityMultiplier: procPlantDensityPreference,
         isExcluded: terrainVegetationExcluded,
         viewMode: () => cameraMode,
-        // Chunked worlds retain full close-range detail but use the stable distance LODs for their
-        // much wider streaming ring. Finite Tellus islands can still opt into all-ring full detail.
-        fullDetailLod: activeWorldTemplate === "tellus" && !isChunked,
+        fullDetailLod: activeWorldTemplate === "tellus",
         shouldPauseBuild: hasMovementKeyHeld,
         shouldDeferBuild: () => {
           const terrainStats = chunkRenderer?.stats();
-          if (!procPlantTerrainHydrated) {
-            procPlantTerrainHydrated = procPlantStartupTerrainReady(isChunked, terrainStats);
-          }
+          const terrainReady = !isChunked || Boolean(
+            terrainStats &&
+            (
+              terrainStats.active > 0 ||
+              (terrainStats.ready > 0 && terrainStats.inflight === 0)
+            ),
+          );
           const skyboxReady =
             Boolean(activeSkyboxUrl) ||
             !runtimeConfig.skyboxUrl ||
             performance.now() - worldCreatedAt > 3500;
-          return !procPlantTerrainHydrated || !skyboxReady;
+          return !terrainReady || !skyboxReady;
         },
       })
     : {
@@ -3300,10 +3296,9 @@ function createTellusWorld(
       },
     };
   };
-  // DEV-ONLY perf readout: window.__tellusPerf() -> { fps, renderPressure, vegetation, procplants }.
+  // DEV-ONLY perf readout: window.__tellusPerf() -> { fps, vegetation, procplants }.
   window.__tellusPerf = () => ({
     fps: fpsValue,
-    renderPressure: renderPressureSnapshot,
     frame: {
       frames: perfDiagnostics.frames,
       maxFrameMs: Math.round(perfDiagnostics.maxFrameMs * 10) / 10,
@@ -3379,7 +3374,6 @@ function createTellusWorld(
           frame?: { phases?: unknown; slowFrame?: unknown };
           chunkTerrain?: unknown;
           motion?: unknown;
-          renderPressure?: unknown;
           procplants?: unknown;
         }
       | undefined;
@@ -3401,7 +3395,6 @@ function createTellusWorld(
       phases: perf?.frame?.phases,
       chunkTerrain: perf?.chunkTerrain,
       motion: perf?.motion,
-      renderPressure: perf?.renderPressure,
       procplants: perf?.procplants,
       slowFrame: perf?.frame?.slowFrame,
       longTasks: slowFrame?.browser?.recentLongTasks?.map((task) => ({
@@ -3420,8 +3413,6 @@ function createTellusWorld(
     fpsFrames = 0;
     fpsSampleStart = lastTime;
     fpsValue = 0;
-    renderPressureController = createRenderPressureController();
-    renderPressureSnapshot = renderPressureController.snapshot(lastTime);
     perfDiagnostics.maxFrameMs = 0;
     perfDiagnostics.slowFrame = null;
     perfDiagnostics.phases.maxMovementMs = 0;
@@ -10313,14 +10304,14 @@ function createTellusWorld(
       perfDiagnostics.phases.miscMs,
     );
     phaseStartedAt = performance.now();
-    vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, renderPressureSnapshot, now);
+    vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
     perfDiagnostics.phases.vegetationMs = performance.now() - phaseStartedAt;
     perfDiagnostics.phases.maxVegetationMs = Math.max(
       perfDiagnostics.phases.maxVegetationMs,
       perfDiagnostics.phases.vegetationMs,
     );
     phaseStartedAt = performance.now();
-    procplants.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, renderPressureSnapshot, now);
+    procplants.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
     perfDiagnostics.phases.procplantsMs = performance.now() - phaseStartedAt;
     perfDiagnostics.phases.maxProcplantsMs = Math.max(
       perfDiagnostics.phases.maxProcplantsMs,
@@ -10382,12 +10373,6 @@ function createTellusWorld(
       perfDiagnostics.phases.physicsMs +
       perfDiagnostics.phases.renderMs +
       perfDiagnostics.phases.miscMs;
-    renderPressureSnapshot = renderPressureController.observe({
-      fps: fpsValue,
-      frameWorkMs: measuredMs,
-      nowMs: performance.now(),
-      active: !document.hidden,
-    });
     const totalMs = Math.max(frameGapMs, performance.now() - frameStartedAt);
     if (totalMs >= 45 && totalMs >= (perfDiagnostics.slowFrame?.totalMs ?? 0)) {
       const recentResources = performance.getEntriesByType("resource")
@@ -10426,7 +10411,6 @@ function createTellusWorld(
           lastGroundingMs: Math.round(perfDiagnostics.chunkStreaming.lastGroundingMs * 10) / 10,
           maxGroundingMs: Math.round(perfDiagnostics.chunkStreaming.maxGroundingMs * 10) / 10,
         },
-        renderPressure: renderPressureSnapshot,
         procplants: procplants.stats(),
         renderer: rendererDiagnostics(),
         browser: {
