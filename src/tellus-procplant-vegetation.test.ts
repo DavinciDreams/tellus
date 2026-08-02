@@ -36,6 +36,7 @@ import {
 import {
   buildCheapTreeTemplate,
   branchModuleLodForTree,
+  createProcPlantCanopyShadowGeometry,
   createProcPlantVegetation,
   groundPlantDistanceDensity,
   procPlantBranchRadialSegments,
@@ -44,6 +45,9 @@ import {
   procPlantStartupTerrainReady,
   procPlantTemplateFromAssetTemplate,
   procPlantChunkSeed,
+  procPlantGrassFieldCellVisible,
+  procPlantCanopyProxyMatrix,
+  procPlantOrganIsCanopy,
   shouldUseCheapDistantTree,
 } from "./tellus-procplant-vegetation";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
@@ -67,6 +71,59 @@ const templateBounds = (template: ProcPlantTemplate) => {
 };
 
 describe("procplant vegetation", () => {
+  it("fits low-poly canopy proxies without treating dense ground cover as canopy", () => {
+    expect(procPlantOrganIsCanopy("leaf:oval:0.5:0:0:0")).toBe(true);
+    expect(procPlantOrganIsCanopy("coniferSpray")).toBe(true);
+    expect(procPlantOrganIsCanopy("palmFrond")).toBe(true);
+    expect(procPlantOrganIsCanopy("grassCarpet:12")).toBe(false);
+    expect(procPlantOrganIsCanopy("grassBlade:0.3:0.1")).toBe(false);
+    expect(procPlantOrganIsCanopy("petal")).toBe(false);
+
+    const broadleaf = createProcPlantCanopyShadowGeometry("broadleaf");
+    const conifer = createProcPlantCanopyShadowGeometry("conifer");
+    const triangles = (geometry: THREE.BufferGeometry) =>
+      (geometry.getIndex()?.count ?? geometry.getAttribute("position").count) / 3;
+    expect(triangles(broadleaf)).toBeLessThanOrEqual(80);
+    expect(triangles(conifer)).toBeLessThanOrEqual(24);
+    broadleaf.dispose();
+    conifer.dispose();
+
+    const matrices = [
+      new THREE.Matrix4().makeTranslation(-2, 5, 0),
+      new THREE.Matrix4().makeTranslation(3, 8, 1),
+    ];
+    const proxy = procPlantCanopyProxyMatrix(matrices, "broadleaf");
+    expect(proxy).not.toBeNull();
+    const center = new THREE.Vector3();
+    const rotation = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    proxy!.decompose(center, rotation, scale);
+    expect(center.x).toBeCloseTo(0.5, 5);
+    expect(center.y).toBeCloseTo(6.5, 5);
+    expect(scale.x).toBeGreaterThan(2.5);
+  });
+
+  it("keeps coarser grass LODs as stable subsets of the fine placement grid", () => {
+    let lod1 = 0;
+    let lod2 = 0;
+    for (let gridX = -20; gridX < 20; gridX++) {
+      for (let gridZ = -20; gridZ < 30; gridZ++) {
+        const seed = Math.imul(gridX + 4099, 0x45d9f3b) ^ Math.imul(gridZ - 8191, 0x119de1f3);
+        const visibleAtLod1 = procPlantGrassFieldCellVisible(gridX, gridZ, seed, 1);
+        const visibleAtLod2 = procPlantGrassFieldCellVisible(gridX, gridZ, seed, 2);
+        expect(procPlantGrassFieldCellVisible(gridX, gridZ, seed, 0)).toBe(true);
+        if (visibleAtLod2) expect(visibleAtLod1).toBe(true);
+        if (visibleAtLod1) lod1++;
+        if (visibleAtLod2) lod2++;
+      }
+    }
+    expect(lod1).toBeGreaterThan(lod2);
+    expect(lod1).toBeGreaterThan(350);
+    expect(lod1).toBeLessThan(650);
+    expect(lod2).toBeGreaterThan(100);
+    expect(lod2).toBeLessThan(250);
+  });
+
   it("keeps nearby branch trunks round independently of compute-pressure LOD", () => {
     expect(procPlantBranchRadialSegments(0, 0)).toBe(8);
     expect(procPlantBranchRadialSegments(0, 1)).toBe(6);
