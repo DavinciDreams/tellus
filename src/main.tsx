@@ -48,17 +48,8 @@ import {
 } from "./tellus-procplant-biomes";
 import {
   createProcPlantVegetation,
-  procPlantStartupTerrainReady,
   type ProcPlantVegetationStats,
 } from "./tellus-procplant-vegetation";
-import { createRenderPressureController } from "./tellus-render-pressure";
-import {
-  TELLUS_SHADOW_MAP_SIZE,
-  TELLUS_SHADOW_RADIUS,
-  configureTellusSunShadow,
-  createTellusShadowInvalidationController,
-  focusTellusSunShadow,
-} from "./tellus-shadow-quality";
 import { staticTerrainAutoVegetationEnabled } from "./tellus-static-terrain";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
 import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, resetLiveMirrors } from "./tellus-procedural-assets";
@@ -502,16 +493,6 @@ function createTellusWorld(
   let fpsValue = 0;
   let fpsFrames = 0;
   let fpsSampleStart = lastTime;
-  let renderPressureController = createRenderPressureController();
-  let renderPressureSnapshot = renderPressureController.snapshot(lastTime);
-  const shadowInvalidation = createTellusShadowInvalidationController();
-  let shadowCasterRevision = 0;
-  let shadowRefreshes = 0;
-  let lastShadowRefreshAt = Number.NEGATIVE_INFINITY;
-  const invalidateShadowCasterMembership = () => {
-    shadowCasterRevision++;
-    shadowInvalidation.invalidate("casters");
-  };
   let tick = 0;
   type BrowserLongTask = {
     name: string;
@@ -549,7 +530,6 @@ function createTellusWorld(
         lastGroundingMs: number;
         maxGroundingMs: number;
       };
-      renderPressure: unknown;
       procplants: unknown;
       renderer: unknown;
       browser: {
@@ -1458,6 +1438,16 @@ function createTellusWorld(
       return 1;
     }
   };
+  // How often (in frames) the shadow map regenerates. Default 3 → ~66% fewer shadow passes than the
+  // old every-frame behaviour. Override via localStorage `tellus.shadowEvery` (1 = every frame).
+  const shadowEveryDebug = (): number => {
+    try {
+      const value = Number(window.localStorage.getItem("tellus.shadowEvery"));
+      return Number.isFinite(value) ? Math.max(1, Math.min(10, Math.round(value))) : 3;
+    } catch {
+      return 3;
+    }
+  };
   const frameDriverDebug = (): "raf" | "timeout" => {
     try {
       return window.localStorage.getItem("tellus.frameDriver") === "timeout" ? "timeout" : "raf";
@@ -1480,7 +1470,9 @@ function createTellusWorld(
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatioCap));
     renderer.shadowMap.enabled = !lowGpuDebug();
-    shadowInvalidation.invalidate("configuration");
+    // Force a shadow refresh next frame whenever this runs (e.g. toggling low-GPU mode back on).
+    // The per-frame interval throttle lives in the animate loop via sun.shadow.needsUpdate.
+    sun.shadow.needsUpdate = true;
   };
   const sampleVegetationHeight = isChunked
     ? (x: number, z: number) => chunkRenderer?.sampleHeight(x, z) ?? largeWorldBaseHeight(x, z)
@@ -1635,7 +1627,6 @@ function createTellusWorld(
     staticTerrainAllowsAutoVegetation &&
     templateAllowsAutoVegetation &&
     (isChunked || procPlantPreference === "1");
-  let procPlantTerrainHydrated = !isChunked;
   const procplants = procplantsEnabled
     ? createProcPlantVegetation({
         scene,
@@ -1656,21 +1647,22 @@ function createTellusWorld(
         densityMultiplier: procPlantDensityPreference,
         isExcluded: terrainVegetationExcluded,
         viewMode: () => cameraMode,
-        // Chunked worlds retain full close-range detail but use the stable distance LODs for their
-        // much wider streaming ring. Finite Tellus islands can still opt into all-ring full detail.
-        fullDetailLod: activeWorldTemplate === "tellus" && !isChunked,
+        fullDetailLod: activeWorldTemplate === "tellus",
         shouldPauseBuild: hasMovementKeyHeld,
-        onShadowCastersChanged: invalidateShadowCasterMembership,
         shouldDeferBuild: () => {
           const terrainStats = chunkRenderer?.stats();
-          if (!procPlantTerrainHydrated) {
-            procPlantTerrainHydrated = procPlantStartupTerrainReady(isChunked, terrainStats);
-          }
+          const terrainReady = !isChunked || Boolean(
+            terrainStats &&
+            (
+              terrainStats.active > 0 ||
+              (terrainStats.ready > 0 && terrainStats.inflight === 0)
+            ),
+          );
           const skyboxReady =
             Boolean(activeSkyboxUrl) ||
             !runtimeConfig.skyboxUrl ||
             performance.now() - worldCreatedAt > 3500;
-          return !procPlantTerrainHydrated || !skyboxReady;
+          return !terrainReady || !skyboxReady;
         },
       })
     : {
@@ -2930,16 +2922,19 @@ function createTellusWorld(
   const sun = new THREE.DirectionalLight(0xffdfb7, 4.1);
   sun.position.set(-55, 58, 42);
   sun.castShadow = true;
-  // The shadow map refreshes only after meaningful region, sun, caster, or actor invalidation. The
-  // shared render-pressure snapshot coalesces those refreshes; there is no separate shadow FPS policy.
-  configureTellusSunShadow(sun);
+  // Manual shadow-map refresh: the day/night cycle nudges the sun every frame, which would otherwise
+  // force a full shadow re-render every frame on both backends (WebGL WebGLShadowMap + WebGPU
+  // ShadowNode both honour LightShadow.autoUpdate/needsUpdate per-light). The animate loop instead
+  // flags needsUpdate every `shadowEveryDebug()` frames — big GPU saving, no visible motion lag.
+  sun.shadow.autoUpdate = false;
+  sun.shadow.needsUpdate = true;
   const moon = new THREE.DirectionalLight(0x9fb7ff, 0.55);
   moon.position.set(55, 42, -42);
   // Moon does NOT cast shadows: a second full shadow pass every frame for a 0.55-intensity fill light
   // was pure GPU cost with almost no visible shadow contribution. The sun shadow carries the scene.
   moon.castShadow = false;
   const hemisphere = new THREE.HemisphereLight(0xb6ccff, 0x3d5332, 2.25);
-  scene.add(sun, sun.target, moon, hemisphere);
+  scene.add(sun, moon, hemisphere);
 
   const visitor = createVisitorMesh(useWebGPU);
   // Chunked worlds place origin at a CORNER, so spawn at the world centre (from the manifest bounds)
@@ -3301,18 +3296,9 @@ function createTellusWorld(
       },
     };
   };
-  // DEV-ONLY perf readout: window.__tellusPerf() -> { fps, renderPressure, vegetation, procplants }.
+  // DEV-ONLY perf readout: window.__tellusPerf() -> { fps, vegetation, procplants }.
   window.__tellusPerf = () => ({
     fps: fpsValue,
-    renderPressure: renderPressureSnapshot,
-    shadows: {
-      radius: TELLUS_SHADOW_RADIUS,
-      mapSize: TELLUS_SHADOW_MAP_SIZE,
-      refreshes: shadowRefreshes,
-      lastRefreshAt: Number.isFinite(lastShadowRefreshAt) ? lastShadowRefreshAt : null,
-      casterRevision: shadowCasterRevision,
-      pending: shadowInvalidation.pendingReasons(),
-    },
     frame: {
       frames: perfDiagnostics.frames,
       maxFrameMs: Math.round(perfDiagnostics.maxFrameMs * 10) / 10,
@@ -3388,7 +3374,6 @@ function createTellusWorld(
           frame?: { phases?: unknown; slowFrame?: unknown };
           chunkTerrain?: unknown;
           motion?: unknown;
-          renderPressure?: unknown;
           procplants?: unknown;
         }
       | undefined;
@@ -3410,7 +3395,6 @@ function createTellusWorld(
       phases: perf?.frame?.phases,
       chunkTerrain: perf?.chunkTerrain,
       motion: perf?.motion,
-      renderPressure: perf?.renderPressure,
       procplants: perf?.procplants,
       slowFrame: perf?.frame?.slowFrame,
       longTasks: slowFrame?.browser?.recentLongTasks?.map((task) => ({
@@ -3429,8 +3413,6 @@ function createTellusWorld(
     fpsFrames = 0;
     fpsSampleStart = lastTime;
     fpsValue = 0;
-    renderPressureController = createRenderPressureController();
-    renderPressureSnapshot = renderPressureController.snapshot(lastTime);
     perfDiagnostics.maxFrameMs = 0;
     perfDiagnostics.slowFrame = null;
     perfDiagnostics.phases.maxMovementMs = 0;
@@ -5057,7 +5039,6 @@ function createTellusWorld(
     scene.remove(mesh);
     disposeObject(mesh);
     generatedMeshes.delete(thingId);
-    invalidateShadowCasterMembership();
     syncTransformControls();
   };
 
@@ -5122,7 +5103,6 @@ function createTellusWorld(
       if (mesh) mesh.visible = true;
     }
     instancePools.delete(modelUrl);
-    invalidateShadowCasterMembership();
     if (reason !== undefined) {
       // An actual error (not a benign drop-below-2 teardown) → never re-attempt this URL for the session.
       instancingDisabledUrls.add(modelUrl);
@@ -5170,7 +5150,6 @@ function createTellusWorld(
         disabled: false,
       };
       instancePools.set(modelUrl, pool);
-      invalidateShadowCasterMembership();
       return pool;
     } catch (error) {
       for (const inst of instanced) {
@@ -5216,7 +5195,6 @@ function createTellusWorld(
       pool.instanced = newInstanced;
       pool.capacity = newCapacity;
       refreshInstancePoolBounds(pool);
-      invalidateShadowCasterMembership();
       return true;
     } catch (error) {
       for (const inst of newInstanced) {
@@ -5271,7 +5249,6 @@ function createTellusWorld(
       pool.thingToSlot.set(thing.id, slot);
       refreshInstancePoolBounds(pool);
       mesh.visible = false;
-      invalidateShadowCasterMembership();
       return true;
     } catch (error) {
       disableInstancePool(pool.modelUrl, error);
@@ -5299,7 +5276,6 @@ function createTellusWorld(
       }
     }
     if (mesh) mesh.visible = true;
-    invalidateShadowCasterMembership();
   };
 
   // Resolve an InstancedMesh raycast hit (pool + instanceId) back to a thing id.
@@ -5686,7 +5662,6 @@ function createTellusWorld(
           pool.instanced[j].setMatrixAt(slot, subMeshes[j].matrixWorld);
         }
         refreshInstancePoolBounds(pool);
-        shadowInvalidation.invalidate("dynamic");
       } catch (error) {
         disableInstancePool(pool.modelUrl, error);
       }
@@ -6522,7 +6497,6 @@ function createTellusWorld(
     failedMesh.userData.transientLoadError =
       error instanceof Error ? error.message : String(error);
     generatedMeshes.set(thing.id, failedMesh);
-    invalidateShadowCasterMembership();
     scene.add(failedMesh);
     syncTransformControls();
     updateThingMeshPosition(thing);
@@ -6653,7 +6627,6 @@ function createTellusWorld(
           }
           ensureGeneratedBuildingLodProxy(current, model);
           generatedMeshes.set(id, model);
-          invalidateShadowCasterMembership();
           startGeneratedAnimation(id, model);
           scene.add(model);
           if (interiorObject && !isFreeMovingVehicle(current)) {
@@ -6752,7 +6725,6 @@ function createTellusWorld(
     }
     const nextMesh = wantsSwirl ? createGenerationSwirl(thing) : createGeneratedMesh(thing);
     generatedMeshes.set(thing.id, nextMesh);
-    invalidateShadowCasterMembership();
     scene.add(nextMesh);
     syncTransformControls();
     updateThingMeshPosition(thing);
@@ -7077,7 +7049,6 @@ function createTellusWorld(
       scene.remove(mesh);
       disposeObject(mesh);
       generatedMeshes.delete(id);
-      invalidateShadowCasterMembership();
     }
     if (selectedThingId === id) selectedThingId = undefined;
     syncTransformControls();
@@ -7583,7 +7554,6 @@ function createTellusWorld(
       ? createGenerationSwirl(clone)
       : createGeneratedMesh(clone);
     generatedMeshes.set(clone.id, mesh);
-    invalidateShadowCasterMembership();
     scene.add(mesh);
     updateThingMeshPosition(clone);
     loadRemoteGeneratedModel(clone);
@@ -7723,7 +7693,6 @@ function createTellusWorld(
       scene.remove(mesh);
       disposeObject(mesh);
       generatedMeshes.delete(id);
-      invalidateShadowCasterMembership();
     }
     syncTransformControls();
     if (sailingThingId === id) {
@@ -8073,7 +8042,6 @@ function createTellusWorld(
       ? createGenerationSwirl(thing)
       : createGeneratedMesh(thing);
     generatedMeshes.set(thing.id, mesh);
-    invalidateShadowCasterMembership();
     scene.add(mesh);
     syncTransformControls();
 
@@ -8095,7 +8063,6 @@ function createTellusWorld(
       }
       const fallbackMesh = createGeneratedMesh(thing);
       generatedMeshes.set(thing.id, fallbackMesh);
-      invalidateShadowCasterMembership();
       scene.add(fallbackMesh);
       syncTransformControls();
     };
@@ -8151,7 +8118,6 @@ function createTellusWorld(
           }
           ensureGeneratedBuildingLodProxy(thing, model);
           generatedMeshes.set(thing.id, model);
-          invalidateShadowCasterMembership();
           startGeneratedAnimation(thing.id, model);
           scene.add(model);
           updateThingMeshPosition(thing);
@@ -8269,7 +8235,6 @@ function createTellusWorld(
           }
           ensureGeneratedBuildingLodProxy(thing, model);
           generatedMeshes.set(thing.id, model);
-          invalidateShadowCasterMembership();
           startGeneratedAnimation(thing.id, model);
           scene.add(model);
           updateThingMeshPosition(thing);
@@ -8408,7 +8373,6 @@ function createTellusWorld(
     refreshVegetationForGeneratedThing(thing);
     const mesh = createGenerationSwirl(thing);
     generatedMeshes.set(thing.id, mesh);
-    invalidateShadowCasterMembership();
     scene.add(mesh);
     const previousSelectedId = selectedThingId;
     selectedThingId = thing.id;
@@ -8433,7 +8397,6 @@ function createTellusWorld(
         }
         ensureGeneratedBuildingLodProxy(thing, modelObject);
         generatedMeshes.set(thing.id, modelObject);
-        invalidateShadowCasterMembership();
         startGeneratedAnimation(thing.id, modelObject); // VRM idle / embedded clip starts looping
         scene.add(modelObject);
         if (interiorObject && !isFreeMovingVehicle(thing)) {
@@ -10135,23 +10098,6 @@ function createTellusWorld(
       z: camera.position.z,
     };
     updateDayNightCycle(Date.now(), now);
-    const shadowProjection = focusTellusSunShadow(
-      sun,
-      visitorPosition.x,
-      visitorPosition.y,
-      visitorPosition.z,
-    );
-    shadowInvalidation.observe(shadowProjection, shadowCasterRevision);
-    if (
-      transformDragging ||
-      hasMovementKeyHeld() ||
-      playerAirborne ||
-      generatedAnimationMixers.size > 0 ||
-      generatedVrmRigs.size > 0 ||
-      avatarRigs.size > 0
-    ) {
-      shadowInvalidation.invalidate("dynamic");
-    }
     flushTerrain();
     perfDiagnostics.phases.miscMs = performance.now() - miscStartedAt;
     phaseStartedAt = performance.now();
@@ -10358,14 +10304,14 @@ function createTellusWorld(
       perfDiagnostics.phases.miscMs,
     );
     phaseStartedAt = performance.now();
-    vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, renderPressureSnapshot, now);
+    vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
     perfDiagnostics.phases.vegetationMs = performance.now() - phaseStartedAt;
     perfDiagnostics.phases.maxVegetationMs = Math.max(
       perfDiagnostics.phases.maxVegetationMs,
       perfDiagnostics.phases.vegetationMs,
     );
     phaseStartedAt = performance.now();
-    procplants.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, renderPressureSnapshot, now);
+    procplants.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
     perfDiagnostics.phases.procplantsMs = performance.now() - phaseStartedAt;
     perfDiagnostics.phases.maxProcplantsMs = Math.max(
       perfDiagnostics.phases.maxProcplantsMs,
@@ -10386,20 +10332,16 @@ function createTellusWorld(
       // material's shader incrementally as chunks/plants stream in (small per-frame costs, hidden behind
       // the overlay), instead of deferring them into one catastrophic multi-second first-frame compile.
       if (shouldRenderThisFrame) {
-        const refreshShadow =
-          renderer.shadowMap.enabled &&
-          sun.intensity >= 0.35 &&
-          shadowInvalidation.shouldRefresh(renderPressureSnapshot, now);
-        if (refreshShadow) sun.shadow.needsUpdate = true;
+        // Manual shadow-map refresh on an interval (sun.shadow.autoUpdate is off — see sun setup).
+        // Flag needsUpdate BEFORE render so this frame regenerates the shadow map; three clears the
+        // flag itself after the pass. Skipped when shadows are globally disabled (low-GPU mode).
+        if (renderer.shadowMap.enabled && perfDiagnostics.frames % shadowEveryDebug() === 0) {
+          sun.shadow.needsUpdate = true;
+        }
         const gpuTimerActive = beginWebGlGpuTimer(perfDiagnostics.frames);
         try {
           renderPortalPreview();
           renderer.render(scene, camera);
-          if (refreshShadow) {
-            shadowInvalidation.markRefreshed(now);
-            shadowRefreshes++;
-            lastShadowRefreshAt = now;
-          }
         } finally {
           if (gpuTimerActive) endWebGlGpuTimer();
         }
@@ -10431,12 +10373,6 @@ function createTellusWorld(
       perfDiagnostics.phases.physicsMs +
       perfDiagnostics.phases.renderMs +
       perfDiagnostics.phases.miscMs;
-    renderPressureSnapshot = renderPressureController.observe({
-      fps: fpsValue,
-      frameWorkMs: measuredMs,
-      nowMs: performance.now(),
-      active: !document.hidden,
-    });
     const totalMs = Math.max(frameGapMs, performance.now() - frameStartedAt);
     if (totalMs >= 45 && totalMs >= (perfDiagnostics.slowFrame?.totalMs ?? 0)) {
       const recentResources = performance.getEntriesByType("resource")
@@ -10475,7 +10411,6 @@ function createTellusWorld(
           lastGroundingMs: Math.round(perfDiagnostics.chunkStreaming.lastGroundingMs * 10) / 10,
           maxGroundingMs: Math.round(perfDiagnostics.chunkStreaming.maxGroundingMs * 10) / 10,
         },
-        renderPressure: renderPressureSnapshot,
         procplants: procplants.stats(),
         renderer: rendererDiagnostics(),
         browser: {
