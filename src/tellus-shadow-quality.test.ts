@@ -3,7 +3,6 @@ import * as THREE from "three";
 import { renderPressureSnapshotFor } from "./tellus-render-pressure";
 import {
   TELLUS_SHADOW_MAP_SIZE,
-  TELLUS_SHADOW_PROXY_LAYER,
   TELLUS_SHADOW_RADIUS,
   TELLUS_SHADOW_TEXEL_WORLD_SIZE,
   configureTellusSunShadow,
@@ -21,7 +20,6 @@ describe("Tellus sun shadow quality", () => {
     expect(sun.shadow.camera.right).toBe(TELLUS_SHADOW_RADIUS);
     expect(sun.shadow.mapSize.x).toBe(TELLUS_SHADOW_MAP_SIZE);
     expect(sun.shadow.mapSize.y).toBe(TELLUS_SHADOW_MAP_SIZE);
-    expect(sun.shadow.camera.layers.isEnabled(TELLUS_SHADOW_PROXY_LAYER)).toBe(true);
     expect(sun.shadow.autoUpdate).toBe(false);
   });
 

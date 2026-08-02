@@ -8,7 +8,6 @@ export const TELLUS_SHADOW_RADIUS = 56;
 export const TELLUS_SHADOW_MAP_SIZE = 1024;
 export const TELLUS_SHADOW_TEXEL_WORLD_SIZE =
   (TELLUS_SHADOW_RADIUS * 2) / TELLUS_SHADOW_MAP_SIZE;
-export const TELLUS_SHADOW_PROXY_LAYER = 1;
 export const TELLUS_SHADOW_SUN_INVALIDATION_RADIANS = THREE.MathUtils.degToRad(0.2);
 
 const DEFAULT_SUN_DIRECTION = new THREE.Vector3(-0.6, 0.65, 0.45).normalize();
@@ -47,9 +46,6 @@ export const configureTellusSunShadow = (sun: THREE.DirectionalLight): void => {
   camera.bottom = -TELLUS_SHADOW_RADIUS;
   camera.near = 1;
   camera.far = 240;
-  // Layer 0 contains normal scene casters. Layer 1 is reserved for shadow-only canopy proxies, so
-  // those cheap silhouettes participate in the shadow pass without appearing in the beauty pass.
-  camera.layers.enable(TELLUS_SHADOW_PROXY_LAYER);
   camera.updateProjectionMatrix();
   sun.shadow.mapSize.set(TELLUS_SHADOW_MAP_SIZE, TELLUS_SHADOW_MAP_SIZE);
   sun.shadow.bias = -0.00012;

@@ -5,7 +5,6 @@ import {
   type RenderPressureInput,
   type RenderPressureSnapshot,
 } from "./tellus-render-pressure";
-import { TELLUS_SHADOW_PROXY_LAYER } from "./tellus-shadow-quality";
 import type { TerrainPaintKind } from "./tellus-types";
 import {
   biomePatchForEcology,
@@ -382,6 +381,18 @@ export const procPlantCanopyProxyMatrix = (
       );
   return new THREE.Matrix4().compose(center, new THREE.Quaternion(), proxyScale);
 };
+
+/**
+ * Keep canopy proxies on the main camera layer so Three.js includes them when traversing shadow
+ * casters. Their beauty-pass material writes neither color nor depth; the shadow renderer derives
+ * its own depth material and therefore still records their silhouettes in the sun shadow map.
+ */
+export const createProcPlantCanopyShadowMaterial = (): THREE.MeshBasicMaterial =>
+  new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    colorWrite: false,
+    depthWrite: false,
+  });
 
 export const shouldUseCheapDistantTree = (
   habit: ProcPlantHabit,
@@ -1036,7 +1047,7 @@ export function createProcPlantVegetation(
     color: 0xffffff,
     side: THREE.DoubleSide,
   });
-  const canopyShadowMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+  const canopyShadowMaterial = createProcPlantCanopyShadowMaterial();
   const canopyShadowGeometries: Record<ProcPlantCanopyShadowKind, THREE.BufferGeometry> = {
     broadleaf: createProcPlantCanopyShadowGeometry("broadleaf"),
     conifer: createProcPlantCanopyShadowGeometry("conifer"),
@@ -2145,7 +2156,6 @@ export function createProcPlantVegetation(
         matrices.length,
       );
       mesh.name = `tellus-procplant-canopy-shadow-${kind}`;
-      mesh.layers.set(TELLUS_SHADOW_PROXY_LAYER);
       mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
       matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
       mesh.instanceMatrix.needsUpdate = true;

@@ -37,6 +37,7 @@ import {
   buildCheapTreeTemplate,
   branchModuleLodForTree,
   createProcPlantCanopyShadowGeometry,
+  createProcPlantCanopyShadowMaterial,
   createProcPlantVegetation,
   groundPlantDistanceDensity,
   procPlantBranchRadialSegments,
@@ -87,6 +88,15 @@ describe("procplant vegetation", () => {
     expect(triangles(conifer)).toBeLessThanOrEqual(24);
     broadleaf.dispose();
     conifer.dispose();
+
+    const shadowOnlyMaterial = createProcPlantCanopyShadowMaterial();
+    const proxyMesh = new THREE.Mesh(new THREE.BoxGeometry(), shadowOnlyMaterial);
+    const mainCamera = new THREE.PerspectiveCamera();
+    expect(proxyMesh.layers.test(mainCamera.layers)).toBe(true);
+    expect(shadowOnlyMaterial.colorWrite).toBe(false);
+    expect(shadowOnlyMaterial.depthWrite).toBe(false);
+    proxyMesh.geometry.dispose();
+    shadowOnlyMaterial.dispose();
 
     const matrices = [
       new THREE.Matrix4().makeTranslation(-2, 5, 0),
