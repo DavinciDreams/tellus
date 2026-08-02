@@ -634,6 +634,7 @@ declare global {
     __tellusExitInterior?: () => void;
     __tellusPerf?: () => {
       fps: number;
+      renderPressure?: unknown;
       vegetation: unknown;
       procplants?: unknown;
       generatedAssets?: unknown;
