@@ -992,6 +992,31 @@ describe("procplant vegetation", () => {
     vegetation.dispose();
   });
 
+  it("prefetches a bounded cheap porch beyond the first-person sightline", () => {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      camera: () => camera,
+      worldId: "chunked-sightline-porch-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -160, maxX: 160, minZ: -160, maxZ: 160 },
+      densityMultiplier: 0,
+    });
+
+    vegetation.update(0, 0, 1, 60, 0);
+    const stats = vegetation.stats();
+    expect(stats.chunks).toBe(57);
+    expect(stats.lod0).toBe(1);
+    expect(stats.lod1).toBe(24);
+    expect(stats.lod2).toBe(32);
+
+    vegetation.dispose();
+  });
+
   it("can use full-detail procplants for close Tellus-template islands", () => {
     const scene = new THREE.Scene();
     const vegetation = createProcPlantVegetation({

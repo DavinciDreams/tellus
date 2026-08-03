@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   firstNestedGrassCellIndex,
   grassFieldStrideForLod,
+  travelGrassLod,
   vegetationChunkPriority,
+  vegetationSightlinePrefetchOffsets,
   vegetationViewImportance,
 } from "./tellus-vegetation-view-priority";
 
@@ -24,6 +26,24 @@ describe("vegetation view priority", () => {
   it("retains a near-player safety bubble for sudden turns", () => {
     expect(vegetationViewImportance(0, 12, context)).toBeGreaterThan(0.8);
     expect(vegetationViewImportance(0, 48, context)).toBe(0);
+  });
+
+  it("prefetches only eight cheap chunks in an octant-stable forward porch", () => {
+    const north = vegetationSightlinePrefetchOffsets(0, -1, 3);
+    const slightlyTurned = vegetationSightlinePrefetchOffsets(0.1, -0.99, 3);
+
+    expect(north).toHaveLength(8);
+    expect(north.filter(({ dz }) => dz === -4)).toHaveLength(5);
+    expect(north.filter(({ dz }) => dz === -5)).toHaveLength(3);
+    expect(slightlyTurned).toEqual(north);
+    expect(north.every(({ dx, dz }) => Math.max(Math.abs(dx), Math.abs(dz)) > 3)).toBe(true);
+  });
+
+  it("uses full travel grass only in the near bubble and central camera cone", () => {
+    expect(travelGrassLod(0, -48, context)).toBe(0);
+    expect(travelGrassLod(32, -32, context)).toBe(1);
+    expect(travelGrassLod(0, 48, context)).toBe(2);
+    expect(travelGrassLod(0, 12, context)).toBe(0);
   });
 
   it("keeps grass LOD cell membership nested and stable across negative coordinates", () => {

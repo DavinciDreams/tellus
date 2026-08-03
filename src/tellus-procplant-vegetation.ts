@@ -18,8 +18,9 @@ import {
 import {
   firstNestedGrassCellIndex,
   grassFieldStrideForLod,
+  travelGrassLod,
   vegetationChunkPriority,
-  vegetationViewImportance,
+  vegetationSightlinePrefetchOffsets,
   type VegetationViewContext,
 } from "./tellus-vegetation-view-priority";
 import type { TerrainPaintKind } from "./tellus-types";
@@ -1566,13 +1567,12 @@ export function createProcPlantVegetation(
       Math.abs(chunk.cx - Math.floor((lastPlayerX ?? chunk.cx * chunkSize) / chunkSize)),
       Math.abs(chunk.cz - Math.floor((lastPlayerZ ?? chunk.cz * chunkSize) / chunkSize)),
     );
-    const grassImportance = vegetationViewImportance(
-      x0 + chunkSize * 0.5,
-      z0 + chunkSize * 0.5,
-      viewPriorityContext(),
-    );
     const grassLod = travelBuild
-      ? grassImportance >= 0.35 ? 1 : 2
+      ? travelGrassLod(
+          x0 + chunkSize * 0.5,
+          z0 + chunkSize * 0.5,
+          viewPriorityContext(),
+        )
       : fullDetailLod || grassRing <= GRASS_FIELD_FULL_DENSITY_RING
       ? 0
       : chunk.lod === 1
@@ -2203,57 +2203,64 @@ export function createProcPlantVegetation(
     const centerCz = lastCenterCz;
     const needed = new Set<string>();
     const ringLimit = activeMaxRing();
+    const ensureNeededChunk = (cx: number, cz: number, lod: 0 | 1 | 2) => {
+      const key = `${cx},${cz}`;
+      needed.add(key);
+      let chunk = active.get(key);
+      if (!chunk) {
+        chunk = {
+          key,
+          cx,
+          cz,
+          lod,
+          builtLod: null,
+          rev: -1,
+          styleRev: 0,
+          needsColdRefinement: false,
+          lastNeededMs: nowMs,
+          group: new THREE.Group(),
+          impostors: [],
+          canopyShadowProxies: [],
+          stats: {
+            plants: 0,
+            instances: 0,
+            grassInstances: 0,
+            grassTriangles: 0,
+            stemTriangles: 0,
+            organDraws: 0,
+            branchSegments: 0,
+            attachedLeaves: 0,
+            branchLod0: 0,
+            branchLod1: 0,
+            branchLod2: 0,
+            impostors: 0,
+          },
+        };
+        chunksCreated++;
+        chunk.group.name = `tellus-procplants-${key}`;
+        active.set(key, chunk);
+        root.add(chunk.group);
+      }
+      chunk.lastNeededMs = nowMs;
+      if (chunk.lod !== lod) chunk.lod = lod;
+      if (
+        chunk.rev !== terrainRev ||
+        chunk.styleRev !== PROCPLANT_RENDER_STYLE_REVISION
+      ) enqueue(key);
+    };
     for (let dz = -ringLimit; dz <= ringLimit; dz++) {
       for (let dx = -ringLimit; dx <= ringLimit; dx++) {
         const ring = Math.max(Math.abs(dx), Math.abs(dz));
-        const lod = lodForRing(ring);
-        const cx = centerCx + dx;
-        const cz = centerCz + dz;
-        const key = `${cx},${cz}`;
-        needed.add(key);
-        let chunk = active.get(key);
-        if (!chunk) {
-          chunk = {
-            key,
-            cx,
-            cz,
-            lod,
-            builtLod: null,
-            rev: -1,
-            styleRev: 0,
-            needsColdRefinement: false,
-            lastNeededMs: nowMs,
-            group: new THREE.Group(),
-            impostors: [],
-            canopyShadowProxies: [],
-            stats: {
-              plants: 0,
-              instances: 0,
-              grassInstances: 0,
-              grassTriangles: 0,
-              stemTriangles: 0,
-              organDraws: 0,
-              branchSegments: 0,
-              attachedLeaves: 0,
-              branchLod0: 0,
-              branchLod1: 0,
-              branchLod2: 0,
-              impostors: 0,
-            },
-          };
-          chunksCreated++;
-          chunk.group.name = `tellus-procplants-${key}`;
-          active.set(key, chunk);
-          root.add(chunk.group);
-        }
-        chunk.lastNeededMs = nowMs;
-        if (chunk.lod !== lod) {
-          chunk.lod = lod;
-        }
-        if (
-          chunk.rev !== terrainRev ||
-          chunk.styleRev !== PROCPLANT_RENDER_STYLE_REVISION
-        ) enqueue(key);
+        ensureNeededChunk(centerCx + dx, centerCz + dz, lodForRing(ring));
+      }
+    }
+    if (camera) {
+      for (const { dx, dz } of vegetationSightlinePrefetchOffsets(
+        viewDirectionX,
+        viewDirectionZ,
+        ringLimit,
+      )) {
+        ensureNeededChunk(centerCx + dx, centerCz + dz, 2);
       }
     }
     for (const [key, chunk] of active) {

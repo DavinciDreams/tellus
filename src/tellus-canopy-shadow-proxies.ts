@@ -193,6 +193,11 @@ export function viewPrioritizedCanopyShadowProxies(
       const distanceSq = (proxy.x - px) ** 2 + (proxy.z - pz) ** 2;
       proxyViewPosition.setFromMatrixPosition(proxy.matrix);
       proxyProjectedPosition.copy(proxyViewPosition).project(camera);
+      const centerInsideDepth =
+        proxyProjectedPosition.z >= -1 && proxyProjectedPosition.z <= 1;
+      const screenCenterWeight = centerInsideDepth
+        ? Math.max(0, 1 - Math.hypot(proxyProjectedPosition.x, proxyProjectedPosition.y) / 1.4)
+        : 0;
       const visible =
         distanceSq <= maxDistanceSq &&
         (
@@ -203,12 +208,14 @@ export function viewPrioritizedCanopyShadowProxies(
             Math.abs(proxyProjectedPosition.y) <= 1 + margin
           )
         );
-      return { proxy, distanceSq, visible };
+      return { proxy, distanceSq, visible, screenCenterWeight };
     })
     .filter((candidate) => candidate.distanceSq <= maxDistanceSq);
   const visible = candidates
     .filter((candidate) => candidate.visible)
-    .sort((a, b) => a.distanceSq - b.distanceSq);
+    .sort((a, b) =>
+      b.screenCenterWeight - a.screenCenterWeight || a.distanceSq - b.distanceSq
+    );
   const nearby = candidates
     .filter((candidate) => !candidate.visible && candidate.distanceSq <= nearDistanceSq)
     .sort((a, b) => a.distanceSq - b.distanceSq);

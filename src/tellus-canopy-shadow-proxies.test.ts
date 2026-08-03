@@ -90,6 +90,22 @@ describe("canopy shadow proxies", () => {
     )).toEqual([visible, nearbyBehind]);
   });
 
+  it("prioritizes a centered tree ahead over a nearer crown at the screen edge", () => {
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    const centered = proxyAt(0, -30);
+    const nearEdge = proxyAt(5, -10);
+
+    expect(viewPrioritizedCanopyShadowProxies(
+      [nearEdge, centered],
+      0,
+      0,
+      1,
+      { camera, maxDistance: 80, nearDistance: 15 },
+    )).toEqual([centered]);
+  });
+
   it("keeps a canopy whose crown intersects the view even when its center is off-screen", () => {
     const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
     camera.updateProjectionMatrix();

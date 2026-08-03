@@ -1679,8 +1679,11 @@ function createTellusWorld(
         viewMode: () => cameraMode,
         fullDetailLod: activeWorldTemplate === "tellus",
         shouldPauseBuild: hasMovementKeyHeld,
-        shadowProxyBudget: () =>
-          lowGpuDebug() ? 0 : runtimeConfig.dayNightMode === "cycle" ? 96 : 192,
+        shadowProxyBudget: () => {
+          if (lowGpuDebug()) return 0;
+          if (runtimeConfig.dayNightMode === "cycle") return 96;
+          return cameraMode === "third" ? 128 : 96;
+        },
         onShadowCastersChanged: (bounds) => {
           canopyShadowCasterBounds = bounds?.clone() ?? null;
           if (canopyShadowCasterBounds) canopyShadowCasterBounds.getCenter(shadowCasterFocus);
