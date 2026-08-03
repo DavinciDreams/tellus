@@ -15,15 +15,12 @@ type FoliageWindMaterial = THREE.Material & {
   };
 };
 
-export function normalizedWindWeights(values: ArrayLike<number>): Float32Array {
-  let maximum = 0;
-  for (let index = 0; index < values.length; index++) {
-    maximum = Math.max(maximum, Math.abs(values[index] ?? 0));
-  }
+export function clampedWindWeights(values: ArrayLike<number>): Float32Array {
   const weights = new Float32Array(values.length);
-  if (maximum <= 1e-6) return weights;
   for (let index = 0; index < values.length; index++) {
-    weights[index] = THREE.MathUtils.clamp(Math.abs(values[index] ?? 0) / maximum, 0, 1);
+    // ProcPlantTemplate.sway is already an authored absolute stiffness weight. Preserve it rather
+    // than normalizing each template independently, which would make a 0.5-flex fern bend like a tree.
+    weights[index] = THREE.MathUtils.clamp(Math.abs(values[index] ?? 0), 0, 1);
   }
   return weights;
 }

@@ -10,7 +10,7 @@ import {
   attachFoliageWindWeights,
   enableFoliageWind,
   heightWindWeights,
-  normalizedWindWeights,
+  clampedWindWeights,
   updateFoliageWind,
 } from "./tellus-foliage-wind";
 import type { TerrainPaintKind } from "./tellus-types";
@@ -1016,7 +1016,7 @@ export function createProcPlantVegetation(
     geometry.setAttribute("position", new THREE.BufferAttribute(template.pos, 3));
     geometry.setAttribute("normal", new THREE.BufferAttribute(template.nrm, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(template.col, 3));
-    attachFoliageWindWeights(geometry, normalizedWindWeights(template.sway));
+    attachFoliageWindWeights(geometry, clampedWindWeights(template.sway));
     geometry.setIndex(new THREE.BufferAttribute(template.idx, 1));
     geometry.computeBoundingSphere();
     geometry.userData.tellusProcplantShared = true;

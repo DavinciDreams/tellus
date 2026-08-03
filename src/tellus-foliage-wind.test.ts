@@ -4,13 +4,13 @@ import {
   attachFoliageWindWeights,
   enableFoliageWind,
   heightWindWeights,
-  normalizedWindWeights,
+  clampedWindWeights,
   updateFoliageWind,
 } from "./tellus-foliage-wind";
 
 describe("foliage wind", () => {
-  it("normalizes authored sway into a bounded vertex weight", () => {
-    expect([...normalizedWindWeights(new Float32Array([0, 2, 4]))]).toEqual([0, 0.5, 1]);
+  it("preserves authored sway while clamping invalid extremes", () => {
+    expect([...clampedWindWeights(new Float32Array([0, 0.5, 2]))]).toEqual([0, 0.5, 1]);
   });
 
   it("anchors the bottom of height-weighted grass", () => {
