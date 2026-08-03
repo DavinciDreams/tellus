@@ -17,6 +17,12 @@ export type CanopyShadowProxyPoolDiagnostics = {
   refreshes: number;
 };
 
+export type CanopyShadowProxySyncResult = {
+  changed: boolean;
+  bounds: THREE.Box3 | null;
+  signature: string;
+};
+
 const proxyBounds = new THREE.Box3();
 const proxyPosition = new THREE.Vector3();
 const proxyRotation = new THREE.Quaternion();
@@ -84,6 +90,40 @@ export function nearestCanopyShadowProxies(
     .slice(0, limit);
 }
 
+export function canopyShadowSelectionSignature(
+  proxies: readonly CanopyShadowProxy[],
+): string {
+  if (proxies.length === 0) return "empty";
+  return proxies
+    .map((proxy) => [
+      proxy.kind,
+      ...proxy.matrix.elements.map((value) => Math.round(value * 1_000)),
+    ].join(":"))
+    .sort()
+    .join("|");
+}
+
+function canopyShadowSelectionBounds(
+  proxies: readonly CanopyShadowProxy[],
+): THREE.Box3 | null {
+  if (proxies.length === 0) return null;
+  const bounds = new THREE.Box3();
+  const position = new THREE.Vector3();
+  const rotation = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const minimum = new THREE.Vector3();
+  const maximum = new THREE.Vector3();
+  for (const proxy of proxies) {
+    proxy.matrix.decompose(position, rotation, scale);
+    scale.set(Math.abs(scale.x), Math.abs(scale.y), Math.abs(scale.z));
+    minimum.copy(position).sub(scale);
+    maximum.copy(position).add(scale);
+    bounds.expandByPoint(minimum);
+    bounds.expandByPoint(maximum);
+  }
+  return bounds;
+}
+
 /** Two global instance pools keep all procedural-tree canopy shadows to at most two draw calls. */
 export class CanopyShadowProxyPool {
   private readonly root = new THREE.Group();
@@ -98,6 +138,8 @@ export class CanopyShadowProxyPool {
   private readonly coniferMesh: THREE.InstancedMesh;
   private currentBudget = 0;
   private refreshes = 0;
+  private selectionSignature = "";
+  private selectionBounds: THREE.Box3 | null = null;
 
   constructor(scene: THREE.Scene, private readonly capacity: number) {
     const safeCapacity = Math.max(1, Math.floor(capacity));
@@ -123,14 +165,34 @@ export class CanopyShadowProxyPool {
     return mesh;
   }
 
-  sync(proxies: readonly CanopyShadowProxy[], px: number, pz: number, budget: number): void {
+  sync(
+    proxies: readonly CanopyShadowProxy[],
+    px: number,
+    pz: number,
+    budget: number,
+  ): CanopyShadowProxySyncResult {
     this.currentBudget = Math.max(0, Math.min(this.capacity, Math.floor(budget)));
     const selected = nearestCanopyShadowProxies(proxies, px, pz, this.currentBudget);
+    const signature = canopyShadowSelectionSignature(selected);
+    if (signature === this.selectionSignature) {
+      return {
+        changed: false,
+        bounds: this.selectionBounds?.clone() ?? null,
+        signature,
+      };
+    }
     const broadleaf = selected.filter((proxy) => proxy.kind === "broadleaf");
     const conifer = selected.filter((proxy) => proxy.kind === "conifer");
     this.write(this.broadleafMesh, broadleaf);
     this.write(this.coniferMesh, conifer);
+    this.selectionSignature = signature;
+    this.selectionBounds = canopyShadowSelectionBounds(selected);
     this.refreshes++;
+    return {
+      changed: true,
+      bounds: this.selectionBounds?.clone() ?? null,
+      signature,
+    };
   }
 
   private write(mesh: THREE.InstancedMesh, proxies: readonly CanopyShadowProxy[]): void {

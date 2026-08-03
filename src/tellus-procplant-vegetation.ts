@@ -94,7 +94,7 @@ export interface ProcPlantVegetationOptions {
   shouldPauseBuild?: () => boolean;
   shouldDeferBuild?: () => boolean;
   shadowProxyBudget?: () => number;
-  onShadowCastersChanged?: () => void;
+  onShadowCastersChanged?: (bounds: THREE.Box3 | null) => void;
   biomeMixRegistry?: TellusBiomeMixRegistry;
 }
 
@@ -975,12 +975,12 @@ export function createProcPlantVegetation(
       Math.hypot(px - lastCanopyShadowX, pz - lastCanopyShadowZ) < CANOPY_SHADOW_RESELECT_DISTANCE
     ) return;
     const proxies = [...active.values()].flatMap((chunk) => chunk.canopyShadowProxies);
-    canopyShadowPool.sync(proxies, px, pz, budget);
+    const selection = canopyShadowPool.sync(proxies, px, pz, budget);
     syncedCanopyShadowRevision = canopyShadowRevision;
     lastCanopyShadowBudget = budget;
     lastCanopyShadowX = px;
     lastCanopyShadowZ = pz;
-    options.onShadowCastersChanged?.();
+    if (selection.changed) options.onShadowCastersChanged?.(selection.bounds);
   };
   stemMaterial.userData.tellusProcplantShared = true;
   organMaterial.userData.tellusProcplantShared = true;
