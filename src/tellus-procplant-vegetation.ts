@@ -269,6 +269,7 @@ const PROC_TREE_IMPOSTOR_GRID_SIZE = 8;
 const MAX_PROC_TREE_IMPOSTOR_HANDLES = 12;
 const PROC_TREE_HORIZON_MAX_RING = 14;
 const PROC_TREE_HORIZON_CHUNKS_PER_RING = 7;
+const PROC_TREE_HORIZON_RETAINED_CHUNK_CAP = 84;
 const PROC_TREE_PLACEMENT_DENSITY = 0.58;
 const PROC_GROUND_PLANT_DETAIL_DISTANCE = 34;
 const PROC_GROUND_PLANT_DETAIL_DISTANCE_THIRD = 42;
@@ -1298,6 +1299,22 @@ export function createProcPlantVegetation(
     else rebuildQueue.push(key);
   };
 
+  const dequeue = (key: string) => {
+    if (!queued.delete(key)) return;
+    const index = rebuildQueue.indexOf(key);
+    if (index >= 0) rebuildQueue.splice(index, 1);
+  };
+
+  const removeActiveChunk = (key: string, chunk: ActiveChunk) => {
+    dequeue(key);
+    root.remove(chunk.group);
+    disposeGroup(chunk.group);
+    active.delete(key);
+    if (chunk.horizonTrees.length > 0) horizonTreePoolDirty = true;
+    if (chunk.canopyShadowProxies.length > 0) canopyShadowRevision++;
+    chunksEvicted++;
+  };
+
   const prioritizeRebuildQueue = (centerCx: number, centerCz: number) => {
     const context = viewPriorityContext();
     rebuildQueue.sort((a, b) => {
@@ -1857,6 +1874,10 @@ export function createProcPlantVegetation(
       const patch = customEntry ? null : biomePatchForEcology(ecology, patchSeed) ?? biomePatchForPaint(paint, patchSeed);
       if (!customEntry && (!patch || rand() > patch.density * densityMultiplier * lodDensity)) continue;
       if (customEntry && isAssetMixEntry(customEntry)) {
+        // Asset templates have no guaranteed horizon budget or tree semantics. A single source may
+        // contain tens of thousands of vertices, so never copy it into LOD3's sparse tree pool until
+        // Asset Store provides an explicit bounded impostor representation for this path.
+        if (horizonOnly) continue;
         const template = customEntry.asset.template
           ? procPlantTemplateFromAssetTemplate(customEntry.asset.template, customEntry.asset.color)
           : null;
@@ -1882,6 +1903,7 @@ export function createProcPlantVegetation(
         continue;
       }
       if (patch?.asset) {
+        if (horizonOnly) continue;
         const hydrated = globalAssetTemplates.get(patch.asset.libraryId);
         const template = hydrated
           ? procPlantTemplateFromAssetTemplate(hydrated, patch.asset.color)
@@ -2503,18 +2525,43 @@ export function createProcPlantVegetation(
         }
       }
     }
+    const retainedHorizonChunks: Array<[string, ActiveChunk]> = [];
     for (const [key, chunk] of active) {
       if (needed.has(key)) continue;
-      const evictionGrace = chunk.builtLod === 3 || chunk.lod === 3
-        ? HORIZON_CHUNK_EVICT_GRACE_MS
-        : FAR_CHUNK_EVICT_GRACE_MS;
-      if (nowMs - chunk.lastNeededMs < evictionGrace) continue;
-      root.remove(chunk.group);
-      disposeGroup(chunk.group);
-      active.delete(key);
-      if (chunk.horizonTrees.length > 0) horizonTreePoolDirty = true;
-      if (chunk.canopyShadowProxies.length > 0) canopyShadowRevision++;
-      chunksEvicted++;
+      const horizonChunk = chunk.builtLod === 3 || chunk.lod === 3;
+      if (horizonChunk) {
+        // Camera turns must not leave never-visible horizon work in the build queue. Grace applies
+        // only to a mesh that was already built; otherwise remove the chunk immediately.
+        dequeue(key);
+        if (chunk.builtLod !== 3) {
+          removeActiveChunk(key, chunk);
+          continue;
+        }
+        if (nowMs - chunk.lastNeededMs >= HORIZON_CHUNK_EVICT_GRACE_MS) {
+          removeActiveChunk(key, chunk);
+          continue;
+        }
+        retainedHorizonChunks.push([key, chunk]);
+        continue;
+      }
+      if (nowMs - chunk.lastNeededMs < FAR_CHUNK_EVICT_GRACE_MS) continue;
+      removeActiveChunk(key, chunk);
+    }
+
+    const neededHorizonCount = [...needed].reduce((count, key) => {
+      const chunk = active.get(key);
+      return chunk?.lod === 3 || chunk?.builtLod === 3 ? count + 1 : count;
+    }, 0);
+    const retainedHorizonBudget = Math.max(
+      0,
+      PROC_TREE_HORIZON_RETAINED_CHUNK_CAP - neededHorizonCount,
+    );
+    retainedHorizonChunks.sort((left, right) =>
+      right[1].lastNeededMs - left[1].lastNeededMs || left[0].localeCompare(right[0])
+    );
+    for (let index = retainedHorizonBudget; index < retainedHorizonChunks.length; index++) {
+      const retained = retainedHorizonChunks[index];
+      if (retained) removeActiveChunk(retained[0], retained[1]);
     }
     prioritizeRebuildQueue(centerCx, centerCz);
     const movementIntentActive = options.shouldPauseBuild?.() ?? false;

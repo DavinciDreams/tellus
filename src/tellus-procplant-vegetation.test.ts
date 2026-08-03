@@ -233,6 +233,115 @@ describe("procplant vegetation", () => {
     vegetation.dispose();
   });
 
+  it("bounds retained horizon chunks and prunes stale turn queues", () => {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 500);
+    camera.position.set(0, 4, 0);
+    const vegetation = createProcPlantVegetation({
+      scene,
+      camera: () => camera,
+      worldId: "chunked-horizon-turn-bound-test",
+      sampleHeight: () => 10,
+      samplePaint: () => "desert-sand",
+      bounds: { minX: -320, maxX: 320, minZ: -320, maxZ: 320 },
+      densityMultiplier: 0,
+    });
+
+    for (let octant = 0; octant < 8; octant++) {
+      const angle = -Math.PI / 2 + octant * Math.PI / 4;
+      camera.lookAt(Math.cos(angle), 4, Math.sin(angle));
+      camera.updateMatrixWorld(true);
+      vegetation.update(0, 0, 10, 60, 1_000 + octant * 100);
+    }
+    const stats = vegetation.stats();
+
+    // 49 base chunks + at most eight 8-chunk detail porches + the hard 84-chunk horizon cap.
+    expect(stats.chunks).toBeLessThanOrEqual(197);
+    expect(stats.lod3).toBeLessThanOrEqual(84);
+    expect(stats.queuedRebuilds).toBeLessThanOrEqual(197);
+
+    vegetation.dispose();
+  });
+
+  it("does not render unbounded asset templates in LOD3 horizon chunks", () => {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 500);
+    camera.position.set(0, 4, 0);
+    camera.lookAt(0, 4, -1);
+    camera.updateMatrixWorld(true);
+    const vegetation = createProcPlantVegetation({
+      scene,
+      camera: () => camera,
+      worldId: "chunked-asset-horizon-bound-test",
+      sampleHeight: () => 10,
+      samplePaint: () => "desert-sand",
+      bounds: { minX: -160, maxX: 160, minZ: -240, maxZ: -82 },
+      densityMultiplier: 1,
+      biomeMixRegistry: {
+        version: 1,
+        worldId: "chunked-asset-horizon-bound-test",
+        updatedAt: new Date(0).toISOString(),
+        mixesByEcologyBiome: {},
+        mixesByTerrainPaint: {
+          "desert-sand": {
+            version: 1,
+            id: "asset-only-horizon",
+            label: "Asset-only horizon",
+            source: "terrain-paint",
+            terrainPaint: "desert-sand",
+            targetTerrainPaint: "desert-sand",
+            seed: 1,
+            density: 1,
+            diversity: 1,
+            targetVerticesPerChunk: 12_000,
+            entries: [{
+              id: "unbounded-asset-entry",
+              label: "Unbounded asset",
+              source: "asset",
+              asset: {
+                kind: "glb",
+                name: "unbounded.glb",
+                runtimeOnly: false,
+                template: {
+                  version: 1,
+                  vertexCount: 3,
+                  positions: [0, 0, 0, 1, 0, 0, 0, 2, 0],
+                  normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+                  colors: [0.2, 0.7, 0.25, 0.2, 0.7, 0.25, 0.2, 0.7, 0.25],
+                  indices: [0, 1, 2],
+                },
+              },
+              weight: 1,
+              density: 1,
+              scale: 8,
+              environment: { light: 0.9, moisture: 0.2, crowding: 0.1, biomeWarmth: 0.9 },
+              seed: 2,
+              enabled: true,
+            }],
+          },
+        },
+      },
+    });
+
+    for (let index = 0; index < 180 && (index === 0 || vegetation.stats().queuedRebuilds > 0); index++) {
+      vegetation.update(0, 0, 10, 60, 1_000 + index * 900);
+    }
+    const root = scene.getObjectByName("tellus-procplant-vegetation");
+    let renderedMeshes = 0;
+    root?.traverse((child) => {
+      if (child instanceof THREE.Mesh || child instanceof THREE.InstancedMesh) renderedMeshes++;
+    });
+    const stats = vegetation.stats();
+
+    expect(stats.lod3).toBeGreaterThan(0);
+    expect(stats.horizonTrees).toBe(0);
+    expect(stats.plants).toBe(0);
+    expect(stats.stemTriangles).toBe(0);
+    expect(renderedMeshes).toBe(0);
+
+    vegetation.dispose();
+  });
+
   it("uses the dense authored conifer throughout the alpine mix", () => {
     const scene = new THREE.Scene();
     const alpineEcology = resolveEcologySample({
