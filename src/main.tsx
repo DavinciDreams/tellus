@@ -2967,6 +2967,10 @@ function createTellusWorld(
   const sun = new THREE.DirectionalLight(0xffdfb7, 4.1);
   sun.position.set(-55, 58, 42);
   sun.castShadow = true;
+  // The procedural canopy pass is capped at three low-poly instanced draws. Spend a modest 1024px
+  // map on that bounded, camera-prioritized pool so first-person tree shadows do not dissolve when
+  // the fitted camera covers several chunks; low-GPU mode still disables the pass entirely.
+  sun.shadow.mapSize.set(1024, 1024);
   // Manual shadow-map refresh: the day/night cycle nudges the sun every frame, which would otherwise
   // force a full shadow re-render every frame on both backends (WebGL WebGLShadowMap + WebGPU
   // ShadowNode both honour LightShadow.autoUpdate/needsUpdate per-light). The animate loop instead

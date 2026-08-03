@@ -5,6 +5,7 @@ export type CanopyShadowKind = "broadleaf" | "conifer";
 export type CanopyShadowProxy = {
   kind: CanopyShadowKind;
   matrix: THREE.Matrix4;
+  trunkMatrix: THREE.Matrix4;
   x: number;
   z: number;
 };
@@ -13,8 +14,16 @@ export type CanopyShadowProxyPoolDiagnostics = {
   budget: number;
   broadleaf: number;
   conifer: number;
+  trunks: number;
   total: number;
   refreshes: number;
+};
+
+export type CanopyShadowSelectionOptions = {
+  camera?: THREE.Camera | null;
+  maxDistance?: number;
+  nearDistance?: number;
+  ndcMargin?: number;
 };
 
 export type CanopyShadowProxySyncResult = {
@@ -30,6 +39,49 @@ const proxyScale = new THREE.Vector3();
 const proxyMinimum = new THREE.Vector3();
 const proxyMaximum = new THREE.Vector3();
 const proxyWorldMatrix = new THREE.Matrix4();
+const proxyViewPosition = new THREE.Vector3();
+const proxyProjectedPosition = new THREE.Vector3();
+
+function proxyFromWorldBounds(
+  worldBounds: THREE.Box3,
+  kind: CanopyShadowKind,
+  treeBase?: THREE.Vector3,
+): CanopyShadowProxy | null {
+  if (worldBounds.isEmpty()) return null;
+  const center = worldBounds.getCenter(new THREE.Vector3());
+  const size = worldBounds.getSize(new THREE.Vector3());
+  const scale = kind === "conifer"
+    ? new THREE.Vector3(
+        Math.max(0.45, Math.max(size.x, size.z) * 0.5),
+        Math.max(0.6, size.y * 0.5),
+        Math.max(0.45, Math.max(size.x, size.z) * 0.5),
+      )
+    : new THREE.Vector3(
+        Math.max(0.45, size.x * 0.5),
+        Math.max(0.45, size.y * 0.5),
+        Math.max(0.45, size.z * 0.5),
+      );
+  const base = treeBase ?? new THREE.Vector3(center.x, worldBounds.min.y, center.z);
+  const canopyLift = Math.max(0, worldBounds.min.y - base.y);
+  const trunkHeight = Math.max(
+    0.6,
+    canopyLift > size.y * 0.2
+      ? canopyLift + size.y * 0.18
+      : size.y * 0.62,
+  );
+  const trunkRadius = THREE.MathUtils.clamp(Math.max(size.x, size.z) * 0.035, 0.12, 0.5);
+  return {
+    kind,
+    matrix: new THREE.Matrix4().compose(center, new THREE.Quaternion(), scale),
+    trunkMatrix: new THREE.Matrix4().compose(
+      base,
+      new THREE.Quaternion(),
+      new THREE.Vector3(trunkRadius, trunkHeight, trunkRadius),
+    ),
+    x: center.x,
+    z: center.z,
+  };
+}
 
 /** Fits one stable, low-poly shadow silhouette to a tree's foliage organs. */
 export function fitCanopyShadowProxy(
@@ -53,26 +105,24 @@ export function fitCanopyShadowProxy(
     proxyBounds.expandByPoint(proxyMaximum);
   }
   if (proxyBounds.isEmpty()) return null;
+  const treeBase = treeMatrix
+    ? new THREE.Vector3().setFromMatrixPosition(treeMatrix)
+    : undefined;
+  return proxyFromWorldBounds(proxyBounds, kind, treeBase);
+}
 
-  const center = proxyBounds.getCenter(new THREE.Vector3());
-  const size = proxyBounds.getSize(new THREE.Vector3());
-  const scale = kind === "conifer"
-    ? new THREE.Vector3(
-        Math.max(0.45, Math.max(size.x, size.z) * 0.5),
-        Math.max(0.6, size.y * 0.5),
-        Math.max(0.45, Math.max(size.x, size.z) * 0.5),
-      )
-    : new THREE.Vector3(
-        Math.max(0.45, size.x * 0.5),
-        Math.max(0.45, size.y * 0.5),
-        Math.max(0.45, size.z * 0.5),
-      );
-  return {
+/** Gives cold-loading silhouettes the same shadow contract as their detailed replacements. */
+export function fitCanopyShadowProxyFromBounds(
+  localBounds: THREE.Box3,
+  kind: CanopyShadowKind,
+  treeMatrix: THREE.Matrix4,
+): CanopyShadowProxy | null {
+  const worldBounds = localBounds.clone().applyMatrix4(treeMatrix);
+  return proxyFromWorldBounds(
+    worldBounds,
     kind,
-    matrix: new THREE.Matrix4().compose(center, new THREE.Quaternion(), scale),
-    x: center.x,
-    z: center.z,
-  };
+    new THREE.Vector3().setFromMatrixPosition(treeMatrix),
+  );
 }
 
 export function nearestCanopyShadowProxies(
@@ -90,6 +140,44 @@ export function nearestCanopyShadowProxies(
     .slice(0, limit);
 }
 
+/** Prioritizes the camera cone, retaining only a small near-player reserve behind the camera. */
+export function viewPrioritizedCanopyShadowProxies(
+  proxies: readonly CanopyShadowProxy[],
+  px: number,
+  pz: number,
+  budget: number,
+  options: CanopyShadowSelectionOptions = {},
+): CanopyShadowProxy[] {
+  const limit = Math.max(0, Math.min(proxies.length, Math.floor(budget)));
+  if (limit === 0) return [];
+  const camera = options.camera;
+  if (!camera) return nearestCanopyShadowProxies(proxies, px, pz, limit);
+
+  const maxDistanceSq = Math.max(1, options.maxDistance ?? 88) ** 2;
+  const nearDistanceSq = Math.max(0, options.nearDistance ?? 22) ** 2;
+  const margin = Math.max(0, options.ndcMargin ?? 0.18);
+  const candidates = proxies
+    .map((proxy) => {
+      const distanceSq = (proxy.x - px) ** 2 + (proxy.z - pz) ** 2;
+      proxyViewPosition.setFromMatrixPosition(proxy.matrix);
+      proxyProjectedPosition.copy(proxyViewPosition).project(camera);
+      const visible =
+        distanceSq <= maxDistanceSq &&
+        proxyProjectedPosition.z >= -1 && proxyProjectedPosition.z <= 1 &&
+        Math.abs(proxyProjectedPosition.x) <= 1 + margin &&
+        Math.abs(proxyProjectedPosition.y) <= 1 + margin;
+      return { proxy, distanceSq, visible };
+    })
+    .filter((candidate) => candidate.distanceSq <= maxDistanceSq);
+  const visible = candidates
+    .filter((candidate) => candidate.visible)
+    .sort((a, b) => a.distanceSq - b.distanceSq);
+  const nearby = candidates
+    .filter((candidate) => !candidate.visible && candidate.distanceSq <= nearDistanceSq)
+    .sort((a, b) => a.distanceSq - b.distanceSq);
+  return [...visible, ...nearby].slice(0, limit).map((candidate) => candidate.proxy);
+}
+
 export function canopyShadowSelectionSignature(
   proxies: readonly CanopyShadowProxy[],
 ): string {
@@ -98,6 +186,7 @@ export function canopyShadowSelectionSignature(
     .map((proxy) => [
       proxy.kind,
       ...proxy.matrix.elements.map((value) => Math.round(value * 1_000)),
+      ...proxy.trunkMatrix.elements.map((value) => Math.round(value * 1_000)),
     ].join(":"))
     .sort()
     .join("|");
@@ -114,12 +203,14 @@ function canopyShadowSelectionBounds(
   const minimum = new THREE.Vector3();
   const maximum = new THREE.Vector3();
   for (const proxy of proxies) {
-    proxy.matrix.decompose(position, rotation, scale);
-    scale.set(Math.abs(scale.x), Math.abs(scale.y), Math.abs(scale.z));
-    minimum.copy(position).sub(scale);
-    maximum.copy(position).add(scale);
-    bounds.expandByPoint(minimum);
-    bounds.expandByPoint(maximum);
+    for (const matrix of [proxy.matrix, proxy.trunkMatrix]) {
+      matrix.decompose(position, rotation, scale);
+      scale.set(Math.abs(scale.x), Math.abs(scale.y), Math.abs(scale.z));
+      minimum.copy(position).sub(scale);
+      maximum.copy(position).add(scale);
+      bounds.expandByPoint(minimum);
+      bounds.expandByPoint(maximum);
+    }
   }
   return bounds;
 }
@@ -134,8 +225,10 @@ export class CanopyShadowProxyPool {
   });
   private readonly broadleafGeometry = new THREE.IcosahedronGeometry(1, 1);
   private readonly coniferGeometry = new THREE.ConeGeometry(1, 2, 8, 1);
+  private readonly trunkGeometry = new THREE.CylinderGeometry(1, 1, 1, 6, 1).translate(0, 0.5, 0);
   private readonly broadleafMesh: THREE.InstancedMesh;
   private readonly coniferMesh: THREE.InstancedMesh;
+  private readonly trunkMesh: THREE.InstancedMesh;
   private currentBudget = 0;
   private refreshes = 0;
   private selectionSignature = "";
@@ -146,14 +239,15 @@ export class CanopyShadowProxyPool {
     this.root.name = "tellus-canopy-shadow-proxies";
     this.broadleafMesh = this.createMesh(this.broadleafGeometry, safeCapacity, "broadleaf");
     this.coniferMesh = this.createMesh(this.coniferGeometry, safeCapacity, "conifer");
-    this.root.add(this.broadleafMesh, this.coniferMesh);
+    this.trunkMesh = this.createMesh(this.trunkGeometry, safeCapacity, "trunk");
+    this.root.add(this.broadleafMesh, this.coniferMesh, this.trunkMesh);
     scene.add(this.root);
   }
 
   private createMesh(
     geometry: THREE.BufferGeometry,
     capacity: number,
-    kind: CanopyShadowKind,
+    kind: CanopyShadowKind | "trunk",
   ): THREE.InstancedMesh {
     const mesh = new THREE.InstancedMesh(geometry, this.material, capacity);
     mesh.name = `tellus-canopy-shadow-${kind}`;
@@ -170,9 +264,16 @@ export class CanopyShadowProxyPool {
     px: number,
     pz: number,
     budget: number,
+    options: CanopyShadowSelectionOptions = {},
   ): CanopyShadowProxySyncResult {
     this.currentBudget = Math.max(0, Math.min(this.capacity, Math.floor(budget)));
-    const selected = nearestCanopyShadowProxies(proxies, px, pz, this.currentBudget);
+    const selected = viewPrioritizedCanopyShadowProxies(
+      proxies,
+      px,
+      pz,
+      this.currentBudget,
+      options,
+    );
     const signature = canopyShadowSelectionSignature(selected);
     if (signature === this.selectionSignature) {
       return {
@@ -185,6 +286,7 @@ export class CanopyShadowProxyPool {
     const conifer = selected.filter((proxy) => proxy.kind === "conifer");
     this.write(this.broadleafMesh, broadleaf);
     this.write(this.coniferMesh, conifer);
+    this.write(this.trunkMesh, selected, (proxy) => proxy.trunkMatrix);
     this.selectionSignature = signature;
     this.selectionBounds = canopyShadowSelectionBounds(selected);
     this.refreshes++;
@@ -195,9 +297,13 @@ export class CanopyShadowProxyPool {
     };
   }
 
-  private write(mesh: THREE.InstancedMesh, proxies: readonly CanopyShadowProxy[]): void {
+  private write(
+    mesh: THREE.InstancedMesh,
+    proxies: readonly CanopyShadowProxy[],
+    matrixFor: (proxy: CanopyShadowProxy) => THREE.Matrix4 = (proxy) => proxy.matrix,
+  ): void {
     mesh.count = proxies.length;
-    proxies.forEach((proxy, index) => mesh.setMatrixAt(index, proxy.matrix));
+    proxies.forEach((proxy, index) => mesh.setMatrixAt(index, matrixFor(proxy)));
     mesh.instanceMatrix.needsUpdate = true;
   }
 
@@ -206,6 +312,7 @@ export class CanopyShadowProxyPool {
       budget: this.currentBudget,
       broadleaf: this.broadleafMesh.count,
       conifer: this.coniferMesh.count,
+      trunks: this.trunkMesh.count,
       total: this.broadleafMesh.count + this.coniferMesh.count,
       refreshes: this.refreshes,
     };
@@ -216,8 +323,10 @@ export class CanopyShadowProxyPool {
     this.root.clear();
     this.broadleafMesh.dispose();
     this.coniferMesh.dispose();
+    this.trunkMesh.dispose();
     this.broadleafGeometry.dispose();
     this.coniferGeometry.dispose();
+    this.trunkGeometry.dispose();
     this.material.dispose();
   }
 }
