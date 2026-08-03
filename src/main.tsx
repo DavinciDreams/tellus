@@ -159,6 +159,7 @@ import {
 import { WildlifeInterpolationBuffer, type WildlifePresentationPose } from "./tellus-wildlife-interpolation";
 import { planWildlifeLod, type WildlifeLodAssignment, type WildlifeRenderTier } from "./tellus-wildlife-lod";
 import { WildlifeProxyRenderer } from "./tellus-wildlife-proxies";
+import { removeWildlifePresentationState } from "./tellus-wildlife-presentation";
 import {
   DEER_WILDLIFE_PROFILE,
   wildlifeClipNameForIntent,
@@ -5633,16 +5634,16 @@ function createTellusWorld(
     mode: GeneratedMotionMode,
     vehicle: VehicleMode | null = null,
     options: GeneratedClipOptions = {},
-  ) => {
+  ): boolean => {
     const clips = generatedModelClips(model);
     const clip = selectGeneratedClip(clips, thingById(id), mode, vehicle, options);
-    if (!clip) return;
+    if (!clip) return false;
     let state = generatedAnimationMixers.get(id);
     if (!state) {
       state = { mixer: new THREE.AnimationMixer(model), mode };
       generatedAnimationMixers.set(id, state);
     }
-    if (state.clipName === clip.name && state.mode === mode && state.action) return;
+    if (state.clipName === clip.name && state.mode === mode && state.action) return true;
     const next = state.mixer.clipAction(clip);
     next.reset();
     next.enabled = true;
@@ -5657,6 +5658,7 @@ function createTellusWorld(
     state.action = next;
     state.clipName = clip.name;
     state.mode = mode;
+    return true;
   };
 
   const playGeneratedIntent = (
@@ -6753,6 +6755,9 @@ function createTellusWorld(
           }
           ensureGeneratedBuildingLodProxy(current, model);
           generatedMeshes.set(id, model);
+          // A placeholder may have observed an authoritative intent before animation clips existed.
+          // Clear that marker so the newly loaded model retries the current intent on the next frame.
+          wildlifeLastIntents.delete(id);
           startGeneratedAnimation(id, model);
           scene.add(model);
           if (interiorObject && !isFreeMovingVehicle(current)) {
@@ -7158,6 +7163,16 @@ function createTellusWorld(
 
   const applyRemoteGeneratedDelete = (id: string) => {
     markGeneratedDeletePending(id);
+    wildlifeAssignments = removeWildlifePresentationState(id, {
+      configs: wildlifeConfigs,
+      interpolation: wildlifeInterpolation,
+      poses: wildlifePoses,
+      tiers: wildlifeTiers,
+      lastIntents: wildlifeLastIntents,
+      assignments: wildlifeAssignments,
+    });
+    // Do not wait for the every-other-frame proxy sync: deletion must remove the last proxy now.
+    wildlifeProxyRenderer.sync(wildlifeAssignments, wildlifePoses);
     const index = generated.findIndex((thing) => thing.id === id);
     if (index === -1) return;
     const [removed] = generated.splice(index, 1);
@@ -10186,8 +10201,9 @@ function createTellusWorld(
                   generatedModelClips(mesh).map((clip) => clip.name),
                 )
               : undefined;
-            playGeneratedClip(pose.id, mesh, pose.animationIntent, null, { preferredClipName });
-            wildlifeLastIntents.set(pose.id, pose.animationIntent);
+            if (playGeneratedClip(pose.id, mesh, pose.animationIntent, null, { preferredClipName })) {
+              wildlifeLastIntents.set(pose.id, pose.animationIntent);
+            }
           }
         }
       }
