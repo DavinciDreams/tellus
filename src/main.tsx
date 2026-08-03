@@ -52,6 +52,7 @@ import {
 } from "./tellus-procplant-vegetation";
 import { isWorldEntryVisuallyReady } from "./tellus-world-entry-readiness";
 import { ShadowUpdatePolicy } from "./tellus-shadow-update-policy";
+import { fitDirectionalShadowCamera } from "./tellus-shadow-camera";
 import { staticTerrainAutoVegetationEnabled } from "./tellus-static-terrain";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
 import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, resetLiveMirrors } from "./tellus-procedural-assets";
@@ -160,6 +161,7 @@ import {
 import { WildlifeInterpolationBuffer, type WildlifePresentationPose } from "./tellus-wildlife-interpolation";
 import { planWildlifeLod, type WildlifeLodAssignment, type WildlifeRenderTier } from "./tellus-wildlife-lod";
 import { WildlifeProxyRenderer } from "./tellus-wildlife-proxies";
+import { removeWildlifePresentationState } from "./tellus-wildlife-presentation";
 import {
   DEER_WILDLIFE_PROFILE,
   wildlifeClipNameForIntent,
@@ -1473,6 +1475,10 @@ function createTellusWorld(
   // Centralized policy: fixed worlds cache shadows, while cycling worlds update after meaningful
   // sun-angle movement. It also owns a slow safety refresh for streamed casters.
   const shadowUpdates = new ShadowUpdatePolicy();
+  let canopyShadowCasterBounds: THREE.Box3 | null = null;
+  const shadowCasterFocus = new THREE.Vector3();
+  const shadowFallbackFocus = new THREE.Vector3();
+  let shadowCameraFit: ReturnType<typeof fitDirectionalShadowCamera> | null = null;
   const frameDriverDebug = (): "raf" | "timeout" => {
     try {
       return window.localStorage.getItem("tellus.frameDriver") === "timeout" ? "timeout" : "raf";
@@ -1675,7 +1681,12 @@ function createTellusWorld(
         shouldPauseBuild: hasMovementKeyHeld,
         shadowProxyBudget: () =>
           lowGpuDebug() ? 0 : runtimeConfig.dayNightMode === "cycle" ? 96 : 192,
-        onShadowCastersChanged: () => shadowUpdates.invalidate(),
+        onShadowCastersChanged: (bounds) => {
+          canopyShadowCasterBounds = bounds?.clone() ?? null;
+          if (canopyShadowCasterBounds) canopyShadowCasterBounds.getCenter(shadowCasterFocus);
+          else shadowCasterFocus.set(visitorPosition.x, visitorPosition.y, visitorPosition.z);
+          shadowUpdates.invalidate();
+        },
         windStrength: () => lowGpuDebug() ? 0 : 1,
         shouldDeferBuild: () => {
           const terrainStats = chunkRenderer?.stats();
@@ -2968,7 +2979,7 @@ function createTellusWorld(
   // was pure GPU cost with almost no visible shadow contribution. The sun shadow carries the scene.
   moon.castShadow = false;
   const hemisphere = new THREE.HemisphereLight(0xb6ccff, 0x3d5332, 2.25);
-  scene.add(sun, moon, hemisphere);
+  scene.add(sun, sun.target, moon, hemisphere);
 
   const visitor = createVisitorMesh(useWebGPU);
   // Chunked worlds place origin at a CORNER, so spawn at the world centre (from the manifest bounds)
@@ -3329,6 +3340,7 @@ function createTellusWorld(
         visibleShadowReceivers,
       },
       shadows: shadowUpdates.diagnostics(),
+      shadowCamera: shadowCameraFit,
     };
   };
   // DEV-ONLY perf readout: window.__tellusPerf() -> { fps, vegetation, procplants }.
@@ -5634,16 +5646,16 @@ function createTellusWorld(
     mode: GeneratedMotionMode,
     vehicle: VehicleMode | null = null,
     options: GeneratedClipOptions = {},
-  ) => {
+  ): boolean => {
     const clips = generatedModelClips(model);
     const clip = selectGeneratedClip(clips, thingById(id), mode, vehicle, options);
-    if (!clip) return;
+    if (!clip) return false;
     let state = generatedAnimationMixers.get(id);
     if (!state) {
       state = { mixer: new THREE.AnimationMixer(model), mode };
       generatedAnimationMixers.set(id, state);
     }
-    if (state.clipName === clip.name && state.mode === mode && state.action) return;
+    if (state.clipName === clip.name && state.mode === mode && state.action) return true;
     const next = state.mixer.clipAction(clip);
     next.reset();
     next.enabled = true;
@@ -5658,6 +5670,7 @@ function createTellusWorld(
     state.action = next;
     state.clipName = clip.name;
     state.mode = mode;
+    return true;
   };
 
   const playGeneratedIntent = (
@@ -6754,6 +6767,9 @@ function createTellusWorld(
           }
           ensureGeneratedBuildingLodProxy(current, model);
           generatedMeshes.set(id, model);
+          // A placeholder may have observed an authoritative intent before animation clips existed.
+          // Clear that marker so the newly loaded model retries the current intent on the next frame.
+          wildlifeLastIntents.delete(id);
           startGeneratedAnimation(id, model);
           scene.add(model);
           if (interiorObject && !isFreeMovingVehicle(current)) {
@@ -7159,6 +7175,16 @@ function createTellusWorld(
 
   const applyRemoteGeneratedDelete = (id: string) => {
     markGeneratedDeletePending(id);
+    wildlifeAssignments = removeWildlifePresentationState(id, {
+      configs: wildlifeConfigs,
+      interpolation: wildlifeInterpolation,
+      poses: wildlifePoses,
+      tiers: wildlifeTiers,
+      lastIntents: wildlifeLastIntents,
+      assignments: wildlifeAssignments,
+    });
+    // Do not wait for the every-other-frame proxy sync: deletion must remove the last proxy now.
+    wildlifeProxyRenderer.sync(wildlifeAssignments, wildlifePoses);
     const index = generated.findIndex((thing) => thing.id === id);
     if (index === -1) return;
     const [removed] = generated.splice(index, 1);
@@ -9645,6 +9671,7 @@ function createTellusWorld(
   const moonMaterialColor = new THREE.Color();
   const moonDirection = new THREE.Vector3();
   const moonArcDirection = new THREE.Vector3();
+  const sunOffset = new THREE.Vector3();
 
   const currentDayNightPhase = (cycleNow: number) =>
     (runtimeConfig.dayNightStart + cycleNow / runtimeConfig.dayNightCycleMs) % 1;
@@ -9722,7 +9749,9 @@ function createTellusWorld(
       material.color.copy(skyboxTint);
     }
 
-    sun.position.set(Math.cos(angle) * -72, sunHeight * 88, Math.sin(angle) * 58);
+    sunOffset.set(Math.cos(angle) * -72, sunHeight * 88, Math.sin(angle) * 58);
+    sun.position.copy(shadowCasterFocus).add(sunOffset);
+    sun.target.position.copy(shadowCasterFocus);
     sun.intensity = (0.05 + daylight * 4.15 + twilight * 0.55) * mood.sun;
     sunColor.copy(nightSun).lerp(daylightSun, daylight).lerp(duskSun, twilight);
     if (mood.sunTint && mood.sunTintStrength) {
@@ -10192,8 +10221,9 @@ function createTellusWorld(
                   generatedModelClips(mesh).map((clip) => clip.name),
                 )
               : undefined;
-            playGeneratedClip(pose.id, mesh, pose.animationIntent, null, { preferredClipName });
-            wildlifeLastIntents.set(pose.id, pose.animationIntent);
+            if (playGeneratedClip(pose.id, mesh, pose.animationIntent, null, { preferredClipName })) {
+              wildlifeLastIntents.set(pose.id, pose.animationIntent);
+            }
           }
         }
       }
@@ -10525,6 +10555,13 @@ function createTellusWorld(
           nowMs: now,
         });
         if (shadowDecision.refresh) {
+          shadowFallbackFocus.set(visitorPosition.x, visitorPosition.y, visitorPosition.z);
+          shadowCameraFit = fitDirectionalShadowCamera(
+            sun,
+            sunOffset,
+            canopyShadowCasterBounds,
+            shadowFallbackFocus,
+          );
           sun.shadow.needsUpdate = true;
         }
         const gpuTimerActive = beginWebGlGpuTimer(perfDiagnostics.frames);

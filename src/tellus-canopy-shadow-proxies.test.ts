@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import {
   CanopyShadowProxyPool,
+  canopyShadowSelectionSignature,
   fitCanopyShadowProxy,
   nearestCanopyShadowProxies,
   type CanopyShadowProxy,
@@ -44,14 +45,39 @@ describe("canopy shadow proxies", () => {
     const pool = new CanopyShadowProxyPool(scene, 8);
     const proxies: CanopyShadowProxy[] = [
       { kind: "broadleaf", matrix: new THREE.Matrix4(), x: 0, z: 0 },
-      { kind: "conifer", matrix: new THREE.Matrix4(), x: 1, z: 0 },
-      { kind: "broadleaf", matrix: new THREE.Matrix4(), x: 2, z: 0 },
+      { kind: "conifer", matrix: new THREE.Matrix4().makeTranslation(1, 0, 0), x: 1, z: 0 },
+      { kind: "broadleaf", matrix: new THREE.Matrix4().makeTranslation(2, 0, 0), x: 2, z: 0 },
     ];
 
-    pool.sync(proxies, 0, 0, 3);
+    const first = pool.sync(proxies, 0, 0, 3);
+    const second = pool.sync([...proxies].reverse(), 0, 0, 3);
 
+    expect(first.changed).toBe(true);
+    expect(first.bounds?.containsPoint(new THREE.Vector3(2, 0, 0))).toBe(true);
+    expect(second.changed).toBe(false);
     expect(pool.diagnostics()).toMatchObject({ total: 3, broadleaf: 2, conifer: 1 });
+    expect(pool.diagnostics().refreshes).toBe(1);
     expect(scene.getObjectByName("tellus-canopy-shadow-proxies")?.children).toHaveLength(2);
     pool.dispose(scene);
+  });
+
+  it("signs selected identities and matrices independent of instance order", () => {
+    const first: CanopyShadowProxy = {
+      kind: "broadleaf",
+      matrix: new THREE.Matrix4().makeTranslation(2, 3, 4),
+      x: 2,
+      z: 4,
+    };
+    const second: CanopyShadowProxy = {
+      kind: "conifer",
+      matrix: new THREE.Matrix4().makeTranslation(8, 5, 6),
+      x: 8,
+      z: 6,
+    };
+
+    expect(canopyShadowSelectionSignature([first, second]))
+      .toBe(canopyShadowSelectionSignature([second, first]));
+    expect(canopyShadowSelectionSignature([first]))
+      .not.toBe(canopyShadowSelectionSignature([second]));
   });
 });
