@@ -15,6 +15,13 @@ import {
   clampedWindWeights,
   updateFoliageWind,
 } from "./tellus-foliage-wind";
+import {
+  firstNestedGrassCellIndex,
+  grassFieldStrideForLod,
+  vegetationChunkPriority,
+  vegetationViewImportance,
+  type VegetationViewContext,
+} from "./tellus-vegetation-view-priority";
 import type { TerrainPaintKind } from "./tellus-types";
 import {
   biomePatchForEcology,
@@ -258,7 +265,7 @@ const PROC_GROUND_PLANT_DETAIL_DISTANCE_THIRD = 42;
 const PROC_GROUND_PLANT_FADE_DISTANCE = 72;
 const PROC_GROUND_PLANT_FADE_DISTANCE_THIRD = 96;
 const PROC_GROUND_PLANT_MIN_DENSITY = 0.22;
-const PROCPLANT_RENDER_STYLE_REVISION = 13;
+const PROCPLANT_RENDER_STYLE_REVISION = 14;
 const FAR_CHUNK_EVICT_GRACE_MS = 2_500;
 
 const branchModuleDistanceLod = (
@@ -301,9 +308,7 @@ const GRASS_CARPET_TUFTS_LOD2 = 8;
 const GRASS_CARPET_RADIUS_LOD0 = 4.8;
 const GRASS_CARPET_RADIUS_LOD1 = 5.6;
 const GRASS_CARPET_RADIUS_LOD2 = 6.4;
-const GRASS_FIELD_SPACING_LOD0 = 0.34;
-const GRASS_FIELD_SPACING_LOD1 = 0.68;
-const GRASS_FIELD_SPACING_LOD2 = 1.18;
+const GRASS_FIELD_BASE_SPACING = 0.34;
 const GRASS_FIELD_FULL_DENSITY_RING = 2;
 
 export const shouldUseCheapDistantTree = (
@@ -969,6 +974,15 @@ export function createProcPlantVegetation(
   let lastCenterCz: number | null = null;
   let lastMoveDirX = 0;
   let lastMoveDirZ = 0;
+  let viewDirectionX = 0;
+  let viewDirectionZ = -1;
+  const viewDirection = new THREE.Vector3();
+  const viewPriorityContext = (): VegetationViewContext => ({
+    playerX: lastPlayerX ?? 0,
+    playerZ: lastPlayerZ ?? 0,
+    forwardX: viewDirectionX,
+    forwardZ: viewDirectionZ,
+  });
   let lastPlayerMovedAt = Number.NEGATIVE_INFINITY;
   let lastMovingBuildAt = Number.NEGATIVE_INFINITY;
   let buildPausedForMotion = false;
@@ -1128,18 +1142,15 @@ export function createProcPlantVegetation(
   };
 
   const prioritizeRebuildQueue = (centerCx: number, centerCz: number) => {
+    const context = viewPriorityContext();
     rebuildQueue.sort((a, b) => {
       const [ax, az] = a.split(",").map(Number);
       const [bx, bz] = b.split(",").map(Number);
-      const arx = ax - centerCx;
-      const arz = az - centerCz;
-      const brx = bx - centerCx;
-      const brz = bz - centerCz;
-      const ar = Math.max(Math.abs(arx), Math.abs(arz));
-      const br = Math.max(Math.abs(brx), Math.abs(brz));
-      const aheadA = arx * lastMoveDirX + arz * lastMoveDirZ;
-      const aheadB = brx * lastMoveDirX + brz * lastMoveDirZ;
-      return (ar * 10 - aheadA * 2) - (br * 10 - aheadB * 2);
+      return vegetationChunkPriority(
+        ax, az, chunkSize, centerCx, centerCz, context, lastMoveDirX, lastMoveDirZ,
+      ) - vegetationChunkPriority(
+        bx, bz, chunkSize, centerCx, centerCz, context, lastMoveDirX, lastMoveDirZ,
+      );
     });
   };
 
@@ -1461,8 +1472,9 @@ export function createProcPlantVegetation(
     // A streamed chunk must become visible quickly while the player is travelling. Full-density grass
     // and connected branch instances are retained for the settled build, but constructing all of their
     // matrices in one movement frame causes a visible hitch even when every source template is cached.
-    // Travel builds therefore use the existing cheap tree silhouette and far-grass spacing, then mark
-    // themselves for the same gradual refinement path used by cold cache entries.
+    // Travel builds therefore use the existing cheap tree silhouette and a nested grass subset. The
+    // camera cone gets the medium subset while off-screen chunks stay sparse, then both use the same
+    // gradual refinement path as cold cache entries.
     const travelBuild = !allowColdBuilds;
     disposeGroup(chunk.group);
     chunk.impostors = [];
@@ -1554,27 +1566,33 @@ export function createProcPlantVegetation(
       Math.abs(chunk.cx - Math.floor((lastPlayerX ?? chunk.cx * chunkSize) / chunkSize)),
       Math.abs(chunk.cz - Math.floor((lastPlayerZ ?? chunk.cz * chunkSize) / chunkSize)),
     );
+    const grassImportance = vegetationViewImportance(
+      x0 + chunkSize * 0.5,
+      z0 + chunkSize * 0.5,
+      viewPriorityContext(),
+    );
     const grassLod = travelBuild
-      ? 2
+      ? grassImportance >= 0.35 ? 1 : 2
       : fullDetailLod || grassRing <= GRASS_FIELD_FULL_DENSITY_RING
       ? 0
       : chunk.lod === 1
         ? 1
         : 2;
-    const grassSpacing = grassLod === 0
-      ? GRASS_FIELD_SPACING_LOD0
-      : grassLod === 1
-        ? GRASS_FIELD_SPACING_LOD1
-        : GRASS_FIELD_SPACING_LOD2;
-    const grassStartX = Math.floor(x0 / grassSpacing) * grassSpacing + grassSpacing * 0.5;
-    const grassStartZ = Math.floor(z0 / grassSpacing) * grassSpacing + grassSpacing * 0.5;
-    for (let gx = grassStartX; gx < x0 + chunkSize; gx += grassSpacing) {
-      for (let gz = grassStartZ; gz < z0 + chunkSize; gz += grassSpacing) {
-        if (gx < x0 || gz < z0) continue;
-        const cellSeed = seed ^ Math.imul(Math.floor(gx / grassSpacing) + 4099, 0x45d9f3b) ^
-          Math.imul(Math.floor(gz / grassSpacing) - 8191, 0x119de1f3);
+    const grassStride = grassFieldStrideForLod(grassLod);
+    const grassMinCellX = Math.ceil(x0 / GRASS_FIELD_BASE_SPACING - 0.5);
+    const grassMinCellZ = Math.ceil(z0 / GRASS_FIELD_BASE_SPACING - 0.5);
+    const grassMaxCellX = Math.ceil((x0 + chunkSize) / GRASS_FIELD_BASE_SPACING - 0.5);
+    const grassMaxCellZ = Math.ceil((z0 + chunkSize) / GRASS_FIELD_BASE_SPACING - 0.5);
+    const grassStartCellX = firstNestedGrassCellIndex(grassMinCellX, grassStride);
+    const grassStartCellZ = firstNestedGrassCellIndex(grassMinCellZ, grassStride);
+    for (let cellX = grassStartCellX; cellX < grassMaxCellX; cellX += grassStride) {
+      for (let cellZ = grassStartCellZ; cellZ < grassMaxCellZ; cellZ += grassStride) {
+        const gx = (cellX + 0.5) * GRASS_FIELD_BASE_SPACING;
+        const gz = (cellZ + 0.5) * GRASS_FIELD_BASE_SPACING;
+        const cellSeed = seed ^ Math.imul(cellX + 4099, 0x45d9f3b) ^
+          Math.imul(cellZ - 8191, 0x119de1f3);
         const cellRand = mulberry32(cellSeed >>> 0);
-        const jitter = grassSpacing * 0.42;
+        const jitter = GRASS_FIELD_BASE_SPACING * 0.42;
         const x = gx + (cellRand() - 0.5) * jitter;
         const z = gz + (cellRand() - 0.5) * jitter;
         if (!inBounds(x, z)) continue;
@@ -2135,6 +2153,12 @@ export function createProcPlantVegetation(
     lastCenterCz = Math.floor(pz / chunkSize);
     const camera = options.camera?.();
     if (camera) {
+      camera.getWorldDirection(viewDirection);
+      const horizontalLength = Math.hypot(viewDirection.x, viewDirection.z);
+      if (horizontalLength > 1e-4) {
+        viewDirectionX = viewDirection.x / horizontalLength;
+        viewDirectionZ = viewDirection.z / horizontalLength;
+      }
       for (const chunk of active.values()) {
         for (const impostor of chunk.impostors) impostor.update(camera);
       }
@@ -2248,14 +2272,19 @@ export function createProcPlantVegetation(
     // still valid; only its ideal density changed. Once streaming catches up and the player settles,
     // refine one nearest mismatched chunk at a time so forests never disappear or rebuild in a burst.
     if (stationary && rebuildQueue.length === 0 && nowMs - lastLodRefreshAt >= 250) {
+      const refinementContext = viewPriorityContext();
       const lodCandidate = [...active.values()]
         .filter((chunk) =>
           chunk.needsColdRefinement ||
           (chunk.builtLod !== null && chunk.builtLod !== chunk.lod)
         )
-        .sort((a, b) =>
-          Math.hypot(a.cx - centerCx, a.cz - centerCz) - Math.hypot(b.cx - centerCx, b.cz - centerCz)
-        )[0];
+        .sort((a, b) => {
+          return vegetationChunkPriority(
+            a.cx, a.cz, chunkSize, centerCx, centerCz, refinementContext, lastMoveDirX, lastMoveDirZ,
+          ) - vegetationChunkPriority(
+            b.cx, b.cz, chunkSize, centerCx, centerCz, refinementContext, lastMoveDirX, lastMoveDirZ,
+          );
+        })[0];
       if (lodCandidate) {
         lodCandidate.rev = -1;
         enqueue(lodCandidate.key, true);
