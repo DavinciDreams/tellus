@@ -1673,6 +1673,9 @@ function createTellusWorld(
         viewMode: () => cameraMode,
         fullDetailLod: activeWorldTemplate === "tellus",
         shouldPauseBuild: hasMovementKeyHeld,
+        shadowProxyBudget: () =>
+          lowGpuDebug() ? 0 : runtimeConfig.dayNightMode === "cycle" ? 96 : 192,
+        onShadowCastersChanged: () => shadowUpdates.invalidate(),
         shouldDeferBuild: () => {
           const terrainStats = chunkRenderer?.stats();
           const terrainReady = !isChunked || Boolean(
@@ -1731,6 +1734,9 @@ function createTellusWorld(
           deferredLodChunks: 0,
           deferredColdChunks: 0,
           lodRefreshes: 0,
+          shadowProxies: 0,
+          shadowProxyBudget: 0,
+          shadowProxyRefreshes: 0,
         }),
         placeManualPlant: () => false,
         replaceManualPlants: () => undefined,
