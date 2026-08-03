@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { SEA_LEVEL, WORLD_RADIUS } from "./tellus-constants";
 import {
   CanopyShadowProxyPool,
+  canopyShadowViewTurned,
   fitCanopyShadowProxy,
   fitCanopyShadowProxyFromBounds,
   type CanopyShadowKind,
@@ -236,6 +237,7 @@ const THIRD_PERSON_MAX_RING = 4;
 const MAX_PLANTS_PER_CHUNK = 4;
 const MAX_CANOPY_SHADOW_PROXIES = 192;
 const CANOPY_SHADOW_RESELECT_DISTANCE = 8;
+const CANOPY_SHADOW_TURN_RESELECT_INTERVAL_MS = 150;
 const CANOPY_SHADOW_FIRST_PERSON_DISTANCE = 88;
 const CANOPY_SHADOW_THIRD_PERSON_DISTANCE = 104;
 const CANOPY_SHADOW_NEAR_RESERVE_DISTANCE = 22;
@@ -992,21 +994,32 @@ export function createProcPlantVegetation(
   let lastCanopyShadowX = Number.POSITIVE_INFINITY;
   let lastCanopyShadowZ = Number.POSITIVE_INFINITY;
   let lastCanopyShadowBudget = -1;
-  const syncCanopyShadowPool = (px: number, pz: number, force = false) => {
+  let lastCanopyShadowSyncAt = Number.NEGATIVE_INFINITY;
+  let lastCanopyShadowDirection: THREE.Vector3 | null = null;
+  const currentCanopyShadowDirection = new THREE.Vector3();
+  const syncCanopyShadowPool = (px: number, pz: number, nowMs: number, force = false) => {
     const budget = THREE.MathUtils.clamp(
       Math.floor(options.shadowProxyBudget?.() ?? MAX_CANOPY_SHADOW_PROXIES),
       0,
       MAX_CANOPY_SHADOW_PROXIES,
     );
+    const camera = options.camera?.() ?? null;
+    if (camera) camera.getWorldDirection(currentCanopyShadowDirection);
+    const cameraTurned = camera
+      ? canopyShadowViewTurned(lastCanopyShadowDirection, currentCanopyShadowDirection)
+      : false;
+    const turnReselectAllowed =
+      cameraTurned && nowMs - lastCanopyShadowSyncAt >= CANOPY_SHADOW_TURN_RESELECT_INTERVAL_MS;
     if (
       !force &&
       syncedCanopyShadowRevision === canopyShadowRevision &&
       lastCanopyShadowBudget === budget &&
-      Math.hypot(px - lastCanopyShadowX, pz - lastCanopyShadowZ) < CANOPY_SHADOW_RESELECT_DISTANCE
+      Math.hypot(px - lastCanopyShadowX, pz - lastCanopyShadowZ) < CANOPY_SHADOW_RESELECT_DISTANCE &&
+      !turnReselectAllowed
     ) return;
     const proxies = [...active.values()].flatMap((chunk) => chunk.canopyShadowProxies);
     const selection = canopyShadowPool.sync(proxies, px, pz, budget, {
-      camera: options.camera?.() ?? null,
+      camera,
       maxDistance: viewMode() === "third"
         ? CANOPY_SHADOW_THIRD_PERSON_DISTANCE
         : CANOPY_SHADOW_FIRST_PERSON_DISTANCE,
@@ -1016,6 +1029,8 @@ export function createProcPlantVegetation(
     lastCanopyShadowBudget = budget;
     lastCanopyShadowX = px;
     lastCanopyShadowZ = pz;
+    lastCanopyShadowSyncAt = nowMs;
+    lastCanopyShadowDirection = camera ? currentCanopyShadowDirection.clone() : null;
     if (selection.changed) options.onShadowCastersChanged?.(selection.bounds);
   };
   stemMaterial.userData.tellusProcplantShared = true;
@@ -2145,7 +2160,7 @@ export function createProcPlantVegetation(
     }
     if (buildDeferred) {
       buildPausedForMotion = false;
-      syncCanopyShadowPool(px, pz);
+      syncCanopyShadowPool(px, pz, nowMs);
       lastUpdateMs = performance.now() - updateStartedAt;
       maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
       return;
@@ -2257,7 +2272,7 @@ export function createProcPlantVegetation(
       !stationary &&
       nowMs - lastMovingBuildAt >= movingBuildIntervalMs;
     if (!stationary && !movingBuildAllowed) {
-      syncCanopyShadowPool(px, pz);
+      syncCanopyShadowPool(px, pz, nowMs);
       lastUpdateMs = performance.now() - updateStartedAt;
       maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
       return;
@@ -2287,7 +2302,7 @@ export function createProcPlantVegetation(
       budget--;
       if (performance.now() - buildStartedAt >= buildMsBudget) break;
     }
-    syncCanopyShadowPool(px, pz);
+    syncCanopyShadowPool(px, pz, nowMs);
     lastUpdateMs = performance.now() - updateStartedAt;
     maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
   };

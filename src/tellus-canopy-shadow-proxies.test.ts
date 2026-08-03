@@ -2,7 +2,9 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import {
   CanopyShadowProxyPool,
+  canopyShadowProxyBounds,
   canopyShadowSelectionSignature,
+  canopyShadowViewTurned,
   fitCanopyShadowProxy,
   fitCanopyShadowProxyFromBounds,
   nearestCanopyShadowProxies,
@@ -86,6 +88,44 @@ describe("canopy shadow proxies", () => {
       2,
       { camera, maxDistance: 80, nearDistance: 15 },
     )).toEqual([visible, nearbyBehind]);
+  });
+
+  it("keeps a canopy whose crown intersects the view even when its center is off-screen", () => {
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    const edge = proxyAt(7, -10);
+    edge.matrix.compose(
+      new THREE.Vector3(7, 4, -10),
+      new THREE.Quaternion(),
+      new THREE.Vector3(3, 3, 3),
+    );
+    const hidden = proxyAt(20, -10);
+
+    expect(new THREE.Vector3().setFromMatrixPosition(edge.matrix).project(camera).x).toBeGreaterThan(1);
+    expect(canopyShadowProxyBounds(edge).min.x).toBeLessThan(6);
+    expect(viewPrioritizedCanopyShadowProxies(
+      [hidden, edge],
+      0,
+      0,
+      1,
+      { camera, maxDistance: 80, nearDistance: 0, ndcMargin: 0 },
+    )).toEqual([edge]);
+  });
+
+  it("detects accumulated camera turns at the reselection threshold", () => {
+    const forward = new THREE.Vector3(0, 0, -1);
+    const sevenDegrees = forward.clone().applyAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      THREE.MathUtils.degToRad(7),
+    );
+    const nineDegrees = forward.clone().applyAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      THREE.MathUtils.degToRad(9),
+    );
+
+    expect(canopyShadowViewTurned(forward, sevenDegrees)).toBe(false);
+    expect(canopyShadowViewTurned(forward, nineDegrees)).toBe(true);
   });
 
   it("uses two global meshes regardless of proxy count", () => {
