@@ -51,6 +51,7 @@ import {
   type ProcPlantVegetationStats,
 } from "./tellus-procplant-vegetation";
 import { isWorldEntryVisuallyReady } from "./tellus-world-entry-readiness";
+import { ShadowUpdatePolicy } from "./tellus-shadow-update-policy";
 import { staticTerrainAutoVegetationEnabled } from "./tellus-static-terrain";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
 import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, resetLiveMirrors } from "./tellus-procedural-assets";
@@ -1469,16 +1470,9 @@ function createTellusWorld(
       return 1;
     }
   };
-  // How often (in frames) the shadow map regenerates. Default 3 → ~66% fewer shadow passes than the
-  // old every-frame behaviour. Override via localStorage `tellus.shadowEvery` (1 = every frame).
-  const shadowEveryDebug = (): number => {
-    try {
-      const value = Number(window.localStorage.getItem("tellus.shadowEvery"));
-      return Number.isFinite(value) ? Math.max(1, Math.min(10, Math.round(value))) : 3;
-    } catch {
-      return 3;
-    }
-  };
+  // Centralized policy: fixed worlds cache shadows, while cycling worlds update after meaningful
+  // sun-angle movement. It also owns a slow safety refresh for streamed casters.
+  const shadowUpdates = new ShadowUpdatePolicy();
   const frameDriverDebug = (): "raf" | "timeout" => {
     try {
       return window.localStorage.getItem("tellus.frameDriver") === "timeout" ? "timeout" : "raf";
@@ -1501,9 +1495,8 @@ function createTellusWorld(
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatioCap));
     renderer.shadowMap.enabled = !lowGpuDebug();
-    // Force a shadow refresh next frame whenever this runs (e.g. toggling low-GPU mode back on).
-    // The per-frame interval throttle lives in the animate loop via sun.shadow.needsUpdate.
-    sun.shadow.needsUpdate = true;
+    // Force a shadow refresh next render whenever this runs (e.g. toggling low-GPU mode back on).
+    shadowUpdates.invalidate();
   };
   const sampleVegetationHeight = isChunked
     ? (x: number, z: number) => chunkRenderer?.sampleHeight(x, z) ?? largeWorldBaseHeight(x, z)
@@ -2959,7 +2952,7 @@ function createTellusWorld(
   // Manual shadow-map refresh: the day/night cycle nudges the sun every frame, which would otherwise
   // force a full shadow re-render every frame on both backends (WebGL WebGLShadowMap + WebGPU
   // ShadowNode both honour LightShadow.autoUpdate/needsUpdate per-light). The animate loop instead
-  // flags needsUpdate every `shadowEveryDebug()` frames — big GPU saving, no visible motion lag.
+  // flags needsUpdate from the centralized fixed/cycling policy below.
   sun.shadow.autoUpdate = false;
   sun.shadow.needsUpdate = true;
   const moon = new THREE.DirectionalLight(0x9fb7ff, 0.55);
@@ -3328,6 +3321,7 @@ function createTellusWorld(
         visibleShadowCasters,
         visibleShadowReceivers,
       },
+      shadows: shadowUpdates.diagnostics(),
     };
   };
   // DEV-ONLY perf readout: window.__tellusPerf() -> { fps, vegetation, procplants }.
@@ -9647,15 +9641,20 @@ function createTellusWorld(
 
   const currentDayNightPhase = (cycleNow: number) =>
     (runtimeConfig.dayNightStart + cycleNow / runtimeConfig.dayNightCycleMs) % 1;
+  const resolvedDayNightPhase = (cycleNow: number) => {
+    if (runtimeConfig.dayNightMode === "day") return 0.25;
+    if (runtimeConfig.dayNightMode === "night") return 0.75;
+    if (runtimeConfig.dayNightMode === "golden") return 0.53;
+    if (runtimeConfig.dayNightMode === "pause") {
+      return ((runtimeConfig.dayNightStart % 1) + 1) % 1;
+    }
+    return currentDayNightPhase(cycleNow);
+  };
+  let currentLightingPhase = resolvedDayNightPhase(Date.now());
 
   const updateDayNightCycle = (cycleNow: number, animationNow = performance.now()) => {
-    let phase = currentDayNightPhase(cycleNow);
-    if (runtimeConfig.dayNightMode === "day") phase = 0.25;
-    if (runtimeConfig.dayNightMode === "night") phase = 0.75;
-    if (runtimeConfig.dayNightMode === "golden") phase = 0.53;
-    if (runtimeConfig.dayNightMode === "pause") {
-      phase = ((runtimeConfig.dayNightStart % 1) + 1) % 1;
-    }
+    const phase = resolvedDayNightPhase(cycleNow);
+    currentLightingPhase = phase;
     const mood =
       LIGHTING_MOOD_PROFILES[runtimeConfig.lightingMood] ??
       LIGHTING_MOOD_PROFILES.natural;
@@ -10510,10 +10509,15 @@ function createTellusWorld(
       // material's shader incrementally as chunks/plants stream in (small per-frame costs, hidden behind
       // the overlay), instead of deferring them into one catastrophic multi-second first-frame compile.
       if (shouldRenderThisFrame) {
-        // Manual shadow-map refresh on an interval (sun.shadow.autoUpdate is off — see sun setup).
-        // Flag needsUpdate BEFORE render so this frame regenerates the shadow map; three clears the
-        // flag itself after the pass. Skipped when shadows are globally disabled (low-GPU mode).
-        if (renderer.shadowMap.enabled && perfDiagnostics.frames % shadowEveryDebug() === 0) {
+        // Frozen worlds reuse their shadow map; cycling worlds update only after meaningful sun-angle
+        // movement. A slow reconciliation refresh picks up newly streamed casters.
+        const shadowDecision = shadowUpdates.next({
+          enabled: renderer.shadowMap.enabled,
+          mode: runtimeConfig.dayNightMode,
+          phase: currentLightingPhase,
+          nowMs: now,
+        });
+        if (shadowDecision.refresh) {
           sun.shadow.needsUpdate = true;
         }
         const gpuTimerActive = beginWebGlGpuTimer(perfDiagnostics.frames);
