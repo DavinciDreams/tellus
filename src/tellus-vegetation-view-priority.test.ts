@@ -4,6 +4,7 @@ import {
   grassFieldStrideForLod,
   travelGrassLod,
   vegetationChunkPriority,
+  vegetationHorizonPrefetchOffsets,
   vegetationSightlinePrefetchOffsets,
   vegetationViewImportance,
 } from "./tellus-vegetation-view-priority";
@@ -37,6 +38,22 @@ describe("vegetation view priority", () => {
     expect(north.filter(({ dz }) => dz === -5)).toHaveLength(3);
     expect(slightlyTurned).toEqual(north);
     expect(north.every(({ dx, dz }) => Math.max(Math.abs(dx), Math.abs(dz)) > 3)).toBe(true);
+  });
+
+  it("samples a wide, bounded, octant-stable tree horizon out to the fog line", () => {
+    const north = vegetationHorizonPrefetchOffsets(0, -1, 3);
+    const slightlyTurned = vegetationHorizonPrefetchOffsets(0.1, -0.99, 3);
+
+    expect(north).toHaveLength(9 * 7);
+    expect(slightlyTurned).toEqual(north);
+    expect(north.every(({ dx, dz }) => {
+      const ring = Math.max(Math.abs(dx), Math.abs(dz));
+      return ring >= 6 && ring <= 14;
+    })).toBe(true);
+    const farRow = north.filter(({ dx, dz }) => Math.max(Math.abs(dx), Math.abs(dz)) === 14);
+    expect(farRow).toHaveLength(7);
+    expect(Math.min(...farRow.map(({ dx }) => dx))).toBeLessThan(-8);
+    expect(Math.max(...farRow.map(({ dx }) => dx))).toBeGreaterThan(8);
   });
 
   it("uses full travel grass only in the near bubble and central camera cone", () => {

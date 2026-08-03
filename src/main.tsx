@@ -1729,9 +1729,12 @@ function createTellusWorld(
           branchLod1: 0,
           branchLod2: 0,
           impostors: 0,
+          horizonTrees: 0,
+          horizonDraws: 0,
           lod0: 0,
           lod1: 0,
           lod2: 0,
+          lod3: 0,
           viewMode: "first" as const,
           queuedRebuilds: 0,
           terrainInvalidations: 0,
@@ -12805,12 +12808,13 @@ function DebugLiveRows({ worldRef, rxEnabled }: DebugLiveRowsProps): React.React
           <div className="debug-stats-row">
             branches {ambientStats.procplants.branchSegments} segments · {ambientStats.procplants.attachedLeaves} attached leaves · tree LOD{" "}
             {ambientStats.procplants.branchLod0}/{ambientStats.procplants.branchLod1}/{ambientStats.procplants.branchLod2} ·{" "}
-            {ambientStats.procplants.impostors} impostors
+            {ambientStats.procplants.impostors} atlas impostors · {ambientStats.procplants.horizonTrees} horizon trees /{" "}
+            {ambientStats.procplants.horizonDraws} draws
           </div>
           <div className="debug-stats-row">
             plant work {ambientStats.procplants.lastUpdateMs} ms · build {ambientStats.procplants.lastBuildMs} ms /{" "}
             {ambientStats.procplants.maxBuildMs} max · queue {ambientStats.procplants.queuedRebuilds} · LOD{" "}
-            {ambientStats.procplants.lod0}/{ambientStats.procplants.lod1}/{ambientStats.procplants.lod2} · deferred LOD{" "}
+            {ambientStats.procplants.lod0}/{ambientStats.procplants.lod1}/{ambientStats.procplants.lod2}/{ambientStats.procplants.lod3} · deferred LOD{" "}
             {ambientStats.procplants.deferredLodChunks} · cold {ambientStats.procplants.deferredColdChunks} · physics{" "}
             {ambientStats.physicsBodies} · rapier {ambientStats.rapierSolids}
           </div>

@@ -98,6 +98,58 @@ export function vegetationSightlinePrefetchOffsets(
   ];
 }
 
+/**
+ * Samples a wide, sparse set of far chunks for horizon-scale tree silhouettes. Unlike the two-row
+ * detail porch above, this reaches the terrain fog line without filling an entire square of plant
+ * chunks. Direction is octant-quantized and every row is sampled from edge to edge, so normal camera
+ * jitter cannot churn the population and the visible FOV does not collapse into a narrow centre strip.
+ */
+export function vegetationHorizonPrefetchOffsets(
+  forwardX: number,
+  forwardZ: number,
+  baseRing: number,
+  maxRing = 14,
+  maxChunksPerRing = 7,
+): VegetationChunkOffset[] {
+  const length = Math.hypot(forwardX, forwardZ);
+  if (length < 1e-4 || maxRing <= baseRing + 2 || maxChunksPerRing <= 0) return [];
+  const octant = Math.round(Math.atan2(forwardZ, forwardX) / (Math.PI / 4));
+  const directionX = Math.cos(octant * Math.PI / 4);
+  const directionZ = Math.sin(octant * Math.PI / 4);
+  const result: VegetationChunkOffset[] = [];
+  const minimumAlignment = Math.cos(48 * Math.PI / 180);
+
+  for (let ring = baseRing + 3; ring <= maxRing; ring++) {
+    const candidates: Array<VegetationChunkOffset & { lateral: number }> = [];
+    for (let dz = -ring; dz <= ring; dz++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
+        const distance = Math.hypot(dx, dz);
+        const alignment = (dx * directionX + dz * directionZ) / distance;
+        if (alignment < minimumAlignment) continue;
+        candidates.push({
+          dx,
+          dz,
+          lateral: (dx * -directionZ + dz * directionX) / distance,
+        });
+      }
+    }
+    candidates.sort((a, b) => a.lateral - b.lateral || a.dx - b.dx || a.dz - b.dz);
+    const count = Math.min(maxChunksPerRing, candidates.length);
+    if (count === 1) {
+      const candidate = candidates[Math.floor(candidates.length / 2)];
+      if (candidate) result.push({ dx: candidate.dx, dz: candidate.dz });
+      continue;
+    }
+    for (let index = 0; index < count; index++) {
+      const candidateIndex = Math.round(index * (candidates.length - 1) / (count - 1));
+      const candidate = candidates[candidateIndex];
+      if (candidate) result.push({ dx: candidate.dx, dz: candidate.dz });
+    }
+  }
+  return result;
+}
+
 export function travelGrassLod(
   pointX: number,
   pointZ: number,
