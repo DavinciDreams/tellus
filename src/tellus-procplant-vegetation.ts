@@ -92,6 +92,9 @@ export interface ProcPlantVegetationOptions {
 
 export interface ProcPlantVegetationStats {
   chunks: number;
+  nearChunks: number;
+  nearChunksBuilt: number;
+  centerChunkBuilt: boolean;
   plants: number;
   manualPlants: number;
   instances: number;
@@ -770,6 +773,9 @@ const geometryForKey = (key: string): THREE.BufferGeometry => {
 
 const emptyStats = (): ProcPlantVegetationStats => ({
   chunks: 0,
+  nearChunks: 0,
+  nearChunksBuilt: 0,
+  centerChunkBuilt: false,
   plants: 0,
   manualPlants: 0,
   instances: 0,
@@ -907,6 +913,8 @@ export function createProcPlantVegetation(
   let activeBiomeMixSignature = "";
   let lastPlayerX: number | null = null;
   let lastPlayerZ: number | null = null;
+  let lastCenterCx: number | null = null;
+  let lastCenterCz: number | null = null;
   let lastMoveDirX = 0;
   let lastMoveDirZ = 0;
   let lastPlayerMovedAt = Number.NEGATIVE_INFINITY;
@@ -1966,6 +1974,8 @@ export function createProcPlantVegetation(
     const updateStartedAt = performance.now();
     builtLastUpdate = 0;
     currentFps = fps;
+    lastCenterCx = Math.floor(px / chunkSize);
+    lastCenterCz = Math.floor(pz / chunkSize);
     const camera = options.camera?.();
     if (camera) {
       for (const chunk of active.values()) {
@@ -2007,8 +2017,8 @@ export function createProcPlantVegetation(
       terrainDirty = false;
       enqueueAllActive();
     }
-    const centerCx = Math.floor(px / chunkSize);
-    const centerCz = Math.floor(pz / chunkSize);
+    const centerCx = lastCenterCx;
+    const centerCz = lastCenterCz;
     const needed = new Set<string>();
     const ringLimit = activeMaxRing();
     for (let dz = -ringLimit; dz <= ringLimit; dz++) {
@@ -2157,6 +2167,17 @@ export function createProcPlantVegetation(
     out.deferredColdChunks = 0;
     out.lodRefreshes = lodRefreshes;
     for (const chunk of active.values()) {
+      if (
+        lastCenterCx !== null &&
+        lastCenterCz !== null &&
+        Math.max(Math.abs(chunk.cx - lastCenterCx), Math.abs(chunk.cz - lastCenterCz)) <= 1
+      ) {
+        out.nearChunks++;
+        if (chunk.builtLod !== null) out.nearChunksBuilt++;
+        if (chunk.cx === lastCenterCx && chunk.cz === lastCenterCz) {
+          out.centerChunkBuilt = chunk.builtLod !== null;
+        }
+      }
       out.plants += chunk.stats.plants;
       out.instances += chunk.stats.instances;
       out.grassInstances += chunk.stats.grassInstances;
