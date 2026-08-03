@@ -6,6 +6,13 @@ import {
   type CanopyShadowKind,
   type CanopyShadowProxy,
 } from "./tellus-canopy-shadow-proxies";
+import {
+  attachFoliageWindWeights,
+  enableFoliageWind,
+  heightWindWeights,
+  normalizedWindWeights,
+  updateFoliageWind,
+} from "./tellus-foliage-wind";
 import type { TerrainPaintKind } from "./tellus-types";
 import {
   biomePatchForEcology,
@@ -95,6 +102,7 @@ export interface ProcPlantVegetationOptions {
   shouldDeferBuild?: () => boolean;
   shadowProxyBudget?: () => number;
   onShadowCastersChanged?: () => void;
+  windStrength?: () => number;
   biomeMixRegistry?: TellusBiomeMixRegistry;
 }
 
@@ -956,6 +964,8 @@ export function createProcPlantVegetation(
     color: 0xffffff,
     side: THREE.DoubleSide,
   });
+  enableFoliageWind(stemMaterial, 0.18);
+  enableFoliageWind(organMaterial, 0.14);
   const canopyShadowPool = new CanopyShadowProxyPool(options.scene, MAX_CANOPY_SHADOW_PROXIES);
   let canopyShadowRevision = 0;
   let syncedCanopyShadowRevision = -1;
@@ -1006,6 +1016,7 @@ export function createProcPlantVegetation(
     geometry.setAttribute("position", new THREE.BufferAttribute(template.pos, 3));
     geometry.setAttribute("normal", new THREE.BufferAttribute(template.nrm, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(template.col, 3));
+    attachFoliageWindWeights(geometry, normalizedWindWeights(template.sway));
     geometry.setIndex(new THREE.BufferAttribute(template.idx, 1));
     geometry.computeBoundingSphere();
     geometry.userData.tellusProcplantShared = true;
@@ -1016,6 +1027,13 @@ export function createProcPlantVegetation(
     const cached = organGeometryCache.get(key);
     if (cached) return cached;
     const geometry = geometryForKey(key);
+    const vertexCount = geometry.getAttribute("position")?.count ?? 0;
+    const weights = key.startsWith("grass")
+      ? heightWindWeights(geometry)
+      : organIsCanopy(key)
+        ? new Float32Array(vertexCount).fill(1)
+        : new Float32Array(vertexCount).fill(0.18);
+    attachFoliageWindWeights(geometry, weights);
     geometry.userData.tellusProcplantShared = true;
     organGeometryCache.set(key, geometry);
     return geometry;
@@ -2054,6 +2072,9 @@ export function createProcPlantVegetation(
     if (disposed) return;
     const updateStartedAt = performance.now();
     builtLastUpdate = 0;
+    const windStrength = options.windStrength?.() ?? 1;
+    updateFoliageWind(stemMaterial, nowMs, windStrength);
+    updateFoliageWind(organMaterial, nowMs, windStrength);
     currentFps = fps;
     lastCenterCx = Math.floor(px / chunkSize);
     lastCenterCz = Math.floor(pz / chunkSize);

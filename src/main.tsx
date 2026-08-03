@@ -1676,6 +1676,7 @@ function createTellusWorld(
         shadowProxyBudget: () =>
           lowGpuDebug() ? 0 : runtimeConfig.dayNightMode === "cycle" ? 96 : 192,
         onShadowCastersChanged: () => shadowUpdates.invalidate(),
+        windStrength: () => lowGpuDebug() ? 0 : 1,
         shouldDeferBuild: () => {
           const terrainStats = chunkRenderer?.stats();
           const terrainReady = !isChunked || Boolean(
