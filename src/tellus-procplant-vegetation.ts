@@ -984,7 +984,7 @@ export function createProcPlantVegetation(
     color: 0xffffff,
     side: THREE.DoubleSide,
   });
-  enableFoliageWind(stemMaterial, 0.18);
+  enableFoliageWind(stemMaterial, 0.18, { space: "post-instance" });
   enableFoliageWind(organMaterial, 0.14);
   const canopyShadowPool = new CanopyShadowProxyPool(options.scene, MAX_CANOPY_SHADOW_PROXIES);
   let canopyShadowRevision = 0;
@@ -1057,7 +1057,9 @@ export function createProcPlantVegetation(
     const weights = key.startsWith("grass")
       ? heightWindWeights(geometry)
       : organIsCanopy(key)
-        ? new Float32Array(vertexCount).fill(1)
+        // Leaves and conifer sprays originate at their attachment point. A height gradient anchors
+        // that petiole/base while letting the tip flutter; a uniform 1 translated the whole card.
+        ? heightWindWeights(geometry)
         : new Float32Array(vertexCount).fill(0.18);
     attachFoliageWindWeights(geometry, weights);
     geometry.userData.tellusProcplantShared = true;

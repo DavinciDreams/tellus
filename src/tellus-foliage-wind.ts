@@ -1,7 +1,12 @@
 import * as THREE from "three";
 
 const WIND_ATTRIBUTE = "tellusWindWeight";
-const WIND_SHADER_KEY = "tellus-foliage-wind-v1";
+const WIND_SHADER_KEY = "tellus-foliage-wind-v2";
+
+export type FoliageWindOptions = {
+  /** Apply after instance scaling for thin branch segments, or locally for blades and leaf surfaces. */
+  space?: "local" | "post-instance";
+};
 
 type FoliageWindState = {
   time: THREE.IUniform<number>;
@@ -54,7 +59,12 @@ export function heightWindWeights(geometry: THREE.BufferGeometry): Float32Array 
   return weights;
 }
 
-export function enableFoliageWind(material: THREE.Material, amplitude: number): void {
+export function enableFoliageWind(
+  material: THREE.Material,
+  amplitude: number,
+  options: FoliageWindOptions = {},
+): void {
+  const space = options.space ?? "local";
   const windMaterial = material as FoliageWindMaterial;
   const previousOnBeforeCompile = material.onBeforeCompile.bind(material);
   const previousProgramKey = material.customProgramCacheKey.bind(material);
@@ -82,15 +92,37 @@ vec3 tellusWindOrigin = vec3(0.0);
 #ifdef USE_INSTANCING
   tellusWindOrigin = instanceMatrix[3].xyz;
 #endif
-float tellusWindPhase = tellusWindOrigin.x * 0.12 + tellusWindOrigin.z * 0.09;
+// A low spatial frequency keeps leaves and branch segments in one crown moving as one tree while
+// still preventing a whole forest from swaying in lockstep.
+float tellusWindPhase = tellusWindOrigin.x * 0.025 + tellusWindOrigin.z * 0.019;
 float tellusWindGust = 0.72 + sin(tellusWindTime * 0.63 + tellusWindPhase * 0.37) * 0.28;
 float tellusWindWave = sin(tellusWindTime * 1.07 + tellusWindPhase) * tellusWindGust;
 float tellusWindBend = ${amplitude.toFixed(4)} * ${WIND_ATTRIBUTE} * tellusWindStrength;
-transformed.x += tellusWindWave * tellusWindBend;
-transformed.z += cos(tellusWindTime * 0.83 + tellusWindPhase * 1.17) * tellusWindBend * 0.58;`,
+${space === "local" ? `transformed.x += tellusWindWave * tellusWindBend;
+transformed.z += cos(tellusWindTime * 0.83 + tellusWindPhase * 1.17) * tellusWindBend * 0.58;` : ""}`,
       );
+    if (space === "post-instance") {
+      // Branch prototypes are instanced with (radius, length, radius) scale. Displacing them in
+      // begin_vertex multiplies lateral movement by the tiny radius and makes the scaffold appear
+      // frozen. Move in mesh space after instanceMatrix so authored sway survives that thin scale.
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <project_vertex>",
+        `vec4 mvPosition = vec4( transformed, 1.0 );
+#ifdef USE_BATCHING
+  mvPosition = batchingMatrix * mvPosition;
+#endif
+#ifdef USE_INSTANCING
+  mvPosition = instanceMatrix * mvPosition;
+#endif
+mvPosition.x += tellusWindWave * tellusWindBend;
+mvPosition.z += cos(tellusWindTime * 0.83 + tellusWindPhase * 1.17) * tellusWindBend * 0.58;
+mvPosition = modelViewMatrix * mvPosition;
+gl_Position = projectionMatrix * mvPosition;`,
+      );
+    }
   };
-  material.customProgramCacheKey = () => `${previousProgramKey()}|${WIND_SHADER_KEY}|${amplitude.toFixed(4)}`;
+  material.customProgramCacheKey = () =>
+    `${previousProgramKey()}|${WIND_SHADER_KEY}|${space}|${amplitude.toFixed(4)}`;
   material.needsUpdate = true;
 }
 

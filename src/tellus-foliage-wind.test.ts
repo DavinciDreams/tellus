@@ -45,4 +45,22 @@ describe("foliage wind", () => {
     expect((shader.uniforms as Record<string, THREE.IUniform<number>>).tellusWindTime.value).toBe(2.5);
     expect((shader.uniforms as Record<string, THREE.IUniform<number>>).tellusWindStrength.value).toBe(0.75);
   });
+
+  it("applies structural branch sway after thin instance scaling", () => {
+    const material = new THREE.MeshLambertMaterial();
+    enableFoliageWind(material, 0.18, { space: "post-instance" });
+    const shader = {
+      uniforms: {},
+      vertexShader: "#include <common>\n#include <begin_vertex>\n#include <project_vertex>",
+      fragmentShader: "",
+    };
+
+    material.onBeforeCompile(shader as never, {} as never);
+
+    const instanceTransform = shader.vertexShader.indexOf("mvPosition = instanceMatrix * mvPosition");
+    const lateralSway = shader.vertexShader.indexOf("mvPosition.x += tellusWindWave");
+    expect(instanceTransform).toBeGreaterThan(-1);
+    expect(lateralSway).toBeGreaterThan(instanceTransform);
+    expect(shader.vertexShader).not.toContain("transformed.x += tellusWindWave");
+  });
 });
