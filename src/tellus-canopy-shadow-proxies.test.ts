@@ -4,9 +4,27 @@ import {
   CanopyShadowProxyPool,
   canopyShadowSelectionSignature,
   fitCanopyShadowProxy,
+  fitCanopyShadowProxyFromBounds,
   nearestCanopyShadowProxies,
+  viewPrioritizedCanopyShadowProxies,
   type CanopyShadowProxy,
 } from "./tellus-canopy-shadow-proxies";
+
+const proxyAt = (
+  x: number,
+  z = 0,
+  kind: CanopyShadowProxy["kind"] = "broadleaf",
+): CanopyShadowProxy => ({
+  kind,
+  matrix: new THREE.Matrix4().makeTranslation(x, 4, z),
+  trunkMatrix: new THREE.Matrix4().compose(
+    new THREE.Vector3(x, 0, z),
+    new THREE.Quaternion(),
+    new THREE.Vector3(0.2, 4, 0.2),
+  ),
+  x,
+  z,
+});
 
 describe("canopy shadow proxies", () => {
   it("fits one broadleaf proxy around foliage transformed into world space", () => {
@@ -26,27 +44,57 @@ describe("canopy shadow proxies", () => {
     proxy?.matrix.decompose(position, rotation, scale);
     expect(position.y).toBeCloseTo(7);
     expect(scale.y).toBeGreaterThan(1);
+    expect(proxy?.trunkMatrix).toBeInstanceOf(THREE.Matrix4);
+  });
+
+  it("gives a cold fallback tree a canopy and trunk proxy", () => {
+    const localBounds = new THREE.Box3(
+      new THREE.Vector3(-2, 0, -2),
+      new THREE.Vector3(2, 8, 2),
+    );
+    const proxy = fitCanopyShadowProxyFromBounds(
+      localBounds,
+      "broadleaf",
+      new THREE.Matrix4().makeTranslation(20, 3, -10),
+    );
+
+    expect(proxy).not.toBeNull();
+    expect(proxy?.x).toBeCloseTo(20);
+    expect(proxy?.z).toBeCloseTo(-10);
+    const trunkScale = new THREE.Vector3();
+    proxy?.trunkMatrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), trunkScale);
+    expect(trunkScale.y).toBeGreaterThan(1);
   });
 
   it("keeps only the nearest proxies inside the structural budget", () => {
-    const proxy = (x: number): CanopyShadowProxy => ({
-      kind: "broadleaf",
-      matrix: new THREE.Matrix4().makeTranslation(x, 0, 0),
-      x,
-      z: 0,
-    });
-
-    expect(nearestCanopyShadowProxies([proxy(20), proxy(2), proxy(8)], 0, 0, 2).map((p) => p.x))
+    expect(nearestCanopyShadowProxies([proxyAt(20), proxyAt(2), proxyAt(8)], 0, 0, 2).map((p) => p.x))
       .toEqual([2, 8]);
+  });
+
+  it("prioritizes visible trees over closer off-screen trees", () => {
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    const visible = proxyAt(0, -30);
+    const nearbyBehind = proxyAt(0, 10);
+    const offscreen = proxyAt(40, -20);
+
+    expect(viewPrioritizedCanopyShadowProxies(
+      [nearbyBehind, offscreen, visible],
+      0,
+      0,
+      2,
+      { camera, maxDistance: 80, nearDistance: 15 },
+    )).toEqual([visible, nearbyBehind]);
   });
 
   it("uses two global meshes regardless of proxy count", () => {
     const scene = new THREE.Scene();
     const pool = new CanopyShadowProxyPool(scene, 8);
     const proxies: CanopyShadowProxy[] = [
-      { kind: "broadleaf", matrix: new THREE.Matrix4(), x: 0, z: 0 },
-      { kind: "conifer", matrix: new THREE.Matrix4().makeTranslation(1, 0, 0), x: 1, z: 0 },
-      { kind: "broadleaf", matrix: new THREE.Matrix4().makeTranslation(2, 0, 0), x: 2, z: 0 },
+      proxyAt(0),
+      proxyAt(1, 0, "conifer"),
+      proxyAt(2),
     ];
 
     const first = pool.sync(proxies, 0, 0, 3);
@@ -55,25 +103,15 @@ describe("canopy shadow proxies", () => {
     expect(first.changed).toBe(true);
     expect(first.bounds?.containsPoint(new THREE.Vector3(2, 0, 0))).toBe(true);
     expect(second.changed).toBe(false);
-    expect(pool.diagnostics()).toMatchObject({ total: 3, broadleaf: 2, conifer: 1 });
+    expect(pool.diagnostics()).toMatchObject({ total: 3, broadleaf: 2, conifer: 1, trunks: 3 });
     expect(pool.diagnostics().refreshes).toBe(1);
-    expect(scene.getObjectByName("tellus-canopy-shadow-proxies")?.children).toHaveLength(2);
+    expect(scene.getObjectByName("tellus-canopy-shadow-proxies")?.children).toHaveLength(3);
     pool.dispose(scene);
   });
 
   it("signs selected identities and matrices independent of instance order", () => {
-    const first: CanopyShadowProxy = {
-      kind: "broadleaf",
-      matrix: new THREE.Matrix4().makeTranslation(2, 3, 4),
-      x: 2,
-      z: 4,
-    };
-    const second: CanopyShadowProxy = {
-      kind: "conifer",
-      matrix: new THREE.Matrix4().makeTranslation(8, 5, 6),
-      x: 8,
-      z: 6,
-    };
+    const first = proxyAt(2, 4);
+    const second = proxyAt(8, 6, "conifer");
 
     expect(canopyShadowSelectionSignature([first, second]))
       .toBe(canopyShadowSelectionSignature([second, first]));

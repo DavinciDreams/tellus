@@ -3,6 +3,7 @@ import { SEA_LEVEL, WORLD_RADIUS } from "./tellus-constants";
 import {
   CanopyShadowProxyPool,
   fitCanopyShadowProxy,
+  fitCanopyShadowProxyFromBounds,
   type CanopyShadowKind,
   type CanopyShadowProxy,
 } from "./tellus-canopy-shadow-proxies";
@@ -227,6 +228,9 @@ const THIRD_PERSON_MAX_RING = 4;
 const MAX_PLANTS_PER_CHUNK = 4;
 const MAX_CANOPY_SHADOW_PROXIES = 192;
 const CANOPY_SHADOW_RESELECT_DISTANCE = 8;
+const CANOPY_SHADOW_FIRST_PERSON_DISTANCE = 88;
+const CANOPY_SHADOW_THIRD_PERSON_DISTANCE = 104;
+const CANOPY_SHADOW_NEAR_RESERVE_DISTANCE = 22;
 const PROC_TREE_NEAR_SCALE = 1.85;
 // Tree transforms must not change when a chunk crosses an LOD ring. Geometry can simplify, but a
 // different scale makes a crown visibly expand/contract and reads as a different tree popping in.
@@ -466,6 +470,7 @@ const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color
 const cheapTreeTemplateCache = new Map<string, ProcPlantTemplate>();
 const templateMinYCache = new WeakMap<ProcPlantTemplate, number>();
 const templateHeightCache = new WeakMap<ProcPlantTemplate, number>();
+const templateBoundsCache = new WeakMap<ProcPlantTemplate, THREE.Box3>();
 const assetTemplateCache = new WeakMap<TellusBiomeAssetTemplate, Map<string, ProcPlantTemplate>>();
 
 export const procPlantTemplateFromAssetTemplate = (
@@ -526,6 +531,21 @@ const templateHeight = (template: ProcPlantTemplate): number => {
     : 1;
   templateHeightCache.set(template, height);
   return height;
+};
+
+const templateBounds = (template: ProcPlantTemplate): THREE.Box3 => {
+  const cached = templateBoundsCache.get(template);
+  if (cached) return cached;
+  const bounds = new THREE.Box3();
+  for (let index = 0; index < template.pos.length; index += 3) {
+    bounds.expandByPoint(new THREE.Vector3(
+      template.pos[index] ?? 0,
+      template.pos[index + 1] ?? 0,
+      template.pos[index + 2] ?? 0,
+    ));
+  }
+  templateBoundsCache.set(template, bounds);
+  return bounds;
 };
 
 export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit): ProcPlantTemplate => {
@@ -975,7 +995,13 @@ export function createProcPlantVegetation(
       Math.hypot(px - lastCanopyShadowX, pz - lastCanopyShadowZ) < CANOPY_SHADOW_RESELECT_DISTANCE
     ) return;
     const proxies = [...active.values()].flatMap((chunk) => chunk.canopyShadowProxies);
-    const selection = canopyShadowPool.sync(proxies, px, pz, budget);
+    const selection = canopyShadowPool.sync(proxies, px, pz, budget, {
+      camera: options.camera?.() ?? null,
+      maxDistance: viewMode() === "third"
+        ? CANOPY_SHADOW_THIRD_PERSON_DISTANCE
+        : CANOPY_SHADOW_FIRST_PERSON_DISTANCE,
+      nearDistance: CANOPY_SHADOW_NEAR_RESERVE_DISTANCE,
+    });
     syncedCanopyShadowRevision = canopyShadowRevision;
     lastCanopyShadowBudget = budget;
     lastCanopyShadowX = px;
@@ -1800,6 +1826,12 @@ export function createProcPlantVegetation(
               z,
             ));
           stemTemplates.push({ template, matrix: fallbackMatrix });
+          const fallbackProxy = fitCanopyShadowProxyFromBounds(
+            templateBounds(template),
+            genome.habit === "conifer" ? "conifer" : "broadleaf",
+            fallbackMatrix,
+          );
+          if (fallbackProxy) chunk.canopyShadowProxies.push(fallbackProxy);
           chunk.stats.plants++;
           chunk.stats.stemTriangles += template.idx.length / 3;
           chunk.needsColdRefinement = true;
@@ -1906,6 +1938,12 @@ export function createProcPlantVegetation(
               z,
             ));
           stemTemplates.push({ template, matrix });
+          const fallbackProxy = fitCanopyShadowProxyFromBounds(
+            templateBounds(template),
+            genome.habit === "conifer" ? "conifer" : "broadleaf",
+            matrix,
+          );
+          if (fallbackProxy) chunk.canopyShadowProxies.push(fallbackProxy);
           chunk.stats.plants++;
           chunk.stats.stemTriangles += template.idx.length / 3;
         }
