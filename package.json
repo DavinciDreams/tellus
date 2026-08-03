@@ -18,6 +18,7 @@
     "bench:instantmesh": "bun scripts/benchmark-instantmesh.mjs",
     "terrain:evoflow-variety": "node scripts/generate-evoflow-terrain-variety.mjs",
     "terrain:yosemite": "node scripts/bake-yosemite-dem.mjs --chunks=20",
+    "wildlife:audit": "node scripts/audit-wildlife-pack.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --passWithNoTests --testTimeout=30000 --coverage",
