@@ -217,12 +217,18 @@ describe("procplant vegetation", () => {
     const horizonMeshes = horizon?.children.filter((child) => child instanceof THREE.InstancedMesh) ?? [];
 
     expect(stats.horizonTrees).toBeGreaterThan(0);
-    expect(stats.horizonDraws).toBeGreaterThan(0);
-    expect(stats.horizonDraws).toBeLessThanOrEqual(stats.horizonTrees);
+    expect(stats.horizonDraws).toBe(1);
     expect(stats.lod3).toBeGreaterThan(0);
     expect(stats.grassInstances).toBe(0);
     expect(horizonMeshes).toHaveLength(stats.horizonDraws);
     expect(horizonMeshes.every((mesh) => mesh.castShadow === false)).toBe(true);
+    const genericAcaciaVertices = buildCheapTreeTemplate("sassafras", "tree").pos.length / 3;
+    expect(horizonMeshes.some((mesh) => (
+      mesh.geometry.getAttribute("position")?.count ?? 0
+    ) > genericAcaciaVertices)).toBe(true);
+    expect(horizonMeshes.every((mesh) => (
+      (mesh.geometry.getIndex()?.count ?? 0) / 3
+    ) < 2_000)).toBe(true);
 
     vegetation.dispose();
   });
