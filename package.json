@@ -32,7 +32,6 @@
     "@pixiv/three-vrm": "^3.5.3",
     "@pixiv/three-vrm-animation": "^3.5.3",
     "@vitejs/plugin-react": "^6.0.1",
-    "@z_ai/mcp-server": "0.1.4",
     "3d-tiles-renderer": "^0.4.28",
     "cesium": "^1.143.0",
     "lucide-react": "^0.577.0",
