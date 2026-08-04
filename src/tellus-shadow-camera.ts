@@ -54,25 +54,39 @@ export function fitDirectionalShadowCamera(
           fallbackFocus.z + fallbackRadius,
         ),
       );
-  const focus = bounds.getCenter(new THREE.Vector3());
   const forward = sunOffset.clone().normalize();
   const right = new THREE.Vector3().crossVectors(WORLD_UP, forward);
   if (right.lengthSq() < 1e-8) right.set(1, 0, 0);
   else right.normalize();
   const up = new THREE.Vector3().crossVectors(forward, right).normalize();
 
+  const receiverFloorY = Math.min(bounds.min.y, fallbackFocus.y);
+  const lightRay = forward.clone().negate();
+  const coveragePoints: THREE.Vector3[] = [];
+  for (const corner of corners(bounds)) {
+    coveragePoints.push(corner);
+    if (corner.y > receiverFloorY && lightRay.y < -1e-5) {
+      const distanceToFloor = (corner.y - receiverFloorY) / -lightRay.y;
+      coveragePoints.push(corner.clone().addScaledVector(lightRay, distanceToFloor));
+    }
+  }
+  const focus = new THREE.Box3().setFromPoints(coveragePoints).getCenter(new THREE.Vector3());
+
   let halfWidth = 0;
   let halfHeight = 0;
   let minDepth = Number.POSITIVE_INFINITY;
   let maxDepth = Number.NEGATIVE_INFINITY;
-  for (const corner of corners(bounds)) {
-    corner.sub(focus);
-    halfWidth = Math.max(halfWidth, Math.abs(corner.dot(right)));
-    halfHeight = Math.max(halfHeight, Math.abs(corner.dot(up)));
-    const depth = corner.dot(forward);
+  const includePoint = (point: THREE.Vector3) => {
+    point.sub(focus);
+    halfWidth = Math.max(halfWidth, Math.abs(point.dot(right)));
+    halfHeight = Math.max(halfHeight, Math.abs(point.dot(up)));
+    const depth = point.dot(forward);
     minDepth = Math.min(minDepth, depth);
     maxDepth = Math.max(maxDepth, depth);
-  }
+  };
+  // The orthographic map must contain the receiver footprint, not only the canopy. Otherwise a
+  // correctly selected foreground tree can cast beyond the map and appear shadowless.
+  for (const point of coveragePoints) includePoint(point.clone());
 
   const halfExtent = Math.max(1, halfWidth, halfHeight) + padding;
   const mapWidth = Math.max(1, light.shadow.mapSize.x);

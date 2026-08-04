@@ -39,10 +39,12 @@ import {
   createProcPlantVegetation,
   groundPlantDistanceDensity,
   procPlantBranchRadialSegments,
+  procPlantUsesHorizonSilhouette,
   procPlantTemplateFromAssetTemplate,
   procPlantChunkSeed,
   shouldUseCheapDistantTree,
 } from "./tellus-procplant-vegetation";
+import { vegetationHorizonPrefetchOffsets } from "./tellus-vegetation-view-priority";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 import { SEA_LEVEL } from "./tellus-constants";
 import type { TellusBiomeMixDefinition } from "./tellus-biome-mix";
@@ -138,6 +140,16 @@ describe("procplant vegetation", () => {
     expect(shouldUseCheapDistantTree("tree", true, 4)).toBe(false);
   });
 
+  it("limits the WebGL horizon tier to tree-form vegetation", () => {
+    expect(procPlantUsesHorizonSilhouette("tree")).toBe(true);
+    expect(procPlantUsesHorizonSilhouette("conifer")).toBe(true);
+    expect(procPlantUsesHorizonSilhouette("palm")).toBe(true);
+    expect(procPlantUsesHorizonSilhouette("shrub")).toBe(false);
+    expect(procPlantUsesHorizonSilhouette("fern")).toBe(false);
+    expect(procPlantUsesHorizonSilhouette("flower")).toBe(false);
+    expect(procPlantUsesHorizonSilhouette("grass")).toBe(false);
+  });
+
   it("gives a custom conifer genome the conifer cutout silhouette even when its id doesn't look like a species name", () => {
     // A mutation genome exported from the biome mixer can have any id (e.g. "branchModules-excurrent-conifer"),
     // not a recognizable species name like "balsamFir" — habit must be the authoritative signal for the
@@ -148,6 +160,253 @@ describe("procplant vegetation", () => {
 
     expect(conifer.pos.length).toBe(knownConifer.pos.length);
     expect(conifer.pos.length).not.toBe(broadleaf.pos.length);
+  });
+
+  it("batches deterministic horizon trees beyond the detailed vegetation porch", () => {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 500);
+    camera.position.set(0, 4, 0);
+    camera.lookAt(0, 4, -1);
+    camera.updateMatrixWorld(true);
+    const vegetation = createProcPlantVegetation({
+      scene,
+      camera: () => camera,
+      worldId: "chunked-horizon-tree-test",
+      sampleHeight: () => 10,
+      samplePaint: () => "desert-sand",
+      bounds: { minX: -160, maxX: 160, minZ: -240, maxZ: -82 },
+      densityMultiplier: 1,
+      biomeMixRegistry: {
+        version: 1,
+        worldId: "chunked-horizon-tree-test",
+        updatedAt: new Date(0).toISOString(),
+        mixesByEcologyBiome: {},
+        mixesByTerrainPaint: {
+          "desert-sand": {
+            version: 1,
+            id: "horizon-acacia",
+            label: "Horizon acacia",
+            source: "terrain-paint",
+            terrainPaint: "desert-sand",
+            targetTerrainPaint: "desert-sand",
+            seed: 1,
+            density: 1,
+            diversity: 1,
+            targetVerticesPerChunk: 12_000,
+            entries: [{
+              id: "horizon-acacia-entry",
+              label: "Acacia",
+              source: "preset",
+              presetId: "acaciaUmbrella",
+              weight: 1,
+              density: 1,
+              scale: 5.8,
+              environment: { light: 0.9, moisture: 0.2, crowding: 0.1, biomeWarmth: 0.9 },
+              seed: 2,
+              enabled: true,
+            }],
+          },
+        },
+      },
+    });
+
+    for (let index = 0; index < 180 && vegetation.stats().horizonTrees === 0; index++) {
+      vegetation.update(0, 0, 10, 60, 1_000 + index * 900);
+    }
+    const stats = vegetation.stats();
+    const horizon = scene.getObjectByName("tellus-procplant-horizon");
+    const horizonMeshes = horizon?.children.filter((child) => child instanceof THREE.InstancedMesh) ?? [];
+
+    expect(stats.horizonTrees).toBeGreaterThan(0);
+    expect(stats.horizonDraws).toBe(1);
+    expect(stats.lod3).toBeGreaterThan(0);
+    expect(stats.grassInstances).toBe(0);
+    expect(horizonMeshes).toHaveLength(stats.horizonDraws);
+    expect(horizonMeshes.every((mesh) => mesh.castShadow === false)).toBe(true);
+    const genericAcaciaVertices = buildCheapTreeTemplate("sassafras", "tree").pos.length / 3;
+    expect(horizonMeshes.some((mesh) => (
+      mesh.geometry.getAttribute("position")?.count ?? 0
+    ) > genericAcaciaVertices)).toBe(true);
+    expect(horizonMeshes.every((mesh) => (
+      (mesh.geometry.getIndex()?.count ?? 0) / 3
+    ) < 2_000)).toBe(true);
+
+    vegetation.dispose();
+  });
+
+  it("bounds retained horizon chunks and prunes stale turn queues", () => {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 500);
+    camera.position.set(0, 4, 0);
+    const vegetation = createProcPlantVegetation({
+      scene,
+      camera: () => camera,
+      worldId: "chunked-horizon-turn-bound-test",
+      sampleHeight: () => 10,
+      samplePaint: () => "desert-sand",
+      bounds: { minX: -320, maxX: 320, minZ: -320, maxZ: 320 },
+      densityMultiplier: 0,
+    });
+
+    for (let octant = 0; octant < 8; octant++) {
+      const angle = -Math.PI / 2 + octant * Math.PI / 4;
+      camera.lookAt(Math.cos(angle), 4, Math.sin(angle));
+      camera.updateMatrixWorld(true);
+      vegetation.update(0, 0, 10, 60, 1_000 + octant * 100);
+    }
+    const stats = vegetation.stats();
+
+    // 49 base chunks + at most eight 8-chunk detail porches + the hard 84-chunk horizon cap.
+    expect(stats.chunks).toBeLessThanOrEqual(197);
+    expect(stats.lod3).toBeLessThanOrEqual(84);
+    expect(stats.queuedRebuilds).toBeLessThanOrEqual(197);
+
+    vegetation.dispose();
+  });
+
+  it("does not render unbounded asset templates in LOD3 horizon chunks", () => {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 500);
+    camera.position.set(0, 4, 0);
+    camera.lookAt(0, 4, -1);
+    camera.updateMatrixWorld(true);
+    const vegetation = createProcPlantVegetation({
+      scene,
+      camera: () => camera,
+      worldId: "chunked-asset-horizon-bound-test",
+      sampleHeight: () => 10,
+      samplePaint: () => "desert-sand",
+      bounds: { minX: -160, maxX: 160, minZ: -240, maxZ: -82 },
+      densityMultiplier: 1,
+      biomeMixRegistry: {
+        version: 1,
+        worldId: "chunked-asset-horizon-bound-test",
+        updatedAt: new Date(0).toISOString(),
+        mixesByEcologyBiome: {},
+        mixesByTerrainPaint: {
+          "desert-sand": {
+            version: 1,
+            id: "asset-only-horizon",
+            label: "Asset-only horizon",
+            source: "terrain-paint",
+            terrainPaint: "desert-sand",
+            targetTerrainPaint: "desert-sand",
+            seed: 1,
+            density: 1,
+            diversity: 1,
+            targetVerticesPerChunk: 12_000,
+            entries: [{
+              id: "unbounded-asset-entry",
+              label: "Unbounded asset",
+              source: "asset",
+              asset: {
+                kind: "glb",
+                name: "unbounded.glb",
+                runtimeOnly: false,
+                template: {
+                  version: 1,
+                  vertexCount: 3,
+                  positions: [0, 0, 0, 1, 0, 0, 0, 2, 0],
+                  normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+                  colors: [0.2, 0.7, 0.25, 0.2, 0.7, 0.25, 0.2, 0.7, 0.25],
+                  indices: [0, 1, 2],
+                },
+              },
+              weight: 1,
+              density: 1,
+              scale: 8,
+              environment: { light: 0.9, moisture: 0.2, crowding: 0.1, biomeWarmth: 0.9 },
+              seed: 2,
+              enabled: true,
+            }],
+          },
+        },
+      },
+    });
+
+    for (let index = 0; index < 180 && (index === 0 || vegetation.stats().queuedRebuilds > 0); index++) {
+      vegetation.update(0, 0, 10, 60, 1_000 + index * 900);
+    }
+    const root = scene.getObjectByName("tellus-procplant-vegetation");
+    let renderedMeshes = 0;
+    root?.traverse((child) => {
+      if (child instanceof THREE.Mesh || child instanceof THREE.InstancedMesh) renderedMeshes++;
+    });
+    const stats = vegetation.stats();
+
+    expect(stats.lod3).toBeGreaterThan(0);
+    expect(stats.horizonTrees).toBe(0);
+    expect(stats.plants).toBe(0);
+    expect(stats.stemTriangles).toBe(0);
+    expect(renderedMeshes).toBe(0);
+
+    vegetation.dispose();
+  });
+
+  it("bounds manual tree placements and omits manual ground plants in LOD3 horizon chunks", () => {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 500);
+    camera.position.set(0, 4, 0);
+    camera.lookAt(0, 4, -1);
+    camera.updateMatrixWorld(true);
+    const vegetation = createProcPlantVegetation({
+      scene,
+      camera: () => camera,
+      worldId: "chunked-manual-horizon-bound-test",
+      sampleHeight: () => 10,
+      samplePaint: () => "desert-sand",
+      bounds: { minX: -160, maxX: 160, minZ: -240, maxZ: -82 },
+      densityMultiplier: 0,
+    });
+    const offsets = vegetationHorizonPrefetchOffsets(0, -1, 3).slice(0, 3);
+    const placements = [
+      { id: "manual-horizon-oak", presetId: "oakCanopy", seed: 11, scale: 14 },
+      { id: "manual-horizon-fir", presetId: "alpineFir", seed: 22, scale: 14 },
+      { id: "manual-horizon-grass", presetId: "furGrass", seed: 33, scale: 1 },
+    ];
+    placements.forEach((placement, index) => {
+      const offset = offsets[index]!;
+      expect(vegetation.placeManualPlant({
+        ...placement,
+        x: offset.dx * 16 + 8,
+        z: offset.dz * 16 + 8,
+      }, { persist: false })).toBe(true);
+    });
+
+    for (let index = 0; index < 240 && (
+      index === 0 || vegetation.stats().horizonTrees < 2 || vegetation.stats().queuedRebuilds > 0
+    ); index++) {
+      vegetation.update(0, 0, 10, 60, 1_000 + index * 900);
+    }
+    const stats = vegetation.stats();
+    const root = scene.getObjectByName("tellus-procplant-vegetation");
+    const horizon = scene.getObjectByName("tellus-procplant-horizon");
+    const horizonMeshes = horizon?.children.filter(
+      (child): child is THREE.InstancedMesh => child instanceof THREE.InstancedMesh,
+    ) ?? [];
+    let detailedMeshes = 0;
+    for (const child of root?.children ?? []) {
+      if (child === horizon) continue;
+      child.traverse((descendant) => {
+        if (descendant instanceof THREE.Mesh || descendant instanceof THREE.InstancedMesh) detailedMeshes++;
+      });
+    }
+
+    expect(stats.manualPlants).toBe(3);
+    expect(stats.horizonTrees).toBe(2);
+    expect(stats.horizonDraws).toBe(2);
+    expect(stats.plants).toBe(2);
+    expect(stats.instances).toBe(0);
+    expect(stats.grassInstances).toBe(0);
+    expect(stats.stemTriangles).toBeGreaterThan(0);
+    expect(stats.stemTriangles).toBeLessThan(4_000);
+    expect(horizonMeshes).toHaveLength(2);
+    expect(horizonMeshes.every((mesh) => (
+      (mesh.geometry.getIndex()?.count ?? 0) / 3
+    ) < 2_000)).toBe(true);
+    expect(detailedMeshes).toBe(0);
+
+    vegetation.dispose();
   });
 
   it("uses the dense authored conifer throughout the alpine mix", () => {
@@ -988,6 +1247,32 @@ describe("procplant vegetation", () => {
 
     vegetation.update(0, 0, 1, 18, 16);
     expect(vegetation.stats().chunks).toBe(49);
+
+    vegetation.dispose();
+  });
+
+  it("prefetches a bounded cheap porch beyond the first-person sightline", () => {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      camera: () => camera,
+      worldId: "chunked-sightline-porch-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -160, maxX: 160, minZ: -160, maxZ: 160 },
+      densityMultiplier: 0,
+    });
+
+    vegetation.update(0, 0, 1, 60, 0);
+    const stats = vegetation.stats();
+    expect(stats.chunks).toBe(120);
+    expect(stats.lod0).toBe(1);
+    expect(stats.lod1).toBe(24);
+    expect(stats.lod2).toBe(32);
+    expect(stats.lod3).toBe(63);
 
     vegetation.dispose();
   });

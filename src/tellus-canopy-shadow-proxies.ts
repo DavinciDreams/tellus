@@ -41,6 +41,36 @@ const proxyMaximum = new THREE.Vector3();
 const proxyWorldMatrix = new THREE.Matrix4();
 const proxyViewPosition = new THREE.Vector3();
 const proxyProjectedPosition = new THREE.Vector3();
+const proxyFrustum = new THREE.Frustum();
+const proxyProjectionView = new THREE.Matrix4();
+const proxySelectionBounds = new THREE.Box3();
+const proxyCanopyLocalBounds = new THREE.Box3(
+  new THREE.Vector3(-1, -1, -1),
+  new THREE.Vector3(1, 1, 1),
+);
+const proxyTrunkLocalBounds = new THREE.Box3(
+  new THREE.Vector3(-1, 0, -1),
+  new THREE.Vector3(1, 1, 1),
+);
+
+export function canopyShadowViewTurned(
+  previous: THREE.Vector3 | null,
+  current: THREE.Vector3,
+  thresholdRadians = THREE.MathUtils.degToRad(8),
+): boolean {
+  if (!previous || previous.lengthSq() < 1e-8 || current.lengthSq() < 1e-8) return true;
+  const cosine = previous.dot(current) / Math.sqrt(previous.lengthSq() * current.lengthSq());
+  return cosine <= Math.cos(Math.max(0, thresholdRadians));
+}
+
+export function canopyShadowProxyBounds(
+  proxy: CanopyShadowProxy,
+  target = new THREE.Box3(),
+): THREE.Box3 {
+  target.copy(proxyCanopyLocalBounds).applyMatrix4(proxy.matrix);
+  proxySelectionBounds.copy(proxyTrunkLocalBounds).applyMatrix4(proxy.trunkMatrix);
+  return target.union(proxySelectionBounds);
+}
 
 function proxyFromWorldBounds(
   worldBounds: THREE.Box3,
@@ -156,22 +186,36 @@ export function viewPrioritizedCanopyShadowProxies(
   const maxDistanceSq = Math.max(1, options.maxDistance ?? 88) ** 2;
   const nearDistanceSq = Math.max(0, options.nearDistance ?? 22) ** 2;
   const margin = Math.max(0, options.ndcMargin ?? 0.18);
+  proxyProjectionView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  proxyFrustum.setFromProjectionMatrix(proxyProjectionView);
   const candidates = proxies
     .map((proxy) => {
       const distanceSq = (proxy.x - px) ** 2 + (proxy.z - pz) ** 2;
       proxyViewPosition.setFromMatrixPosition(proxy.matrix);
       proxyProjectedPosition.copy(proxyViewPosition).project(camera);
+      const centerInsideDepth =
+        proxyProjectedPosition.z >= -1 && proxyProjectedPosition.z <= 1;
+      const screenCenterWeight = centerInsideDepth
+        ? Math.max(0, 1 - Math.hypot(proxyProjectedPosition.x, proxyProjectedPosition.y) / 1.4)
+        : 0;
       const visible =
         distanceSq <= maxDistanceSq &&
-        proxyProjectedPosition.z >= -1 && proxyProjectedPosition.z <= 1 &&
-        Math.abs(proxyProjectedPosition.x) <= 1 + margin &&
-        Math.abs(proxyProjectedPosition.y) <= 1 + margin;
-      return { proxy, distanceSq, visible };
+        (
+          proxyFrustum.intersectsBox(canopyShadowProxyBounds(proxy, proxyBounds)) ||
+          (
+            proxyProjectedPosition.z >= -1 && proxyProjectedPosition.z <= 1 &&
+            Math.abs(proxyProjectedPosition.x) <= 1 + margin &&
+            Math.abs(proxyProjectedPosition.y) <= 1 + margin
+          )
+        );
+      return { proxy, distanceSq, visible, screenCenterWeight };
     })
     .filter((candidate) => candidate.distanceSq <= maxDistanceSq);
   const visible = candidates
     .filter((candidate) => candidate.visible)
-    .sort((a, b) => a.distanceSq - b.distanceSq);
+    .sort((a, b) =>
+      b.screenCenterWeight - a.screenCenterWeight || a.distanceSq - b.distanceSq
+    );
   const nearby = candidates
     .filter((candidate) => !candidate.visible && candidate.distanceSq <= nearDistanceSq)
     .sort((a, b) => a.distanceSq - b.distanceSq);
@@ -197,20 +241,8 @@ function canopyShadowSelectionBounds(
 ): THREE.Box3 | null {
   if (proxies.length === 0) return null;
   const bounds = new THREE.Box3();
-  const position = new THREE.Vector3();
-  const rotation = new THREE.Quaternion();
-  const scale = new THREE.Vector3();
-  const minimum = new THREE.Vector3();
-  const maximum = new THREE.Vector3();
   for (const proxy of proxies) {
-    for (const matrix of [proxy.matrix, proxy.trunkMatrix]) {
-      matrix.decompose(position, rotation, scale);
-      scale.set(Math.abs(scale.x), Math.abs(scale.y), Math.abs(scale.z));
-      minimum.copy(position).sub(scale);
-      maximum.copy(position).add(scale);
-      bounds.expandByPoint(minimum);
-      bounds.expandByPoint(maximum);
-    }
+    bounds.union(canopyShadowProxyBounds(proxy, proxyBounds));
   }
   return bounds;
 }
