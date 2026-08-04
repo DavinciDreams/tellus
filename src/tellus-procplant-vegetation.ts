@@ -1,5 +1,12 @@
 import * as THREE from "three";
 import { SEA_LEVEL, WORLD_RADIUS } from "./tellus-constants";
+import {
+  CanopyShadowProxyPool,
+  fitCanopyShadowProxy,
+  fitCanopyShadowProxyFromBounds,
+  type CanopyShadowKind,
+  type CanopyShadowProxy,
+} from "./tellus-canopy-shadow-proxies";
 import type { TerrainPaintKind } from "./tellus-types";
 import {
   biomePatchForEcology,
@@ -87,6 +94,8 @@ export interface ProcPlantVegetationOptions {
   fullDetailLod?: boolean;
   shouldPauseBuild?: () => boolean;
   shouldDeferBuild?: () => boolean;
+  shadowProxyBudget?: () => number;
+  onShadowCastersChanged?: (bounds: THREE.Box3 | null) => void;
   biomeMixRegistry?: TellusBiomeMixRegistry;
 }
 
@@ -128,6 +137,9 @@ export interface ProcPlantVegetationStats {
   deferredLodChunks: number;
   deferredColdChunks: number;
   lodRefreshes: number;
+  shadowProxies: number;
+  shadowProxyBudget: number;
+  shadowProxyRefreshes: number;
 }
 
 export interface ProcPlantVegetationSystem {
@@ -178,6 +190,7 @@ interface ActiveChunk {
   lastNeededMs: number;
   group: THREE.Group;
   impostors: TellusImpostorInstance[];
+  canopyShadowProxies: CanopyShadowProxy[];
   stats: ChunkStats;
 }
 
@@ -213,6 +226,11 @@ const DEFAULT_CHUNK_SIZE = 16;
 const DEFAULT_MAX_RING = 3;
 const THIRD_PERSON_MAX_RING = 4;
 const MAX_PLANTS_PER_CHUNK = 4;
+const MAX_CANOPY_SHADOW_PROXIES = 192;
+const CANOPY_SHADOW_RESELECT_DISTANCE = 8;
+const CANOPY_SHADOW_FIRST_PERSON_DISTANCE = 88;
+const CANOPY_SHADOW_THIRD_PERSON_DISTANCE = 104;
+const CANOPY_SHADOW_NEAR_RESERVE_DISTANCE = 22;
 const PROC_TREE_NEAR_SCALE = 1.85;
 // Tree transforms must not change when a chunk crosses an LOD ring. Geometry can simplify, but a
 // different scale makes a crown visibly expand/contract and reads as a different tree popping in.
@@ -452,6 +470,7 @@ const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color
 const cheapTreeTemplateCache = new Map<string, ProcPlantTemplate>();
 const templateMinYCache = new WeakMap<ProcPlantTemplate, number>();
 const templateHeightCache = new WeakMap<ProcPlantTemplate, number>();
+const templateBoundsCache = new WeakMap<ProcPlantTemplate, THREE.Box3>();
 const assetTemplateCache = new WeakMap<TellusBiomeAssetTemplate, Map<string, ProcPlantTemplate>>();
 
 export const procPlantTemplateFromAssetTemplate = (
@@ -512,6 +531,21 @@ const templateHeight = (template: ProcPlantTemplate): number => {
     : 1;
   templateHeightCache.set(template, height);
   return height;
+};
+
+const templateBounds = (template: ProcPlantTemplate): THREE.Box3 => {
+  const cached = templateBoundsCache.get(template);
+  if (cached) return cached;
+  const bounds = new THREE.Box3();
+  for (let index = 0; index < template.pos.length; index += 3) {
+    bounds.expandByPoint(new THREE.Vector3(
+      template.pos[index] ?? 0,
+      template.pos[index + 1] ?? 0,
+      template.pos[index + 2] ?? 0,
+    ));
+  }
+  templateBoundsCache.set(template, bounds);
+  return bounds;
 };
 
 export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit): ProcPlantTemplate => {
@@ -688,6 +722,11 @@ const geometryKeyFor = (genome: ProcPlantGenome, instance: ProcPlantInstance): s
   return instance.kind;
 };
 
+const organIsCanopy = (geometryKey: string): boolean =>
+  geometryKey === "coniferSpray" ||
+  geometryKey === "palmFrond" ||
+  geometryKey.startsWith("leaf:");
+
 // A branch-module tree's foliage should render as clustered conifer needle sprays, not flat
 // broadleaf-shaped leaf cards, whenever the genome calls for it — matching the Weber-Penn foliage-fill
 // path's own foliageSource handling (see buildBranchModuleGraphTemplate in tellus-procplants.ts).
@@ -809,6 +848,9 @@ const emptyStats = (): ProcPlantVegetationStats => ({
   deferredLodChunks: 0,
   deferredColdChunks: 0,
   lodRefreshes: 0,
+  shadowProxies: 0,
+  shadowProxyBudget: 0,
+  shadowProxyRefreshes: 0,
 });
 
 const isFinitePlacementNumber = (value: unknown): value is number =>
@@ -934,6 +976,38 @@ export function createProcPlantVegetation(
     color: 0xffffff,
     side: THREE.DoubleSide,
   });
+  const canopyShadowPool = new CanopyShadowProxyPool(options.scene, MAX_CANOPY_SHADOW_PROXIES);
+  let canopyShadowRevision = 0;
+  let syncedCanopyShadowRevision = -1;
+  let lastCanopyShadowX = Number.POSITIVE_INFINITY;
+  let lastCanopyShadowZ = Number.POSITIVE_INFINITY;
+  let lastCanopyShadowBudget = -1;
+  const syncCanopyShadowPool = (px: number, pz: number, force = false) => {
+    const budget = THREE.MathUtils.clamp(
+      Math.floor(options.shadowProxyBudget?.() ?? MAX_CANOPY_SHADOW_PROXIES),
+      0,
+      MAX_CANOPY_SHADOW_PROXIES,
+    );
+    if (
+      !force &&
+      syncedCanopyShadowRevision === canopyShadowRevision &&
+      lastCanopyShadowBudget === budget &&
+      Math.hypot(px - lastCanopyShadowX, pz - lastCanopyShadowZ) < CANOPY_SHADOW_RESELECT_DISTANCE
+    ) return;
+    const proxies = [...active.values()].flatMap((chunk) => chunk.canopyShadowProxies);
+    const selection = canopyShadowPool.sync(proxies, px, pz, budget, {
+      camera: options.camera?.() ?? null,
+      maxDistance: viewMode() === "third"
+        ? CANOPY_SHADOW_THIRD_PERSON_DISTANCE
+        : CANOPY_SHADOW_FIRST_PERSON_DISTANCE,
+      nearDistance: CANOPY_SHADOW_NEAR_RESERVE_DISTANCE,
+    });
+    syncedCanopyShadowRevision = canopyShadowRevision;
+    lastCanopyShadowBudget = budget;
+    lastCanopyShadowX = px;
+    lastCanopyShadowZ = pz;
+    if (selection.changed) options.onShadowCastersChanged?.(selection.bounds);
+  };
   stemMaterial.userData.tellusProcplantShared = true;
   organMaterial.userData.tellusProcplantShared = true;
   const stemGeometryCache = new Map<ProcPlantTemplate, THREE.BufferGeometry>();
@@ -1357,6 +1431,7 @@ export function createProcPlantVegetation(
     const travelBuild = !allowColdBuilds;
     disposeGroup(chunk.group);
     chunk.impostors = [];
+    chunk.canopyShadowProxies = [];
     chunk.stats = {
       plants: 0,
       instances: 0,
@@ -1385,6 +1460,14 @@ export function createProcPlantVegetation(
     const plantCap = Math.max(1, Math.round(MAX_PLANTS_PER_CHUNK * densityMultiplier));
     const stemTemplates: Array<{ template: ProcPlantTemplate; matrix: THREE.Matrix4 }> = [];
     const organBuckets = new Map<string, OrganBucket>();
+    const queueCanopyShadowProxy = (
+      matrices: readonly THREE.Matrix4[],
+      kind: CanopyShadowKind,
+      treeMatrix?: THREE.Matrix4,
+    ) => {
+      const proxy = fitCanopyShadowProxy(matrices, kind, treeMatrix);
+      if (proxy) chunk.canopyShadowProxies.push(proxy);
+    };
     const x0 = chunk.cx * chunkSize;
     const z0 = chunk.cz * chunkSize;
     const attempts = plantCap * 5;
@@ -1743,6 +1826,12 @@ export function createProcPlantVegetation(
               z,
             ));
           stemTemplates.push({ template, matrix: fallbackMatrix });
+          const fallbackProxy = fitCanopyShadowProxyFromBounds(
+            templateBounds(template),
+            genome.habit === "conifer" ? "conifer" : "broadleaf",
+            fallbackMatrix,
+          );
+          if (fallbackProxy) chunk.canopyShadowProxies.push(fallbackProxy);
           chunk.stats.plants++;
           chunk.stats.stemTriangles += template.idx.length / 3;
           chunk.needsColdRefinement = true;
@@ -1750,6 +1839,11 @@ export function createProcPlantVegetation(
         }
         const useConiferSpray = branchModuleFoliageIsConiferSpray(genome);
         const foliageKind: "leaf" | "coniferSpray" = useConiferSpray ? "coniferSpray" : "leaf";
+        queueCanopyShadowProxy(
+          moduleTree.leaves.map((leaf) => leaf.matrix),
+          useConiferSpray ? "conifer" : "broadleaf",
+          treeMatrix,
+        );
         const leafKey = geometryKeyFor(genome, {
           kind: foliageKind,
           matrix: new THREE.Matrix4(),
@@ -1844,6 +1938,12 @@ export function createProcPlantVegetation(
               z,
             ));
           stemTemplates.push({ template, matrix });
+          const fallbackProxy = fitCanopyShadowProxyFromBounds(
+            templateBounds(template),
+            genome.habit === "conifer" ? "conifer" : "broadleaf",
+            matrix,
+          );
+          if (fallbackProxy) chunk.canopyShadowProxies.push(fallbackProxy);
           chunk.stats.plants++;
           chunk.stats.stemTriangles += template.idx.length / 3;
         }
@@ -1857,6 +1957,12 @@ export function createProcPlantVegetation(
       chunk.stats.plants++;
       chunk.stats.stemTriangles += built.stats.stemTriangles;
       const organStride = treeHabit ? (chunk.lod === 2 ? 4 : chunk.lod === 1 ? 2 : 1) : 1;
+      const canopyInstances = treeHabit
+        ? built.instances.filter((instance) => organIsCanopy(geometryKeyFor(genome, instance)))
+        : [];
+      const canopyKind: CanopyShadowKind = canopyInstances.some((instance) => instance.kind === "coniferSpray")
+        ? "conifer"
+        : "broadleaf";
       for (let instanceIndex = 0; instanceIndex < built.instances.length; instanceIndex += organStride) {
         const instance = built.instances[instanceIndex]!;
         const key = geometryKeyFor(genome, instance);
@@ -1871,6 +1977,9 @@ export function createProcPlantVegetation(
         };
         bucket.instances.push(placed);
         chunk.stats.instances++;
+      }
+      if (treeHabit) {
+        queueCanopyShadowProxy(canopyInstances.map((instance) => instance.matrix), canopyKind, matrix);
       }
     }
 
@@ -1903,6 +2012,8 @@ export function createProcPlantVegetation(
       stemTemplates.push({ template: built.stems, matrix });
       chunk.stats.plants++;
       chunk.stats.stemTriangles += built.stats.stemTriangles;
+      const canopyMatrices: THREE.Matrix4[] = [];
+      let canopyKind: CanopyShadowKind = "broadleaf";
       for (const instance of built.instances) {
         const key = geometryKeyFor(genome, instance);
         let bucket = organBuckets.get(key);
@@ -1914,7 +2025,14 @@ export function createProcPlantVegetation(
           ...instance,
           matrix: matrix.clone().multiply(instance.matrix),
         });
+        if (organIsCanopy(key)) {
+          canopyMatrices.push(instance.matrix);
+          if (key === "coniferSpray") canopyKind = "conifer";
+        }
         chunk.stats.instances++;
+      }
+      if (genome.habit === "tree" || genome.habit === "conifer") {
+        queueCanopyShadowProxy(canopyMatrices, canopyKind, matrix);
       }
     }
 
@@ -1967,6 +2085,7 @@ export function createProcPlantVegetation(
         chunk.stats.grassTriangles += trianglesPerInstance * bucket.instances.length;
       }
     }
+    canopyShadowRevision++;
   };
 
   const update = (px: number, pz: number, _playerY: number, fps: number, nowMs: number) => {
@@ -2003,6 +2122,7 @@ export function createProcPlantVegetation(
     }
     if (buildDeferred) {
       buildPausedForMotion = false;
+      syncCanopyShadowPool(px, pz);
       lastUpdateMs = performance.now() - updateStartedAt;
       maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
       return;
@@ -2043,6 +2163,7 @@ export function createProcPlantVegetation(
             lastNeededMs: nowMs,
             group: new THREE.Group(),
             impostors: [],
+            canopyShadowProxies: [],
             stats: {
               plants: 0,
               instances: 0,
@@ -2079,6 +2200,7 @@ export function createProcPlantVegetation(
       root.remove(chunk.group);
       disposeGroup(chunk.group);
       active.delete(key);
+      if (chunk.canopyShadowProxies.length > 0) canopyShadowRevision++;
       chunksEvicted++;
     }
     prioritizeRebuildQueue(centerCx, centerCz);
@@ -2112,6 +2234,7 @@ export function createProcPlantVegetation(
       !stationary &&
       nowMs - lastMovingBuildAt >= movingBuildIntervalMs;
     if (!stationary && !movingBuildAllowed) {
+      syncCanopyShadowPool(px, pz);
       lastUpdateMs = performance.now() - updateStartedAt;
       maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
       return;
@@ -2141,6 +2264,7 @@ export function createProcPlantVegetation(
       budget--;
       if (performance.now() - buildStartedAt >= buildMsBudget) break;
     }
+    syncCanopyShadowPool(px, pz);
     lastUpdateMs = performance.now() - updateStartedAt;
     maxUpdateMs = Math.max(maxUpdateMs, lastUpdateMs);
   };
@@ -2166,6 +2290,10 @@ export function createProcPlantVegetation(
     out.deferredLodChunks = 0;
     out.deferredColdChunks = 0;
     out.lodRefreshes = lodRefreshes;
+    const shadowProxyStats = canopyShadowPool.diagnostics();
+    out.shadowProxies = shadowProxyStats.total;
+    out.shadowProxyBudget = shadowProxyStats.budget;
+    out.shadowProxyRefreshes = shadowProxyStats.refreshes;
     for (const chunk of active.values()) {
       if (
         lastCenterCx !== null &&
@@ -2290,6 +2418,7 @@ export function createProcPlantVegetation(
       active.clear();
       root.clear();
       options.scene.remove(root);
+      canopyShadowPool.dispose(options.scene);
       for (const handle of branchTreeImpostorHandles.values()) handle.dispose();
       branchTreeImpostorHandles.clear();
       branchTreeImpostorFailures.clear();
