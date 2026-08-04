@@ -1,5 +1,7 @@
 import { Buffer } from "node:buffer";
+import { lookup } from "node:dns/promises";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import { join, resolve } from "node:path";
 import { NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
@@ -481,8 +483,114 @@ function dataUrlBytes(dataUrl: string): { bytes: Buffer; mime: string } | null {
   return { bytes, mime };
 }
 
+// Hosts of the configured 3D backends (InstantMesh / pixal3d / anigen Gradio spaces). These are the
+// only "internal" targets outbound fetches are allowed to reach — the raw model + concept-image URLs
+// this handler retrieves come from these allow-listed spaces, which legitimately live on the LAN.
+function internalFetchAllowedHosts(): Set<string> {
+  const hosts = new Set<string>();
+  const bases = [
+    ...knownInstantMeshBaseUrls(),
+    process.env.INSTANTMESH_GRADIO_BASE_URL,
+    ...(process.env.INSTANTMESH_GRADIO_BASE_URLS?.split(",") ?? []),
+    process.env.PIXAL3D_GRADIO_BASE_URL,
+    process.env.ANIGEN_GRADIO_BASE_URL,
+  ];
+  for (const base of bases) {
+    const trimmed = base?.trim();
+    if (!trimmed) continue;
+    try {
+      hosts.add(new URL(trimmed).host);
+    } catch {
+      /* skip malformed base URL */
+    }
+  }
+  return hosts;
+}
+
+// True for loopback / private / link-local / reserved addresses that outbound requests must never
+// reach (RFC1918, 127/8, 169.254/16 incl. the 169.254.169.254 metadata endpoint, 0.0.0.0, ULA, …).
+function isBlockedIpLiteral(ip: string): boolean {
+  const family = isIP(ip);
+  if (family === 4) {
+    const octets = ip.split(".").map(Number);
+    const [a, b] = octets;
+    if (a === 0) return true; // 0.0.0.0/8 "this host"
+    if (a === 10) return true; // 10.0.0.0/8
+    if (a === 127) return true; // 127.0.0.0/8 loopback
+    if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local (+ cloud metadata)
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true; // 192.168.0.0/16
+    if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
+    return false;
+  }
+  if (family === 6) {
+    const lower = ip.toLowerCase();
+    if (lower === "::1" || lower === "::") return true; // loopback / unspecified
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // fc00::/7 unique-local
+    if (lower.startsWith("fe80")) return true; // link-local
+    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower); // IPv4-mapped
+    if (mapped) return isBlockedIpLiteral(mapped[1]);
+    return false;
+  }
+  return false;
+}
+
+// SSRF guard for user-supplied URLs: reject non-http(s) schemes and any host that is (or resolves to)
+// a private/loopback/link-local/reserved address. Configured backend hosts are allowed through.
+async function assertSafeOutboundUrl(rawUrl: string): Promise<void> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error("Blocked request to an invalid URL");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Blocked non-http(s) URL scheme: ${parsed.protocol}`);
+  }
+  if (internalFetchAllowedHosts().has(parsed.host)) return;
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
+  if (isIP(hostname)) {
+    if (isBlockedIpLiteral(hostname)) {
+      throw new Error("Blocked request to a private/reserved address");
+    }
+    return;
+  }
+  const lowerHost = hostname.toLowerCase();
+  if (
+    lowerHost === "localhost" ||
+    lowerHost.endsWith(".localhost") ||
+    lowerHost.endsWith(".local") ||
+    lowerHost.endsWith(".internal")
+  ) {
+    throw new Error("Blocked request to an internal hostname");
+  }
+  // Resolve the name and block if ANY address is private (defends against DNS-rebinding / names that
+  // point at internal IPs).
+  let addresses: { address: string }[];
+  try {
+    addresses = await lookup(hostname, { all: true });
+  } catch {
+    throw new Error("Blocked request to an unresolvable host");
+  }
+  for (const { address } of addresses) {
+    if (isBlockedIpLiteral(address)) {
+      throw new Error("Blocked request to a host resolving to a private address");
+    }
+  }
+}
+
+// Reject a redirect response instead of following it: an allowed host must not be able to bounce the
+// request to an internal target.
+function assertNotRedirect(response: Response): void {
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error(`Blocked redirect (status ${response.status})`);
+  }
+}
+
 async function fetchArrayBuffer(url: string): Promise<ArrayBuffer> {
-  const response = await fetch(url);
+  await assertSafeOutboundUrl(url);
+  const response = await fetch(url, { redirect: "manual" });
+  assertNotRedirect(response);
   if (!response.ok) {
     const body = await response.text();
     throw new Error(cleanUpstreamError(response.status, body));
@@ -509,7 +617,9 @@ async function instantMeshPredictFnIndex(baseUrl: string): Promise<number> {
 async function fetchBytes(url: string): Promise<{ bytes: Buffer; mime: string }> {
   const dataUrl = dataUrlBytes(url);
   if (dataUrl) return dataUrl;
-  const response = await fetch(url);
+  await assertSafeOutboundUrl(url);
+  const response = await fetch(url, { redirect: "manual" });
+  assertNotRedirect(response);
   if (!response.ok) {
     const body = await response.text();
     throw new Error(cleanUpstreamError(response.status, body));

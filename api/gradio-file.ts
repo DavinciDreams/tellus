@@ -37,7 +37,12 @@ export async function gradioFileHandler(request: Request): Promise<Response> {
     return new Response("Blocked Gradio file host", { status: 403 });
   }
 
-  const upstream = await fetch(target);
+  // Disable redirect-following: an allow-listed host must not be able to bounce the request to an
+  // internal URL (redirect-based SSRF). Treat any 3xx as an error.
+  const upstream = await fetch(target, { redirect: "manual" });
+  if (upstream.status >= 300 && upstream.status < 400) {
+    return new Response("Blocked redirect from Gradio host", { status: 502 });
+  }
   return new Response(upstream.body, {
     status: upstream.status,
     headers: {
