@@ -50,6 +50,7 @@ import {
   createProcPlantVegetation,
   type ProcPlantVegetationStats,
 } from "./tellus-procplant-vegetation";
+import { isWorldEntryVisuallyReady } from "./tellus-world-entry-readiness";
 import { staticTerrainAutoVegetationEnabled } from "./tellus-static-terrain";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
 import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, resetLiveMirrors } from "./tellus-procedural-assets";
@@ -1217,19 +1218,20 @@ function createTellusWorld(
     '<div class="tellus-entry-loading__label">Entering world…</div>';
   container.appendChild(loadingOverlay);
   let loadingOverlayRemoved = false;
-  const removeLoadingOverlay = () => {
+  const removeLoadingOverlay = (reason: "visually-ready" | "safety-timeout") => {
     if (loadingOverlayRemoved) return;
     loadingOverlayRemoved = true;
-    // Single source of truth: the moment the overlay goes (including via the safety timer), the scene
-    // MUST start rendering again — the render loop skips drawing while the overlay is up.
     worldReadyFired = true;
     loadingOverlay.classList.add("tellus-entry-loading--hidden");
     // Remove after the CSS fade so it doesn't linger in the DOM.
     window.setTimeout(() => loadingOverlay.remove(), 700);
-    window.dispatchEvent(new CustomEvent("tellus:world-ready"));
+    window.dispatchEvent(new CustomEvent("tellus:world-ready", { detail: { reason } }));
   };
   // Safety net: never let the overlay stick, even if the ready signal is somehow missed.
-  const loadingOverlaySafetyTimer = window.setTimeout(removeLoadingOverlay, 9000);
+  const loadingOverlaySafetyTimer = window.setTimeout(
+    () => removeLoadingOverlay("safety-timeout"),
+    9000,
+  );
   const prefersOriginalTellusIslandRenderer =
     activeWorldTemplate === "tellus" && !isContinentalChunkedWorld;
   // WebGL is now the HARD DEFAULT. three.js's WebGPU backend is currently both slower for this app's
@@ -1671,6 +1673,9 @@ function createTellusWorld(
         notifyRegionsChanged: () => undefined,
         stats: () => ({
           chunks: 0,
+          nearChunks: 0,
+          nearChunksBuilt: 0,
+          centerChunkBuilt: false,
           plants: 0,
           manualPlants: 0,
           instances: 0,
@@ -10213,33 +10218,29 @@ function createTellusWorld(
         worldEntryGrounded = true;
         worldEntryGroundedAt = performance.now();
       }
-      // Reveal once the nearby TERRAIN chunks have drained (nothing pending/queued/inflight) AND the
-      // procedural plants around the spawn have finished their first build pass (queue empty, at least
-      // one chunk built) — plus a short settle — or after a 3.5s cap so a slow far-ring never blocks
-      // entry. Gating on the plant queue is what stops the "things still spawning in" after reveal.
+      // Reveal once the spawn terrain and a majority of the immediate procplant neighborhood are
+      // built. Distant terrain and vegetation keep streaming after reveal; neither full queue should
+      // define visual readiness for the player's entry area.
       const chunkStats = chunkRenderer?.stats();
-      const terrainDrained =
+      const spawnTerrainReady =
         !isChunked ||
-        (chunkStats
-          ? chunkStats.active > 0 &&
-            chunkStats.pending + chunkStats.queued + chunkStats.inflight === 0
-          : true);
+        (groundBuilt && Boolean(chunkStats && chunkStats.active > 0));
       const plantStats = procplants.stats();
-      const plantsSettled =
-        !procplantsEnabled ||
-        (plantStats.chunksBuilt > 0 && plantStats.queuedRebuilds === 0);
       // Wait for the chosen VRM avatar to finish mounting so the default robot isn't seen first.
       // "" (deterministic robot) and "classic" stay procedural by design — nothing to wait for there.
       const localAvatarPending =
         localAvatarId !== "" && localAvatarId !== "classic" && !avatarRigs.has(visitorId);
-      const nearbyStreamingDrained = terrainDrained && plantsSettled && !localAvatarPending;
       const settledMs = worldEntryGroundedAt > 0 ? performance.now() - worldEntryGroundedAt : 0;
-      if (
-        worldEntryGrounded &&
-        ((nearbyStreamingDrained && settledMs > 600) || settledMs > 4500)
-      ) {
+      if (isWorldEntryVisuallyReady({
+        grounded: worldEntryGrounded,
+        groundedForMs: settledMs,
+        spawnTerrainReady,
+        avatarReady: !localAvatarPending,
+        procplantsEnabled,
+        vegetation: plantStats,
+      })) {
         window.clearTimeout(loadingOverlaySafetyTimer);
-        removeLoadingOverlay(); // sets worldReadyFired
+        removeLoadingOverlay("visually-ready");
       }
     }
     if (sailingThingId) {

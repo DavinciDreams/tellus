@@ -1097,6 +1097,31 @@ describe("procplant vegetation", () => {
     vegetation.dispose();
   });
 
+  it("reports immediate neighborhood coverage before the distant rebuild queue drains", () => {
+    const vegetation = createProcPlantVegetation({
+      scene: new THREE.Scene(),
+      worldId: "entry-coverage-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "forest-floor",
+      bounds: { minX: -64, maxX: 64, minZ: -64, maxZ: 64 },
+      chunkSize: 16,
+      maxRing: 2,
+      densityMultiplier: 0,
+    });
+
+    for (let i = 0; i < 10 && vegetation.stats().nearChunksBuilt < 5; i++) {
+      vegetation.update(0, 0, 1, 60, i * 700);
+    }
+    const stats = vegetation.stats();
+
+    expect(stats.nearChunks).toBe(9);
+    expect(stats.nearChunksBuilt).toBeGreaterThanOrEqual(5);
+    expect(stats.centerChunkBuilt).toBe(true);
+    expect(stats.queuedRebuilds).toBeGreaterThan(0);
+
+    vegetation.dispose();
+  });
+
   it("refines sparse travel grass after movement stops", () => {
     let moving = true;
     const vegetation = createProcPlantVegetation({
