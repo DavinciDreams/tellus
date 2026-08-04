@@ -250,6 +250,7 @@ const DEFAULT_CHUNK_SIZE = 16;
 const DEFAULT_MAX_RING = 3;
 const THIRD_PERSON_MAX_RING = 4;
 const MAX_PLANTS_PER_CHUNK = 4;
+const MAX_HORIZON_TREE_TRIANGLES = 2_000;
 const MAX_CANOPY_SHADOW_PROXIES = 192;
 const CANOPY_SHADOW_RESELECT_DISTANCE = 8;
 const CANOPY_SHADOW_TURN_RESELECT_INTERVAL_MS = 150;
@@ -1241,12 +1242,26 @@ export function createProcPlantVegetation(
       template: ProcPlantTemplate;
       matrix: THREE.Matrix4;
       color?: THREE.Color;
-    }> = structural.segments.map((segment) => ({
-      template: branchSegmentPrototypeTemplate(segment.prototypeId, 5),
-      matrix: segment.matrix,
-      color: bark,
-    }));
-    for (const leaf of structural.leaves) {
+    }> = [];
+    // The authored leaf/spray geometries have different costs, so a leaf-count cap alone does not
+    // guarantee the advertised WebGL horizon budget. Account for actual indices and sample the
+    // crown evenly within the remaining allowance. Keep one triangle unused so the contract is
+    // strictly "under 2,000", matching diagnostics and regression assertions.
+    let remainingTriangles = MAX_HORIZON_TREE_TRIANGLES - 1;
+    for (const segment of structural.segments) {
+      const segmentTemplate = branchSegmentPrototypeTemplate(segment.prototypeId, 5);
+      const triangleCount = segmentTemplate.idx.length / 3;
+      if (triangleCount > remainingTriangles) break;
+      entries.push({ template: segmentTemplate, matrix: segment.matrix, color: bark });
+      remainingTriangles -= triangleCount;
+    }
+    const foliageTriangles = foliage.idx.length / 3;
+    const leafCount = foliageTriangles > 0
+      ? Math.min(structural.leaves.length, Math.floor(remainingTriangles / foliageTriangles))
+      : 0;
+    for (let index = 0; index < leafCount; index++) {
+      const leafIndex = Math.floor(index * structural.leaves.length / leafCount);
+      const leaf = structural.leaves[leafIndex]!;
       entries.push({ template: foliage, matrix: leaf.matrix, color: foliageColor });
     }
     const template = combineTransformedTemplates(entries);
@@ -1692,6 +1707,98 @@ export function createProcPlantVegetation(
       const proxy = fitCanopyShadowProxy(matrices, kind, treeMatrix);
       if (proxy) chunk.canopyShadowProxies.push(proxy);
     };
+    const branchTreeOptionsForGenome = (
+      genome: ProcPlantGenome,
+      species: string,
+      overrides: Partial<BiomeTreeTemplateOptions> = {},
+    ): BiomeTreeTemplateOptions => ({
+      ...foliageDefaultsForTreeSpecies(species),
+      maxBranchDepth: genome.branchModules?.levels ?? genome.weberPenn?.maxBranchDepth,
+      maxStems: genome.branchModules?.moduleBudget ?? genome.weberPenn?.maxStems,
+      maxLeaves: genome.branchModules
+        ? Math.round(THREE.MathUtils.clamp(
+            (genome.branchModules.moduleBudget ?? 140) *
+            (genome.foliage?.mass ?? 0.74) *
+            (genome.foliage?.clusterDensity ?? 1.1) *
+            1.6,
+            24,
+            360,
+          ))
+        : genome.weberPenn?.maxLeaves,
+      leafScaleMultiplier: genome.weberPenn?.leafScaleMultiplier ?? genome.foliage?.size,
+      palette: genome.branchModules?.palette,
+      gnarliness: genome.branchModules?.gnarliness,
+      droop: genome.branchModules?.droop,
+      spread: branchModuleSpreadForGenome(genome),
+      tropism: genome.branchModules?.tropism,
+      branchDensity: genome.branchModules?.branchDensity,
+      branchAngle: genome.branchModules?.branchAngle,
+      vigor: genome.branchModules?.vigor,
+      collisionBias: genome.branchModules?.collisionBias,
+      junctionBlend: genome.branchModules?.junctionBlend,
+      broadleafCrown: genome.tree?.crown === "propRoot" ? "spreading" : genome.tree?.crown,
+      ...overrides,
+    });
+    const addHorizonTree = (
+      genome: ProcPlantGenome,
+      species: string,
+      authoredOptions: BiomeTreeTemplateOptions,
+      x: number,
+      height: number,
+      z: number,
+      yaw: number,
+      scale: number,
+    ): boolean => {
+      const horizonOptions: BiomeTreeTemplateOptions = {
+        ...authoredOptions,
+        maxBranchDepth: Math.min(2, authoredOptions.maxBranchDepth ?? 2),
+        maxStems: Math.min(48, authoredOptions.maxStems ?? 48),
+        maxLeaves: Math.min(96, authoredOptions.maxLeaves ?? 96),
+      };
+      // Every horizon instance of an authored profile shares one representative bounded graph.
+      const { key: branchTreeKey } = branchModuleTreeCacheKey(species, 0, horizonOptions);
+      const moduleTree = buildBranchModuleTreeCached(species, 0, horizonOptions, true);
+      if (!moduleTree) return false;
+
+      const foliageKind: "leaf" | "coniferSpray" | "palmFrond" = genome.habit === "palm"
+        ? "palmFrond"
+        : branchModuleFoliageIsConiferSpray(genome)
+          ? "coniferSpray"
+          : "leaf";
+      const leafKey = geometryKeyFor(genome, {
+        kind: foliageKind,
+        matrix: new THREE.Matrix4(),
+        color: new THREE.Color(),
+        sway: 0,
+      });
+      const leafA = new THREE.Color(genome.branchModules?.leafColor ?? genome.leaf.colorA);
+      const leafB = new THREE.Color(genome.leaf.colorB);
+      const template = branchTreeHorizonTemplate(
+        `${branchTreeKey}|${leafKey}`,
+        moduleTree,
+        organGeometryForKey(leafKey),
+        leafA.lerp(leafB, 0.45),
+        genome.branchModules?.barkColor ?? genome.weberPenn?.barkColor ?? 0x5b3d24,
+      );
+      const silhouetteScale = scale / templateHeight(template);
+      const matrix = new THREE.Matrix4()
+        .makeRotationY(yaw)
+        .premultiply(new THREE.Matrix4().makeScale(silhouetteScale, silhouetteScale, silhouetteScale))
+        .premultiply(new THREE.Matrix4().makeTranslation(
+          x,
+          height + 0.02 - templateMinY(template) * silhouetteScale,
+          z,
+        ));
+      chunk.horizonTrees.push({ template, matrix });
+      horizonTreePoolDirty = true;
+      const structural = branchModuleLodView(moduleTree, 2);
+      chunk.stats.plants++;
+      chunk.stats.branchSegments += structural.segments.length;
+      chunk.stats.attachedLeaves += structural.leaves.length;
+      chunk.stats.branchLod2++;
+      chunk.stats.stemTriangles += template.idx.length / 3;
+      return true;
+    };
     const x0 = chunk.cx * chunkSize;
     const z0 = chunk.cz * chunkSize;
     const attempts = plantCap * 5;
@@ -2013,55 +2120,32 @@ export function createProcPlantVegetation(
         if (horizonOnly && !procPlantUsesHorizonSilhouette(genome.habit)) continue;
         const yaw = rand() * Math.PI * 2;
         const scale = baseScale * PROC_TREE_STABLE_SCALE * THREE.MathUtils.lerp(0.9, 1.24, rand());
-        const treeMatrix = new THREE.Matrix4()
-          .makeRotationY(yaw)
-          .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
-          .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02, z));
-        const authoredBranchTreeOptions: BiomeTreeTemplateOptions = {
-          ...foliageDefaultsForTreeSpecies(branchTreeSpecies),
-          maxBranchDepth: genome.branchModules?.levels ?? genome.weberPenn?.maxBranchDepth,
-          maxStems: genome.branchModules?.moduleBudget ?? genome.weberPenn?.maxStems,
-          maxLeaves: genome.branchModules
-            ? Math.round(THREE.MathUtils.clamp(
-                (genome.branchModules.moduleBudget ?? 140) *
-                (genome.foliage?.mass ?? 0.74) *
-                (genome.foliage?.clusterDensity ?? 1.1) *
-                1.6,
-                24,
-                360,
-              ))
-            : genome.weberPenn?.maxLeaves,
-          leafScaleMultiplier: genome.weberPenn?.leafScaleMultiplier ?? genome.foliage?.size,
-          palette: genome.branchModules?.palette,
-          gnarliness: genome.branchModules?.gnarliness,
-          droop: genome.branchModules?.droop,
-          spread: branchModuleSpreadForGenome(genome),
-          tropism: genome.branchModules?.tropism,
-          branchDensity: genome.branchModules?.branchDensity,
-          branchAngle: genome.branchModules?.branchAngle,
-          vigor: genome.branchModules?.vigor,
-          collisionBias: genome.branchModules?.collisionBias,
-          junctionBlend: genome.branchModules?.junctionBlend,
-          broadleafCrown: genome.tree?.crown === "propRoot" ? "spreading" : genome.tree?.crown,
-          ...(treeBackend?.kind === "lsystem" ? treeBackend : {}),
-        };
-        const branchTreeOptions: BiomeTreeTemplateOptions = horizonOnly
-          ? {
-              ...authoredBranchTreeOptions,
-              maxBranchDepth: Math.min(2, authoredBranchTreeOptions.maxBranchDepth ?? 2),
-              maxStems: Math.min(48, authoredBranchTreeOptions.maxStems ?? 48),
-              maxLeaves: Math.min(96, authoredBranchTreeOptions.maxLeaves ?? 96),
-            }
-          : authoredBranchTreeOptions;
-        // Horizon trees intentionally share one representative graph per authored species/profile.
-        // Near trees retain their eight seed buckets, while the far tier pays the cold graph cost once.
-        const branchTreeSeed = horizonOnly ? 0 : renderSeed;
+        const authoredBranchTreeOptions = branchTreeOptionsForGenome(
+          genome,
+          branchTreeSpecies,
+          treeBackend?.kind === "lsystem" ? treeBackend : {},
+        );
+        if (horizonOnly) {
+          addHorizonTree(
+            genome,
+            branchTreeSpecies,
+            authoredBranchTreeOptions,
+            x,
+            height,
+            z,
+            yaw,
+            scale,
+          );
+          continue;
+        }
+        const branchTreeOptions = authoredBranchTreeOptions;
+        const branchTreeSeed = renderSeed;
         const { key: branchTreeKey } = branchModuleTreeCacheKey(branchTreeSpecies, branchTreeSeed, branchTreeOptions);
         const moduleTree = buildBranchModuleTreeCached(
           branchTreeSpecies,
           branchTreeSeed,
           branchTreeOptions,
-          horizonOnly || allowColdBuilds,
+          allowColdBuilds,
         );
         if (!moduleTree) {
           // A brand-new branch graph is still deferred during movement, but the emergency silhouette
@@ -2088,6 +2172,10 @@ export function createProcPlantVegetation(
           chunk.needsColdRefinement = true;
           continue;
         }
+        const treeMatrix = new THREE.Matrix4()
+          .makeRotationY(yaw)
+          .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
+          .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02, z));
         const useConiferSpray = branchModuleFoliageIsConiferSpray(genome);
         const foliageKind: "leaf" | "coniferSpray" | "palmFrond" = genome.habit === "palm"
           ? "palmFrond"
@@ -2105,38 +2193,8 @@ export function createProcPlantVegetation(
         const leafB = new THREE.Color(genome.leaf.colorB);
         const treeHue = (hash01(renderSeed * 0.754877666) - 0.5) * 0.045;
         const treeLight = (hash01(renderSeed * 1.324717957) - 0.5) * 0.1;
-        // Horizon instances must share the same authored palette so an entire species remains one
-        // InstancedMesh. Near trees keep their per-instance hue/light variation where it is visible.
-        if (!horizonOnly) {
-          leafA.offsetHSL(treeHue, 0, treeLight);
-          leafB.offsetHSL(treeHue * 0.7, 0, treeLight * 0.75);
-        }
-        if (horizonOnly) {
-          const template = branchTreeHorizonTemplate(
-            `${branchTreeKey}|${leafKey}`,
-            moduleTree,
-            organGeometryForKey(leafKey),
-            leafA.clone().lerp(leafB, 0.45),
-            genome.branchModules?.barkColor ?? genome.weberPenn?.barkColor ?? 0x5b3d24,
-          );
-          const silhouetteScale = scale / templateHeight(template);
-          const matrix = new THREE.Matrix4()
-            .makeRotationY(yaw)
-            .premultiply(new THREE.Matrix4().makeScale(silhouetteScale, silhouetteScale, silhouetteScale))
-            .premultiply(new THREE.Matrix4().makeTranslation(
-              x,
-              height + 0.02 - templateMinY(template) * silhouetteScale,
-              z,
-            ));
-          chunk.horizonTrees.push({ template, matrix });
-          horizonTreePoolDirty = true;
-          chunk.stats.plants++;
-          chunk.stats.branchSegments += branchModuleLodView(moduleTree, 2).segments.length;
-          chunk.stats.attachedLeaves += branchModuleLodView(moduleTree, 2).leaves.length;
-          chunk.stats.branchLod2++;
-          chunk.stats.stemTriangles += template.idx.length / 3;
-          continue;
-        }
+        leafA.offsetHSL(treeHue, 0, treeLight);
+        leafB.offsetHSL(treeHue * 0.7, 0, treeLight * 0.75);
         queueCanopyShadowProxy(
           moduleTree.leaves.map((leaf) => leaf.matrix),
           useConiferSpray ? "conifer" : "broadleaf",
@@ -2294,6 +2352,24 @@ export function createProcPlantVegetation(
       if (options.isExcluded?.(placement.x, placement.z, height)) continue;
       const genome = procPlantPresets[placement.presetId];
       if (!genome) continue;
+      const yaw = ((placement.seed >>> 0) / 4294967296) * Math.PI * 2;
+      if (horizonOnly) {
+        // Persisted placements share the same strict LOD3 contract as biome-generated vegetation:
+        // omit ground plants and batch tree-form presets through the bounded representative graph.
+        if (!procPlantUsesHorizonSilhouette(genome.habit)) continue;
+        const species = genome.weberPenn?.species ?? genome.id;
+        addHorizonTree(
+          genome,
+          species,
+          branchTreeOptionsForGenome(genome, species),
+          placement.x,
+          height,
+          placement.z,
+          yaw,
+          placement.scale,
+        );
+        continue;
+      }
       const built = buildProcPlantInstancedPartsCached(
         genome,
         placement.seed,
@@ -2305,7 +2381,7 @@ export function createProcPlantVegetation(
         continue;
       }
       const matrix = new THREE.Matrix4()
-        .makeRotationY(((placement.seed >>> 0) / 4294967296) * Math.PI * 2)
+        .makeRotationY(yaw)
         .premultiply(new THREE.Matrix4().makeScale(placement.scale, placement.scale, placement.scale))
         .premultiply(new THREE.Matrix4().makeTranslation(
           placement.x,

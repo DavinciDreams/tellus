@@ -44,6 +44,7 @@ import {
   procPlantChunkSeed,
   shouldUseCheapDistantTree,
 } from "./tellus-procplant-vegetation";
+import { vegetationHorizonPrefetchOffsets } from "./tellus-vegetation-view-priority";
 import { treeTemplateFromSpecies } from "./tellus-tree-gen";
 import { SEA_LEVEL } from "./tellus-constants";
 import type { TellusBiomeMixDefinition } from "./tellus-biome-mix";
@@ -338,6 +339,72 @@ describe("procplant vegetation", () => {
     expect(stats.plants).toBe(0);
     expect(stats.stemTriangles).toBe(0);
     expect(renderedMeshes).toBe(0);
+
+    vegetation.dispose();
+  });
+
+  it("bounds manual tree placements and omits manual ground plants in LOD3 horizon chunks", () => {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 500);
+    camera.position.set(0, 4, 0);
+    camera.lookAt(0, 4, -1);
+    camera.updateMatrixWorld(true);
+    const vegetation = createProcPlantVegetation({
+      scene,
+      camera: () => camera,
+      worldId: "chunked-manual-horizon-bound-test",
+      sampleHeight: () => 10,
+      samplePaint: () => "desert-sand",
+      bounds: { minX: -160, maxX: 160, minZ: -240, maxZ: -82 },
+      densityMultiplier: 0,
+    });
+    const offsets = vegetationHorizonPrefetchOffsets(0, -1, 3).slice(0, 3);
+    const placements = [
+      { id: "manual-horizon-oak", presetId: "oakCanopy", seed: 11, scale: 14 },
+      { id: "manual-horizon-fir", presetId: "alpineFir", seed: 22, scale: 14 },
+      { id: "manual-horizon-grass", presetId: "furGrass", seed: 33, scale: 1 },
+    ];
+    placements.forEach((placement, index) => {
+      const offset = offsets[index]!;
+      expect(vegetation.placeManualPlant({
+        ...placement,
+        x: offset.dx * 16 + 8,
+        z: offset.dz * 16 + 8,
+      }, { persist: false })).toBe(true);
+    });
+
+    for (let index = 0; index < 240 && (
+      index === 0 || vegetation.stats().horizonTrees < 2 || vegetation.stats().queuedRebuilds > 0
+    ); index++) {
+      vegetation.update(0, 0, 10, 60, 1_000 + index * 900);
+    }
+    const stats = vegetation.stats();
+    const root = scene.getObjectByName("tellus-procplant-vegetation");
+    const horizon = scene.getObjectByName("tellus-procplant-horizon");
+    const horizonMeshes = horizon?.children.filter(
+      (child): child is THREE.InstancedMesh => child instanceof THREE.InstancedMesh,
+    ) ?? [];
+    let detailedMeshes = 0;
+    for (const child of root?.children ?? []) {
+      if (child === horizon) continue;
+      child.traverse((descendant) => {
+        if (descendant instanceof THREE.Mesh || descendant instanceof THREE.InstancedMesh) detailedMeshes++;
+      });
+    }
+
+    expect(stats.manualPlants).toBe(3);
+    expect(stats.horizonTrees).toBe(2);
+    expect(stats.horizonDraws).toBe(2);
+    expect(stats.plants).toBe(2);
+    expect(stats.instances).toBe(0);
+    expect(stats.grassInstances).toBe(0);
+    expect(stats.stemTriangles).toBeGreaterThan(0);
+    expect(stats.stemTriangles).toBeLessThan(4_000);
+    expect(horizonMeshes).toHaveLength(2);
+    expect(horizonMeshes.every((mesh) => (
+      (mesh.geometry.getIndex()?.count ?? 0) / 3
+    ) < 2_000)).toBe(true);
+    expect(detailedMeshes).toBe(0);
 
     vegetation.dispose();
   });
