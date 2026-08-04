@@ -1,4 +1,8 @@
-import type { AssetAnimationMetadata } from "./tellus-animation-intents";
+import {
+  animationIntents,
+  type AnimationIntent,
+  type AssetAnimationMetadata,
+} from "./tellus-animation-intents";
 
 export type TerrainPaintKind =
   | "meadow"
@@ -88,6 +92,120 @@ export interface WorldGeneratedThing {
   /** Optional asset-store enrichment for clip intent/category search. Older gateways omit it. */
   animationClips?: AssetAnimationMetadata[];
   updatedAt: string;
+}
+
+export type WildlifeMovementMode = "ground" | "air" | "water";
+export type WildlifeBehaviorStateName =
+  | "idle"
+  | "graze"
+  | "wander"
+  | "travel"
+  | "alert"
+  | "flee"
+  | "return"
+  | "rest"
+  | "blocked";
+export type WildlifeControllerMode =
+  | "individual-command"
+  | "herd-command"
+  | "ambient"
+  | "static";
+export type WildlifeCommandIntent =
+  | "idle"
+  | "graze"
+  | "wander"
+  | "travel"
+  | "flee"
+  | "return"
+  | "gather";
+
+export interface WildlifeHomeRange {
+  kind: "circle";
+  center: { x: number; z: number };
+  radiusMeters: number;
+}
+
+/** Durable opt-in configuration keyed by WorldGeneratedThing.id. */
+export interface WildlifeAnimalConfig {
+  animalId: string;
+  enabled: boolean;
+  speciesProfileId: string;
+  movementMode: WildlifeMovementMode;
+  herdId?: string;
+  home?: WildlifeHomeRange;
+  seed: number;
+  populationEligible?: boolean;
+  revision: number;
+}
+
+export interface WildlifeAnimalState {
+  animalId: string;
+  herdId: string;
+  state: WildlifeBehaviorStateName;
+  animationIntent: AnimationIntent;
+  position: Vec3;
+  rotationY: number;
+  destination?: Vec3;
+  threat?: Vec3;
+  speedMetersPerSecond: number;
+  startedAt: string;
+  expiresAt?: string;
+  controllerMode: WildlifeControllerMode;
+  revision: number;
+}
+
+export interface WildlifeHerdState {
+  herdId: string;
+  speciesProfileId: string;
+  movementMode: WildlifeMovementMode;
+  memberIds: string[];
+  state: WildlifeBehaviorStateName;
+  animationIntent: AnimationIntent;
+  destination?: Vec3;
+  threat?: Vec3;
+  home: WildlifeHomeRange;
+  populationTarget?: number;
+  populationCap: number;
+  seed: number;
+  revision: number;
+  updatedAt: string;
+}
+
+export type WildlifeSelector =
+  | { animalId: string }
+  | { herdId: string }
+  | { speciesProfileId: string }
+  | { region: { center: Vec3; radiusMeters: number } }
+  | { all: true };
+
+export interface WildlifePatchAnimal {
+  id: string;
+  position: Vec3;
+  rotationY: number;
+  state: WildlifeBehaviorStateName;
+  animationIntent: AnimationIntent;
+  speedMetersPerSecond: number;
+  revision: number;
+}
+
+export interface WildlifePatch {
+  type: "wildlife.patch";
+  seq: number;
+  serverTime: string;
+  herdId: string;
+  animals: WildlifePatchAnimal[];
+}
+
+export interface WildlifeCommandReceipt {
+  requestId: string;
+  status: "accepted" | "partially-accepted" | "rejected" | "completed" | "expired" | "failed";
+  matchedAnimals: number;
+  matchedHerds: number;
+  rejectedAnimals?: number;
+  reasonCode?: string;
+  issuedBy: string;
+  acceptedAt?: string;
+  expiresAt?: string;
 }
 
 /** A one-shot emote broadcast: play `animation` ONCE on `visitorId`'s avatar rig, then resume
@@ -210,6 +328,24 @@ export type WorldAction =
       type: "world.chat";
       visitorId: string;
       message: WorldChatMessage;
+    }
+  | {
+      type: "wildlife.configure";
+      visitorId: string;
+      requestId: string;
+      config: WildlifeAnimalConfig;
+    }
+  | {
+      type: "wildlife.command";
+      visitorId: string;
+      requestId: string;
+      selector: WildlifeSelector;
+      intent: WildlifeCommandIntent;
+      destination?: Vec3;
+      from?: Vec3;
+      region?: { center: Vec3; radiusMeters: number };
+      durationSeconds?: number;
+      reason?: string;
     };
 
 export type WorldPatch =
@@ -232,6 +368,9 @@ export type WorldPatch =
       tileSetUrl?: string;
       // Chunked procedural plant placements (manual scatter, persisted/broadcast by Hyades).
       procPlantPlacements?: WorldProcPlantPlacement[];
+      wildlifeAnimals?: WildlifeAnimalConfig[];
+      wildlifeStates?: WildlifeAnimalState[];
+      wildlifeHerds?: WildlifeHerdState[];
     }
   | {
       type: "presence.updated";
@@ -278,6 +417,16 @@ export type WorldPatch =
       type: "action.rejected";
       actionType: string;
       reason: string;
+    }
+  | WildlifePatch
+  | {
+      type: "wildlife.configured";
+      wildlifeAnimals: WildlifeAnimalConfig[];
+      actorId?: string;
+    }
+  | {
+      type: "wildlife.command.receipt";
+      receipt: WildlifeCommandReceipt;
     }
   | ChunkUpdatedPatch;
 
@@ -525,6 +674,160 @@ export function procPlantDeletedFromWorldPatch(parsed: unknown): string | null {
   return typeof parsed.id === "string" ? parsed.id : null;
 }
 
+const wildlifeStates = new Set<WildlifeBehaviorStateName>([
+  "idle", "graze", "wander", "travel", "alert", "flee", "return", "rest", "blocked",
+]);
+const wildlifeMovementModes = new Set<WildlifeMovementMode>(["ground", "air", "water"]);
+const wildlifeControllerModes = new Set<WildlifeControllerMode>([
+  "individual-command", "herd-command", "ambient", "static",
+]);
+const wildlifeCommandIntents = new Set<WildlifeCommandIntent>([
+  "idle", "graze", "wander", "travel", "flee", "return", "gather",
+]);
+const animationIntentSet = new Set<string>(animationIntents);
+
+const isWildlifeHomeRange = (value: unknown): value is WildlifeHomeRange =>
+  isRecord(value) &&
+  value.kind === "circle" &&
+  isRecord(value.center) &&
+  typeof value.center.x === "number" && Number.isFinite(value.center.x) &&
+  typeof value.center.z === "number" && Number.isFinite(value.center.z) &&
+  typeof value.radiusMeters === "number" && Number.isFinite(value.radiusMeters) &&
+  value.radiusMeters > 0;
+
+export function isWildlifeAnimalConfig(value: unknown): value is WildlifeAnimalConfig {
+  return (
+    isRecord(value) &&
+    typeof value.animalId === "string" && value.animalId.length > 0 &&
+    typeof value.enabled === "boolean" &&
+    typeof value.speciesProfileId === "string" && value.speciesProfileId.length > 0 &&
+    typeof value.movementMode === "string" && wildlifeMovementModes.has(value.movementMode as WildlifeMovementMode) &&
+    (value.herdId === undefined || typeof value.herdId === "string") &&
+    (value.home === undefined || isWildlifeHomeRange(value.home)) &&
+    typeof value.seed === "number" && Number.isFinite(value.seed) &&
+    (value.populationEligible === undefined || typeof value.populationEligible === "boolean") &&
+    typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0
+  );
+}
+
+export function isWildlifeAnimalState(value: unknown): value is WildlifeAnimalState {
+  return (
+    isRecord(value) &&
+    typeof value.animalId === "string" && value.animalId.length > 0 &&
+    typeof value.herdId === "string" && value.herdId.length > 0 &&
+    typeof value.state === "string" && wildlifeStates.has(value.state as WildlifeBehaviorStateName) &&
+    typeof value.animationIntent === "string" && animationIntentSet.has(value.animationIntent) &&
+    isVec3(value.position) &&
+    typeof value.rotationY === "number" && Number.isFinite(value.rotationY) &&
+    (value.destination === undefined || isVec3(value.destination)) &&
+    (value.threat === undefined || isVec3(value.threat)) &&
+    typeof value.speedMetersPerSecond === "number" && Number.isFinite(value.speedMetersPerSecond) && value.speedMetersPerSecond >= 0 &&
+    typeof value.startedAt === "string" &&
+    (value.expiresAt === undefined || typeof value.expiresAt === "string") &&
+    typeof value.controllerMode === "string" && wildlifeControllerModes.has(value.controllerMode as WildlifeControllerMode) &&
+    typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0
+  );
+}
+
+export function isWildlifeHerdState(value: unknown): value is WildlifeHerdState {
+  return (
+    isRecord(value) &&
+    typeof value.herdId === "string" && value.herdId.length > 0 &&
+    typeof value.speciesProfileId === "string" && value.speciesProfileId.length > 0 &&
+    typeof value.movementMode === "string" && wildlifeMovementModes.has(value.movementMode as WildlifeMovementMode) &&
+    Array.isArray(value.memberIds) && value.memberIds.every((id) => typeof id === "string" && id.length > 0) &&
+    typeof value.state === "string" && wildlifeStates.has(value.state as WildlifeBehaviorStateName) &&
+    typeof value.animationIntent === "string" && animationIntentSet.has(value.animationIntent) &&
+    (value.destination === undefined || isVec3(value.destination)) &&
+    (value.threat === undefined || isVec3(value.threat)) &&
+    isWildlifeHomeRange(value.home) &&
+    (value.populationTarget === undefined || (typeof value.populationTarget === "number" && Number.isInteger(value.populationTarget) && value.populationTarget >= 0)) &&
+    typeof value.populationCap === "number" && Number.isInteger(value.populationCap) && value.populationCap >= 0 &&
+    typeof value.seed === "number" && Number.isFinite(value.seed) &&
+    typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0 &&
+    typeof value.updatedAt === "string"
+  );
+}
+
+export function isWildlifePatchAnimal(value: unknown): value is WildlifePatchAnimal {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" && value.id.length > 0 &&
+    isVec3(value.position) &&
+    typeof value.rotationY === "number" && Number.isFinite(value.rotationY) &&
+    typeof value.state === "string" && wildlifeStates.has(value.state as WildlifeBehaviorStateName) &&
+    typeof value.animationIntent === "string" && animationIntentSet.has(value.animationIntent) &&
+    typeof value.speedMetersPerSecond === "number" && Number.isFinite(value.speedMetersPerSecond) && value.speedMetersPerSecond >= 0 &&
+    typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0
+  );
+}
+
+export function wildlifePatchFromWorldPatch(value: unknown): WildlifePatch | null {
+  if (
+    !isRecord(value) || value.type !== "wildlife.patch" ||
+    typeof value.seq !== "number" || !Number.isInteger(value.seq) || value.seq < 0 ||
+    typeof value.serverTime !== "string" ||
+    typeof value.herdId !== "string" || value.herdId.length === 0 ||
+    !Array.isArray(value.animals)
+  ) return null;
+  const animals = value.animals.filter(isWildlifePatchAnimal);
+  if (animals.length !== value.animals.length) return null;
+  return { type: "wildlife.patch", seq: value.seq, serverTime: value.serverTime, herdId: value.herdId, animals };
+}
+
+export function wildlifeSnapshotFromWorldPatch(value: unknown): {
+  animals: WildlifeAnimalConfig[];
+  states: WildlifeAnimalState[];
+  herds: WildlifeHerdState[];
+} | null {
+  if (!isRecord(value) || value.type !== "world.snapshot") return null;
+  const animals = Array.isArray(value.wildlifeAnimals) ? value.wildlifeAnimals.filter(isWildlifeAnimalConfig) : [];
+  const states = Array.isArray(value.wildlifeStates) ? value.wildlifeStates.filter(isWildlifeAnimalState) : [];
+  const herds = Array.isArray(value.wildlifeHerds) ? value.wildlifeHerds.filter(isWildlifeHerdState) : [];
+  return { animals, states, herds };
+}
+
+export function wildlifeConfiguredFromWorldPatch(value: unknown): WildlifeAnimalConfig[] | null {
+  if (!isRecord(value) || value.type !== "wildlife.configured" || !Array.isArray(value.wildlifeAnimals)) {
+    return null;
+  }
+  const configs = value.wildlifeAnimals.filter(isWildlifeAnimalConfig);
+  return configs.length === value.wildlifeAnimals.length ? configs : null;
+}
+
+export function wildlifeCommandReceiptFromWorldPatch(value: unknown): WildlifeCommandReceipt | null {
+  if (!isRecord(value) || value.type !== "wildlife.command.receipt" || !isRecord(value.receipt)) {
+    return null;
+  }
+  const receipt = value.receipt;
+  const statuses = new Set<WildlifeCommandReceipt["status"]>([
+    "accepted", "partially-accepted", "rejected", "completed", "expired", "failed",
+  ]);
+  if (
+    typeof receipt.requestId !== "string" || receipt.requestId.length === 0 ||
+    typeof receipt.status !== "string" || !statuses.has(receipt.status as WildlifeCommandReceipt["status"]) ||
+    typeof receipt.matchedAnimals !== "number" || !Number.isInteger(receipt.matchedAnimals) || receipt.matchedAnimals < 0 ||
+    typeof receipt.matchedHerds !== "number" || !Number.isInteger(receipt.matchedHerds) || receipt.matchedHerds < 0 ||
+    (receipt.rejectedAnimals !== undefined &&
+      (typeof receipt.rejectedAnimals !== "number" || !Number.isInteger(receipt.rejectedAnimals) || receipt.rejectedAnimals < 0)) ||
+    (receipt.reasonCode !== undefined && typeof receipt.reasonCode !== "string") ||
+    typeof receipt.issuedBy !== "string" || receipt.issuedBy.length === 0 ||
+    (receipt.acceptedAt !== undefined && typeof receipt.acceptedAt !== "string") ||
+    (receipt.expiresAt !== undefined && typeof receipt.expiresAt !== "string")
+  ) return null;
+  return receipt as unknown as WildlifeCommandReceipt;
+}
+
+function isWildlifeSelector(value: unknown): value is WildlifeSelector {
+  if (!isRecord(value)) return false;
+  if (typeof value.animalId === "string") return value.animalId.length > 0;
+  if (typeof value.herdId === "string") return value.herdId.length > 0;
+  if (typeof value.speciesProfileId === "string") return value.speciesProfileId.length > 0;
+  if (value.all === true) return true;
+  return isRecord(value.region) && isVec3(value.region.center) &&
+    typeof value.region.radiusMeters === "number" && Number.isFinite(value.region.radiusMeters) && value.region.radiusMeters > 0;
+}
+
 export interface PortalEntered {
   portalId: string;
   fromWorldId: string;
@@ -705,6 +1008,30 @@ export function isWorldAction(value: unknown): value is WorldAction {
   }
   if (value.type === "world.chat") {
     return isWorldChatMessage(value.message);
+  }
+  if (value.type === "wildlife.configure") {
+    return (
+      typeof value.requestId === "string" && value.requestId.length > 0 &&
+      isWildlifeAnimalConfig(value.config)
+    );
+  }
+  if (value.type === "wildlife.command") {
+    return (
+      typeof value.requestId === "string" && value.requestId.length > 0 &&
+      isWildlifeSelector(value.selector) &&
+      typeof value.intent === "string" &&
+      wildlifeCommandIntents.has(value.intent as WildlifeCommandIntent) &&
+      (value.destination === undefined || isVec3(value.destination)) &&
+      (value.from === undefined || isVec3(value.from)) &&
+      (value.region === undefined ||
+        (isRecord(value.region) && isVec3(value.region.center) &&
+          typeof value.region.radiusMeters === "number" &&
+          Number.isFinite(value.region.radiusMeters) && value.region.radiusMeters > 0)) &&
+      (value.durationSeconds === undefined ||
+        (typeof value.durationSeconds === "number" &&
+          Number.isFinite(value.durationSeconds) && value.durationSeconds > 0)) &&
+      (value.reason === undefined || typeof value.reason === "string")
+    );
   }
   return false;
 }

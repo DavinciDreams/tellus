@@ -151,7 +151,20 @@ import {
   type WorldPortal,
   type WorldProcPlantPlacement,
   type PortalEntered,
+  wildlifePatchFromWorldPatch,
+  wildlifeConfiguredFromWorldPatch,
+  wildlifeSnapshotFromWorldPatch,
+  type WildlifeAnimalConfig,
 } from "./world-protocol";
+import { WildlifeInterpolationBuffer, type WildlifePresentationPose } from "./tellus-wildlife-interpolation";
+import { planWildlifeLod, type WildlifeLodAssignment, type WildlifeRenderTier } from "./tellus-wildlife-lod";
+import { WildlifeProxyRenderer } from "./tellus-wildlife-proxies";
+import { removeWildlifePresentationState } from "./tellus-wildlife-presentation";
+import {
+  DEER_WILDLIFE_PROFILE,
+  wildlifeClipNameForIntent,
+  wildlifeSpeciesProfile,
+} from "./tellus-wildlife-species";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, ProceduralAssetPlacement, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood, WaterSettings, WaterStyle } from "./tellus-types";
 import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, chunkedWorldSupportsPaint, CHUNK_SPAN } from "./tellus-constants";
@@ -766,12 +779,20 @@ function createTellusWorld(
     ignoreExplicit?: boolean;
     movementHints?: string[];
     preferSit?: boolean;
+    preferredClipName?: string;
   };
   const generatedAnimationMixers = new Map<string, GeneratedAnimationState>();
   // Placed VRM things (auton/Atlantean store models) animate through a real VRM rig — a VRMA idle clip
   // looped by default, advanced (mixer + spring bones) each frame here. Parallel to the plain-GLB
   // mixers above; a thing is in exactly one of the two maps.
   const generatedVrmRigs = new Map<string, VrmObjectRig>();
+  const wildlifeConfigs = new Map<string, WildlifeAnimalConfig>();
+  const wildlifeInterpolation = new WildlifeInterpolationBuffer();
+  const wildlifePoses = new Map<string, WildlifePresentationPose>();
+  const wildlifeTiers = new Map<string, WildlifeRenderTier>();
+  const wildlifeLastIntents = new Map<string, string>();
+  let wildlifeProxyRenderer: WildlifeProxyRenderer;
+  let wildlifeAssignments: WildlifeLodAssignment[] = [];
   // GPU-instancing of static duplicated generated models (flag-gated; default OFF). One InstancePool per
   // modelUrl holds one THREE.InstancedMesh per sub-mesh of the shared GLB; folded ("instanced") things keep
   // their regular mesh in the scene but `visible = false`, and we copy that hidden mesh's per-sub-mesh
@@ -839,6 +860,14 @@ function createTellusWorld(
     return {
       things: generated.length,
       mountedMeshes: generatedMeshes.size,
+      wildlife: {
+        configured: wildlifeConfigs.size,
+        interpolated: wildlifePoses.size,
+        full: wildlifeAssignments.filter((entry) => entry.tier === "full").length,
+        instanced: wildlifeAssignments.filter((entry) => entry.tier === "instanced").length,
+        impostor: wildlifeAssignments.filter((entry) => entry.tier === "impostor").length,
+        culled: wildlifeAssignments.filter((entry) => entry.tier === "culled").length,
+      },
       visibleMeshes,
       queue: {
         pending: worldModelLoadQueue.length,
@@ -1157,6 +1186,7 @@ function createTellusWorld(
     worldTriggerVolumeGroup = createWorldTriggerVolumeGroup(definitions);
     scene.add(worldTriggerVolumeGroup);
   };
+  wildlifeProxyRenderer = new WildlifeProxyRenderer(scene);
   scene.background = new THREE.Color(0xa7c3ef);
   scene.fog = new THREE.Fog(0xa7c3ef, 72 * WORLD_SCALE, 230 * WORLD_SCALE);
   // Ambient reflections for PBR assets (GLBs look muddy without an environment); intensity follows
@@ -4571,6 +4601,91 @@ function createTellusWorld(
       if (remoteThings) {
         applyRemoteGeneratedThings(remoteThings);
       }
+      const wildlifeSnapshot = wildlifeSnapshotFromWorldPatch(parsed);
+      if (wildlifeSnapshot) {
+        const previouslyConfigured = new Set(wildlifeConfigs.keys());
+        wildlifeConfigs.clear();
+        wildlifeInterpolation.clear();
+        wildlifeTiers.clear();
+        for (const config of wildlifeSnapshot.animals) wildlifeConfigs.set(config.animalId, config);
+        for (const config of wildlifeSnapshot.animals) {
+          previouslyConfigured.delete(config.animalId);
+          if (config.enabled) uninstanceThing(config.animalId);
+          else {
+            const mesh = generatedMeshes.get(config.animalId);
+            if (mesh) mesh.visible = true;
+          }
+        }
+        for (const animalId of previouslyConfigured) {
+          const mesh = generatedMeshes.get(animalId);
+          if (mesh) mesh.visible = true;
+          wildlifeLastIntents.delete(animalId);
+        }
+        const byHerd = new Map<string, typeof wildlifeSnapshot.states>();
+        for (const state of wildlifeSnapshot.states) {
+          const states = byHerd.get(state.herdId) ?? [];
+          states.push(state);
+          byHerd.set(state.herdId, states);
+        }
+        const serverTime = new Date().toISOString();
+        for (const [herdId, states] of byHerd) {
+          wildlifeInterpolation.applyPatch({
+            type: "wildlife.patch",
+            seq: Math.max(1, ...states.map((state) => state.revision)),
+            serverTime,
+            herdId,
+            animals: states.map((state) => ({
+              id: state.animalId,
+              position: state.position,
+              rotationY: state.rotationY,
+              state: state.state,
+              animationIntent: state.animationIntent,
+              speedMetersPerSecond: state.speedMetersPerSecond,
+              revision: state.revision,
+            })),
+          });
+        }
+      }
+      const wildlifePatch = wildlifePatchFromWorldPatch(parsed);
+      if (wildlifePatch) {
+        // Hyades keeps durable configuration on the per-herd grain. A client which was already connected when
+        // another owner configured the herd may see its first semantic patch before a fresh snapshot; hydrate a
+        // conservative deer config so the authoritative movement is still rendered and animated immediately.
+        for (const animal of wildlifePatch.animals) {
+          if (wildlifeConfigs.has(animal.id)) continue;
+          const thing = thingById(animal.id);
+          wildlifeConfigs.set(animal.id, {
+            animalId: animal.id,
+            enabled: true,
+            speciesProfileId: DEER_WILDLIFE_PROFILE.id,
+            movementMode: DEER_WILDLIFE_PROFILE.movementMode,
+            herdId: wildlifePatch.herdId,
+            home: {
+              kind: "circle",
+              center: { x: thing?.position.x ?? animal.position.x, z: thing?.position.z ?? animal.position.z },
+              radiusMeters: 48,
+            },
+            seed: Math.abs([...animal.id].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) | 0, 17)),
+            populationEligible: true,
+            revision: animal.revision,
+          });
+          uninstanceThing(animal.id);
+        }
+        wildlifeInterpolation.applyPatch(wildlifePatch);
+      }
+      const configuredWildlife = wildlifeConfiguredFromWorldPatch(parsed);
+      if (configuredWildlife) {
+        for (const config of configuredWildlife) {
+          wildlifeConfigs.set(config.animalId, config);
+          if (config.enabled) uninstanceThing(config.animalId);
+          else {
+            const mesh = generatedMeshes.get(config.animalId);
+            if (mesh) mesh.visible = true;
+            wildlifeTiers.delete(config.animalId);
+            wildlifeLastIntents.delete(config.animalId);
+          }
+        }
+      }
       const remoteProcPlants = procPlantPlacementsFromWorldPatch(parsed);
       if (remoteProcPlants) {
         const placements = remoteProcPlants.map(procPlantPlacementFromWorld);
@@ -5069,6 +5184,7 @@ function createTellusWorld(
   const isInstanceCandidate = (thing: GeneratedThing): boolean => {
     if (thing.id === sailingThingId) return false;
     if (thing.petOwnerId) return false;
+    if (wildlifeConfigs.has(thing.id)) return false;
     if (!thing.modelUrl || thing.generationStatus !== "ready") return false;
     const mesh = generatedMeshes.get(thing.id);
     if (!mesh) return false;
@@ -5466,6 +5582,12 @@ function createTellusWorld(
     options: GeneratedClipOptions = {},
   ): THREE.AnimationClip | undefined => {
     if (clips.length === 0) return undefined;
+    const preferred = options.preferredClipName?.trim();
+    const preferredClip = preferred
+      ? clips.find((clip) => clip.name === preferred) ??
+        clips.find((clip) => clip.name.toLowerCase() === preferred.toLowerCase())
+      : undefined;
+    if (preferredClip) return preferredClip;
     const wanted = options.ignoreExplicit ? "" : thing?.animation?.trim();
     const wantedClip = wanted
       ? clips.find((c) => c.name === wanted) ??
@@ -5512,16 +5634,16 @@ function createTellusWorld(
     mode: GeneratedMotionMode,
     vehicle: VehicleMode | null = null,
     options: GeneratedClipOptions = {},
-  ) => {
+  ): boolean => {
     const clips = generatedModelClips(model);
     const clip = selectGeneratedClip(clips, thingById(id), mode, vehicle, options);
-    if (!clip) return;
+    if (!clip) return false;
     let state = generatedAnimationMixers.get(id);
     if (!state) {
       state = { mixer: new THREE.AnimationMixer(model), mode };
       generatedAnimationMixers.set(id, state);
     }
-    if (state.clipName === clip.name && state.mode === mode && state.action) return;
+    if (state.clipName === clip.name && state.mode === mode && state.action) return true;
     const next = state.mixer.clipAction(clip);
     next.reset();
     next.enabled = true;
@@ -5536,6 +5658,7 @@ function createTellusWorld(
     state.action = next;
     state.clipName = clip.name;
     state.mode = mode;
+    return true;
   };
 
   const playGeneratedIntent = (
@@ -6632,6 +6755,9 @@ function createTellusWorld(
           }
           ensureGeneratedBuildingLodProxy(current, model);
           generatedMeshes.set(id, model);
+          // A placeholder may have observed an authoritative intent before animation clips existed.
+          // Clear that marker so the newly loaded model retries the current intent on the next frame.
+          wildlifeLastIntents.delete(id);
           startGeneratedAnimation(id, model);
           scene.add(model);
           if (interiorObject && !isFreeMovingVehicle(current)) {
@@ -7037,6 +7163,16 @@ function createTellusWorld(
 
   const applyRemoteGeneratedDelete = (id: string) => {
     markGeneratedDeletePending(id);
+    wildlifeAssignments = removeWildlifePresentationState(id, {
+      configs: wildlifeConfigs,
+      interpolation: wildlifeInterpolation,
+      poses: wildlifePoses,
+      tiers: wildlifeTiers,
+      lastIntents: wildlifeLastIntents,
+      assignments: wildlifeAssignments,
+    });
+    // Do not wait for the every-other-frame proxy sync: deletion must remove the last proxy now.
+    wildlifeProxyRenderer.sync(wildlifeAssignments, wildlifePoses);
     const index = generated.findIndex((thing) => thing.id === id);
     if (index === -1) return;
     const [removed] = generated.splice(index, 1);
@@ -10018,12 +10154,69 @@ function createTellusWorld(
       camera.updateMatrixWorld();
       tilesRenderer.update(); // stream the 3D tileset against the current camera
     }
-    for (const state of generatedAnimationMixers.values()) {
+    const sampledWildlife = wildlifeInterpolation.sampleAll(Date.now());
+    wildlifePoses.clear();
+    for (const pose of sampledWildlife) wildlifePoses.set(pose.id, pose);
+    if (tick % 12 === 0) {
+      wildlifeAssignments = planWildlifeLod(
+        [...wildlifeConfigs.values()].filter((config) => config.enabled).map((config) => {
+          const pose = wildlifePoses.get(config.animalId);
+          const mesh = generatedMeshes.get(config.animalId);
+          const position = pose?.position ?? thingById(config.animalId)?.position;
+          const distanceMeters = position
+            ? Math.hypot(
+                camera.position.x - position.x,
+                camera.position.y - position.y,
+                camera.position.z - position.z,
+              )
+            : Number.POSITIVE_INFINITY;
+          return {
+            id: config.animalId,
+            distanceMeters,
+            visible: Boolean(position),
+            // Runtime VAT renderers opt into this capability; ordinary skinned GLBs use the proxy tier.
+            supportsInstancedAnimation: mesh?.userData.wildlifeInstancedAnimation === true,
+            selected: selectedThingId === config.animalId,
+          };
+        }),
+        wildlifeTiers,
+      );
+      wildlifeTiers.clear();
+      for (const assignment of wildlifeAssignments) wildlifeTiers.set(assignment.id, assignment.tier);
+    }
+    for (const assignment of wildlifeAssignments) {
+      const pose = wildlifePoses.get(assignment.id);
+      const mesh = generatedMeshes.get(assignment.id);
+      if (mesh) {
+        mesh.visible = assignment.tier === "full";
+        if (pose) {
+          mesh.position.set(pose.position.x, pose.position.y, pose.position.z);
+          mesh.rotation.y = pose.rotationY;
+          if (assignment.tier === "full" && wildlifeLastIntents.get(pose.id) !== pose.animationIntent) {
+            const config = wildlifeConfigs.get(pose.id);
+            const preferredClipName = config
+              ? wildlifeClipNameForIntent(
+                  config.speciesProfileId,
+                  pose.animationIntent,
+                  generatedModelClips(mesh).map((clip) => clip.name),
+                )
+              : undefined;
+            if (playGeneratedClip(pose.id, mesh, pose.animationIntent, null, { preferredClipName })) {
+              wildlifeLastIntents.set(pose.id, pose.animationIntent);
+            }
+          }
+        }
+      }
+    }
+    if (tick % 2 === 0) wildlifeProxyRenderer.sync(wildlifeAssignments, wildlifePoses);
+    for (const [id, state] of generatedAnimationMixers) {
+      if (wildlifeConfigs.has(id) && wildlifeTiers.get(id) !== "full") continue;
       state.mixer.update(delta);
     }
     // Placed VRM things: advance the mixer + VRM spring bones (a static idle still needs spring-bone
     // settle; a looping VRMA clip plays here).
-    for (const rig of generatedVrmRigs.values()) {
+    for (const [id, rig] of generatedVrmRigs) {
+      if (wildlifeConfigs.has(id) && wildlifeTiers.get(id) !== "full") continue;
       rig.update(delta);
     }
     // Avatar rigs: local walk/idle/jump from the player position delta + airborne flag; remotes
@@ -11145,6 +11338,39 @@ function createTellusWorld(
       })
       .filter((actor) => actor.distance <= radius)
       .sort((a, b) => a.distance - b.distance);
+  const configureWildlife = (
+    animalId: string,
+    options: { speciesProfileId?: string; herdId?: string; radiusMeters?: number; enabled?: boolean } = {},
+  ) => {
+    const thing = thingById(animalId);
+    if (!thing) return { ok: false, error: `unknown generated animal id '${animalId}'` };
+    if (worldSocket?.readyState !== WebSocket.OPEN) return { ok: false, error: "world socket is not connected" };
+    const current = wildlifeConfigs.get(animalId);
+    const profile = wildlifeSpeciesProfile(options.speciesProfileId?.trim() || current?.speciesProfileId || "deer");
+    const config: WildlifeAnimalConfig = {
+      animalId,
+      enabled: options.enabled ?? true,
+      speciesProfileId: profile?.id ?? "deer",
+      movementMode: profile?.movementMode ?? current?.movementMode ?? "ground",
+      herdId: options.herdId?.trim() || current?.herdId || "deer-default",
+      home: {
+        kind: "circle",
+        center: current?.home?.center ?? { x: thing.position.x, z: thing.position.z },
+        radiusMeters: clamp(options.radiusMeters ?? current?.home?.radiusMeters ?? 48, 2, 2_000),
+      },
+      seed: current?.seed ?? Math.abs([...animalId].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) | 0, 17)),
+      populationEligible: current?.populationEligible ?? true,
+      revision: current?.revision ?? 0,
+    };
+    worldSocket.send(JSON.stringify({
+      type: "wildlife.configure",
+      visitorId,
+      requestId: makeId("wildlife-configure"),
+      config,
+    }));
+    return { ok: true, config };
+  };
+
   const tellusAgent = {
     getNearby(radius = 30) {
       return generated
@@ -11160,6 +11386,74 @@ function createTellusWorld(
         .filter((o) => o.distance <= radius)
         .sort((a, b) => a.distance - b.distance)
         .slice(0, 12);
+    },
+    getWildlife() {
+      return [...wildlifeConfigs.values()].map((config) => ({
+        ...config,
+        pose: wildlifePoses.get(config.animalId) ?? null,
+        renderTier: wildlifeTiers.get(config.animalId) ?? "culled",
+      }));
+    },
+    configureWildlife,
+    populateDeerHerd(
+      options: { count?: number; herdId?: string; radiusMeters?: number; center?: { x: number; z: number } } = {},
+    ) {
+      if (worldSocket?.readyState !== WebSocket.OPEN) return { ok: false, error: "world socket is not connected" };
+      const count = Math.round(clamp(options.count ?? 6, 1, DEER_WILDLIFE_PROFILE.populationCap));
+      const herdId = options.herdId?.trim() || `deer-${makeId("herd").slice(-8)}`;
+      const center = options.center ?? { x: visitorPosition.x, z: visitorPosition.z };
+      const homeRadius = clamp(options.radiusMeters ?? 48, 8, 2_000);
+      const members: string[] = [];
+      for (let index = 0; index < count; index += 1) {
+        const angle = index * Math.PI * (3 - Math.sqrt(5));
+        const distance = 3 + Math.sqrt(index / Math.max(1, count - 1)) * Math.min(10, homeRadius * 0.25);
+        const x = center.x + Math.cos(angle) * distance;
+        const z = center.z + Math.sin(angle) * distance;
+        const thing = addLibraryAsset({
+          id: "tellus-deer-stag",
+          name: DEER_WILDLIFE_PROFILE.label,
+          description: "low-poly stag deer wildlife",
+          modelUrl: DEER_WILDLIFE_PROFILE.modelUrl,
+          source: "generated",
+        }, {
+          creatorId: "visitor",
+          ownerUserId: userId,
+          location: { x, y: terrainHeight(x, z), z },
+          scale: DEER_WILDLIFE_PROFILE.defaultScale,
+        });
+        members.push(thing.id);
+        configureWildlife(thing.id, {
+          speciesProfileId: DEER_WILDLIFE_PROFILE.id,
+          herdId,
+          radiusMeters: homeRadius,
+        });
+      }
+      return { ok: true, herdId, members };
+    },
+    commandWildlife(args: {
+      animalId?: string;
+      herdId?: string;
+      intent: "idle" | "graze" | "wander" | "travel" | "flee" | "return" | "gather";
+      destination?: Vec3;
+      from?: Vec3;
+      durationSeconds?: number;
+      reason?: string;
+    }) {
+      if (worldSocket?.readyState !== WebSocket.OPEN) return { ok: false, error: "world socket is not connected" };
+      const selector = args.animalId ? { animalId: args.animalId } : args.herdId ? { herdId: args.herdId } : null;
+      if (!selector) return { ok: false, error: "animalId or herdId is required" };
+      worldSocket.send(JSON.stringify({
+        type: "wildlife.command",
+        visitorId,
+        requestId: makeId("wildlife-command"),
+        selector,
+        intent: args.intent,
+        destination: args.destination,
+        from: args.from,
+        durationSeconds: clamp(args.durationSeconds ?? 20, 1, 120),
+        reason: args.reason,
+      }));
+      return { ok: true };
     },
     getActors(radius = 80) {
       return nearbyActors(radius).map((actor) => ({
@@ -12156,6 +12450,9 @@ function createTellusWorld(
         rig.dispose();
       }
       generatedVrmRigs.clear();
+      wildlifeProxyRenderer.dispose();
+      wildlifeInterpolation.clear();
+      wildlifeConfigs.clear();
       resetLiveMirrors();
       // Dispose the static-duplicate instancing pools (InstancedMeshes own their own instanceMatrix buffers;
       // geometry/materials are shared with the GLB cache, so InstancedMesh.dispose() leaves those alone).
