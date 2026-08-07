@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { generatedAssetRoot } from "./generated-assets.ts";
+import { generatedAssetRoot } from "./generated-assets.js";
 
 const stateFilename = "tellus-state.json";
 

@@ -2,10 +2,10 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
-import generate3DHandler from "./api/generate-3d.ts";
-import generatedAssetsHandler from "./api/generated-assets.ts";
-import gradioFileHandler from "./api/gradio-file.ts";
-import tellusStateHandler from "./api/tellus-state.ts";
+import generate3DHandler from "./api/generate-3d.js";
+import generatedAssetsHandler from "./api/generated-assets.js";
+import gradioFileHandler from "./api/gradio-file.js";
+import tellusStateHandler from "./api/tellus-state.js";
 
 async function bodyFromRequest(request: import("node:http").IncomingMessage) {
   const chunks: Buffer[] = [];

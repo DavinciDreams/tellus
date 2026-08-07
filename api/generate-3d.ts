@@ -16,7 +16,7 @@ import {
 } from "@gltf-transform/functions";
 import { MeshoptSimplifier } from "meshoptimizer";
 import sharp from "sharp";
-import { generatedAssetRoot } from "./generated-assets.ts";
+import { generatedAssetRoot } from "./generated-assets.js";
 
 interface Generate3DRequest {
   id?: string;
