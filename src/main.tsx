@@ -193,6 +193,7 @@ import {
 } from "./tellus-ecology";
 import type { RapierSolid, TellusRapierPhysics } from "./tellus-rapier-physics";
 import { generateInteriorRoom, normalizeInteriorBiomeMaterial, type InteriorBiomeMaterial } from "./tellus-building";
+import { planAutomaticBuildingInteriorDoor } from "./tellus-building-interiors";
 import { installSessionFetch, getSession, issueTellusLiveTicket, SESSION_HEADER } from "./tellus-auth";
 import { AuthControls, PremiumUpsellChip, openTellusAccountPanel, useTellusAuth } from "./tellus-auth-ui";
 import { buildAgentFeed, type AgentChatLine, type AgentToolChip } from "./agent-chat-format";
@@ -1708,6 +1709,7 @@ function createTellusWorld(
         },
       })
     : {
+        setVisible: () => undefined,
         update: () => undefined,
         notifyTerrainChanged: () => undefined,
         notifyRegionsChanged: () => undefined,
@@ -2399,6 +2401,10 @@ function createTellusWorld(
     interiorSceneUrl = u;
     ocean.visible = false;
     for (const m of [archipelago, terrain, pondWater, flowerPatchGroup, floatingRim]) m.visible = false;
+    // Cached outdoor terrain/vegetation must not render behind the room or keep streaming/rebuilding.
+    // The animation loop also skips their update work while interiorObject is mounted.
+    chunkRenderer?.setVisible(false);
+    procplants.setVisible(false);
     setChunkedFlatGround(0); // ground the player on the room floor (no heightfield inside)
     // The procedural room is centered at the origin; drop the player INTO the room (origin, flat floor)
     // on entry instead of preserving an outdoor spawn point.
@@ -2485,6 +2491,8 @@ function createTellusWorld(
     interiorObject = null;
     interiorSceneUrl = null;
     rapierPhysics?.clearStatics();
+    chunkRenderer?.setVisible(true);
+    procplants.setVisible(true);
     ocean.visible = showsWorldWaterSurface;
     archipelago.visible = !isContinentalChunkedWorld;
     terrain.visible = !isChunked;
@@ -2553,6 +2561,7 @@ function createTellusWorld(
   const pendingPortalIds = new Set<string>();
   const pendingPortalStartedAt = new Map<string, number>();
   const pendingPortalWarnedIds = new Set<string>();
+  const pendingAutomaticBuildingDoors = new Map<string, string>();
   const pendingDeletedPortals = new Map<string, WorldPortal>();
   let lastPortalEnterAt = 0;
   let lastPortalSelectAt = 0;
@@ -2793,12 +2802,16 @@ function createTellusWorld(
     const wasPending = pendingPortalIds.delete(p.id);
     pendingPortalStartedAt.delete(p.id);
     pendingPortalWarnedIds.delete(p.id);
+    const automaticBuilding = pendingAutomaticBuildingDoors.get(p.id);
+    pendingAutomaticBuildingDoors.delete(p.id);
     if (wasPending) {
       addLog({
         agentId: "world",
         agentName: "Tellus",
         tool: "interact",
-        text: `Portal ready: ${p.label || p.target.worldId}`,
+        text: automaticBuilding
+          ? `Interior door ready for ${automaticBuilding}.`
+          : `Portal ready: ${p.label || p.target.worldId}`,
       });
     }
   };
@@ -2968,6 +2981,7 @@ function createTellusWorld(
       if (!started || pendingPortalWarnedIds.has(id) || now - started < 8000) continue;
       pendingPortalWarnedIds.add(id);
       const portal = worldPortals.find((p) => p.id === id);
+      const automaticBuilding = pendingAutomaticBuildingDoors.get(id);
       // No confirm AND no rejection after 8s usually means the server isn't acting on the upsert at
       // all — most often Features.Portals is disabled on this silo, or you don't own this world (only
       // the owner / an unowned world can manage portals). Be honest rather than spin forever.
@@ -2975,7 +2989,9 @@ function createTellusWorld(
         agentId: "world",
         agentName: "Tellus",
         tool: "interact",
-        text: `Portal "${portal?.label || id}" wasn't confirmed — portals may be disabled on this server, or you may not own this world.`,
+        text: automaticBuilding
+          ? `The interior door for ${automaticBuilding} wasn't confirmed. The exterior building is safe, but its interior is unavailable until Hyades enables portals for this world.`
+          : `Portal "${portal?.label || id}" wasn't confirmed — portals may be disabled on this server, or you may not own this world.`,
       });
       publish();
     }
@@ -4791,6 +4807,7 @@ function createTellusWorld(
         pendingPortalIds.delete(portalDeleted);
         pendingPortalStartedAt.delete(portalDeleted);
         pendingPortalWarnedIds.delete(portalDeleted);
+        pendingAutomaticBuildingDoors.delete(portalDeleted);
         pendingDeletedPortals.delete(portalDeleted);
         portalAnchorOffsets.delete(portalDeleted);
         worldPortals = worldPortals.filter((p) => p.id !== portalDeleted);
@@ -4803,17 +4820,33 @@ function createTellusWorld(
         typeof parsed.actionType === "string" &&
         typeof parsed.reason === "string"
       ) {
+        let automaticDoorRejection = false;
         if (parsed.actionType === "terrain.sculpt") {
           chunkRenderer?.discardLocalPaint();
         }
         if (parsed.actionType === "world.portal.upsert" || parsed.actionType === "portal.upsert") {
           const rejectedPendingIds = new Set(pendingPortalIds);
+          const rejectedAutomaticBuildings = [...rejectedPendingIds]
+            .map((id) => pendingAutomaticBuildingDoors.get(id))
+            .filter((name): name is string => Boolean(name));
           pendingPortalIds.clear();
           pendingPortalStartedAt.clear();
           pendingPortalWarnedIds.clear();
-          for (const id of rejectedPendingIds) portalAnchorOffsets.delete(id);
+          for (const id of rejectedPendingIds) {
+            portalAnchorOffsets.delete(id);
+            pendingAutomaticBuildingDoors.delete(id);
+          }
           worldPortals = worldPortals.filter((p) => !rejectedPendingIds.has(p.id));
           syncPortalMarkers();
+          if (rejectedAutomaticBuildings.length > 0) {
+            automaticDoorRejection = true;
+            addLog({
+              agentId: "world",
+              agentName: "Tellus",
+              tool: "interact",
+              text: `Interior door wasn't created for ${rejectedAutomaticBuildings.join(", ")}. ${portalRejectionMessage(parsed.reason)} The exterior building was kept without a broken door.`,
+            });
+          }
         }
         if (parsed.actionType === "world.portal.delete" || parsed.actionType === "portal.delete") {
           for (const portal of pendingDeletedPortals.values()) {
@@ -4828,7 +4861,7 @@ function createTellusWorld(
           syncPortalMarkers();
         }
         const isPortalAction = /portal/i.test(parsed.actionType);
-        addLog({
+        if (!automaticDoorRejection) addLog({
           agentId: "world",
           agentName: "Tellus",
           tool: "interact",
@@ -8582,6 +8615,7 @@ function createTellusWorld(
           placeObjectAboveGround(modelObject, interiorVisiblePlacementForThing(thing), 0.04);
         }
         updateThingMeshPosition(thing);
+        createAutomaticBuildingInteriorDoor(thing, modelObject);
         refreshVegetationForGeneratedThing(thing);
         syncTransformControls();
         publish();
@@ -10345,7 +10379,7 @@ function createTellusWorld(
     flushTerrain();
     perfDiagnostics.phases.miscMs = performance.now() - miscStartedAt;
     phaseStartedAt = performance.now();
-    if (chunkRenderer) {
+    if (chunkRenderer && !interiorObject) {
       const movingOnFoot = hasMovementKeyHeld() && !sailingThingId && !flying;
       // current position owns eviction; movingOnFoot defers expensive LOD-upgrade rebuilds (see
       // ChunkRenderer.update's doc comment) until the player settles.
@@ -10543,20 +10577,25 @@ function createTellusWorld(
       perfDiagnostics.phases.maxMiscMs,
       perfDiagnostics.phases.miscMs,
     );
-    phaseStartedAt = performance.now();
-    vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
-    perfDiagnostics.phases.vegetationMs = performance.now() - phaseStartedAt;
-    perfDiagnostics.phases.maxVegetationMs = Math.max(
-      perfDiagnostics.phases.maxVegetationMs,
-      perfDiagnostics.phases.vegetationMs,
-    );
-    phaseStartedAt = performance.now();
-    procplants.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
-    perfDiagnostics.phases.procplantsMs = performance.now() - phaseStartedAt;
-    perfDiagnostics.phases.maxProcplantsMs = Math.max(
-      perfDiagnostics.phases.maxProcplantsMs,
-      perfDiagnostics.phases.procplantsMs,
-    );
+    if (!interiorObject) {
+      phaseStartedAt = performance.now();
+      vegetation.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
+      perfDiagnostics.phases.vegetationMs = performance.now() - phaseStartedAt;
+      perfDiagnostics.phases.maxVegetationMs = Math.max(
+        perfDiagnostics.phases.maxVegetationMs,
+        perfDiagnostics.phases.vegetationMs,
+      );
+      phaseStartedAt = performance.now();
+      procplants.update(visitorPosition.x, visitorPosition.z, visitorPosition.y, fpsValue, now);
+      perfDiagnostics.phases.procplantsMs = performance.now() - phaseStartedAt;
+      perfDiagnostics.phases.maxProcplantsMs = Math.max(
+        perfDiagnostics.phases.maxProcplantsMs,
+        perfDiagnostics.phases.procplantsMs,
+      );
+    } else {
+      perfDiagnostics.phases.vegetationMs = 0;
+      perfDiagnostics.phases.procplantsMs = 0;
+    }
     phaseStartedAt = performance.now();
     ambientPhysics.step(delta);
     perfDiagnostics.phases.physicsMs = performance.now() - phaseStartedAt;
@@ -12145,6 +12184,8 @@ function createTellusWorld(
     else if (tellusWorldBackendAvailable)
       void fetch(tellusWorldHttpUrl("action"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(frame) })
         .catch((error) => {
+          const automaticBuilding = pendingAutomaticBuildingDoors.get(portal.id);
+          pendingAutomaticBuildingDoors.delete(portal.id);
           if (pending) {
             pendingPortalIds.delete(portal.id);
             pendingPortalStartedAt.delete(portal.id);
@@ -12157,10 +12198,88 @@ function createTellusWorld(
             agentId: "world",
             agentName: "Tellus",
             tool: "interact",
-            text: `Portal request failed: ${extractErrorMessage(error)}`,
+            text: automaticBuilding
+              ? `Interior door for ${automaticBuilding} couldn't be saved: ${extractErrorMessage(error)}. The exterior building was kept without a broken door.`
+              : `Portal request failed: ${extractErrorMessage(error)}`,
           });
           publish();
         });
+  };
+  const createAutomaticBuildingInteriorDoor = (
+    thing: GeneratedThing,
+    model: THREE.Object3D,
+  ): void => {
+    if (interiorObject) return;
+    const proceduralBuilding = parseProceduralModelUrl(thing.modelUrl ?? "")?.building;
+    if (!proceduralBuilding) {
+      if (generatedThingSuppressesVegetation(thing)) {
+        addLog({
+          agentId: "world",
+          agentName: "Tellus",
+          tool: "interact",
+          text: `${thing.prompt} was placed as an exterior-only building. Automatic interiors currently require a Tellus procedural building with a known entrance orientation.`,
+        });
+        publish();
+      }
+      return;
+    }
+    if (!tellusWorldBackendAvailable) {
+      addLog({
+        agentId: "world",
+        agentName: "Tellus",
+        tool: "interact",
+        text: `${thing.prompt} was placed, but its interior door needs a connected Hyades world and was not created locally.`,
+      });
+      publish();
+      return;
+    }
+    if (worldPortals.some((portal) => portal.anchorThingId === thing.id && portal.target.kind === "interior")) {
+      return;
+    }
+    const dimensions = fittedModelDimensions(model);
+    const plan = dimensions
+      ? planAutomaticBuildingInteriorDoor({
+          worldId: runtimeConfig.worldId,
+          thingId: thing.id,
+          buildingLabel: thing.prompt,
+          position: thing.position,
+          rotationY: thing.rotationY ?? 0,
+          fittedDepth: dimensions.depth,
+        })
+      : null;
+    if (!plan) {
+      addLog({
+        agentId: "world",
+        agentName: "Tellus",
+        tool: "interact",
+        text: `${thing.prompt} was placed, but Tellus couldn't measure its entrance safely, so no interior door was added.`,
+      });
+      publish();
+      return;
+    }
+
+    const portalId = makeId("door");
+    pendingAutomaticBuildingDoors.set(portalId, thing.prompt);
+    sendPortalUpsert(
+      {
+        id: portalId,
+        worldId: runtimeConfig.worldId,
+        label: plan.label,
+        position: plan.position,
+        radius: 1.35,
+        rotation: { x: 0, y: plan.rotationY, z: 0 },
+        target: {
+          kind: "interior",
+          worldId: plan.interiorWorldId,
+          spawn: interiorDoorSpawnForSceneUrl(GENERATED_INTERIOR_SCENE_URL),
+          sceneUrl: GENERATED_INTERIOR_SCENE_URL,
+        },
+        anchorThingId: thing.id,
+        anchorOffset: plan.anchorOffset,
+      },
+      { logText: `Adding an interior door to ${thing.prompt}...` },
+    );
+    announcePortalSelection(portalId);
   };
   const sendPortalDelete = (portalId: string) => {
     const id = portalId.trim();
@@ -12170,6 +12289,7 @@ function createTellusWorld(
     pendingPortalIds.delete(id);
     pendingPortalStartedAt.delete(id);
     pendingPortalWarnedIds.delete(id);
+    pendingAutomaticBuildingDoors.delete(id);
     pendingDeletedPortals.set(id, existing);
     portalAnchorOffsets.delete(id);
     worldPortals = worldPortals.filter((p) => p.id !== id);

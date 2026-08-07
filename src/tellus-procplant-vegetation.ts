@@ -164,6 +164,8 @@ export interface ProcPlantVegetationStats {
 }
 
 export interface ProcPlantVegetationSystem {
+  /** Hide/show cached vegetation without rebuilding it when entering/leaving an interior. */
+  setVisible(visible: boolean): void;
   update(px: number, pz: number, playerY: number, fps: number, nowMs: number): void;
   notifyTerrainChanged(): void;
   notifyRegionsChanged(regions: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }>): void;
@@ -2775,6 +2777,10 @@ export function createProcPlantVegetation(
   };
 
   return {
+    setVisible: (visible) => {
+      root.visible = visible;
+      canopyShadowPool.setVisible(visible);
+    },
     update,
     notifyTerrainChanged: () => {
       if (!terrainDirty) terrainInvalidations++;

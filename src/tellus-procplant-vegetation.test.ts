@@ -65,6 +65,29 @@ const templateBounds = (template: ProcPlantTemplate) => {
 };
 
 describe("procplant vegetation", () => {
+  it("can hide cached outdoor vegetation while an interior is active", () => {
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-interior-visibility-test",
+      sampleHeight: () => 0,
+      samplePaint: () => "meadow",
+      bounds: { minX: -20, maxX: 20, minZ: -20, maxZ: 20 },
+      densityMultiplier: 0,
+    });
+    const root = scene.getObjectByName("tellus-procplant-vegetation") as THREE.Group;
+    const shadowRoot = scene.getObjectByName("tellus-canopy-shadow-proxies") as THREE.Group;
+
+    vegetation.setVisible(false);
+    expect(root.visible).toBe(false);
+    expect(shadowRoot.visible).toBe(false);
+    vegetation.setVisible(true);
+    expect(root.visible).toBe(true);
+    expect(shadowRoot.visible).toBe(true);
+
+    vegetation.dispose();
+  });
+
   it("keeps nearby branch trunks round independently of compute-pressure LOD", () => {
     expect(procPlantBranchRadialSegments(0, 0)).toBe(8);
     expect(procPlantBranchRadialSegments(0, 1)).toBe(6);
