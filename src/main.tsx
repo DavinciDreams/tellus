@@ -31,6 +31,7 @@ import {
   Ship,
   Sprout,
   Trash2,
+  UsersRound,
   Video,
   VideoOff,
   Volume2,
@@ -218,6 +219,7 @@ import { WorldTriggersPanel } from "./world-triggers-panel";
 import { AgentCapabilitiesPanel } from "./agent-capabilities-panel";
 import { AgentCollaborationPanel } from "./agent-collaboration-panel";
 import { AgentAssetWorkshopPanel } from "./agent-asset-workshop-panel";
+import { NaturePanel } from "./nature-panel";
 import { defaultSkyboxUrlForTemplate, parseLandShapeOverrides, parseOptionalWorldTemplateId, parseWorldTemplateId, shouldIgnoreDefaultTellusTemplate, templateForWorldId, templateSuppressesAutoVegetation } from "./tellus-world-templates";
 import { evoflowTerrainSourceFor, evoflowWaterModeFor } from "./tellus-evoflow-terrains";
 import {
@@ -11451,8 +11453,8 @@ function createTellusWorld(
     options: { speciesProfileId?: string; herdId?: string; radiusMeters?: number; enabled?: boolean } = {},
   ) => {
     const thing = thingById(animalId);
-    if (!thing) return { ok: false, error: `unknown generated animal id '${animalId}'` };
-    if (worldSocket?.readyState !== WebSocket.OPEN) return { ok: false, error: "world socket is not connected" };
+    if (!thing) return { ok: false as const, error: `unknown generated animal id '${animalId}'` };
+    if (worldSocket?.readyState !== WebSocket.OPEN) return { ok: false as const, error: "world socket is not connected" };
     const current = wildlifeConfigs.get(animalId);
     const profile = wildlifeSpeciesProfile(options.speciesProfileId?.trim() || current?.speciesProfileId || "deer");
     const config: WildlifeAnimalConfig = {
@@ -11476,7 +11478,49 @@ function createTellusWorld(
       requestId: makeId("wildlife-configure"),
       config,
     }));
-    return { ok: true, config };
+    return { ok: true as const, config };
+  };
+
+  const getWildlife = () => [...wildlifeConfigs.values()].map((config) => ({
+    ...config,
+    pose: wildlifePoses.get(config.animalId) ?? null,
+    renderTier: wildlifeTiers.get(config.animalId) ?? "culled" as const,
+  }));
+
+  const populateDeerHerd = (
+    options: { count?: number; herdId?: string; radiusMeters?: number; center?: { x: number; z: number } } = {},
+  ) => {
+    if (worldSocket?.readyState !== WebSocket.OPEN) return { ok: false as const, error: "world socket is not connected" };
+    const count = Math.round(clamp(options.count ?? 6, 1, DEER_WILDLIFE_PROFILE.populationCap));
+    const herdId = options.herdId?.trim() || `deer-${makeId("herd").slice(-8)}`;
+    const center = options.center ?? { x: visitorPosition.x, z: visitorPosition.z };
+    const homeRadius = clamp(options.radiusMeters ?? 48, 8, 2_000);
+    const members: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const angle = index * Math.PI * (3 - Math.sqrt(5));
+      const distance = 3 + Math.sqrt(index / Math.max(1, count - 1)) * Math.min(10, homeRadius * 0.25);
+      const x = center.x + Math.cos(angle) * distance;
+      const z = center.z + Math.sin(angle) * distance;
+      const thing = addLibraryAsset({
+        id: "tellus-deer-stag",
+        name: DEER_WILDLIFE_PROFILE.label,
+        description: "low-poly stag deer wildlife",
+        modelUrl: DEER_WILDLIFE_PROFILE.modelUrl,
+        source: "generated",
+      }, {
+        creatorId: "visitor",
+        ownerUserId: userId,
+        location: { x, y: terrainHeight(x, z), z },
+        scale: DEER_WILDLIFE_PROFILE.defaultScale,
+      });
+      members.push(thing.id);
+      configureWildlife(thing.id, {
+        speciesProfileId: DEER_WILDLIFE_PROFILE.id,
+        herdId,
+        radiusMeters: homeRadius,
+      });
+    }
+    return { ok: true as const, herdId, members };
   };
 
   const tellusAgent = {
@@ -11495,49 +11539,9 @@ function createTellusWorld(
         .sort((a, b) => a.distance - b.distance)
         .slice(0, 12);
     },
-    getWildlife() {
-      return [...wildlifeConfigs.values()].map((config) => ({
-        ...config,
-        pose: wildlifePoses.get(config.animalId) ?? null,
-        renderTier: wildlifeTiers.get(config.animalId) ?? "culled",
-      }));
-    },
+    getWildlife,
     configureWildlife,
-    populateDeerHerd(
-      options: { count?: number; herdId?: string; radiusMeters?: number; center?: { x: number; z: number } } = {},
-    ) {
-      if (worldSocket?.readyState !== WebSocket.OPEN) return { ok: false, error: "world socket is not connected" };
-      const count = Math.round(clamp(options.count ?? 6, 1, DEER_WILDLIFE_PROFILE.populationCap));
-      const herdId = options.herdId?.trim() || `deer-${makeId("herd").slice(-8)}`;
-      const center = options.center ?? { x: visitorPosition.x, z: visitorPosition.z };
-      const homeRadius = clamp(options.radiusMeters ?? 48, 8, 2_000);
-      const members: string[] = [];
-      for (let index = 0; index < count; index += 1) {
-        const angle = index * Math.PI * (3 - Math.sqrt(5));
-        const distance = 3 + Math.sqrt(index / Math.max(1, count - 1)) * Math.min(10, homeRadius * 0.25);
-        const x = center.x + Math.cos(angle) * distance;
-        const z = center.z + Math.sin(angle) * distance;
-        const thing = addLibraryAsset({
-          id: "tellus-deer-stag",
-          name: DEER_WILDLIFE_PROFILE.label,
-          description: "low-poly stag deer wildlife",
-          modelUrl: DEER_WILDLIFE_PROFILE.modelUrl,
-          source: "generated",
-        }, {
-          creatorId: "visitor",
-          ownerUserId: userId,
-          location: { x, y: terrainHeight(x, z), z },
-          scale: DEER_WILDLIFE_PROFILE.defaultScale,
-        });
-        members.push(thing.id);
-        configureWildlife(thing.id, {
-          speciesProfileId: DEER_WILDLIFE_PROFILE.id,
-          herdId,
-          radiusMeters: homeRadius,
-        });
-      }
-      return { ok: true, herdId, members };
-    },
+    populateDeerHerd,
     commandWildlife(args: {
       animalId?: string;
       herdId?: string;
@@ -12522,6 +12526,9 @@ function createTellusWorld(
     sendWorldChat,
     sampleMapPoint,
     setWorldTriggerVolumes,
+    getWildlife,
+    configureWildlife,
+    populateDeerHerd,
     snapshot,
     getFps: () => fpsValue,
     setRxEnabled: (on: boolean) => {
@@ -13183,6 +13190,7 @@ function App(): React.ReactElement {
   // ── Avatar picker state (catalog selection; "" = deterministic default robot) ──
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [assetPanelTab, setAssetPanelTab] = useState<AssetPanelTab>("building");
+  const [naturePanelOpen, setNaturePanelOpen] = useState(false);
   const [runtimeConfigLoaded, setRuntimeConfigLoaded] = useState(false);
   const [avatarCatalog, setAvatarCatalog] = useState<readonly AvatarCatalogEntry[]>(() => avatarCatalogSync());
   const [avatarSelection, setAvatarSelection] = useState<string>(() => storedAvatarId());
@@ -17455,13 +17463,18 @@ function App(): React.ReactElement {
   const isToolOpen = (menu: ToolMenu): boolean => openToolMenus.includes(menu);
 
   const toggleAssetDrawer = () => {
-    setAssetPanelOpen((open) => {
-      if (!open) setAssetPanelTab(assetPrimaryTab);
-      return !open;
-    });
+    setNaturePanelOpen(false);
+    const libraryTab = assetPanelTab === assetPrimaryTab || assetPanelTab === "avatar" ? "animal" : assetPanelTab;
+    if (assetPanelOpen && assetPanelTab === libraryTab) {
+      setAssetPanelOpen(false);
+      return;
+    }
+    setAssetPanelTab(libraryTab);
+    setAssetPanelOpen(true);
   };
 
   const openAssetDrawerTab = (tab: AssetPanelTab) => {
+    setNaturePanelOpen(false);
     if (assetPanelOpen && assetPanelTab === tab) {
       setAssetPanelOpen(false);
       return;
@@ -17515,7 +17528,9 @@ function App(): React.ReactElement {
 
   const paletteCommands: CommandItem[] = [
     { id: "create", label: "Create something", icon: <Send size={16} />, hint: "⌘K then type", group: "Create", keywords: "generate make new prompt", onRun: focusCreatePrompt },
-    { id: "assets", label: `Open ${assetPrimaryLabel.toLowerCase()}`, icon: <Building2 size={16} />, group: "Create", keywords: "assets objects things drawer", onRun: toggleAssetDrawer },
+    { id: "assets", label: "Open assets", icon: <Box size={16} />, group: "Create", keywords: "library objects flora fauna things drawer", onRun: toggleAssetDrawer },
+    { id: "build", label: "Open Build", icon: <Building2 size={16} />, group: "Create", keywords: "building structure house furniture", onRun: () => openAssetDrawerTab(assetPrimaryTab) },
+    { id: "nature", label: "Open Nature", icon: <Sprout size={16} />, group: "Create", keywords: "wildlife deer ecology flora fauna", onRun: () => { setAssetPanelOpen(false); setNaturePanelOpen(true); } },
     { id: "terrain", label: "Shape terrain", icon: <Mountain size={16} />, group: "Create", keywords: "sculpt ground height", onRun: () => toggleToolPanel("terrain") },
     { id: "move", label: "Move the selected object", icon: <RotateCw size={16} />, group: "Create", keywords: "transform rotate gizmo mesh", onRun: showMeshToolbar },
     { id: "chat", label: "Open world chat", icon: <MessageCircle size={16} />, group: "Connect", keywords: "talk message say", onRun: () => { setChatTab("world"); setWorldChatOpen(true); } },
@@ -17527,19 +17542,17 @@ function App(): React.ReactElement {
     { id: "map", label: "Open the map", icon: <MapIcon size={16} />, hint: "M", group: "Navigate", keywords: "minimap overview", onRun: () => setWorldMapOpen(true) },
   ];
 
-  // The bottom toolbelt, migrated onto the design-system Dock — one emphasized
-  // primary (Create) + a secondary group, wired to the existing HUD handlers.
+  // Stable world-tool domains from the authoritative information architecture.
+  // Existing focused panels remain the implementation seams behind each domain.
   const toolbeltItems: DockItem[] = [
     { id: "create", label: "Create", icon: <Send size={18} />, primary: true, active: createPromptOpen, onSelect: focusCreatePrompt },
-    { id: "assets", label: assetPrimaryLabel, icon: assetPrimaryTab === "building" ? <Building2 size={18} /> : <Box size={18} />, active: assetPanelOpen && assetPanelTab === assetPrimaryTab, onSelect: toggleAssetDrawer },
-    { id: "chat", label: "Chat", icon: <MessageCircle size={18} />, active: worldChatOpen && chatTab !== "agent", onSelect: () => { setChatTab("world"); setWorldChatOpen((open) => (chatTab === "agent" ? true : !open)); } },
-    { id: "travel", label: "Travel", icon: <Plane size={18} />, active: travelMenuOpen, onSelect: () => { setTravelMenuOpen((open) => !open); setWorldMenuOpen(false); } },
-    { id: "world", label: "World", icon: <Globe2 size={18} />, active: worldMenuOpen, onSelect: () => { setWorldMenuOpen((open) => { const next = !open; if (next) setNewWorldPanelOpen(false); return next; }); setTravelMenuOpen(false); } },
-    { id: "map", label: "Map", icon: <MapIcon size={18} />, active: worldMapOpen, onSelect: () => setWorldMapOpen((open) => !open) },
+    { id: "assets", label: "Assets", icon: <Box size={18} />, active: assetPanelOpen && assetPanelTab !== assetPrimaryTab, onSelect: toggleAssetDrawer },
+    { id: "build", label: "Build", icon: <Building2 size={18} />, active: assetPanelOpen && assetPanelTab === assetPrimaryTab, onSelect: () => openAssetDrawerTab(assetPrimaryTab) },
+    { id: "nature", label: "Nature", icon: <Sprout size={18} />, active: naturePanelOpen, onSelect: () => { setAssetPanelOpen(false); setNaturePanelOpen((open) => !open); } },
     { id: "terrain", label: "Terrain", icon: <Mountain size={18} />, active: isToolOpen("terrain"), onSelect: () => toggleToolPanel("terrain") },
-    { id: "move", label: "Move", icon: <RotateCw size={18} />, active: !!activeSelectedThing, onSelect: showMeshToolbar },
-    { id: "agent", label: "Agent", icon: <Bot size={18} />, active: agentPanelOpen, onSelect: () => { setChatTab("agent"); setWorldChatOpen((open) => (chatTab === "agent" ? !open : true)); } },
-    { id: "avatar", label: "Avatar", icon: <PersonStanding size={18} />, active: assetPanelOpen && assetPanelTab === "avatar", onSelect: () => openAssetDrawerTab("avatar") },
+    { id: "travel", label: "Travel", icon: <Plane size={18} />, active: travelMenuOpen, onSelect: () => { setTravelMenuOpen((open) => !open); setWorldMenuOpen(false); } },
+    { id: "messages", label: "Messages", icon: <MessageCircle size={18} />, active: worldChatOpen && chatTab !== "agent", onSelect: () => { setChatTab("world"); setWorldChatOpen((open) => (chatTab === "agent" ? true : !open)); } },
+    { id: "people", label: "People", icon: <UsersRound size={18} />, active: agentPanelOpen, onSelect: () => { setAgentSettingsOpen(true); setChatTab("agent"); setWorldChatOpen((open) => (chatTab === "agent" ? !open : true)); } },
   ];
 
   const debugPanel = showFps ? (
@@ -17617,7 +17630,7 @@ function App(): React.ReactElement {
     <main
       className={[
         "tellus-shell",
-        openToolMenus.length > 0 || assetPanelOpen ? "" : "mesh-tools-hidden",
+        openToolMenus.length > 0 || assetPanelOpen || naturePanelOpen ? "" : "mesh-tools-hidden",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -20175,12 +20188,21 @@ function App(): React.ReactElement {
         )}
       </section>
 
+      {naturePanelOpen && (
+        <NaturePanel
+          getWorldApi={() => worldRef.current}
+          onClose={() => setNaturePanelOpen(false)}
+          onBrowseFauna={() => openAssetDrawerTab("animal")}
+          onBrowseFlora={() => openAssetDrawerTab("flora")}
+        />
+      )}
+
       {assetPanelOpen && (
       <aside className="tool-panel asset-tool-panel" aria-label="Asset panel">
         {assetPanelOpen && (
           <section className="tool-card inventory-card asset-drawer">
             <div className="panel-strip">
-              <span>{assetPanelTab === "avatar" ? "Avatar" : assetPrimaryLabel}</span>
+              <span>{assetPanelTab === "avatar" ? "Avatar" : "Assets"}</span>
               <button
                 type="button"
                 className="icon-button"

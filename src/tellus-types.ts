@@ -3,7 +3,7 @@ import type * as THREE from "three";
 import type { AssetAnimationMetadata } from "./tellus-animation-intents";
 import type { ProcPlantVegetationStats } from "./tellus-procplant-vegetation";
 import type { MeshStats } from "./webrtc-mesh";
-import type { WorldChatChannel, WorldChatMessage, WorldGeneratedThing, WorldPresence, WorldPortal, PortalEntered, WorldBiomeCell } from "./world-protocol";
+import type { WildlifeAnimalConfig, WorldChatChannel, WorldChatMessage, WorldGeneratedThing, WorldPresence, WorldPortal, PortalEntered, WorldBiomeCell } from "./world-protocol";
 
 export type AgentId = "johnny" | "mira" | "sol" | "atlas";
 
@@ -439,6 +439,17 @@ export interface TellusWorldApi {
   ): WorldChatMessage | null;
   sampleMapPoint(x: number, z: number): { height: number; kind: TerrainKind; loaded: boolean };
   setWorldTriggerVolumes(definitions: readonly WorldTriggerVolumeSpec[] | null): void;
+  getWildlife(): WildlifeUiAnimal[];
+  configureWildlife(
+    animalId: string,
+    options?: { speciesProfileId?: string; herdId?: string; radiusMeters?: number; enabled?: boolean },
+  ): WildlifeActionResult;
+  populateDeerHerd(options?: {
+    count?: number;
+    herdId?: string;
+    radiusMeters?: number;
+    center?: { x: number; z: number };
+  }): WildlifePopulationResult;
   snapshot(): TellusSnapshot;
   getFps(): number;
   // ── P2P video controls (RX inbound video, TX local camera) ──
@@ -503,6 +514,19 @@ export interface TellusWorldApi {
   };
   destroy(): void;
 }
+
+export interface WildlifeUiAnimal extends WildlifeAnimalConfig {
+  pose: { state?: string; animationIntent?: string } | null;
+  renderTier: "full" | "instanced" | "impostor" | "culled";
+}
+
+export type WildlifeActionResult =
+  | { ok: true; config: WildlifeAnimalConfig }
+  | { ok: false; error: string };
+
+export type WildlifePopulationResult =
+  | { ok: true; herdId: string; members: string[] }
+  | { ok: false; error: string };
 
 export interface ProceduralAssetPlacement {
   id: string;
