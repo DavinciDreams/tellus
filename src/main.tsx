@@ -39,7 +39,7 @@ import {
   X,
 } from "lucide-react";
 import * as THREE from "three";
-import { TilesRenderer } from "3d-tiles-renderer";
+import type { TilesRenderer as TilesRendererInstance } from "3d-tiles-renderer/three";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import {
   ASSET_BACKED_PROCPLANT_MODEL_ID_SET,
@@ -2502,21 +2502,37 @@ function createTellusWorld(
   // ── TELLUS INFINITY tiles (Phase 4) ── mount a 3D Tileset as the RENDER substrate (the gameplay height
   // still comes from the baked chunk heightfield, so agents + players agree). Experimental spike: a tiles-*
   // world's snapshot carries a tileSetUrl; we hide the placeholder terrain + stream the tileset.
-  let tilesRenderer: TilesRenderer | null = null;
+  let tilesRenderer: TilesRendererInstance | null = null;
   let tileSetUrl: string | null = null;
-  const mountTileset = (url: string) => {
+  let loadingTileSetUrl: string | null = null;
+  let tileSetRequestId = 0;
+  const mountTileset = async (url: string) => {
     const u = url.trim();
-    if (!u || u === tileSetUrl || !renderer) return;
+    if (!u || !renderer || u === loadingTileSetUrl || (u === tileSetUrl && tilesRenderer)) return;
     tileSetUrl = u;
+    loadingTileSetUrl = u;
+    const requestId = ++tileSetRequestId;
     for (const m of [ocean, archipelago, terrain]) m.visible = false;
     try {
-      tilesRenderer = new TilesRenderer(u);
-      tilesRenderer.setCamera(camera);
-      tilesRenderer.setResolutionFromRenderer(camera, renderer as THREE.WebGLRenderer);
-      scene.add(tilesRenderer.group);
+      // 3D Tiles is an experimental, world-specific substrate. Loading it on demand
+      // keeps its sizeable parser/runtime graph out of the ordinary Tellus startup.
+      const { TilesRenderer } = await import("3d-tiles-renderer/three");
+      if (requestId !== tileSetRequestId || tileSetUrl !== u) return;
+      const nextTilesRenderer = new TilesRenderer(u);
+      nextTilesRenderer.setCamera(camera);
+      nextTilesRenderer.setResolutionFromRenderer(camera, renderer as THREE.WebGLRenderer);
+      if (tilesRenderer) {
+        scene.remove(tilesRenderer.group);
+        tilesRenderer.dispose();
+      }
+      tilesRenderer = nextTilesRenderer;
+      scene.add(nextTilesRenderer.group);
       addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `Mounted 3D tileset: ${u}` });
     } catch (error) {
+      if (requestId === tileSetRequestId) tileSetUrl = null;
       addLog({ agentId: "world", agentName: "Tellus", tool: "interact", text: `tileset mount failed: ${error}` });
+    } finally {
+      if (requestId === tileSetRequestId) loadingTileSetUrl = null;
     }
   };
 
@@ -12525,6 +12541,9 @@ function createTellusWorld(
         tilesRenderer.dispose();
         tilesRenderer = null;
       }
+      tileSetRequestId += 1;
+      tileSetUrl = null;
+      loadingTileSetUrl = null;
       delete window.__tellusAvatarDebug;
       delete window.__tellusWorldDebug;
       delete window.__tellusAssetLodUrls;
