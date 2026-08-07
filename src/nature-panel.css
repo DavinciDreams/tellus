@@ -88,11 +88,10 @@
 }
 
 .nature-panel__overview strong {
-  overflow: hidden;
   color: var(--ds-text);
   font-size: var(--ds-text-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: var(--ds-leading-tight);
+  white-space: normal;
 }
 
 .nature-panel__section,
