@@ -13001,6 +13001,7 @@ function App(): React.ReactElement {
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const worldRef = useRef<TellusWorldApi | null>(null);
+  const getWorldApi = useCallback(() => worldRef.current, []);
   const pendingPortalTransfersRef = useRef<Record<string, PendingPortalTransfer>>({});
   const [snapshot, setSnapshot] = useState<TellusSnapshot>({
     generated: [],
@@ -20190,7 +20191,7 @@ function App(): React.ReactElement {
 
       {naturePanelOpen && (
         <NaturePanel
-          getWorldApi={() => worldRef.current}
+          getWorldApi={getWorldApi}
           onClose={() => setNaturePanelOpen(false)}
           onBrowseFauna={() => openAssetDrawerTab("animal")}
           onBrowseFlora={() => openAssetDrawerTab("flora")}
