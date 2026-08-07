@@ -33,6 +33,16 @@ describe("automatic building interior doors", () => {
 
     expect(plan?.interiorWorldId).toMatch(/^interior-[a-z0-9_-]+$/);
     expect(plan?.interiorWorldId.length).toBeLessThanOrEqual(96);
+
+    const sibling = planAutomaticBuildingInteriorDoor({
+      worldId: `World ${"x".repeat(100)}`,
+      thingId: `Thing ${"z".repeat(100)}`,
+      buildingLabel: "House",
+      position: { x: 0, y: 0, z: 0 },
+      rotationY: 0,
+      fittedDepth: 6,
+    });
+    expect(sibling?.interiorWorldId).not.toBe(plan?.interiorWorldId);
   });
 
   it("refuses invalid fitted geometry instead of creating a misplaced door", () => {

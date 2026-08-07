@@ -17,6 +17,22 @@ const safeIdPart = (value: string): string =>
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "") || "space";
 
+const stableIdHash = (value: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+const boundedInteriorWorldId = (worldId: string, thingId: string): string => {
+  const raw = `interior-${safeIdPart(worldId)}-${safeIdPart(thingId)}`;
+  if (raw.length <= MAX_INTERIOR_WORLD_ID_LENGTH) return raw;
+  const suffix = `-${stableIdHash(`${worldId}\0${thingId}`)}`;
+  return `${raw.slice(0, MAX_INTERIOR_WORLD_ID_LENGTH - suffix.length).replace(/-+$/g, "")}${suffix}`;
+};
+
 /**
  * Build the deterministic exterior-door pose for a fitted procedural building.
  * Tellus procedural buildings author their entrance on local +Z, so the portal can
@@ -42,9 +58,7 @@ export function planAutomaticBuildingInteriorDoor(input: {
   };
   const sin = Math.sin(input.rotationY);
   const cos = Math.cos(input.rotationY);
-  const interiorWorldId = `interior-${safeIdPart(input.worldId)}-${safeIdPart(input.thingId)}`
-    .slice(0, MAX_INTERIOR_WORLD_ID_LENGTH)
-    .replace(/-+$/g, "");
+  const interiorWorldId = boundedInteriorWorldId(input.worldId, input.thingId);
 
   return {
     interiorWorldId,

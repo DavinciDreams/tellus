@@ -2993,6 +2993,17 @@ function createTellusWorld(
           ? `The interior door for ${automaticBuilding} wasn't confirmed. The exterior building is safe, but its interior is unavailable until Hyades enables portals for this world.`
           : `Portal "${portal?.label || id}" wasn't confirmed — portals may be disabled on this server, or you may not own this world.`,
       });
+      if (automaticBuilding) {
+        // Do not leave an optimistic doorway in the world after its authoritative
+        // persistence window expires. A late server echo can still re-add it.
+        pendingPortalIds.delete(id);
+        pendingPortalStartedAt.delete(id);
+        pendingPortalWarnedIds.delete(id);
+        pendingAutomaticBuildingDoors.delete(id);
+        portalAnchorOffsets.delete(id);
+        worldPortals = worldPortals.filter((candidate) => candidate.id !== id);
+        syncPortalMarkers();
+      }
       publish();
     }
   };
