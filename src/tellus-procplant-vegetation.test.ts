@@ -74,8 +74,17 @@ describe("procplant vegetation", () => {
 
   it("keeps authored close-tree presets above box-like radial budgets", () => {
     const treePresets = Object.values(procPlantPresets).filter((genome) => genome.weberPenn);
+    const optimizedConifers = new Set(["blueSpruce", "alpineFir"]);
     expect(treePresets.length).toBeGreaterThan(0);
-    expect(treePresets.every((genome) => (genome.weberPenn?.radialSegments ?? 6) >= 6)).toBe(true);
+    // Blue Spruce and Alpine Fir deliberately trade tube radial detail for foliage coverage;
+    // tellus-procplants-cost-parity.test.ts protects their measured bounds and triangle ceilings.
+    expect(treePresets
+      .filter((genome) => !optimizedConifers.has(genome.id))
+      .every((genome) => (genome.weberPenn?.radialSegments ?? 6) >= 6)).toBe(true);
+    for (const presetId of optimizedConifers) {
+      expect(procPlantPresets[presetId]?.habit).toBe("conifer");
+      expect(procPlantPresets[presetId]?.weberPenn?.radialSegments).toBe(4);
+    }
   });
 
   it("protects nearby branch-module crowns from chunk and low-FPS LOD pressure", () => {
