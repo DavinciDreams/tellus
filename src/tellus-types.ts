@@ -440,6 +440,7 @@ export interface TellusWorldApi {
   sampleMapPoint(x: number, z: number): { height: number; kind: TerrainKind; loaded: boolean };
   setWorldTriggerVolumes(definitions: readonly WorldTriggerVolumeSpec[] | null): void;
   getWildlife(): WildlifeUiAnimal[];
+  getUnmanagedDeerCount(): number;
   configureWildlife(
     animalId: string,
     options?: { speciesProfileId?: string; herdId?: string; radiusMeters?: number; enabled?: boolean },
@@ -525,7 +526,7 @@ export type WildlifeActionResult =
   | { ok: false; error: string };
 
 export type WildlifePopulationResult =
-  | { ok: true; herdId: string; members: string[] }
+  | { ok: true; herdId: string; members: string[]; adopted: number; created: number }
   | { ok: false; error: string };
 
 export interface ProceduralAssetPlacement {

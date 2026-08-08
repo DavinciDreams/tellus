@@ -1,9 +1,10 @@
-.nature-tool-panel {
+.tool-panel.nature-tool-panel {
   top: 118px;
   right: 20px;
-  bottom: 86px;
+  bottom: 96px;
   left: auto;
   width: min(380px, calc(100vw - 40px));
+  height: auto;
   max-height: none;
   padding: 0;
   overflow: hidden;
@@ -202,10 +203,11 @@
 }
 
 @media (max-width: 640px) {
-  .nature-tool-panel {
+  .tool-panel.nature-tool-panel {
     top: 72px;
     right: 8px;
-    bottom: 78px;
+    bottom: 88px;
+    left: auto;
     width: calc(100vw - 16px);
   }
 }

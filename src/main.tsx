@@ -792,6 +792,7 @@ function createTellusWorld(
   // mixers above; a thing is in exactly one of the two maps.
   const generatedVrmRigs = new Map<string, VrmObjectRig>();
   const wildlifeConfigs = new Map<string, WildlifeAnimalConfig>();
+  const pendingWildlifeConfigs = new Map<string, WildlifeAnimalConfig | null>();
   const wildlifeInterpolation = new WildlifeInterpolationBuffer();
   const wildlifePoses = new Map<string, WildlifePresentationPose>();
   const wildlifeTiers = new Map<string, WildlifeRenderTier>();
@@ -4670,6 +4671,7 @@ function createTellusWorld(
       }
       const wildlifeSnapshot = wildlifeSnapshotFromWorldPatch(parsed);
       if (wildlifeSnapshot) {
+        pendingWildlifeConfigs.clear();
         const previouslyConfigured = new Set(wildlifeConfigs.keys());
         wildlifeConfigs.clear();
         wildlifeInterpolation.clear();
@@ -4743,6 +4745,7 @@ function createTellusWorld(
       const configuredWildlife = wildlifeConfiguredFromWorldPatch(parsed);
       if (configuredWildlife) {
         for (const config of configuredWildlife) {
+          pendingWildlifeConfigs.delete(config.animalId);
           wildlifeConfigs.set(config.animalId, config);
           if (config.enabled) uninstanceThing(config.animalId);
           else {
@@ -4872,6 +4875,17 @@ function createTellusWorld(
           }
           pendingDeletedPortals.clear();
           syncPortalMarkers();
+        }
+        if (parsed.actionType === "wildlife.configure") {
+          for (const [animalId, previous] of pendingWildlifeConfigs) {
+            if (previous) wildlifeConfigs.set(animalId, previous);
+            else wildlifeConfigs.delete(animalId);
+            const mesh = generatedMeshes.get(animalId);
+            if (mesh) mesh.visible = true;
+            wildlifeTiers.delete(animalId);
+            wildlifeLastIntents.delete(animalId);
+          }
+          pendingWildlifeConfigs.clear();
         }
         const isPortalAction = /portal/i.test(parsed.actionType);
         if (!automaticDoorRejection) addLog({
@@ -11472,12 +11486,28 @@ function createTellusWorld(
       populationEligible: current?.populationEligible ?? true,
       revision: current?.revision ?? 0,
     };
-    worldSocket.send(JSON.stringify({
-      type: "wildlife.configure",
-      visitorId,
-      requestId: makeId("wildlife-configure"),
-      config,
-    }));
+    if (!pendingWildlifeConfigs.has(animalId)) {
+      pendingWildlifeConfigs.set(animalId, current ?? null);
+    }
+    try {
+      worldSocket.send(JSON.stringify({
+        type: "wildlife.configure",
+        visitorId,
+        requestId: makeId("wildlife-configure"),
+        config,
+      }));
+    } catch {
+      const previous = pendingWildlifeConfigs.get(animalId);
+      pendingWildlifeConfigs.delete(animalId);
+      if (previous) wildlifeConfigs.set(animalId, previous);
+      else wildlifeConfigs.delete(animalId);
+      return { ok: false as const, error: "wildlife configuration could not be sent" };
+    }
+    // Reflect a successfully queued request immediately so the HUD and renderer do not claim that freshly
+    // placed deer are unmanaged while waiting for Hyades' wildlife.configured echo. The server remains
+    // authoritative: an echo replaces this value, a snapshot resets it, and action.rejected rolls it back.
+    wildlifeConfigs.set(animalId, config);
+    if (config.enabled) uninstanceThing(animalId);
     return { ok: true as const, config };
   };
 
@@ -11486,6 +11516,24 @@ function createTellusWorld(
     pose: wildlifePoses.get(config.animalId) ?? null,
     renderTier: wildlifeTiers.get(config.animalId) ?? "culled" as const,
   }));
+
+  const unmanagedDeerCandidates = (center?: { x: number; z: number }) => generated
+    .filter((thing) => {
+      if (wildlifeConfigs.has(thing.id) || !thing.modelUrl) return false;
+      let modelPath = thing.modelUrl;
+      try {
+        modelPath = new URL(thing.modelUrl, window.location.href).pathname;
+      } catch {
+        // Relative built-in paths are already directly comparable.
+      }
+      return modelPath === DEER_WILDLIFE_PROFILE.modelUrl &&
+        (!thing.ownerUserId || thing.ownerUserId === userId);
+    })
+    .sort((left, right) => center
+      ? distance2D(left.position, center) - distance2D(right.position, center)
+      : left.id.localeCompare(right.id));
+
+  const getUnmanagedDeerCount = () => unmanagedDeerCandidates().length;
 
   const populateDeerHerd = (
     options: { count?: number; herdId?: string; radiusMeters?: number; center?: { x: number; z: number } } = {},
@@ -11496,7 +11544,17 @@ function createTellusWorld(
     const center = options.center ?? { x: visitorPosition.x, z: visitorPosition.z };
     const homeRadius = clamp(options.radiusMeters ?? 48, 8, 2_000);
     const members: string[] = [];
-    for (let index = 0; index < count; index += 1) {
+    const candidates = unmanagedDeerCandidates(center).slice(0, count);
+    for (const thing of candidates) {
+      const configured = configureWildlife(thing.id, {
+        speciesProfileId: DEER_WILDLIFE_PROFILE.id,
+        herdId,
+        radiusMeters: homeRadius,
+      });
+      if (configured.ok) members.push(thing.id);
+    }
+    const adopted = members.length;
+    for (let index = adopted; index < count; index += 1) {
       const angle = index * Math.PI * (3 - Math.sqrt(5));
       const distance = 3 + Math.sqrt(index / Math.max(1, count - 1)) * Math.min(10, homeRadius * 0.25);
       const x = center.x + Math.cos(angle) * distance;
@@ -11520,7 +11578,7 @@ function createTellusWorld(
         radiusMeters: homeRadius,
       });
     }
-    return { ok: true as const, herdId, members };
+    return { ok: true as const, herdId, members, adopted, created: members.length - adopted };
   };
 
   const tellusAgent = {
@@ -11540,6 +11598,7 @@ function createTellusWorld(
         .slice(0, 12);
     },
     getWildlife,
+    getUnmanagedDeerCount,
     configureWildlife,
     populateDeerHerd,
     commandWildlife(args: {
@@ -12527,6 +12586,7 @@ function createTellusWorld(
     sampleMapPoint,
     setWorldTriggerVolumes,
     getWildlife,
+    getUnmanagedDeerCount,
     configureWildlife,
     populateDeerHerd,
     snapshot,
@@ -12649,6 +12709,7 @@ function createTellusWorld(
       wildlifeProxyRenderer.dispose();
       wildlifeInterpolation.clear();
       wildlifeConfigs.clear();
+      pendingWildlifeConfigs.clear();
       resetLiveMirrors();
       // Dispose the static-duplicate instancing pools (InstancedMeshes own their own instanceMatrix buffers;
       // geometry/materials are shared with the GLB cache, so InstancedMesh.dispose() leaves those alone).
