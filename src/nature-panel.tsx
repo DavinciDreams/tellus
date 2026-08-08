@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Leaf, PawPrint, RefreshCw, Sprout, X } from "lucide-react";
+import { ExternalLink, Leaf, PawPrint, RefreshCw, Sprout, X } from "lucide-react";
 import { Badge, Button, IconButton, Panel } from "./design-system";
 import {
   normalizeWildlifePopulationPolicy,
@@ -106,7 +106,17 @@ export function NaturePanel({ getWorldApi, onBrowseFauna, onBrowseFlora, onClose
       >
         <div className="nature-panel__body">
           <section className="nature-panel__overview" aria-label="Nature overview">
-            <div><Sprout size={16} aria-hidden="true" /><span><small>Flora</small><strong>World ecology</strong></span></div>
+            <a
+              className="nature-panel__ecology"
+              href="/biome-mixer.html"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open Biome Mixer for world ecology"
+            >
+              <Sprout size={16} aria-hidden="true" />
+              <span><small>Biome mixer</small><strong>World ecology</strong></span>
+              <ExternalLink className="nature-panel__external" size={13} aria-hidden="true" />
+            </a>
             <div><PawPrint size={16} aria-hidden="true" /><span><small>Wildlife</small><strong>{enabledCount > 0 ? `${enabledCount} active` : unmanagedDeerCount > 0 ? `${unmanagedDeerCount} ready` : "0 active"}</strong></span></div>
           </section>
 

@@ -77,7 +77,7 @@
   gap: var(--ds-space-4);
 }
 
-.nature-panel__overview > div {
+.nature-panel__overview > :is(div, a) {
   align-items: center;
   gap: var(--ds-space-4);
   min-width: 0;
@@ -86,6 +86,26 @@
   border-radius: var(--ds-radius-md);
   background: var(--ds-bg-soft);
   color: var(--ds-leaf-bright);
+}
+
+.nature-panel__ecology {
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color var(--ds-transition), background var(--ds-transition);
+}
+
+.nature-panel__ecology:hover {
+  border-color: var(--ds-border);
+  background: var(--ds-input-bg-hover);
+}
+
+.nature-panel__ecology > span {
+  flex: 1;
+}
+
+.nature-panel__external {
+  flex: none;
+  color: var(--ds-gold-bright);
 }
 
 .nature-panel__overview strong {
@@ -197,7 +217,7 @@
   color: var(--ds-danger-text);
 }
 
-.nature-panel :is(button, input):focus-visible {
+.nature-panel :is(a, button, input):focus-visible {
   outline: none;
   box-shadow: var(--ds-focus-ring);
 }

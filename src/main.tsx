@@ -20862,17 +20862,6 @@ function App(): React.ReactElement {
           </div>
           <div className="terrain-subtitle with-rule">Scatter</div>
           <div className="terrain-scatter-grid">
-            <a
-              className="terrain-scatter-tile"
-              href="/biome-mixer.html"
-              target="_blank"
-              rel="noreferrer"
-              title="Open biome mixer"
-              aria-label="Open biome mixer"
-            >
-              <span className="terrain-scatter-emoji" aria-hidden="true">Mix</span>
-              <span className="terrain-scatter-label">Biome Mixer</span>
-            </a>
             {PROCEDURAL_CATALOG.map((arch) => (
               <div key={arch.id} className={`terrain-scatter-tile ${vegetationBrushId === arch.id ? "active" : ""} ${vegetationBrushId === arch.id && vegetationBrushMode === "multi" ? "multi" : ""}`}>
                 <button
