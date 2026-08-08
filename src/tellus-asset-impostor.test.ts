@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assetImpostorViewBlend,
   createAssetStoreImpostorInstance,
+  cylindricalImpostorTarget,
   loadAssetStoreImpostor,
   normalizeAssetImpostorVariant,
   type AssetStoreImpostorTemplate,
@@ -64,6 +65,20 @@ describe("Asset Store WebGL impostors", () => {
 
     const forward = assetImpostorViewBlend(new THREE.Vector3(0, 0, 1), 31, 31, "hemi");
     expect(forward.faceIndices.x).toBe(960);
+  });
+
+  it("keeps billboard facing horizontal when the camera changes height", () => {
+    const target = new THREE.Vector3();
+    expect(cylindricalImpostorTarget(
+      new THREE.Vector3(12, 30, -8),
+      new THREE.Vector3(2, 5, 3),
+      target,
+    )?.toArray()).toEqual([12, 5, -8]);
+    expect(cylindricalImpostorTarget(
+      new THREE.Vector3(2, 30, 3),
+      new THREE.Vector3(2, 5, 3),
+      target,
+    )).toBeNull();
   });
 
   it("loads the image through Hyades and derives the normalized grounded plane", async () => {
@@ -134,7 +149,7 @@ describe("Asset Store WebGL impostors", () => {
     };
     const instance = createAssetStoreImpostorInstance(template, { scale: 10, yaw: 0 });
     const camera = new THREE.PerspectiveCamera();
-    camera.position.set(0, 4, 20);
+    camera.position.set(10, 24, 20);
     camera.updateMatrixWorld(true);
     instance.mesh.updateMatrixWorld(true);
     instance.update(camera);
@@ -147,6 +162,8 @@ describe("Asset Store WebGL impostors", () => {
     expect((material.uniforms.gridSize!.value as THREE.Vector2).toArray()).toEqual([31, 31]);
     const weights = material.uniforms.faceWeights!.value as THREE.Vector3;
     expect(weights.x + weights.y + weights.z).toBeCloseTo(1);
+    expect(instance.mesh.rotation.x).toBeCloseTo(0, 6);
+    expect(instance.mesh.rotation.z).toBeCloseTo(0, 6);
 
     instance.dispose();
     texture.dispose();

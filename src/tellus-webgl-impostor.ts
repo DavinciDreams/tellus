@@ -1,5 +1,8 @@
 import * as THREE from "three";
-import { assetImpostorViewBlend } from "./tellus-asset-impostor";
+import {
+  assetImpostorViewBlend,
+  cylindricalImpostorTarget,
+} from "./tellus-asset-impostor";
 import type { TellusImpostorInstance } from "./tellus-impostor";
 
 export interface WebGlImpostorBakeOptions {
@@ -199,6 +202,7 @@ export const bakeWebGlImpostor = (
       const cameraPosition = new THREE.Vector3();
       const meshPosition = new THREE.Vector3();
       const direction = new THREE.Vector3();
+      const billboardTarget = new THREE.Vector3();
       const update = (activeCamera: THREE.Camera) => {
         activeCamera.getWorldPosition(cameraPosition);
         mesh.getWorldPosition(meshPosition);
@@ -208,7 +212,8 @@ export const bakeWebGlImpostor = (
         const view = assetImpostorViewBlend(direction, gridSize, gridSize, "hemi");
         material.uniforms.faceIndices!.value.copy(view.faceIndices);
         material.uniforms.faceWeights!.value.copy(view.faceWeights);
-        mesh.lookAt(cameraPosition);
+        const target = cylindricalImpostorTarget(cameraPosition, meshPosition, billboardTarget);
+        if (target) mesh.lookAt(target);
       };
       mesh.onBeforeRender = (_renderer, _scene, activeCamera) => update(activeCamera);
       return {
