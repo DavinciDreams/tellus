@@ -1753,6 +1753,33 @@ textarea::placeholder {
   background: rgb(0 0 0 / 24%);
 }
 
+.agent-tab-auth {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--hud-border);
+  border-radius: 7px;
+  background: rgb(222 188 86 / 10%);
+  color: var(--hud-text);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.agent-tab-auth button {
+  min-height: 32px;
+  border: 1px solid var(--hud-border);
+  border-radius: 6px;
+  background: rgb(222 188 86 / 18%);
+  color: var(--hud-gold-bright);
+  font: 700 11px/1 inherit;
+  cursor: pointer;
+}
+
+.agent-tab-auth button:focus-visible {
+  outline: 2px solid var(--hud-gold-bright);
+  outline-offset: 2px;
+}
+
 .maker-agent-roster {
   display: flex;
   flex-direction: column;

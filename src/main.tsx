@@ -13298,6 +13298,7 @@ function App(): React.ReactElement {
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [agentPersonaDraft, setAgentPersonaDraft] = useState("");
+  const agentPersonaDirtyRef = useRef(false);
   const [agentBusy, setAgentBusy] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
   // Maker-owned roster. Null means not loaded; `makerAgentsSupported=false` is the mixed-version fallback
@@ -13616,6 +13617,11 @@ function App(): React.ReactElement {
 
   const runAgentAction = useCallback(
     async (action: "start" | "stop" | "persona", body?: unknown) => {
+      if (!account?.accountId) {
+        setAgentError("Log in to use your agent. Your personality draft is still here.");
+        openTellusAccountPanel();
+        return null;
+      }
       setAgentBusy(true);
       setAgentError(null);
       try {
@@ -13624,10 +13630,18 @@ function App(): React.ReactElement {
           headers: body ? { "Content-Type": "application/json" } : undefined,
           body: body ? JSON.stringify(body) : undefined,
         });
-        if (!res.ok) throw new Error(`${action} failed (${res.status})`);
+        if (!res.ok) {
+          if (res.status === 401) openTellusAccountPanel();
+          throw new Error(
+            res.status === 401
+              ? "Your Tellus session expired. Log in again to use your agent."
+              : `${action} failed (${res.status})`,
+          );
+        }
         const status = (await res.json()) as AgentStatus;
         setAgentStatus(status);
         setAgentPersonaDraft(status.selfSection ?? "");
+        agentPersonaDirtyRef.current = false;
         return status;
       } catch (err) {
         setAgentError(err instanceof Error ? err.message : `Failed to ${action} agent.`);
@@ -13636,7 +13650,7 @@ function App(): React.ReactElement {
         setAgentBusy(false);
       }
     },
-    [],
+    [account?.accountId],
   );
 
   const onAgentStartStop = useCallback(() => {
@@ -13678,24 +13692,37 @@ function App(): React.ReactElement {
   // world's agent seeds from (server: POST /api/tellus/user/default-persona; the per-world copy is
   // independent afterwards). Saves the per-world persona too so "Set as default" never loses the edit.
   const onAgentSaveDefaultPersona = useCallback(async () => {
+    if (!account?.accountId) {
+      setAgentError("Log in to save a default personality. Your draft is still here.");
+      openTellusAccountPanel();
+      return;
+    }
     setAgentBusy(true);
     setAgentError(null);
     try {
-      await runAgentAction("persona", { text: agentPersonaDraft, replace: true });
+      const status = await runAgentAction("persona", { text: agentPersonaDraft, replace: true });
+      if (!status) return;
       const base = runtimeConfig.worldApiBase || runtimeConfig.apiBase || "";
       const res = await fetch(`${base}/api/tellus/user/default-persona?userId=${encodeURIComponent(tellusUserId())}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: agentPersonaDraft }),
       });
-      if (!res.ok) throw new Error(`default persona save failed (${res.status})`);
+      if (!res.ok) {
+        throw new Error(
+          res.status === 401
+            ? "Your Tellus session expired. Log in again to save a default personality."
+            : `default persona save failed (${res.status})`,
+        );
+      }
+      agentPersonaDirtyRef.current = false;
       setMemoriesEditing(false);
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : "default persona save failed");
     } finally {
       setAgentBusy(false);
     }
-  }, [runAgentAction, agentPersonaDraft]);
+  }, [account?.accountId, runAgentAction, agentPersonaDraft]);
 
   // Load the agent's memory: the self-section edit history AND the agent's own `remember` notes.
   const loadMemoriesLog = useCallback(async () => {
@@ -13770,7 +13797,13 @@ function App(): React.ReactElement {
   // outlives the panel, and the thinking/sleep state should stay fresh); prime the persona draft on
   // first load.
   useEffect(() => {
-    if (!agentPanelOpen && !agentViewportOn) return;
+    if ((!agentPanelOpen && !agentViewportOn) || !account?.accountId) {
+      if (!account?.accountId) {
+        setAgentStatus(null);
+        setAgentError(null);
+      }
+      return;
+    }
     let cancelled = false;
     const controller = new AbortController();
     const load = async () => {
@@ -13780,13 +13813,16 @@ function App(): React.ReactElement {
         // Seed the textarea from selfSection ONLY on the first load (prev === null), so the 3s poll
         // never clobbers the user's edits — including a deliberately-cleared field.
         setAgentStatus((prev) => {
-          if (prev === null) setAgentPersonaDraft(status?.selfSection ?? "");
+          if (prev === null && !agentPersonaDirtyRef.current) {
+            setAgentPersonaDraft(status?.selfSection ?? "");
+          }
           return status;
         });
         setAgentError(null);
       } catch (err) {
         if (cancelled || controller.signal.aborted) return;
-        setAgentError(err instanceof Error ? err.message : "Failed to load agent status.");
+        const message = err instanceof Error ? err.message : "Failed to load agent status.";
+        setAgentError(message === "status 401" ? "Your Tellus session expired. Log in again to use your agent." : message);
       }
       // Dialog feed: poll on the same cadence. A transcript failure is non-fatal — keep the last good feed
       // and don't surface an error (status drives the panel's error line).
@@ -13807,7 +13843,7 @@ function App(): React.ReactElement {
       controller.abort();
       window.clearInterval(id);
     };
-  }, [agentPanelOpen, agentViewportOn, fetchAgentStatus, fetchAgentTranscript, mergeAgentTranscript]);
+  }, [account?.accountId, agentPanelOpen, agentViewportOn, fetchAgentStatus, fetchAgentTranscript, mergeAgentTranscript]);
 
   // The expanded-chat overlay (⤢) only makes sense while the Agent tab is visible. If the chat panel
   // closes or switches tabs, drop the overlay too — otherwise it survives as an orphaned fullscreen
@@ -13886,6 +13922,7 @@ function App(): React.ReactElement {
   // behind a single foldable "Settings" strip so the panel stays small and non-blocking. This replaces
   // the old floating center-screen agent aside — same handlers, same fetch wiring, just relocated.
   const renderAgentTab = () => {
+    const agentAuthenticated = Boolean(account?.accountId);
     const optedIn = agentStatus?.optedIn ?? false;
     const currentMakerWorldId = canonicalWorldId(runtimeConfig.worldId);
     const running =
@@ -13894,16 +13931,18 @@ function App(): React.ReactElement {
       (agentStatus?.enabled ?? false);
     const thinking = optedIn && (agentStatus?.processing ?? false);
     const willWake = optedIn && !(agentStatus?.enabled ?? false) && (agentStatus?.ownerPresent ?? false);
-    const statusLabel = !optedIn
-      ? "Stopped"
-      : thinking
-        ? "Thinking…"
-        : running
-          ? "Running"
-          : willWake
-            ? "Sleeping (will wake)"
-            : "Sleeping";
-    const dot = !optedIn ? "#7a8597" : thinking ? "#9ec8ff" : running ? "#6fae46" : "#d8a64a";
+    const statusLabel = !agentAuthenticated
+      ? "Sign in required"
+      : !optedIn
+        ? "Stopped"
+        : thinking
+          ? "Thinking…"
+          : running
+            ? "Running"
+            : willWake
+              ? "Sleeping (will wake)"
+              : "Sleeping";
+    const dot = !agentAuthenticated || !optedIn ? "#7a8597" : thinking ? "#9ec8ff" : running ? "#6fae46" : "#d8a64a";
     return (
       <div className="agent-tab">
         {/* Status + settings fold toggle */}
@@ -13944,6 +13983,12 @@ function App(): React.ReactElement {
 
         {agentSettingsOpen && (
           <div className="agent-tab-settings">
+            {!agentAuthenticated && (
+              <section className="agent-tab-auth" aria-label="Agent login required">
+                <span>Agents belong to your Tellus account. Log in to start one or save this personality.</span>
+                <button type="button" onClick={openTellusAccountPanel}>Log in</button>
+              </section>
+            )}
             {account?.accountId && makerAgentsSupported && (
               <section className="maker-agent-roster" aria-label="Your agents">
                 <div className="maker-agent-roster__header">
@@ -14155,7 +14200,7 @@ function App(): React.ReactElement {
             <button
               type="button"
               disabled={agentBusy}
-              onClick={onAgentStartStop}
+              onClick={agentAuthenticated ? onAgentStartStop : openTellusAccountPanel}
               style={{
                 ...p2pBtnStyle(optedIn),
                 flex: "none",
@@ -14165,7 +14210,7 @@ function App(): React.ReactElement {
                 cursor: agentBusy ? "default" : "pointer",
               }}
             >
-              {agentBusy ? "…" : optedIn ? "Stop" : "Start my agent"}
+              {agentBusy ? "…" : !agentAuthenticated ? "Log in to start" : optedIn ? "Stop" : "Start my agent"}
             </button>
 
             {/* Personality & memories (folds within the settings strip) */}
@@ -14216,7 +14261,9 @@ function App(): React.ReactElement {
                   <button
                     type="button"
                     onClick={() => {
-                      setAgentPersonaDraft(agentStatus?.selfSection ?? "");
+                      if (!agentPersonaDirtyRef.current) {
+                        setAgentPersonaDraft(agentStatus?.selfSection ?? "");
+                      }
                       setMemoriesOpen(true);
                       setMemoriesEditing(true);
                     }}
@@ -14229,7 +14276,10 @@ function App(): React.ReactElement {
                 <>
                   <textarea
                     value={agentPersonaDraft}
-                    onChange={(e) => setAgentPersonaDraft(e.target.value)}
+                    onChange={(e) => {
+                      agentPersonaDirtyRef.current = true;
+                      setAgentPersonaDraft(e.target.value);
+                    }}
                     placeholder="Describe how your agent should behave, what it should remember…"
                     rows={6}
                     style={{
@@ -14250,9 +14300,17 @@ function App(): React.ReactElement {
                       onClick={() => void onAgentSavePersona()}
                       style={{ ...p2pBtnStyle(true), opacity: agentBusy ? 0.6 : 1, cursor: agentBusy ? "default" : "pointer" }}
                     >
-                      {agentBusy ? "…" : "Save"}
+                      {agentBusy ? "…" : agentAuthenticated ? "Save" : "Log in to save"}
                     </button>
-                    <button type="button" onClick={() => setMemoriesEditing(false)} style={p2pBtnStyle(false)}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAgentPersonaDraft(agentStatus?.selfSection ?? "");
+                        agentPersonaDirtyRef.current = false;
+                        setMemoriesEditing(false);
+                      }}
+                      style={p2pBtnStyle(false)}
+                    >
                       Cancel
                     </button>
                     <button
@@ -14262,7 +14320,7 @@ function App(): React.ReactElement {
                       onClick={() => void onAgentSaveDefaultPersona()}
                       style={{ ...p2pBtnStyle(false), opacity: agentBusy ? 0.6 : 1 }}
                     >
-                      Set as default
+                      {agentAuthenticated ? "Set as default" : "Log in for default"}
                     </button>
                   </div>
                 </>
@@ -14323,7 +14381,9 @@ function App(): React.ReactElement {
                     <button
                       type="button"
                       onClick={() => {
-                        setAgentPersonaDraft(agentStatus?.selfSection ?? "");
+                        if (!agentPersonaDirtyRef.current) {
+                          setAgentPersonaDraft(agentStatus?.selfSection ?? "");
+                        }
                         setMemoriesEditing(true);
                       }}
                       style={p2pBtnStyle(false)}
@@ -14443,7 +14503,7 @@ function App(): React.ReactElement {
           </div>
         )}
 
-        {agentError && <div style={{ fontSize: 11, color: "#ff9a9a" }}>{agentError}</div>}
+        {agentError && <div role="alert" style={{ fontSize: 11, color: "#ff9a9a" }}>{agentError}</div>}
 
         {/* Agent composer — the big box is the input; transcript appears above once there is history. */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
