@@ -86,6 +86,15 @@ export interface ProcPlantGenome {
     leafletPairs: number;
     arch: number;
   };
+  /** Low, spreading vegetation rendered as a bounded set of broad leaf clusters. */
+  groundcover?: {
+    radius: number;
+    clusters: number;
+    leavesPerCluster: number;
+    height: number;
+    flowerRate?: number;
+    runners?: boolean;
+  };
   foliage?: {
     mass: number;
     clusterDensity: number;
@@ -289,7 +298,7 @@ export type ProcPlantInstanceKind =
   | "flobotPinkBloom"
   | "foxgloveBloom"
   | "flowerCenter";
-export type ProcPlantFoliageClusterKind = "coniferSpray" | "palmFrond";
+export type ProcPlantFoliageClusterKind = "coniferSpray" | "palmFrond" | "fernFrond";
 
 export interface ProcPlantInstance {
   kind: ProcPlantInstanceKind | ProcPlantFoliageClusterKind;
@@ -403,6 +412,35 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       leafBoostInShade: 0.45,
       branchSuppressionInShade: 0.1,
       phototropism: 0.1,
+    },
+  },
+  maidenhairFernPatch: {
+    id: "maidenhairFernPatch",
+    habit: "fern",
+    nodeCount: 7,
+    internode: { base: 0.08, tip: 0.05, curve: 1.05 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0, tip: 0, curve: 1 },
+    branchAngle: { mean: 0.76, spread: 0.16, depthDecay: 0.7 },
+    apicalDominance: 0.42,
+    leaf: {
+      shape: "fan",
+      length: { base: 0.16, tip: 0.1, curve: 0.9 },
+      widthRatio: 0.88,
+      density: { base: 0.92, tip: 0.7, curve: 1 },
+      curl: 0.06,
+      serration: 0.08,
+      venation: 0.34,
+      colorA: 0x214c32,
+      colorB: 0x78b86c,
+    },
+    fern: { pinnae: 12, leafletPairs: 4, arch: 0.82 },
+    groundcover: { radius: 0.9, clusters: 11, leavesPerCluster: 5, height: 0.48 },
+    lightResponse: {
+      shadeAvoidance: 0.14,
+      leafBoostInShade: 0.42,
+      branchSuppressionInShade: 0.08,
+      phototropism: 0.06,
     },
   },
   meadowFlower: {
@@ -816,10 +854,43 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       color: 0xf4e8ff,
       centerColor: 0xd8c4ee,
     },
+    // Tellus's legacy round-leaf mesh is heavier than Procplants core's current card.
+    // Eight deterministic runner clusters retain the authored patch radius while keeping
+    // the materialized groundcover below the previous clover triangle count.
+    groundcover: { radius: 0.72, clusters: 8, leavesPerCluster: 3, height: 0.12, flowerRate: 0.22, runners: true },
     lightResponse: {
       shadeAvoidance: 0.18,
       leafBoostInShade: 0.32,
       branchSuppressionInShade: 0.18,
+      phototropism: 0.06,
+    },
+  },
+  woodlandVioletCarpet: {
+    id: "woodlandVioletCarpet",
+    habit: "flower",
+    nodeCount: 5,
+    internode: { base: 0.07, tip: 0.045, curve: 1 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0, tip: 0, curve: 1 },
+    branchAngle: { mean: 0.36, spread: 0.12, depthDecay: 0.72 },
+    apicalDominance: 0.24,
+    leaf: {
+      shape: "cordate",
+      length: { base: 0.17, tip: 0.12, curve: 0.92 },
+      widthRatio: 0.92,
+      density: { base: 0.95, tip: 0.74, curve: 1 },
+      curl: 0.045,
+      serration: 0.02,
+      venation: 0.4,
+      colorA: 0x285335,
+      colorB: 0x77a85a,
+    },
+    flower: { whorls: 1, petals: 5, radius: 0.075, color: 0x7652b5, centerColor: 0xf1d65b },
+    groundcover: { radius: 1.02, clusters: 11, leavesPerCluster: 3, height: 0.18, flowerRate: 0.66 },
+    lightResponse: {
+      shadeAvoidance: 0.16,
+      leafBoostInShade: 0.34,
+      branchSuppressionInShade: 0.12,
       phototropism: 0.06,
     },
   },
@@ -1418,7 +1489,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorA: 0x263f32,
       colorB: 0x6f8f74,
     },
-    foliage: { mass: 1.15, clusterDensity: 1.4, whorlDensity: 0.9, tipBias: 0.34, size: 0.68 },
+    foliage: { mass: 0.98, clusterDensity: 1.02, whorlDensity: 0.86, tipBias: 0.38, size: 0.78 },
     treeRealism: { crownSpread: 0.44, crownTaper: 0.78, trunkFlare: 0.34, trunkBend: 0.14, branchGnarl: 0.18, windFlex: 0.58, colorVariance: 0.12 },
     weberPenn: {
       species: "smallPine",
@@ -1426,12 +1497,12 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       crownFill: true,
       foliageSource: "conifer-spray",
       fillAnchor: "leaf-sites",
-      maxBranchDepth: 3,
-      maxStems: 96,
-      maxLeaves: 260,
+      maxBranchDepth: 2,
+      maxStems: 64,
+      maxLeaves: 160,
       leafScaleMultiplier: 2.6,
-      radialSegments: 6,
-      branchSamples: 2,
+      radialSegments: 4,
+      branchSamples: 1,
     },
     lightResponse: {
       shadeAvoidance: 0.28,
@@ -1460,7 +1531,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorA: 0x1f392e,
       colorB: 0x6b8a63,
     },
-    foliage: { mass: 1.25, clusterDensity: 1.45, whorlDensity: 0.95, tipBias: 0.3, size: 0.6 },
+    foliage: { mass: 1.02, clusterDensity: 1.04, whorlDensity: 0.9, tipBias: 0.34, size: 0.7 },
     treeRealism: { crownSpread: 0.36, crownTaper: 0.88, trunkFlare: 0.36, trunkBend: 0.1, branchGnarl: 0.16, windFlex: 0.5, colorVariance: 0.1 },
     weberPenn: {
       species: "balsamFir",
@@ -1468,12 +1539,12 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       crownFill: true,
       foliageSource: "conifer-spray",
       fillAnchor: "leaf-sites",
-      maxBranchDepth: 3,
-      maxStems: 104,
-      maxLeaves: 300,
+      maxBranchDepth: 2,
+      maxStems: 68,
+      maxLeaves: 180,
       leafScaleMultiplier: 2.85,
-      radialSegments: 6,
-      branchSamples: 2,
+      radialSegments: 4,
+      branchSamples: 1,
     },
     lightResponse: {
       shadeAvoidance: 0.22,
@@ -1732,6 +1803,36 @@ const rotateFromAxis = (axis: THREE.Vector3, azimuth: number, elevation: number)
     .multiplyScalar(Math.cos(elevation))
     .add(lateral.multiplyScalar(Math.sin(elevation)))
     .normalize();
+};
+
+/** Build a stable organ frame from its supporting stem rather than world axes. */
+const branchRelativeFoliageFrame = (
+  branchDirection: THREE.Vector3,
+  azimuth: number,
+  divergence: number,
+  upBias: number,
+  referenceRight?: THREE.Vector3,
+) => {
+  const branch = branchDirection.clone().normalize();
+  const basis = tangentBasis(branch);
+  let baseRight = referenceRight?.clone().projectOnPlane(branch);
+  if (!baseRight || baseRight.lengthSq() < 0.0001) baseRight = basis.right;
+  baseRight.normalize();
+  const radial = baseRight.clone().applyAxisAngle(branch, azimuth).normalize();
+  const direction = branch
+    .clone()
+    .multiplyScalar(Math.cos(divergence))
+    .add(radial.clone().multiplyScalar(Math.sin(divergence)))
+    .add(UP.clone().multiplyScalar(upBias))
+    .normalize();
+  const desiredNormal = UP.clone()
+    .multiplyScalar(0.82)
+    .add(radial.clone().multiplyScalar(0.18))
+    .projectOnPlane(direction);
+  if (desiredNormal.lengthSq() < 0.0001) desiredNormal.copy(basis.up);
+  desiredNormal.normalize();
+  const right = desiredNormal.cross(direction).normalize();
+  return { direction, right, radial };
 };
 
 const flowerLoadBend = (
@@ -2005,61 +2106,93 @@ export const buildProcPlantGraph = (
     return { stems, segments, organs };
   }
 
-  if (genome.id === "cloverGroundcover") {
-    const runners = 3;
-    for (let r = 0; r < runners; r++) {
-      const yaw = r * genome.phyllotaxisAngle + rng() * 0.35;
-      const start: StemNode = {
-        position: new THREE.Vector3((rng() - 0.5) * 0.08, 0.018, (rng() - 0.5) * 0.08),
-        direction: rotateFromAxis(UP, yaw, 1.35),
-        radius: root.radius * 0.42,
-        depth: 0,
-        t: 0,
-        index: stems.length,
-      };
-      stems.push(start);
-      segments.push([root.index, start.index]);
-      let previous = start;
-      const nodes = 3 + Math.round(rng() * 1.4);
-      for (let i = 1; i <= nodes; i++) {
-        const t = i / nodes;
-        const wander = yaw + Math.sin(i * 1.7 + seed) * 0.25 + (rng() - 0.5) * 0.22;
-        const direction = new THREE.Vector3(Math.cos(wander), 0.05 + shade * 0.08, Math.sin(wander)).normalize();
-        const position = previous.position
-          .clone()
-          .add(direction.clone().multiplyScalar(curve(genome.internode, t) * (1.1 + rng() * 0.35)));
-        const node: StemNode = {
-          position,
-          direction,
-          radius: previous.radius * 0.86,
+  if (genome.groundcover) {
+    const cover = genome.groundcover;
+    const clusterCount = Math.max(3, Math.min(24, Math.round(cover.clusters)));
+    const leafCount = Math.max(1, Math.min(5, Math.round(cover.leavesPerCluster)));
+    let previousRunner = root;
+    for (let cluster = 0; cluster < clusterCount; cluster++) {
+      const t = clusterCount > 1 ? cluster / (clusterCount - 1) : 0;
+      const yaw = cluster * genome.phyllotaxisAngle + (rng() - 0.5) * 0.34;
+      const spread = cluster === 0 ? 0 : cover.radius * Math.sqrt(t) * (0.82 + rng() * 0.28);
+      const position = new THREE.Vector3(
+        Math.cos(yaw) * spread,
+        0.012 + rng() * cover.height * 0.08,
+        Math.sin(yaw) * spread,
+      );
+      const runnerDirection = position.clone().sub(previousRunner.position);
+      if (cover.runners && cluster > 0 && runnerDirection.lengthSq() > 0.0001) {
+        const runner: StemNode = {
+          position: position.clone(),
+          direction: runnerDirection.normalize(),
+          radius: root.radius * 0.22,
           depth: 0,
           t,
           index: stems.length,
         };
-        stems.push(node);
-        segments.push([previous.index, node.index]);
-        previous = node;
-        for (let leaf = 0; leaf < 3; leaf++) {
-          const leafYaw = yaw + leaf * (Math.PI * 2 / 3) + i * 0.18;
-          organs.push({
-            kind: "leaf",
-            position: position.clone().add(new THREE.Vector3(0, 0.025 + leaf * 0.004, 0)),
-            direction: rotateFromAxis(UP, leafYaw, 1.22 + rng() * 0.12),
-            right: new THREE.Vector3(Math.cos(leafYaw + Math.PI / 2), 0, Math.sin(leafYaw + Math.PI / 2)).normalize(),
-            scale: curve(genome.leaf.length, t) * (0.92 + rng() * 0.18),
-            t,
-          });
-        }
-        if (genome.flower && i === nodes && rng() < 0.62 + env.moisture * 0.2) {
-          organs.push({
-            kind: "flower",
-            position: position.clone().add(new THREE.Vector3(0, 0.13 + rng() * 0.04, 0)),
-            direction: UP.clone(),
-            right: tangentBasis(UP).right,
-            scale: 0.68 + rng() * 0.16,
-            t: 1,
-          });
-        }
+        stems.push(runner);
+        segments.push([previousRunner.index, runner.index]);
+        previousRunner = runner;
+      }
+
+      const supportDirection = new THREE.Vector3(Math.cos(yaw), 0.12 + shade * 0.08, Math.sin(yaw)).normalize();
+      const supportRight = tangentBasis(supportDirection).right;
+      for (let leaf = 0; leaf < leafCount; leaf++) {
+        const leafYaw = leaf * (Math.PI * 2 / leafCount) + cluster * 0.21 + (rng() - 0.5) * 0.12;
+        // Fern fronds arch UP out of the crown; flat groundcover leaves splay outward. A shared
+        // near-horizontal divergence made the fern patch read as litter on the floor.
+        const fernCover = genome.habit === "fern";
+        const frame = branchRelativeFoliageFrame(
+          supportDirection,
+          leafYaw,
+          fernCover ? 0.5 + rng() * 0.24 : 0.86 + rng() * 0.2,
+          (fernCover ? 0.86 : 0.42) + shade * 0.12,
+          supportRight,
+        );
+        // A fern-habit groundcover (e.g. maidenhairFernPatch) still wants frond cards — plain
+        // leaf quads scattered on the floor read as loose foliage, not as a fern patch.
+        const isFernCover = genome.habit === "fern";
+        organs.push({
+          kind: isFernCover ? "fernFrond" : "leaf",
+          position: position
+            .clone()
+            .add(new THREE.Vector3(0, cover.height * (0.12 + leaf * 0.025), 0))
+            .add(frame.radial.clone().multiplyScalar(cover.radius * 0.018)),
+          direction: frame.direction,
+          right: frame.right,
+          scale: curve(genome.leaf.length, t) * (0.9 + rng() * 0.22) * (isFernCover ? 2.4 : 1),
+          t,
+        });
+      }
+
+      if (genome.flower && rng() < (cover.flowerRate ?? 0) * (0.72 + env.moisture * 0.32)) {
+        const stemBase: StemNode = {
+          position: position.clone(),
+          direction: UP.clone(),
+          radius: root.radius * 0.18,
+          depth: 0,
+          t,
+          index: stems.length,
+        };
+        stems.push(stemBase);
+        const stemTip: StemNode = {
+          position: position.clone().add(new THREE.Vector3((rng() - 0.5) * 0.025, cover.height * (0.78 + rng() * 0.32), (rng() - 0.5) * 0.025)),
+          direction: UP.clone(),
+          radius: stemBase.radius * 0.46,
+          depth: 0,
+          t: 1,
+          index: stems.length,
+        };
+        stems.push(stemTip);
+        segments.push([stemBase.index, stemTip.index]);
+        organs.push({
+          kind: "flower",
+          position: stemTip.position.clone(),
+          direction: UP.clone(),
+          right: tangentBasis(UP).right,
+          scale: 0.7 + rng() * 0.2,
+          t: 1,
+        });
       }
     }
     return { stems, segments, organs };
@@ -2568,6 +2701,36 @@ export const buildProcPlantGraph = (
     return { stems, segments, organs };
   }
 
+  if (genome.habit === "fern" && genome.fern) {
+    // A fern's read comes from a few BROAD fronds, not many thin ones. Each fernFrond card is
+    // wide-at-base and tapered, so a modest count fills the crown; spending the same triangles on
+    // more, narrower blades looked like wheat.
+    const fronds = Math.max(6, Math.min(10, Math.round(genome.fern.pinnae / 2.4)));
+    const frondLength =
+      genome.nodeCount * curve(genome.internode, 0.28) * (0.4 + genome.fern.arch * 0.16) * heightStretch;
+    for (let frond = 0; frond < fronds; frond++) {
+      const yaw = frond * genome.phyllotaxisAngle + (rng() - 0.5) * 0.16;
+      // Splay the outer fronds further from vertical than the inner ones so the clump forms a
+      // shuttlecock rather than a flat rosette — that vertical spread is what reads as a fern.
+      const ring = frond / Math.max(1, fronds - 1);
+      const frame = branchRelativeFoliageFrame(
+        UP,
+        yaw,
+        0.46 + ring * 0.72 + genome.fern.arch * 0.16 + rng() * 0.08,
+        0.34 - ring * 0.26,
+      );
+      organs.push({
+        kind: "fernFrond",
+        position: new THREE.Vector3((rng() - 0.5) * 0.045, 0.018 + rng() * 0.018, (rng() - 0.5) * 0.045),
+        direction: frame.direction,
+        right: frame.right,
+        scale: frondLength * (0.9 + rng() * 0.24),
+        t: ring,
+      });
+    }
+    return { stems, segments, organs };
+  }
+
   growAxis(0, 0, genome.nodeCount, 1);
 
   if (genome.habit === "conifer") {
@@ -2672,30 +2835,6 @@ export const buildProcPlantGraph = (
         scale: curve(genome.leaf.length, t) * (1.05 + (i % 3) * 0.05),
         t,
       });
-    }
-  }
-
-  if (genome.habit === "fern" && genome.fern) {
-    const fronds = Math.max(3, Math.round(genome.fern.pinnae / 3));
-    for (let f = 0; f < fronds; f++) {
-      const yaw = f * genome.phyllotaxisAngle;
-      const direction = rotateFromAxis(UP, yaw, 0.66);
-      for (let i = 0; i < genome.fern.pinnae; i++) {
-        const t = i / Math.max(1, genome.fern.pinnae - 1);
-        const base = direction
-          .clone()
-          .multiplyScalar(t * 1.1)
-          .add(new THREE.Vector3(0, Math.sin(t * Math.PI) * genome.fern.arch * 0.32, 0));
-        const right = new THREE.Vector3(Math.cos(yaw + Math.PI / 2), 0, -Math.sin(yaw + Math.PI / 2));
-        organs.push({
-          kind: "fernLeaflet",
-          position: base,
-          direction,
-          right,
-          scale: curve(genome.leaf.length, t) * Math.sin(t * Math.PI),
-          t,
-        });
-      }
     }
   }
 
@@ -3279,6 +3418,30 @@ const coniferSprayInstance = (
   };
 };
 
+const fernFrondInstance = (
+  genome: ProcPlantGenome,
+  organ: Organ,
+): ProcPlantInstance => {
+  const length = organ.scale;
+  const dir = organ.direction.clone().normalize();
+  const right = organ.right.clone().normalize();
+  const normal = new THREE.Vector3().crossVectors(right, dir).normalize();
+  normal.negate();
+  const color = new THREE.Color(genome.leaf.colorA).lerp(new THREE.Color(genome.leaf.colorB), 0.25 + organ.t * 0.35);
+  return {
+    kind: "fernFrond",
+    matrix: instanceMatrixFromFrame(
+      organ.position,
+      right,
+      dir,
+      normal,
+      new THREE.Vector3(length, length, length),
+    ),
+    color,
+    sway: 0.9,
+  };
+};
+
 const palmFrondInstance = (
   genome: ProcPlantGenome,
   organ: Organ,
@@ -3602,6 +3765,9 @@ const buildProcPlantSingleShootParts = (
     } else if (organ.kind === "palmFrond") {
       instances.push(palmFrondInstance(genome, organ));
       leafCount++;
+    } else if (organ.kind === "fernFrond") {
+      instances.push(fernFrondInstance(genome, organ));
+      leafCount++;
     } else if (organ.kind === "flower") {
       const petals = flowerInstances(genome, organ);
       instances.push(...petals);
@@ -3916,6 +4082,69 @@ export const createProcPlantConiferSprayGeometry = (detail: "full" | "light" = "
     addNeedlePlate(0.045, 0.62, 0.26, 0.13, -0.048, 0.035, 0.018, 0.1);
   }
 
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+/**
+ * Fern frond: broad at the base, tapering to a point. The palm card peaks at mid-length
+ * (sin(pi*y)) which reads as a narrow blade — lots of triangles covering very little screen. A
+ * fern's visual mass sits low and wide, so the same triangle budget buys far more coverage when
+ * spent on width near the base. Deliberately space-filling: at a distance a handful of these read
+ * as a fern clump, where thin blades read as wheat.
+ */
+export const createProcPlantFernFrondGeometry = (): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
+    const base = positions.length / 3;
+    const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize();
+    for (const p of [a, b, c, d]) {
+      positions.push(p.x, p.y, p.z);
+      normals.push(normal.x, normal.y, normal.z);
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+  // Width profile: near-full at the base, easing to zero at the tip. The shoulder keeps the widest
+  // part just above the base (a frond flares before it tapers) instead of at the very bottom.
+  const halfWidth = (y: number) => {
+    const shoulder = Math.min(1, y / 0.14);          // quick flare out of the crown
+    const taper = (1 - y) ** 0.9;                    // long narrowing run to the point
+    return 0.34 * shoulder * taper;
+  };
+  const cuts = 11;
+  for (let i = 0; i < cuts; i++) {
+    const y0 = i / cuts;
+    const y1 = (i + 1) / cuts;
+    // Gentle arch so the frond nods forward rather than standing as a flat plane.
+    const sag0 = -(y0 * y0) * 0.22;
+    const sag1 = -(y1 * y1) * 0.22;
+    const w0 = halfWidth(y0);
+    const w1 = halfWidth(y1);
+    // Alternating fold gives the blade a shallow V cross-section, so it catches light from more
+    // angles and does not disappear edge-on.
+    // Keep the fold subtle and scaled to the local width. A fixed offset dominated the narrow tip
+    // segments and turned the silhouette into a zigzag saw edge.
+    const fold0 = (i % 2 === 0 ? 1 : -1) * 0.05 * w0;
+    const fold1 = -(i % 2 === 0 ? 1 : -1) * 0.05 * w1;
+    addQuad(
+      new THREE.Vector3(0, y0, sag0),
+      new THREE.Vector3(-w0, y0, fold0 + sag0),
+      new THREE.Vector3(-w1, y1, fold1 + sag1),
+      new THREE.Vector3(0, y1, sag1),
+    );
+    addQuad(
+      new THREE.Vector3(0, y0, sag0),
+      new THREE.Vector3(0, y1, sag1),
+      new THREE.Vector3(w1, y1, -fold1 + sag1),
+      new THREE.Vector3(w0, y0, -fold0 + sag0),
+    );
+  }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
@@ -5237,6 +5466,12 @@ export const buildProcPlantTemplate = (
     } else if (organ.kind === "palmFrond") {
       const inst = palmFrondInstance(genome, organ);
       const geo = createProcPlantPalmFrondGeometry();
+      addTransformedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
+      geo.dispose();
+      leafCount++;
+    } else if (organ.kind === "fernFrond") {
+      const inst = fernFrondInstance(genome, organ);
+      const geo = createProcPlantFernFrondGeometry();
       addTransformedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
       geo.dispose();
       leafCount++;

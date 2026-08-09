@@ -1,0 +1,1341 @@
+{
+  "schema": "procplants-tellus-golden-contract",
+  "fixtureVersion": 2,
+  "generatorContractRevision": 2,
+  "floatPrecision": 6,
+  "hashAlgorithms": {
+    "summary": "sha256-canonical-json-sorted-keys-floats-6dp",
+    "geometry": "sha256-template-pos-nrm-uv0-col-tintable-sway-idx-ordered-floats-6dp"
+  },
+  "seed": 612072,
+  "environment": {
+    "light": 0.78,
+    "moisture": 0.65,
+    "crowding": 0.25,
+    "biomeWarmth": 0.7
+  },
+  "biomeNormalization": {
+    "assetLodPreference": {
+      "valid": {
+        "input": "game-optimized",
+        "normalized": "game-optimized"
+      },
+      "invalid": {
+        "input": "unsupported-lod",
+        "normalized": "game-optimized"
+      }
+    }
+  },
+  "presets": [
+    {
+      "presetId": "phiFern",
+      "genome": {
+        "id": "phiFern",
+        "habit": "fern",
+        "backend": "procplant-graph",
+        "phyllotaxy": {
+          "mode": "legacy-spiral",
+          "angle": 2.399963
+        },
+        "hash": "1dd77a256e3dd4ea2e35ab742a6a34ed11a064255bb718e001a3da074e253209"
+      },
+      "attachmentIr": {
+        "segments": 0,
+        "attachments": 36,
+        "parentedAttachments": 0,
+        "kinds": {
+          "palmFrond": 36
+        },
+        "bounds": {
+          "min": [
+            -0.228852,
+            0.011184,
+            -0.19858
+          ],
+          "max": [
+            0.176908,
+            0.038832,
+            0.130359
+          ]
+        },
+        "axialT": {
+          "min": 0,
+          "max": 0
+        },
+        "sway": {
+          "min": 0.35,
+          "max": 1
+        },
+        "hash": "ea313c5ea915b3d0be7932c83aa760de9fd748ecb1b0cda75b4894e02edb121b"
+      },
+      "instances": {
+        "total": 36,
+        "supportedKinds": [
+          "palmFrond"
+        ],
+        "countsByKind": {
+          "palmFrond": 36
+        }
+      },
+      "lodSelection": {
+        "contract": "procplants.runtime-lod-selection",
+        "version": 1,
+        "policy": {
+          "mode": "hybrid",
+          "distanceMetric": "camera-to-bounds-center-world-units",
+          "distanceNormalization": "divide-by-instance-max-world-scale",
+          "screenMetric": "projected-bounds-height-over-viewport-height",
+          "hysteresisRatio": 0.12,
+          "culling": {
+            "rule": "either",
+            "minDistance": 145.125,
+            "maxProjectedScreenHeight": 0.003
+          }
+        },
+        "tiers": [
+          {
+            "id": "lod0-full",
+            "level": 0,
+            "label": "full",
+            "minDistance": 0,
+            "maxProjectedScreenHeight": 1,
+            "triangleBudget": 312,
+            "organBudget": 6
+          },
+          {
+            "id": "lod1-clustered",
+            "level": 1,
+            "label": "clustered",
+            "minDistance": 13.5,
+            "maxProjectedScreenHeight": 0.22,
+            "triangleBudget": 150,
+            "organBudget": 3
+          },
+          {
+            "id": "lod2-billboard-cross",
+            "level": 2,
+            "label": "billboard-cross",
+            "minDistance": 31.5,
+            "maxProjectedScreenHeight": 0.075,
+            "triangleBudget": 32,
+            "organBudget": 4
+          },
+          {
+            "id": "lod3-impostor",
+            "level": 3,
+            "label": "impostor",
+            "minDistance": 64.5,
+            "maxProjectedScreenHeight": 0.025,
+            "triangleBudget": 2,
+            "organBudget": 1
+          }
+        ]
+      },
+      "lods": [
+        {
+          "level": 0,
+          "label": "full",
+          "distance": 0,
+          "triangles": 1872,
+          "vertices": 5616,
+          "bounds": {
+            "min": [
+              -0.868658,
+              -0.268271,
+              -0.834233
+            ],
+            "max": [
+              0.823005,
+              0.480776,
+              0.850083
+            ]
+          },
+          "sway": {
+            "min": 0.85,
+            "max": 0.85
+          },
+          "attributeLengths": {
+            "pos": 16848,
+            "nrm": 16848,
+            "uv0": 11232,
+            "col": 16848,
+            "tintable": 5616,
+            "sway": 5616,
+            "idx": 5616
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "12518d95",
+            "sourceIndexHash": "b0308b40",
+            "triangleCount": 1872,
+            "indexCount": 5616,
+            "groups": {
+              "total": 1,
+              "barkStem": 0,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 0,
+              "organ": 1872
+            },
+            "coverage": {
+              "indices": 5616,
+              "triangles": 1872,
+              "complete": true
+            }
+          },
+          "geometryHash": "96e96ea2665d0810daf8f5b8c9e503e65f188d678598daac7ee1d182c838bf6e"
+        },
+        {
+          "level": 1,
+          "label": "clustered",
+          "distance": 13.5,
+          "triangles": 624,
+          "vertices": 1872,
+          "bounds": {
+            "min": [
+              -0.643529,
+              -0.215761,
+              -0.561104
+            ],
+            "max": [
+              0.500319,
+              0.435902,
+              0.603705
+            ]
+          },
+          "sway": {
+            "min": 0.85,
+            "max": 0.85
+          },
+          "attributeLengths": {
+            "pos": 5616,
+            "nrm": 5616,
+            "uv0": 3744,
+            "col": 5616,
+            "tintable": 1872,
+            "sway": 1872,
+            "idx": 1872
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "0c9256cd",
+            "sourceIndexHash": "1bcb6e56",
+            "triangleCount": 624,
+            "indexCount": 1872,
+            "groups": {
+              "total": 1,
+              "barkStem": 0,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 0,
+              "organ": 624
+            },
+            "coverage": {
+              "indices": 1872,
+              "triangles": 624,
+              "complete": true
+            }
+          },
+          "geometryHash": "c5228bf140a4f56c04a00a6e8af6eb186d0fff3477e38421ebfe93e1c31db019"
+        },
+        {
+          "level": 2,
+          "label": "billboard-cross",
+          "distance": 31.5,
+          "triangles": 4,
+          "vertices": 8,
+          "bounds": {
+            "min": [
+              -0.868658,
+              -0.268271,
+              -0.837906
+            ],
+            "max": [
+              0.823005,
+              0.480776,
+              0.853756
+            ]
+          },
+          "sway": {
+            "min": 0.7,
+            "max": 0.7
+          },
+          "attributeLengths": {
+            "pos": 24,
+            "nrm": 24,
+            "uv0": 16,
+            "col": 24,
+            "tintable": 8,
+            "sway": 8,
+            "idx": 12
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "287da517",
+            "sourceIndexHash": "acebd62b",
+            "triangleCount": 4,
+            "indexCount": 12,
+            "groups": {
+              "total": 1,
+              "barkStem": 0,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 0,
+              "organ": 4
+            },
+            "coverage": {
+              "indices": 12,
+              "triangles": 4,
+              "complete": true
+            }
+          },
+          "geometryHash": "a86f9843220445742e2ec30df1b830809cc3ead7e0fe66d0bfa268380756e791"
+        },
+        {
+          "level": 3,
+          "label": "impostor",
+          "distance": 64.5,
+          "triangles": 2,
+          "vertices": 4,
+          "bounds": {
+            "min": [
+              -0.868658,
+              -0.268271,
+              0.007925
+            ],
+            "max": [
+              0.823005,
+              0.480776,
+              0.007925
+            ]
+          },
+          "sway": {
+            "min": 0.7,
+            "max": 0.7
+          },
+          "attributeLengths": {
+            "pos": 12,
+            "nrm": 12,
+            "uv0": 8,
+            "col": 12,
+            "tintable": 4,
+            "sway": 4,
+            "idx": 6
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "52584354",
+            "sourceIndexHash": "27efcf43",
+            "triangleCount": 2,
+            "indexCount": 6,
+            "groups": {
+              "total": 1,
+              "barkStem": 0,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 0,
+              "organ": 2
+            },
+            "coverage": {
+              "indices": 6,
+              "triangles": 2,
+              "complete": true
+            }
+          },
+          "geometryHash": "6fa59899f32e8e556984c81550bb10e9fca1a327448703a56eb83dd21a51d6c6"
+        }
+      ],
+      "hash": "ea6fcaad450421e08fca91b8ee82cda4b2456178cbc023ece4b1cfd1584aff44"
+    },
+    {
+      "presetId": "blueSpruce",
+      "genome": {
+        "id": "blueSpruce",
+        "habit": "conifer",
+        "backend": "weber-penn",
+        "phyllotaxy": {
+          "mode": "legacy-spiral",
+          "angle": 2.399963
+        },
+        "hash": "0680c6b547c5563f31ca977ec2bfb2a9772413f45d14da051415193a79b273eb"
+      },
+      "attachmentIr": {
+        "segments": 0,
+        "attachments": 160,
+        "parentedAttachments": 0,
+        "kinds": {
+          "leaf-site": 160
+        },
+        "bounds": {
+          "min": [
+            -0.327686,
+            0.041781,
+            -0.30998
+          ],
+          "max": [
+            0.327968,
+            0.934483,
+            0.272123
+          ]
+        },
+        "axialT": {
+          "min": 0.041781,
+          "max": 0.934483
+        },
+        "sway": {
+          "min": 0.404233,
+          "max": 0.922
+        },
+        "hash": "23ff5478e63475f58d6c3ded120b771c72dd3e99d8d7beb8ad7ebc8b620c9e6c"
+      },
+      "instances": {
+        "total": 0,
+        "supportedKinds": [],
+        "countsByKind": {}
+      },
+      "lodSelection": {
+        "contract": "procplants.runtime-lod-selection",
+        "version": 1,
+        "policy": {
+          "mode": "hybrid",
+          "distanceMetric": "camera-to-bounds-center-world-units",
+          "distanceNormalization": "divide-by-instance-max-world-scale",
+          "screenMetric": "projected-bounds-height-over-viewport-height",
+          "hysteresisRatio": 0.12,
+          "culling": {
+            "rule": "either",
+            "minDistance": 290.25,
+            "maxProjectedScreenHeight": 0.003
+          }
+        },
+        "tiers": [
+          {
+            "id": "lod0-full",
+            "level": 0,
+            "label": "full",
+            "minDistance": 0,
+            "maxProjectedScreenHeight": 1,
+            "triangleBudget": 3934,
+            "organBudget": 122
+          },
+          {
+            "id": "lod1-clustered",
+            "level": 1,
+            "label": "clustered",
+            "minDistance": 27,
+            "maxProjectedScreenHeight": 0.22,
+            "triangleBudget": 1889,
+            "organBudget": 61
+          },
+          {
+            "id": "lod2-billboard-cross",
+            "level": 2,
+            "label": "billboard-cross",
+            "minDistance": 63,
+            "maxProjectedScreenHeight": 0.075,
+            "triangleBudget": 32,
+            "organBudget": 4
+          },
+          {
+            "id": "lod3-impostor",
+            "level": 3,
+            "label": "impostor",
+            "minDistance": 129,
+            "maxProjectedScreenHeight": 0.025,
+            "triangleBudget": 2,
+            "organBudget": 1
+          }
+        ]
+      },
+      "lods": [
+        {
+          "level": 0,
+          "label": "full",
+          "distance": 0,
+          "triangles": 3934,
+          "vertices": 7324,
+          "bounds": {
+            "min": [
+              -0.696833,
+              -0.120845,
+              -0.746664
+            ],
+            "max": [
+              0.644119,
+              1.141916,
+              0.430085
+            ]
+          },
+          "sway": {
+            "min": 0,
+            "max": 1
+          },
+          "attributeLengths": {
+            "pos": 21972,
+            "nrm": 21972,
+            "uv0": 14648,
+            "col": 21972,
+            "tintable": 7324,
+            "sway": 7324,
+            "idx": 11802
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "e264f0fa",
+            "sourceIndexHash": "03b510d7",
+            "triangleCount": 3934,
+            "indexCount": 11802,
+            "groups": {
+              "total": 2,
+              "barkStem": 1,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 2470,
+              "organ": 1464
+            },
+            "coverage": {
+              "indices": 11802,
+              "triangles": 3934,
+              "complete": true
+            }
+          },
+          "geometryHash": "81ad2dd1444743537087044202e09e32ccae776251c471646d6089e22316a1d2"
+        },
+        {
+          "level": 1,
+          "label": "clustered",
+          "distance": 27,
+          "triangles": 2494,
+          "vertices": 3942,
+          "bounds": {
+            "min": [
+              -0.705072,
+              -0.080271,
+              -0.669203
+            ],
+            "max": [
+              0.724741,
+              1.138506,
+              0.572356
+            ]
+          },
+          "sway": {
+            "min": 0,
+            "max": 1
+          },
+          "attributeLengths": {
+            "pos": 11826,
+            "nrm": 11826,
+            "uv0": 7884,
+            "col": 11826,
+            "tintable": 3942,
+            "sway": 3942,
+            "idx": 7482
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "a7142df8",
+            "sourceIndexHash": "ba67108a",
+            "triangleCount": 2494,
+            "indexCount": 7482,
+            "groups": {
+              "total": 2,
+              "barkStem": 1,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 1798,
+              "organ": 696
+            },
+            "coverage": {
+              "indices": 7482,
+              "triangles": 2494,
+              "complete": true
+            }
+          },
+          "geometryHash": "bef4107b1f5cb7635b70737f61744258cf8939318c8e246726cf332c7a548a32"
+        },
+        {
+          "level": 2,
+          "label": "billboard-cross",
+          "distance": 63,
+          "triangles": 4,
+          "vertices": 8,
+          "bounds": {
+            "min": [
+              -0.696833,
+              -0.120845,
+              -0.828765
+            ],
+            "max": [
+              0.644119,
+              1.141916,
+              0.512186
+            ]
+          },
+          "sway": {
+            "min": 0.7,
+            "max": 0.7
+          },
+          "attributeLengths": {
+            "pos": 24,
+            "nrm": 24,
+            "uv0": 16,
+            "col": 24,
+            "tintable": 8,
+            "sway": 8,
+            "idx": 12
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "287da517",
+            "sourceIndexHash": "acebd62b",
+            "triangleCount": 4,
+            "indexCount": 12,
+            "groups": {
+              "total": 1,
+              "barkStem": 0,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 0,
+              "organ": 4
+            },
+            "coverage": {
+              "indices": 12,
+              "triangles": 4,
+              "complete": true
+            }
+          },
+          "geometryHash": "0ef98dce11e2d8fe31f0cf13496419b47cdc0435c722709d7e14608dce384301"
+        },
+        {
+          "level": 3,
+          "label": "impostor",
+          "distance": 129,
+          "triangles": 2,
+          "vertices": 4,
+          "bounds": {
+            "min": [
+              -0.696833,
+              -0.120845,
+              -0.15829
+            ],
+            "max": [
+              0.644119,
+              1.141916,
+              -0.15829
+            ]
+          },
+          "sway": {
+            "min": 0.7,
+            "max": 0.7
+          },
+          "attributeLengths": {
+            "pos": 12,
+            "nrm": 12,
+            "uv0": 8,
+            "col": 12,
+            "tintable": 4,
+            "sway": 4,
+            "idx": 6
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "52584354",
+            "sourceIndexHash": "27efcf43",
+            "triangleCount": 2,
+            "indexCount": 6,
+            "groups": {
+              "total": 1,
+              "barkStem": 0,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 0,
+              "organ": 2
+            },
+            "coverage": {
+              "indices": 6,
+              "triangles": 2,
+              "complete": true
+            }
+          },
+          "geometryHash": "048a875df31a00c56444a6bb843171f01f77894eb1d4aea49a396f53ac607d1f"
+        }
+      ],
+      "hash": "53f1e74942d2dbaf7e27b7125fc7dc10f71a3d02b241754f17ba783e5e7c124c"
+    },
+    {
+      "presetId": "cloverGroundcover",
+      "genome": {
+        "id": "cloverGroundcover",
+        "habit": "vine",
+        "backend": "procplant-graph",
+        "phyllotaxy": {
+          "mode": "legacy-spiral",
+          "angle": 2.399963
+        },
+        "hash": "385ac2e0041bb68fc9447b6628a3375f172eb189f55b252d6bd66f5e62b66625"
+      },
+      "attachmentIr": {
+        "segments": 11,
+        "attachments": 34,
+        "parentedAttachments": 34,
+        "kinds": {
+          "flower": 1,
+          "leaf": 33
+        },
+        "bounds": {
+          "min": [
+            -0.662978,
+            0.015207,
+            -0.684291
+          ],
+          "max": [
+            0.488855,
+            0.138981,
+            0.458961
+          ]
+        },
+        "axialT": {
+          "min": 0,
+          "max": 1
+        },
+        "sway": {
+          "min": 0.35,
+          "max": 1
+        },
+        "hash": "3db71208a92e96491fdaaa95af3b5cc89c21ee6feeb80741a7f3141817b9b2d4"
+      },
+      "instances": {
+        "total": 43,
+        "supportedKinds": [
+          "flowerCenter",
+          "leaf",
+          "petal"
+        ],
+        "countsByKind": {
+          "flowerCenter": 1,
+          "leaf": 33,
+          "petal": 9
+        }
+      },
+      "lodSelection": {
+        "contract": "procplants.runtime-lod-selection",
+        "version": 1,
+        "policy": {
+          "mode": "hybrid",
+          "distanceMetric": "camera-to-bounds-center-world-units",
+          "distanceNormalization": "divide-by-instance-max-world-scale",
+          "screenMetric": "projected-bounds-height-over-viewport-height",
+          "hysteresisRatio": 0.12,
+          "culling": {
+            "rule": "either",
+            "minDistance": 145.125,
+            "maxProjectedScreenHeight": 0.003
+          }
+        },
+        "tiers": [
+          {
+            "id": "lod0-full",
+            "level": 0,
+            "label": "full",
+            "minDistance": 0,
+            "maxProjectedScreenHeight": 1,
+            "triangleBudget": 626,
+            "organBudget": 34
+          },
+          {
+            "id": "lod1-clustered",
+            "level": 1,
+            "label": "clustered",
+            "minDistance": 13.5,
+            "maxProjectedScreenHeight": 0.22,
+            "triangleBudget": 301,
+            "organBudget": 17
+          },
+          {
+            "id": "lod2-billboard-cross",
+            "level": 2,
+            "label": "billboard-cross",
+            "minDistance": 31.5,
+            "maxProjectedScreenHeight": 0.075,
+            "triangleBudget": 32,
+            "organBudget": 4
+          },
+          {
+            "id": "lod3-impostor",
+            "level": 3,
+            "label": "impostor",
+            "minDistance": 64.5,
+            "maxProjectedScreenHeight": 0.025,
+            "triangleBudget": 2,
+            "organBudget": 1
+          }
+        ]
+      },
+      "lods": [
+        {
+          "level": 0,
+          "label": "full",
+          "distance": 0,
+          "triangles": 662,
+          "vertices": 1898,
+          "bounds": {
+            "min": [
+              -0.741847,
+              -0.042429,
+              -0.798702
+            ],
+            "max": [
+              0.590985,
+              0.198625,
+              0.560082
+            ]
+          },
+          "sway": {
+            "min": 0.05,
+            "max": 1
+          },
+          "attributeLengths": {
+            "pos": 5694,
+            "nrm": 5694,
+            "uv0": 3796,
+            "col": 5694,
+            "tintable": 1898,
+            "sway": 1898,
+            "idx": 1986
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "f4f6a4eb",
+            "sourceIndexHash": "8f441b29",
+            "triangleCount": 662,
+            "indexCount": 1986,
+            "groups": {
+              "total": 2,
+              "barkStem": 1,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 88,
+              "organ": 574
+            },
+            "coverage": {
+              "indices": 1986,
+              "triangles": 662,
+              "complete": true
+            }
+          },
+          "geometryHash": "b8ca8d5a96e1b212bf5eff8284db7d999c0633c70f6ece730ba75deab4a55e94"
+        },
+        {
+          "level": 1,
+          "label": "clustered",
+          "distance": 13.5,
+          "triangles": 382,
+          "vertices": 1098,
+          "bounds": {
+            "min": [
+              -0.671876,
+              -0.011988,
+              -0.525178
+            ],
+            "max": [
+              0.580207,
+              0.19375,
+              0.629172
+            ]
+          },
+          "sway": {
+            "min": 0.1,
+            "max": 1
+          },
+          "attributeLengths": {
+            "pos": 3294,
+            "nrm": 3294,
+            "uv0": 2196,
+            "col": 3294,
+            "tintable": 1098,
+            "sway": 1098,
+            "idx": 1146
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "ebd51345",
+            "sourceIndexHash": "1ef0b930",
+            "triangleCount": 382,
+            "indexCount": 1146,
+            "groups": {
+              "total": 2,
+              "barkStem": 1,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 48,
+              "organ": 334
+            },
+            "coverage": {
+              "indices": 1146,
+              "triangles": 382,
+              "complete": true
+            }
+          },
+          "geometryHash": "72a0d1cdcdc2281a8508b7b6ec5fbfc43e520c7d0c1e713036a06e09b9145e72"
+        },
+        {
+          "level": 2,
+          "label": "billboard-cross",
+          "distance": 31.5,
+          "triangles": 4,
+          "vertices": 8,
+          "bounds": {
+            "min": [
+              -0.754823,
+              -0.042429,
+              -0.798702
+            ],
+            "max": [
+              0.603961,
+              0.198625,
+              0.560082
+            ]
+          },
+          "sway": {
+            "min": 0.7,
+            "max": 0.7
+          },
+          "attributeLengths": {
+            "pos": 24,
+            "nrm": 24,
+            "uv0": 16,
+            "col": 24,
+            "tintable": 8,
+            "sway": 8,
+            "idx": 12
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "287da517",
+            "sourceIndexHash": "acebd62b",
+            "triangleCount": 4,
+            "indexCount": 12,
+            "groups": {
+              "total": 1,
+              "barkStem": 0,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 0,
+              "organ": 4
+            },
+            "coverage": {
+              "indices": 12,
+              "triangles": 4,
+              "complete": true
+            }
+          },
+          "geometryHash": "334920a8590db0f8b6ba20471acee7d5e0797ca2a5246bb72bf36c34c69895bd"
+        },
+        {
+          "level": 3,
+          "label": "impostor",
+          "distance": 64.5,
+          "triangles": 2,
+          "vertices": 4,
+          "bounds": {
+            "min": [
+              -0.754823,
+              -0.042429,
+              -0.11931
+            ],
+            "max": [
+              0.603961,
+              0.198625,
+              -0.11931
+            ]
+          },
+          "sway": {
+            "min": 0.7,
+            "max": 0.7
+          },
+          "attributeLengths": {
+            "pos": 12,
+            "nrm": 12,
+            "uv0": 8,
+            "col": 12,
+            "tintable": 4,
+            "sway": 4,
+            "idx": 6
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "52584354",
+            "sourceIndexHash": "27efcf43",
+            "triangleCount": 2,
+            "indexCount": 6,
+            "groups": {
+              "total": 1,
+              "barkStem": 0,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 0,
+              "organ": 2
+            },
+            "coverage": {
+              "indices": 6,
+              "triangles": 2,
+              "complete": true
+            }
+          },
+          "geometryHash": "21379186ec223049cb5f33ea1ed0c1f2c88ba9e40c99811c5ec307fd71f4c23c"
+        }
+      ],
+      "hash": "15871a8a57b2bc499aa8695d7cca4126a4d6ca802ac4e68ab5d9618f8d1c47c6"
+    },
+    {
+      "presetId": "weepingWillow",
+      "genome": {
+        "id": "weepingWillow",
+        "habit": "tree",
+        "backend": "branch-module-graph",
+        "phyllotaxy": {
+          "mode": "alternate",
+          "phase": 0.42
+        },
+        "hash": "3f0e1564a65e66b793b9ae528af7154daf4637c91f0a747b55fc291dd0bdc975"
+      },
+      "attachmentIr": {
+        "segments": 79,
+        "attachments": 27,
+        "parentedAttachments": 27,
+        "kinds": {
+          "branch-tip": 27
+        },
+        "bounds": {
+          "min": [
+            -0.172408,
+            0.25731,
+            -0.293139
+          ],
+          "max": [
+            0.338676,
+            1.505068,
+            0.263405
+          ]
+        },
+        "axialT": {
+          "min": 1,
+          "max": 1
+        },
+        "sway": {
+          "min": 0.833689,
+          "max": 0.96
+        },
+        "hash": "f0f60ad5b600b6e8acb69a1112e5e3d49085eadd64cca114d7496877649b4812"
+      },
+      "instances": {
+        "total": 0,
+        "supportedKinds": [],
+        "countsByKind": {}
+      },
+      "lodSelection": {
+        "contract": "procplants.runtime-lod-selection",
+        "version": 1,
+        "policy": {
+          "mode": "hybrid",
+          "distanceMetric": "camera-to-bounds-center-world-units",
+          "distanceNormalization": "divide-by-instance-max-world-scale",
+          "screenMetric": "projected-bounds-height-over-viewport-height",
+          "hysteresisRatio": 0.12,
+          "culling": {
+            "rule": "either",
+            "minDistance": 290.25,
+            "maxProjectedScreenHeight": 0.003
+          }
+        },
+        "tiers": [
+          {
+            "id": "lod0-full",
+            "level": 0,
+            "label": "full",
+            "minDistance": 0,
+            "maxProjectedScreenHeight": 1,
+            "triangleBudget": 1800,
+            "organBudget": 73
+          },
+          {
+            "id": "lod1-clustered",
+            "level": 1,
+            "label": "clustered",
+            "minDistance": 27,
+            "maxProjectedScreenHeight": 0.22,
+            "triangleBudget": 864,
+            "organBudget": 37
+          },
+          {
+            "id": "lod2-billboard-cross",
+            "level": 2,
+            "label": "billboard-cross",
+            "minDistance": 63,
+            "maxProjectedScreenHeight": 0.075,
+            "triangleBudget": 32,
+            "organBudget": 4
+          },
+          {
+            "id": "lod3-impostor",
+            "level": 3,
+            "label": "impostor",
+            "minDistance": 129,
+            "maxProjectedScreenHeight": 0.025,
+            "triangleBudget": 2,
+            "organBudget": 1
+          }
+        ]
+      },
+      "lods": [
+        {
+          "level": 0,
+          "label": "full",
+          "distance": 0,
+          "triangles": 1800,
+          "vertices": 4768,
+          "bounds": {
+            "min": [
+              -0.20601,
+              -0.000023,
+              -0.296615
+            ],
+            "max": [
+              0.435414,
+              1.589774,
+              0.339812
+            ]
+          },
+          "sway": {
+            "min": 0.055556,
+            "max": 0.98
+          },
+          "attributeLengths": {
+            "pos": 14304,
+            "nrm": 14304,
+            "uv0": 9536,
+            "col": 14304,
+            "tintable": 4768,
+            "sway": 4768,
+            "idx": 5400
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "18f25bad",
+            "sourceIndexHash": "babaebe8",
+            "triangleCount": 1800,
+            "indexCount": 5400,
+            "groups": {
+              "total": 2,
+              "barkStem": 1,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 632,
+              "organ": 1168
+            },
+            "coverage": {
+              "indices": 5400,
+              "triangles": 1800,
+              "complete": true
+            }
+          },
+          "geometryHash": "14018471e1c2072f7d83bff84d19885897f54331d2d71741dc6629adfecb31d5"
+        },
+        {
+          "level": 1,
+          "label": "clustered",
+          "distance": 27,
+          "triangles": 616,
+          "vertices": 1488,
+          "bounds": {
+            "min": [
+              -0.170759,
+              -0.000023,
+              -0.271913
+            ],
+            "max": [
+              0.310192,
+              1.274147,
+              0.261283
+            ]
+          },
+          "sway": {
+            "min": 0.055556,
+            "max": 0.943911
+          },
+          "attributeLengths": {
+            "pos": 4464,
+            "nrm": 4464,
+            "uv0": 2976,
+            "col": 4464,
+            "tintable": 1488,
+            "sway": 1488,
+            "idx": 1848
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "402f0a44",
+            "sourceIndexHash": "df387d1e",
+            "triangleCount": 616,
+            "indexCount": 1848,
+            "groups": {
+              "total": 2,
+              "barkStem": 1,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 360,
+              "organ": 256
+            },
+            "coverage": {
+              "indices": 1848,
+              "triangles": 616,
+              "complete": true
+            }
+          },
+          "geometryHash": "1228e2aa0f959331f3dc93e5b7d9fbba671f2d2a612f334610df87710d2d6f52"
+        },
+        {
+          "level": 2,
+          "label": "billboard-cross",
+          "distance": 63,
+          "triangles": 4,
+          "vertices": 8,
+          "bounds": {
+            "min": [
+              -0.20601,
+              -0.000023,
+              -0.299114
+            ],
+            "max": [
+              0.435414,
+              1.589774,
+              0.342311
+            ]
+          },
+          "sway": {
+            "min": 0.7,
+            "max": 0.7
+          },
+          "attributeLengths": {
+            "pos": 24,
+            "nrm": 24,
+            "uv0": 16,
+            "col": 24,
+            "tintable": 8,
+            "sway": 8,
+            "idx": 12
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "287da517",
+            "sourceIndexHash": "acebd62b",
+            "triangleCount": 4,
+            "indexCount": 12,
+            "groups": {
+              "total": 1,
+              "barkStem": 0,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 0,
+              "organ": 4
+            },
+            "coverage": {
+              "indices": 12,
+              "triangles": 4,
+              "complete": true
+            }
+          },
+          "geometryHash": "332a043f1acbfb8b94979523df0a2bab285da7252792855998b6a9e69c446bda"
+        },
+        {
+          "level": 3,
+          "label": "impostor",
+          "distance": 129,
+          "triangles": 2,
+          "vertices": 4,
+          "bounds": {
+            "min": [
+              -0.20601,
+              -0.000023,
+              0.021599
+            ],
+            "max": [
+              0.435414,
+              1.589774,
+              0.021599
+            ]
+          },
+          "sway": {
+            "min": 0.7,
+            "max": 0.7
+          },
+          "attributeLengths": {
+            "pos": 12,
+            "nrm": 12,
+            "uv0": 8,
+            "col": 12,
+            "tintable": 4,
+            "sway": 4,
+            "idx": 6
+          },
+          "surfacePartition": {
+            "contract": "procplants.surface-partition",
+            "version": 1,
+            "contentHash": "52584354",
+            "sourceIndexHash": "27efcf43",
+            "triangleCount": 2,
+            "indexCount": 6,
+            "groups": {
+              "total": 1,
+              "barkStem": 0,
+              "organ": 1
+            },
+            "triangles": {
+              "barkStem": 0,
+              "organ": 2
+            },
+            "coverage": {
+              "indices": 6,
+              "triangles": 2,
+              "complete": true
+            }
+          },
+          "geometryHash": "bc970902923bd23d6dfae727b2ef56a60b690634c20b8af0748278863fa00db9"
+        }
+      ],
+      "hash": "c28831c2be45295e3e18b812a7d7ed2026f2b7d71e3e5c48a7f60c4bbf38e821"
+    }
+  ],
+  "hash": "28c70baa23fe0bbd5e1e08c0c86b12670f3b70bf4cc62b191bd2a4842deeee95"
+}

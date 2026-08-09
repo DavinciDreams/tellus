@@ -8,6 +8,7 @@ import {
   buildProcPlantRuntimePackage,
   branchModuleSpreadForGenome,
   createProcPlantConiferSprayGeometry,
+  createProcPlantFernFrondGeometry,
   createProcPlantLeafGeometry,
   defaultPlantEnvironment,
   procPlantPresets,
@@ -74,8 +75,17 @@ describe("procplant vegetation", () => {
 
   it("keeps authored close-tree presets above box-like radial budgets", () => {
     const treePresets = Object.values(procPlantPresets).filter((genome) => genome.weberPenn);
+    const optimizedConifers = new Set(["blueSpruce", "alpineFir"]);
     expect(treePresets.length).toBeGreaterThan(0);
-    expect(treePresets.every((genome) => (genome.weberPenn?.radialSegments ?? 6) >= 6)).toBe(true);
+    // Blue Spruce and Alpine Fir deliberately trade tube radial detail for foliage coverage;
+    // tellus-procplants-cost-parity.test.ts protects their measured bounds and triangle ceilings.
+    expect(treePresets
+      .filter((genome) => !optimizedConifers.has(genome.id))
+      .every((genome) => (genome.weberPenn?.radialSegments ?? 6) >= 6)).toBe(true);
+    for (const presetId of optimizedConifers) {
+      expect(procPlantPresets[presetId]?.habit).toBe("conifer");
+      expect(procPlantPresets[presetId]?.weberPenn?.radialSegments).toBe(4);
+    }
   });
 
   it("protects nearby branch-module crowns from chunk and low-FPS LOD pressure", () => {
@@ -974,6 +984,50 @@ describe("procplant vegetation", () => {
     expect(vegetation.stats().manualPlants).toBe(2);
     expect(vegetation.stats().plants).toBeGreaterThanOrEqual(2);
 
+    vegetation.dispose();
+  });
+
+  it("renders fern instances with the dedicated broad frond geometry", () => {
+    const scene = new THREE.Scene();
+    const vegetation = createProcPlantVegetation({
+      scene,
+      worldId: "chunked-fern-frond-test",
+      sampleHeight: () => 1,
+      samplePaint: () => "meadow",
+      bounds: { minX: -20, maxX: 20, minZ: -20, maxZ: 20 },
+      densityMultiplier: 0,
+    });
+
+    expect(vegetation.placeManualPlant({
+      id: "manual-phi-fern",
+      presetId: "phiFern",
+      seed: 612072,
+      x: 1,
+      z: 1,
+      scale: 1,
+    })).toBe(true);
+    for (let i = 0; i < 12 && vegetation.stats().plants === 0; i++) {
+      vegetation.update(0, 0, 1, 60, i * 16);
+    }
+
+    const expected = createProcPlantFernFrondGeometry();
+    const expectedVertices = expected.getAttribute("position").count;
+    const expectedTriangles = (expected.getIndex()?.count ?? 0) / 3;
+    let matchingMeshes = 0;
+    scene.traverse((child) => {
+      if (!(child instanceof THREE.InstancedMesh)) return;
+      if (
+        child.geometry.getAttribute("position").count === expectedVertices &&
+        (child.geometry.getIndex()?.count ?? 0) / 3 === expectedTriangles
+      ) {
+        matchingMeshes++;
+      }
+    });
+
+    expect(vegetation.stats().plants).toBeGreaterThan(0);
+    expect(matchingMeshes).toBeGreaterThan(0);
+
+    expected.dispose();
     vegetation.dispose();
   });
 
