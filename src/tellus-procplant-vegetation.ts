@@ -75,6 +75,7 @@ import {
   createProcPlantConiferSprayGeometry,
   createProcPlantDaylilyBloomGeometry,
   defaultPlantEnvironment,
+  createProcPlantFernFrondGeometry,
   createProcPlantFlowerCenterGeometry,
   createProcPlantFlowerDiscGeometry,
   createProcPlantFoxgloveBloomGeometry,
@@ -900,6 +901,8 @@ const geometryForKey = (key: string): THREE.BufferGeometry => {
       return createProcPlantFlowerCenterGeometry();
     case "coniferSpray":
       return createProcPlantConiferSprayGeometry();
+    case "fernFrond":
+      return createProcPlantFernFrondGeometry();
     case "palmFrond":
       return createProcPlantPalmFrondGeometry();
     default:

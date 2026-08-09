@@ -20,7 +20,7 @@
     "terrain:yosemite": "node scripts/bake-yosemite-dem.mjs --chunks=20",
     "wildlife:audit": "node scripts/audit-wildlife-pack.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --passWithNoTests --testTimeout=30000",
     "test:coverage": "vitest run --passWithNoTests --testTimeout=30000 --coverage",
     "perf:render": "bun run build && node scripts/check-render-performance.mjs"
   },

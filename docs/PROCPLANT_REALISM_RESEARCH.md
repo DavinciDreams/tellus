@@ -53,13 +53,13 @@ unit-length, orthogonal, and deterministic.
 - Moving players receive a quick sparse build. Cold templates and full density
   refine gradually after movement stops under bounded per-update build counts
   and millisecond budgets.
-- Phi Fern uses six branch-relative slotted frond cards instead of repeated
+- Phi Fern uses eight branch-relative broad tapered frond cards instead of repeated
   leaflet chains, and Blue Spruce/Alpine Fir use bounded four-sided stems with
   one branch sample while retaining explicit foliage coverage budgets.
 - Against the same `origin/master` build, the opt-in contract/cost/groundcover
-  pass changes only `tellus-procplant-biomes` materially: 154,248 to 156,446
-  raw bytes and 42,042 to 42,550 level-9 gzip bytes (+1.43% raw, +1.21% gzip).
-  The main chunk is byte-identical raw and one gzip byte smaller; the shared
+  pass changes only `tellus-procplant-biomes` materially: 154,248 to 157,662
+  raw bytes and 42,042 to 42,760 level-9 gzip bytes (+2.21% raw, +1.71% gzip).
+  The main chunk grows by 54 raw bytes and 13 gzip bytes; the shared
   Three.js chunk is byte-identical.
 
 These are quality-preserving reductions in generation and rendering work. They

@@ -54,12 +54,14 @@ describe("procplant cost parity", () => {
       };
     });
 
+    // Ferns use a dedicated wide-at-base, tapered frond card (fernFrond) rather than the palm's
+    // mid-length-widest blade — the palm profile read as wheat at this triangle budget.
     const fern = buildProcPlantGraph(procPlantPresets.phiFern, SEED, ENVIRONMENT);
-    expect(fern.organs).toHaveLength(6);
-    expect(fern.organs.every((organ) => organ.kind === "palmFrond")).toBe(true);
+    expect(fern.organs).toHaveLength(8);
+    expect(fern.organs.every((organ) => organ.kind === "fernFrond")).toBe(true);
     const fernParts = buildProcPlantInstancedParts(procPlantPresets.phiFern, SEED, ENVIRONMENT);
-    expect(fernParts.instances).toHaveLength(36);
-    expect(fernParts.instances.every((instance) => instance.kind === "palmFrond")).toBe(true);
+    expect(fernParts.instances).toHaveLength(48);
+    expect(fernParts.instances.every((instance) => instance.kind === "fernFrond")).toBe(true);
     expect(Math.min(metrics[0]!.size[0], metrics[0]!.size[2])).toBeGreaterThan(1.2);
 
     const clover = buildProcPlantGraph(procPlantPresets.cloverGroundcover, SEED, ENVIRONMENT);
