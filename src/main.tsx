@@ -11258,7 +11258,7 @@ function createTellusWorld(
           agentId: "world",
           agentName: "Tellus",
           tool: "interact",
-          text: "WebGPU is not available in this browser. Using simplified WebGL preview.",
+          text: "Using the default WebGL renderer. WebGPU remains an explicit developer opt-in.",
         });
       }
       applyLowGpuDebugMode();
