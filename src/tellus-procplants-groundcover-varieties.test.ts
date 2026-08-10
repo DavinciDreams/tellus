@@ -10,6 +10,7 @@ import {
 import {
   ECOLOGY_BIOME_OPTIONS,
   PROCPLANT_PLACEABLE_CATALOG,
+  TELLUS_PLACEMENT_ONLY_GROUNDCOVER_PROCPLANT_PRESETS,
   biomePatchesForEcologyBiome,
   biomePatchesForPaint,
 } from "./tellus-procplant-biomes";
@@ -110,7 +111,9 @@ describe("opt-in non-grass groundcover varieties", () => {
         }
       }
     }
-    expect(automaticIds.has("maidenhairFernPatch")).toBe(false);
-    expect(automaticIds.has("woodlandVioletCarpet")).toBe(false);
+    for (const id of TELLUS_PLACEMENT_ONLY_GROUNDCOVER_PROCPLANT_PRESETS) {
+      expect(placeablePresetIds.has(id)).toBe(true);
+      expect(automaticIds.has(id)).toBe(false);
+    }
   });
 });
