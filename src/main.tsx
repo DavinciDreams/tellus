@@ -1722,6 +1722,7 @@ function createTellusWorld(
           grassInstances: 0,
           grassTriangles: 0,
           stemTriangles: 0,
+          organTriangles: 0,
           organDraws: 0,
           branchSegments: 0,
           attachedLeaves: 0,

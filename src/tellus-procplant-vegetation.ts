@@ -30,6 +30,7 @@ import {
   biomePatchForPaint,
   environmentForBiomePatch,
   GLOBAL_DEFAULT_FERN_ASSET_IDS,
+  TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESET_SET,
   genomeForBiomePatch,
   treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
@@ -72,6 +73,7 @@ import {
 import {
   branchModuleSpreadForGenome,
   buildProcPlantInstancedParts,
+  compileProcPlantLods,
   createProcPlantInstanceGeometry,
   defaultPlantEnvironment,
   isProcPlantSupportedInstanceKind,
@@ -80,6 +82,7 @@ import {
   type ProcPlantHabit,
   type ProcPlantInstance,
   type ProcPlantInstancedParts,
+  type ProcPlantCompiledLod,
   type ProcPlantTemplate,
   GOLDEN_ANGLE_RADIANS,
   procPlantPresets,
@@ -121,6 +124,7 @@ export interface ProcPlantVegetationStats {
   grassInstances: number;
   grassTriangles: number;
   stemTriangles: number;
+  organTriangles: number;
   organDraws: number;
   branchSegments: number;
   attachedLeaves: number;
@@ -183,6 +187,7 @@ interface ChunkStats {
   grassInstances: number;
   grassTriangles: number;
   stemTriangles: number;
+  organTriangles: number;
   organDraws: number;
   branchSegments: number;
   attachedLeaves: number;
@@ -351,6 +356,12 @@ export const groundPlantDistanceDensity = (
   return THREE.MathUtils.lerp(1, PROC_GROUND_PLANT_MIN_DENSITY, fade);
 };
 
+/** Package geometry tier used by audited Tellus groundcovers; horizon chunks omit them. */
+export const groundcoverTemplateLodForChunk = (
+  chunkLod: 0 | 1 | 2 | 3,
+  fullDetail = false,
+): 0 | 1 | 2 | null => fullDetail ? 0 : chunkLod === 3 ? null : chunkLod;
+
 /** Keep close trunks visually round even when low FPS reduces branch-count LOD. */
 export const procPlantBranchRadialSegments = (chunkLod: number, distanceLod: BranchModuleLodLevel): number => {
   const visualLod = Math.max(chunkLod, distanceLod);
@@ -440,17 +451,27 @@ const buildBranchModuleTreeCached = (
 // little, so 0.25-steps are visually indistinguishable while collapsing the cache key space).
 const PLANT_SEED_BUCKETS = 12;
 const procPlantPartsCache = new Map<string, ProcPlantInstancedParts>();
+const procPlantLodsCache = new Map<string, ProcPlantCompiledLod[]>();
+const procPlantCacheIdentity = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+) => {
+  const bucket =
+    ((Math.trunc(seed) % PLANT_SEED_BUCKETS) + PLANT_SEED_BUCKETS) % PLANT_SEED_BUCKETS;
+  const q = (value: number) => Math.round(value * 4) / 4;
+  return {
+    bucket,
+    key: `${genome.id}|${bucket}|${q(env.light)}|${q(env.moisture)}|${q(env.crowding)}|${q(env.biomeWarmth)}`,
+  };
+};
 const buildProcPlantInstancedPartsCached = (
   genome: ProcPlantGenome,
   seed: number,
   env: ProcPlantEnvironment,
   allowColdBuild = true,
 ): ProcPlantInstancedParts | null => {
-  const bucket =
-    ((Math.trunc(seed) % PLANT_SEED_BUCKETS) + PLANT_SEED_BUCKETS) % PLANT_SEED_BUCKETS;
-  const q = (v: number) => Math.round(v * 4) / 4;
-  const key =
-    `${genome.id}|${bucket}|${q(env.light)}|${q(env.moisture)}|${q(env.crowding)}|${q(env.biomeWarmth)}`;
+  const { bucket, key } = procPlantCacheIdentity(genome, seed, env);
   let built = procPlantPartsCache.get(key);
   if (!built && !allowColdBuild) return null;
   if (!built) {
@@ -459,6 +480,22 @@ const buildProcPlantInstancedPartsCached = (
     procPlantPartsCache.set(key, built);
   }
   return built;
+};
+
+const compileProcPlantLodsCached = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+  allowColdBuild = true,
+): ProcPlantCompiledLod[] | null => {
+  const { bucket, key } = procPlantCacheIdentity(genome, seed, env);
+  let lods = procPlantLodsCache.get(key);
+  if (!lods && !allowColdBuild) return null;
+  if (!lods) {
+    lods = compileProcPlantLods(genome, ((bucket + 1) * 0x9e3779b1) >>> 0, env);
+    procPlantLodsCache.set(key, lods);
+  }
+  return lods;
 };
 
 const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color): ProcPlantTemplate => {
@@ -954,6 +991,7 @@ const emptyStats = (): ProcPlantVegetationStats => ({
   grassInstances: 0,
   grassTriangles: 0,
   stemTriangles: 0,
+  organTriangles: 0,
   organDraws: 0,
   branchSegments: 0,
   attachedLeaves: 0,
@@ -1714,6 +1752,7 @@ export function createProcPlantVegetation(
       grassInstances: 0,
       grassTriangles: 0,
       stemTriangles: 0,
+      organTriangles: 0,
       organDraws: 0,
       branchSegments: 0,
       attachedLeaves: 0,
@@ -2321,6 +2360,29 @@ export function createProcPlantVegetation(
         chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
+      const groundcoverLod = TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESET_SET.has(genome.id)
+        ? groundcoverTemplateLodForChunk(chunk.lod, fullDetailLod)
+        : 0;
+      if (groundcoverLod !== null && groundcoverLod > 0) {
+        const lods = compileProcPlantLodsCached(genome, renderSeed, environment, allowColdBuilds);
+        if (!lods) {
+          chunk.needsColdRefinement = true;
+          continue;
+        }
+        const template = lods[groundcoverLod]!.template;
+        const matrix = new THREE.Matrix4()
+          .makeRotationY(yaw)
+          .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
+          .premultiply(new THREE.Matrix4().makeTranslation(
+            x,
+            height + 0.02 - templateMinY(template) * scale,
+            z,
+          ));
+        stemTemplates.push({ template, matrix });
+        chunk.stats.plants++;
+        chunk.stats.stemTriangles += template.idx.length / 3;
+        continue;
+      }
       const built = buildProcPlantInstancedPartsCached(genome, renderSeed, environment, allowColdBuilds);
       if (!built) {
         chunk.needsColdRefinement = true;
@@ -2405,6 +2467,30 @@ export function createProcPlantVegetation(
           yaw,
           placement.scale,
         );
+        continue;
+      }
+      const groundcoverLod = TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESET_SET.has(genome.id)
+        ? groundcoverTemplateLodForChunk(chunk.lod, fullDetailLod)
+        : 0;
+      if (groundcoverLod !== null && groundcoverLod > 0) {
+        const environment = defaultPlantEnvironment();
+        const lods = compileProcPlantLodsCached(genome, placement.seed, environment, allowColdBuilds);
+        if (!lods) {
+          chunk.needsColdRefinement = true;
+          continue;
+        }
+        const template = lods[groundcoverLod]!.template;
+        const matrix = new THREE.Matrix4()
+          .makeRotationY(yaw)
+          .premultiply(new THREE.Matrix4().makeScale(placement.scale, placement.scale, placement.scale))
+          .premultiply(new THREE.Matrix4().makeTranslation(
+            placement.x,
+            height + 0.02 - templateMinY(template) * placement.scale,
+            placement.z,
+          ));
+        stemTemplates.push({ template, matrix });
+        chunk.stats.plants++;
+        chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
       const built = buildProcPlantInstancedPartsCached(
@@ -2494,9 +2580,10 @@ export function createProcPlantVegetation(
       mesh.receiveShadow = false;
       chunk.group.add(mesh);
       chunk.stats.organDraws++;
+      const vertices = bucket.geometry.getAttribute("position")?.count ?? 0;
+      const trianglesPerInstance = (bucket.geometry.getIndex()?.count ?? vertices) / 3;
+      chunk.stats.organTriangles += trianglesPerInstance * bucket.instances.length;
       if (bucket.key.startsWith("grassCarpet:")) {
-        const vertices = bucket.geometry.getAttribute("position")?.count ?? 0;
-        const trianglesPerInstance = (bucket.geometry.getIndex()?.count ?? vertices) / 3;
         chunk.stats.grassInstances += bucket.instances.length;
         chunk.stats.grassTriangles += trianglesPerInstance * bucket.instances.length;
       }
@@ -2591,6 +2678,7 @@ export function createProcPlantVegetation(
             grassInstances: 0,
             grassTriangles: 0,
             stemTriangles: 0,
+            organTriangles: 0,
             organDraws: 0,
             branchSegments: 0,
             attachedLeaves: 0,
@@ -2793,6 +2881,7 @@ export function createProcPlantVegetation(
       out.grassInstances += chunk.stats.grassInstances;
       out.grassTriangles += chunk.stats.grassTriangles;
       out.stemTriangles += chunk.stats.stemTriangles;
+      out.organTriangles += chunk.stats.organTriangles;
       out.organDraws += chunk.stats.organDraws;
       out.branchSegments += chunk.stats.branchSegments;
       out.attachedLeaves += chunk.stats.attachedLeaves;

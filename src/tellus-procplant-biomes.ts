@@ -61,9 +61,43 @@ export interface ProcPlantPlaceableCatalogEntry {
   scatterCount: number;
   scatterRadius: number;
   scale: number;
+  /** Available to explicit placement tools but excluded from automatic ecology and paint selection. */
+  placementOnly: boolean;
   assetStoreModelId?: string;
   assetModelUrl?: string;
 }
+
+export const TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESETS = [
+  "phiFern",
+  "brackenFernMat",
+  "maidenhairFernPatch",
+  "woodlandVioletCarpet",
+  "trilliumPatch",
+  "horsetailColony",
+  "cloverGroundcover",
+  "woodSorrelCarpet",
+  "woodlandAnemoneCarpet",
+  "creepingPhloxCarpet",
+  "wildStrawberryGroundcover",
+] as const;
+export const TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESET_SET: ReadonlySet<string> = new Set(
+  TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESETS,
+);
+
+export const TELLUS_PLACEMENT_ONLY_GROUNDCOVER_PROCPLANT_PRESETS = [
+  "brackenFernMat",
+  "maidenhairFernPatch",
+  "woodlandVioletCarpet",
+  "trilliumPatch",
+  "horsetailColony",
+  "woodSorrelCarpet",
+  "woodlandAnemoneCarpet",
+  "creepingPhloxCarpet",
+  "wildStrawberryGroundcover",
+] as const;
+const TELLUS_PLACEMENT_ONLY_GROUNDCOVER_PROCPLANT_PRESET_SET = new Set<string>(
+  TELLUS_PLACEMENT_ONLY_GROUNDCOVER_PROCPLANT_PRESETS,
+);
 
 export const ASSET_BACKED_PROCPLANT_MODEL_IDS = [
   "3e610d94-51a5-4257-9899-34f5c8eaa0bb",
@@ -189,6 +223,7 @@ export const PROCPLANT_PLACEABLE_CATALOG: ProcPlantPlaceableCatalogEntry[] = pro
     scatterCount: kind === "tree" ? 4 : kind === "flower" ? 12 : 10,
     scatterRadius: kind === "tree" ? 30 : 11,
     scale: replacement?.scale ?? adultScaleForProcPlantPreset(presetId),
+    placementOnly: TELLUS_PLACEMENT_ONLY_GROUNDCOVER_PROCPLANT_PRESET_SET.has(presetId),
     assetStoreModelId: replacement?.assetStoreModelId,
     assetModelUrl: replacement
       ? `/api/assets/model/${encodeURIComponent(replacement.assetStoreModelId)}/game-optimized`
