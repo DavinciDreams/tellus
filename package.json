@@ -25,7 +25,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests --testTimeout=30000",
     "test:coverage": "vitest run --passWithNoTests --testTimeout=30000 --coverage",
-    "perf:render": "bun run build && node scripts/check-render-performance.mjs"
+    "perf:render": "bun run build && node scripts/check-render-performance.mjs",
+    "perf:procplants-webgl": "bun run build && node scripts/check-procplant-webgl-performance.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",
