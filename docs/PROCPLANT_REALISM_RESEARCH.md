@@ -11,19 +11,20 @@ conifer sprays are in the runtime and Biome Mixer where applicable.
 
 ## External generator contract acceptance
 
-Tellus accepts Procplants generator contract revision 2, fixture version 2, as
-reviewed producer provenance through
-`fixtures/procplants/tellus-procplant-contract-v2.golden.json`. The focused
+Tellus accepts Procplants generator contract revision 3, fixture version 3, as
+reviewed producer provenance through the fixture shipped by the exact pinned
+`procplants/core` package. The focused
 contract-acceptance test pins the approved Phi Fern, Blue Spruce, Clover
 Groundcover, and Weeping Willow hashes, UV0 and surface partitions, supported
 instance totals, runtime LOD-selection tiers, biome normalization vectors, and
 their four decreasing geometry LODs.
 
-This acceptance does not assert that Tellus's current local generator produces
-equivalent graphs or geometry. Runtime adoption remains pending a versioned
-`procplants/core` package and a thin Tellus adapter; current runtime imports,
-default biome mappings, chunk LOD policy, wind, shadows, and asset substitutions
-remain unchanged.
+Tellus consumes that immutable package through a thin adapter and verifies the
+installed runtime geometry against the package fixture. Tellus still owns its
+default biome mappings, chunk LOD policy, wind, shadows, renderer choice, and
+asset substitutions. In particular, WebGL remains the default renderer because
+it is faster for the current Tellus workload; Procplants WebGPU paths are
+opt-in correctness work and are not Tellus performance evidence.
 
 The isolated 2026-08 integration also exposes Maidenhair Fern Patch and
 Woodland Violet Carpet as explicit procedural placement choices beside the

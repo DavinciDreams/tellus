@@ -124,7 +124,7 @@ describe("installed Procplants producer contract acceptance", () => {
       schema: "procplants-tellus-golden-contract",
       fixtureVersion: 3,
       generatorContractRevision: 3,
-      hash: "62870c7df7d6cd323d19662cad387881a5f3047f30ba4a295d148d277c9baa52",
+      hash: "a0e06f99d48e08713d8867260f30de9ee339d3d1f13cc2d97c18d30b90cb6585",
     });
     expect(PROCPLANT_GENERATOR_CONTRACT_REVISION).toBe(fixture.generatorContractRevision);
   });
