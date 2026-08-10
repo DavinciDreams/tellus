@@ -40,7 +40,7 @@
     "lucide-react": "^0.577.0",
     "meshoptimizer": "^1.1.1",
     "nostr-tools": "^2.23.5",
-    "procplants": "github:DavinciDreams/procedural-plant-lab#e3a69da8404efb7a093d18c699c13373365578f8",
+    "procplants": "github:DavinciDreams/procedural-plant-lab#5a9f2964b182a1d1e981c38ac5f4f2f4f9777867",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "sharp": "^0.35.0",
