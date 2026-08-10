@@ -19,11 +19,12 @@
  * (MeshBasicNodeMaterial / MeshStandardNodeMaterial); the runtime material is
  * a TSL node material with no GLSL fallback.
  *
- * Tellus's primary renderer IS `WebGPURenderer` (see main.tsx), so this works
- * on the default path. On the classic `WebGLRenderer` FALLBACK path, baking
- * will NOT function — call `isImpostorBakingSupported(renderer)` first and
- * skip impostor LOD (fall back to the existing distance-fade vegetation LOD)
- * when it returns false.
+ * Tellus defaults to `WebGLRenderer` because that path is currently faster and
+ * more reliable for its workload. This legacy TSL baker therefore does NOT run
+ * on the default Tellus path; it is available only after the explicit
+ * `tellus.renderer = "webgpu"` developer opt-in. Always call
+ * `isImpostorBakingSupported(renderer)` first and retain the WebGL-native asset
+ * impostor or mesh/distance LOD path when it returns false.
  * ============================================================================
  *
  * USAGE (not wired into the render loop yet — call from an LOD/asset builder):
