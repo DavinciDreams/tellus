@@ -4,6 +4,7 @@ import {
   buildProcPlantGraph,
   buildProcPlantInstancedParts,
   buildProcPlantTemplate,
+  compileProcPlantLods,
   defaultPlantEnvironment,
   procPlantPresets,
 } from "./tellus-procplants";
@@ -33,6 +34,21 @@ const TRIANGLE_CEILINGS = {
   cloverGroundcover: 1_400,
   blueSpruce: 6_000,
   alpineFir: 7_500,
+} as const;
+
+const INDEXED_LOD_METRICS = {
+  phiFern: {
+    triangles: [352, 264, 4, 2],
+    vertices: [704, 528, 8, 4],
+  },
+  blueSpruce: {
+    triangles: [3_934, 2_494, 4, 2],
+    vertices: [4_420, 2_436, 8, 4],
+  },
+  alpineFir: {
+    triangles: [5_190, 3_174, 4, 2],
+    vertices: [5_208, 2_856, 8, 4],
+  },
 } as const;
 
 describe("procplant cost parity", () => {
@@ -108,5 +124,16 @@ describe("procplant cost parity", () => {
     });
 
     console.log("PROCPLANT_COST_PARITY", JSON.stringify(metrics));
+  });
+
+  it("freezes the indexed Phi Fern and conifer LOD upload costs", () => {
+    for (const [id, expected] of Object.entries(INDEXED_LOD_METRICS) as [
+      keyof typeof INDEXED_LOD_METRICS,
+      (typeof INDEXED_LOD_METRICS)[keyof typeof INDEXED_LOD_METRICS],
+    ][]) {
+      const lods = compileProcPlantLods(procPlantPresets[id], SEED, ENVIRONMENT);
+      expect(lods.map(({ template }) => template.idx.length / 3)).toEqual(expected.triangles);
+      expect(lods.map(({ template }) => template.pos.length / 3)).toEqual(expected.vertices);
+    }
   });
 });
