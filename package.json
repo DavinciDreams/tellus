@@ -8,6 +8,9 @@
   "engines": {
     "node": "22.x"
   },
+  "trustedDependencies": [
+    "procplants"
+  ],
   "scripts": {
     "dev": "vite --host --port 3344 --strictPort",
     "build": "tsc --noEmit && vite build",
@@ -37,6 +40,7 @@
     "lucide-react": "^0.577.0",
     "meshoptimizer": "^1.1.1",
     "nostr-tools": "^2.23.5",
+    "procplants": "github:DavinciDreams/procedural-plant-lab#e3a69da8404efb7a093d18c699c13373365578f8",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "sharp": "^0.35.0",

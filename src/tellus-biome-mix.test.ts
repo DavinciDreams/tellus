@@ -196,14 +196,17 @@ describe("Tellus biome mix normalization", () => {
     expect(ECOLOGY_BIOME_OPTIONS.every((biome) => makeAuthoredEcologyBiomeMix(biome, 17) !== null)).toBe(true);
   });
 
-  it("keeps the reusable tundra small-pine preset aligned with the authored default and gravel fallback", () => {
+  it("keeps the authored tundra genome isolated while gravel maps to the registered small-pine preset", () => {
     const authored = makeAuthoredEcologyBiomeMix("tundra", 17);
     const authoredGenome = genomeForMixEntry(authored!.entries[0]!);
     const registeredGenome = procPlantPresets.tundraSmallPine;
 
-    expect(registeredGenome.weberPenn).toEqual(authoredGenome.weberPenn);
-    expect(registeredGenome.foliage).toEqual(authoredGenome.foliage);
-    expect(registeredGenome.treeRealism).toEqual(authoredGenome.treeRealism);
+    // Authored defaults retain their exported genome. Procplants v3 independently owns the
+    // lower-cost reusable preset used by automatic gravel placement.
+    expect(authoredGenome.id).toBe("weberPenn-smallPine");
+    expect(authoredGenome.weberPenn?.species).toBe("smallPine");
+    expect(registeredGenome.id).toBe("tundraSmallPine");
+    expect(registeredGenome.weberPenn?.species).toBe("smallPine");
 
     const gravelTree = biomePatchesForPaint("gravel", 17)
       .find((patch) => patch.primary === "tundraSmallPine");

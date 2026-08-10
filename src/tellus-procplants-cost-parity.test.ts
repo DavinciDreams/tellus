@@ -60,7 +60,9 @@ describe("procplant cost parity", () => {
     expect(fern.organs).toHaveLength(8);
     expect(fern.organs.every((organ) => organ.kind === "fernFrond")).toBe(true);
     const fernParts = buildProcPlantInstancedParts(procPlantPresets.phiFern, SEED, ENVIRONMENT);
-    expect(fernParts.instances).toHaveLength(48);
+    // Canonical Procplants keeps one 44-triangle prototype per graph organ: 8 x 44 = 352.
+    // Tellus must not re-introduce the former hidden six-card expansion.
+    expect(fernParts.instances).toHaveLength(8);
     expect(fernParts.instances.every((instance) => instance.kind === "fernFrond")).toBe(true);
     expect(Math.min(metrics[0]!.size[0], metrics[0]!.size[2])).toBeGreaterThan(1.2);
 

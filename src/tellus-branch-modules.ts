@@ -270,10 +270,12 @@ export function branchSegmentPrototypeTemplate(
   const vertexCount = position.count;
   const pos = new Float32Array(vertexCount * 3);
   const nrm = new Float32Array(vertexCount * 3);
+  const uv0 = new Float32Array(vertexCount * 2);
   const col = new Float32Array(vertexCount * 3);
   const tintable = new Uint8Array(vertexCount);
   const sway = new Float32Array(vertexCount);
   const bark = new THREE.Color(0x5d4327);
+  const uv = geometry.getAttribute("uv");
   for (let i = 0; i < vertexCount; i++) {
     const offset = i * 3;
     pos[offset] = position.getX(i);
@@ -282,6 +284,9 @@ export function branchSegmentPrototypeTemplate(
     nrm[offset] = normal.getX(i);
     nrm[offset + 1] = normal.getY(i);
     nrm[offset + 2] = normal.getZ(i);
+    const uvOffset = i * 2;
+    uv0[uvOffset] = uv?.getX(i) ?? 0;
+    uv0[uvOffset + 1] = uv?.getY(i) ?? 0;
     col[offset] = bark.r;
     col[offset + 1] = bark.g;
     col[offset + 2] = bark.b;
@@ -291,7 +296,7 @@ export function branchSegmentPrototypeTemplate(
   const idx = new Uint32Array(sourceIndex?.count ?? vertexCount);
   for (let i = 0; i < idx.length; i++) idx[i] = sourceIndex?.getX(i) ?? i;
   geometry.dispose();
-  const template = { pos, nrm, col, tintable, sway, idx };
+  const template = { pos, nrm, uv0, col, tintable, sway, idx };
   prototypeTemplates.set(cacheKey, template);
   return template;
 }

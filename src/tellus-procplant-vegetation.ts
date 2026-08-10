@@ -72,17 +72,9 @@ import {
 import {
   branchModuleSpreadForGenome,
   buildProcPlantInstancedParts,
-  createProcPlantConiferSprayGeometry,
-  createProcPlantDaylilyBloomGeometry,
+  createProcPlantInstanceGeometry,
   defaultPlantEnvironment,
-  createProcPlantFernFrondGeometry,
-  createProcPlantFlowerCenterGeometry,
-  createProcPlantFlowerDiscGeometry,
-  createProcPlantFoxgloveBloomGeometry,
-  createProcPlantGrassBladeGeometry,
-  createProcPlantLeafGeometry,
-  createProcPlantPalmFrondGeometry,
-  createProcPlantPetalGeometry,
+  isProcPlantSupportedInstanceKind,
   type ProcPlantEnvironment,
   type ProcPlantGenome,
   type ProcPlantHabit,
@@ -476,10 +468,12 @@ const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color
   const vertexCount = position.count;
   const pos = new Float32Array(vertexCount * 3);
   const nrm = new Float32Array(vertexCount * 3);
+  const uv0 = new Float32Array(vertexCount * 2);
   const col = new Float32Array(vertexCount * 3);
   const tintable = new Uint8Array(vertexCount);
   const sway = new Float32Array(vertexCount);
   const idx = new Uint32Array(vertexCount);
+  const uv = source.getAttribute("uv");
   for (let i = 0; i < vertexCount; i++) {
     const offset = i * 3;
     pos[offset] = position.getX(i);
@@ -488,6 +482,9 @@ const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color
     nrm[offset] = normal?.getX(i) ?? 0;
     nrm[offset + 1] = normal?.getY(i) ?? 1;
     nrm[offset + 2] = normal?.getZ(i) ?? 0;
+    const uvOffset = i * 2;
+    uv0[uvOffset] = uv?.getX(i) ?? 0;
+    uv0[uvOffset + 1] = uv?.getY(i) ?? 0;
     col[offset] = color.r;
     col[offset + 1] = color.g;
     col[offset + 2] = color.b;
@@ -496,7 +493,7 @@ const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color
     idx[i] = i;
   }
   if (source !== geometry) source.dispose();
-  return { pos, nrm, col, tintable, sway, idx };
+  return { pos, nrm, uv0, col, tintable, sway, idx };
 };
 
 const combineTransformedTemplates = (
@@ -510,6 +507,7 @@ const combineTransformedTemplates = (
   const totalIndices = entries.reduce((sum, entry) => sum + entry.template.idx.length, 0);
   const pos = new Float32Array(totalVertices * 3);
   const nrm = new Float32Array(totalVertices * 3);
+  const uv0 = new Float32Array(totalVertices * 2);
   const col = new Float32Array(totalVertices * 3);
   const tintable = new Uint8Array(totalVertices);
   const sway = new Float32Array(totalVertices);
@@ -542,6 +540,10 @@ const combineTransformedTemplates = (
       nrm[target] = normal.x;
       nrm[target + 1] = normal.y;
       nrm[target + 2] = normal.z;
+      const sourceUv = vertex * 2;
+      const targetUv = (vertexCursor + vertex) * 2;
+      uv0[targetUv] = template.uv0[sourceUv] ?? 0;
+      uv0[targetUv + 1] = template.uv0[sourceUv + 1] ?? 0;
       col[target] = color?.r ?? template.col[source] ?? 1;
       col[target + 1] = color?.g ?? template.col[source + 1] ?? 1;
       col[target + 2] = color?.b ?? template.col[source + 2] ?? 1;
@@ -553,7 +555,7 @@ const combineTransformedTemplates = (
     indexCursor += template.idx.length;
   }
 
-  return { pos, nrm, col, tintable, sway, idx };
+  return { pos, nrm, uv0, col, tintable, sway, idx };
 };
 
 const cheapTreeTemplateCache = new Map<string, ProcPlantTemplate>();
@@ -584,6 +586,7 @@ export const procPlantTemplateFromAssetTemplate = (
   const template: ProcPlantTemplate = {
     pos: new Float32Array(asset.positions),
     nrm: new Float32Array(asset.normals),
+    uv0: new Float32Array(asset.vertexCount * 2),
     col: colors,
     tintable: new Uint8Array(asset.vertexCount),
     sway: new Float32Array(asset.vertexCount),
@@ -647,12 +650,16 @@ export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit):
   // through to the generic broadleaf trunk+icosahedron silhouette at distance.
   const conifer = habit === "conifer" || /fir|pine|douglas|larch|spruce/i.test(species);
   if (conifer) {
-    const template = buildRetroCutoutTreeTemplate(hashString(species), undefined, {
+    const retroTemplate = buildRetroCutoutTreeTemplate(hashString(species), undefined, {
       height: /small/i.test(species) ? 0.98 : /douglas|redwood/i.test(species) ? 1.36 : 1.18,
       width: /small/i.test(species) ? 0.42 : /douglas|redwood/i.test(species) ? 0.56 : 0.5,
       planes: /small/i.test(species) ? 3 : 4,
       trunkRadius: /small/i.test(species) ? 0.052 : 0.058,
     });
+    const template: ProcPlantTemplate = {
+      ...retroTemplate,
+      uv0: new Float32Array(retroTemplate.pos.length / 3 * 2),
+    };
     cheapTreeTemplateCache.set(cacheKey, template);
     return template;
   }
@@ -677,6 +684,7 @@ export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit):
   const vertexOffset = trunkTemplate.pos.length / 3;
   const pos = new Float32Array(trunkTemplate.pos.length + crownTemplate.pos.length);
   const nrm = new Float32Array(trunkTemplate.nrm.length + crownTemplate.nrm.length);
+  const uv0 = new Float32Array(trunkTemplate.uv0.length + crownTemplate.uv0.length);
   const col = new Float32Array(trunkTemplate.col.length + crownTemplate.col.length);
   const tintable = new Uint8Array(trunkTemplate.tintable.length + crownTemplate.tintable.length);
   const sway = new Float32Array(trunkTemplate.sway.length + crownTemplate.sway.length);
@@ -685,6 +693,8 @@ export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit):
   pos.set(crownTemplate.pos, trunkTemplate.pos.length);
   nrm.set(trunkTemplate.nrm, 0);
   nrm.set(crownTemplate.nrm, trunkTemplate.nrm.length);
+  uv0.set(trunkTemplate.uv0, 0);
+  uv0.set(crownTemplate.uv0, trunkTemplate.uv0.length);
   col.set(trunkTemplate.col, 0);
   col.set(crownTemplate.col, trunkTemplate.col.length);
   tintable.set(trunkTemplate.tintable, 0);
@@ -698,6 +708,7 @@ export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit):
   const template = {
     pos,
     nrm,
+    uv0,
     col,
     tintable,
     sway,
@@ -875,38 +886,60 @@ const createGrassCarpetGeometry = (bladeCount: number): THREE.BufferGeometry => 
 
 const geometryForKey = (key: string): THREE.BufferGeometry => {
   const [kind, shape, widthRatio, serration, curl, venation] = key.split(":");
+  if (kind === "grassCarpet") return createGrassCarpetGeometry(Number(shape) || 12);
+  if (!isProcPlantSupportedInstanceKind(kind)) {
+    throw new Error(`Unsupported Procplants v3 instance kind: ${kind}`);
+  }
+  const baseGenome = procPlantPresets.phiFern!;
+  const parsedVenation = Number(venation);
+  const genome = kind === "leaf"
+    ? {
+        ...baseGenome,
+        leaf: {
+          ...baseGenome.leaf,
+          shape: shape as ProcPlantGenome["leaf"]["shape"],
+          widthRatio: Number(widthRatio),
+          serration: Number(serration),
+          curl: Number(curl),
+          venation: Number.isFinite(parsedVenation) ? parsedVenation : 0.5,
+        },
+      }
+    : kind === "grassBlade"
+      ? {
+          ...baseGenome,
+          leaf: {
+            ...baseGenome.leaf,
+            widthRatio: Number(shape),
+            curl: Number(widthRatio),
+          },
+        }
+      : baseGenome;
   switch (kind) {
-    case "grassCarpet":
-      return createGrassCarpetGeometry(Number(shape) || 12);
     case "leaf":
-      const parsedVenation = Number(venation);
-      return createProcPlantLeafGeometry(
-        shape as ProcPlantGenome["leaf"]["shape"],
-        Number(widthRatio),
-        Number(serration),
-        Number(curl),
-        Number.isFinite(parsedVenation) ? parsedVenation : 0.5,
-      );
     case "grassBlade":
-      return createProcPlantGrassBladeGeometry(Number(shape), Number(widthRatio));
     case "petal":
-      return createProcPlantPetalGeometry();
     case "flowerDisc":
-      return createProcPlantFlowerDiscGeometry();
     case "daylilyBloom":
-      return createProcPlantDaylilyBloomGeometry();
+    case "hibiscusBloom":
+    case "flobotCupBloom":
+    case "flobotPetal2Bloom":
+    case "flobotPinkBloom":
     case "foxgloveBloom":
-      return createProcPlantFoxgloveBloomGeometry();
     case "flowerCenter":
-      return createProcPlantFlowerCenterGeometry();
+    case "fruit":
+    case "berry":
+    case "cone":
+    case "thorn":
+    case "aerialRoot":
     case "coniferSpray":
-      return createProcPlantConiferSprayGeometry();
     case "fernFrond":
-      return createProcPlantFernFrondGeometry();
     case "palmFrond":
-      return createProcPlantPalmFrondGeometry();
-    default:
-      return createProcPlantPetalGeometry();
+    case "mossTuft":
+      return createProcPlantInstanceGeometry(kind, genome);
+    default: {
+      const unsupported: never = kind;
+      throw new Error(`Unsupported Procplants v3 instance kind: ${String(unsupported)}`);
+    }
   }
 };
 
@@ -1165,6 +1198,7 @@ export function createProcPlantVegetation(
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(template.pos, 3));
     geometry.setAttribute("normal", new THREE.BufferAttribute(template.nrm, 3));
+    geometry.setAttribute("uv", new THREE.BufferAttribute(template.uv0, 2));
     geometry.setAttribute("color", new THREE.BufferAttribute(template.col, 3));
     attachFoliageWindWeights(geometry, clampedWindWeights(template.sway));
     geometry.setIndex(new THREE.BufferAttribute(template.idx, 1));

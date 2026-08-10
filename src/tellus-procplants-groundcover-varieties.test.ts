@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
   buildProcPlantGraph,
+  buildProcPlantInstancedParts,
   buildProcPlantTemplate,
   defaultPlantEnvironment,
   procPlantPresets,
@@ -60,7 +61,19 @@ describe("opt-in non-grass groundcover varieties", () => {
         expect(organ.right.toArray().every(Number.isFinite)).toBe(true);
         expect(organ.direction.length()).toBeCloseTo(1, 5);
         expect(organ.right.length()).toBeCloseTo(1, 5);
-        expect(Math.abs(organ.direction.dot(organ.right))).toBeLessThan(1e-5);
+      }
+
+      // Attachment IR is the public branch-relative placement contract. The renderer consumes
+      // compiled instance matrices, not the generator's intermediate organ-frame vectors.
+      const parts = buildProcPlantInstancedParts(genome, SEED, ENVIRONMENT);
+      for (const attachment of parts.graph.attachments) {
+        expect(Math.abs(attachment.tangent.dot(attachment.right))).toBeLessThan(1e-5);
+        expect(Math.abs(attachment.tangent.dot(attachment.up))).toBeLessThan(1e-5);
+        expect(attachment.tangent.clone().cross(attachment.right).dot(attachment.up)).toBeGreaterThan(0.999);
+      }
+      for (const instance of parts.instances) {
+        expect(instance.matrix.elements.every(Number.isFinite)).toBe(true);
+        expect(Math.abs(new THREE.Matrix3().setFromMatrix4(instance.matrix).determinant())).toBeGreaterThan(1e-8);
       }
 
       return { id, triangles, vertices: first.template.pos.length / 3, organs: graph.organs.length, size: size.toArray() };
