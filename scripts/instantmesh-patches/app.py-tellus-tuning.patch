@@ -1,0 +1,241 @@
+diff --git a/app.py b/app.py
+index 2f0fa3d..0323e02 100644
+--- a/app.py
++++ b/app.py
+@@ -23,6 +23,14 @@ from src.utils.infer_util import remove_background, resize_foreground, images_to
+ import tempfile
+ from huggingface_hub import hf_hub_download
+ 
++default_sample_steps = int(os.environ.get("INSTANTMESH_SAMPLE_STEPS", "30"))
++default_sample_steps = min(75, max(30, default_sample_steps))
++default_seed = int(os.environ.get("INSTANTMESH_SAMPLE_SEED", "42"))
++clean_white_bg = os.environ.get("INSTANTMESH_CLEAN_WHITE_BG", "1") != "0"
++white_bg_threshold = int(os.environ.get("INSTANTMESH_WHITE_BG_THRESHOLD", "235"))
++white_bg_chroma = int(os.environ.get("INSTANTMESH_WHITE_BG_CHROMA", "35"))
++mesh_grid_res = int(os.environ.get("INSTANTMESH_MESH_GRID_RES", "64"))
++preview_render_size = int(os.environ.get("INSTANTMESH_PREVIEW_RENDER_SIZE", "256"))
+ 
+ if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
+     device0 = torch.device('cuda:0')
+@@ -76,6 +84,8 @@ config = OmegaConf.load(config_path)
+ config_name = os.path.basename(config_path).replace('.yaml', '')
+ model_config = config.model_config
+ infer_config = config.infer_config
++model_config.params.grid_res = mesh_grid_res
++infer_config.render_resolution = preview_render_size
+ 
+ IS_FLEXICUBES = True if config_name.startswith('instant-mesh') else False
+ 
+@@ -121,18 +131,45 @@ def check_input_image(input_image):
+         raise gr.Error("No image uploaded!")
+ 
+ 
++def clean_white_background(image, threshold=235, chroma_limit=35):
++    rgba = image.convert("RGBA")
++    arr = np.array(rgba).astype(np.float32)
++    rgb = arr[..., :3]
++    alpha = arr[..., 3]
++
++    min_rgb = rgb.min(axis=-1)
++    max_rgb = rgb.max(axis=-1)
++    chroma = max_rgb - min_rgb
++    near_white = (min_rgb >= threshold) & (chroma <= chroma_limit)
++
++    if near_white.any():
++        softness = max(1.0, 255.0 - threshold)
++        white_fade = np.clip((255.0 - min_rgb) / softness, 0.0, 1.0)
++        alpha = np.where(near_white, np.minimum(alpha, alpha * white_fade), alpha)
++        arr[..., 3] = alpha
++
++    return Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA")
++
++
+ def preprocess(input_image, do_remove_background):
+ 
++    print(f"Preprocess started: remove_background={do_remove_background}", flush=True)
+     rembg_session = rembg.new_session() if do_remove_background else None
+     if do_remove_background:
+         input_image = remove_background(input_image, rembg_session)
++        if clean_white_bg:
++            input_image = clean_white_background(input_image, white_bg_threshold, white_bg_chroma)
+         input_image = resize_foreground(input_image, 0.85)
++        if clean_white_bg:
++            input_image = clean_white_background(input_image, white_bg_threshold, white_bg_chroma)
+ 
++    print("Preprocess finished.", flush=True)
+     return input_image
+ 
+ 
+ def generate_mvs(input_image, sample_steps, sample_seed):
+ 
++    print(f"Multi-view generation started: steps={sample_steps}, seed={sample_seed}", flush=True)
+     seed_everything(sample_seed)
+     
+     # sampling
+@@ -149,11 +186,46 @@ def generate_mvs(input_image, sample_steps, sample_seed):
+     show_image = rearrange(show_image, '(n m) h w c -> (n h) (m w) c', n=2, m=3)
+     show_image = Image.fromarray(show_image.numpy())
+ 
++    print("Multi-view generation finished.", flush=True)
+     return z123_image, show_image
+ 
+ 
++def generate_mvs_and_make3d(input_image, sample_steps, sample_seed):
++    z123_image, show_image = generate_mvs(input_image, sample_steps, sample_seed)
++    if torch.cuda.is_available():
++        torch.cuda.empty_cache()
++    video_fpath, mesh_fpath, mesh_glb_fpath = make3d(z123_image)
++    return z123_image, show_image, video_fpath, mesh_fpath, mesh_glb_fpath
++
++
++def generate_all(input_image, do_remove_background, sample_steps, sample_seed):
++    check_input_image(input_image)
++    processed_image = preprocess(input_image, do_remove_background)
++    z123_image, show_image, video_fpath, mesh_fpath, mesh_glb_fpath = generate_mvs_and_make3d(
++        processed_image,
++        sample_steps,
++        sample_seed,
++    )
++    print(
++        f"Generation outputs: video={video_fpath}, obj={mesh_fpath}, glb={mesh_glb_fpath}",
++        flush=True,
++    )
++    return (
++        processed_image,
++        z123_image,
++        show_image,
++        video_fpath,
++        video_fpath,
++        mesh_fpath,
++        mesh_fpath,
++        mesh_glb_fpath,
++        mesh_glb_fpath,
++    )
++
++
+ def make_mesh(mesh_fpath, planes):
+ 
++    print("Mesh extraction started.", flush=True)
+     mesh_basename = os.path.basename(mesh_fpath).split('.')[0]
+     mesh_dirname = os.path.dirname(mesh_fpath)
+     mesh_glb_fpath = os.path.join(mesh_dirname, f"{mesh_basename}.glb")
+@@ -175,11 +247,13 @@ def make_mesh(mesh_fpath, planes):
+         
+         print(f"Mesh saved to {mesh_fpath}")
+ 
++    print("Mesh extraction finished.", flush=True)
+     return mesh_fpath, mesh_glb_fpath
+ 
+ 
+ def make3d(images):
+ 
++    print("3D reconstruction started.", flush=True)
+     images = np.asarray(images, dtype=np.float32) / 255.0
+     images = torch.from_numpy(images).permute(2, 0, 1).contiguous().float()     # (3, 960, 640)
+     images = rearrange(images, 'c (n h) (m w) -> (n m) c h w', n=3, m=2)        # (6, 3, 320, 320)
+@@ -203,7 +277,7 @@ def make3d(images):
+ 
+         # get video
+         chunk_size = 20 if IS_FLEXICUBES else 1
+-        render_size = 384
++        render_size = preview_render_size
+         
+         frames = []
+         for i in tqdm(range(0, render_cameras.shape[1], chunk_size)):
+@@ -232,6 +306,7 @@ def make3d(images):
+ 
+     mesh_fpath, mesh_glb_fpath = make_mesh(mesh_fpath, planes)
+ 
++    print("3D reconstruction finished.", flush=True)
+     return video_fpath, mesh_fpath, mesh_glb_fpath
+ 
+ 
+@@ -300,15 +375,15 @@ with gr.Blocks() as demo:
+                     do_remove_background = gr.Checkbox(
+                         label="Remove Background", value=True
+                     )
+-                    sample_seed = gr.Number(value=42, label="Seed Value", precision=0)
++                    sample_seed = gr.Number(value=default_seed, label="Seed Value", precision=0)
+ 
+                     sample_steps = gr.Slider(
+-                        label="Sample Steps",
+-                        minimum=30,
+-                        maximum=75,
+-                        value=75,
+-                        step=5
+-                    )
++	                    label="Sample Steps",
++	                    minimum=30,
++	                    maximum=75,
++	                    value=default_sample_steps,
++	                    step=5
++	                )
+ 
+             with gr.Row():
+                 submit = gr.Button("Generate", elem_id="generate", variant="primary")
+@@ -342,6 +417,10 @@ with gr.Blocks() as demo:
+                         autoplay=True,
+                         interactive=False
+                     )
++                    output_video_file = gr.File(
++                        label="Download Preview Video",
++                        interactive=False
++                    )
+ 
+             with gr.Row():
+                 with gr.Tab("OBJ"):
+@@ -350,6 +429,10 @@ with gr.Blocks() as demo:
+                         #width=768,
+                         interactive=False,
+                     )
++                    output_model_obj_file = gr.File(
++                        label="Download OBJ",
++                        interactive=False
++                    )
+                     gr.Markdown("Note: Downloaded .obj model will be flipped. Export .glb instead or manually flip it before usage.")
+                 with gr.Tab("GLB"):
+                     output_model_glb = gr.Model3D(
+@@ -357,6 +440,10 @@ with gr.Blocks() as demo:
+                         #width=768,
+                         interactive=False,
+                     )
++                    output_model_glb_file = gr.File(
++                        label="Download GLB",
++                        interactive=False
++                    )
+                     gr.Markdown("Note: The model shown here has a darker appearance. Download to get correct results.")
+ 
+             with gr.Row():
+@@ -365,18 +452,20 @@ with gr.Blocks() as demo:
+     gr.Markdown(_CITE_)
+     mv_images = gr.State()
+ 
+-    submit.click(fn=check_input_image, inputs=[input_image]).success(
+-        fn=preprocess,
+-        inputs=[input_image, do_remove_background],
+-        outputs=[processed_image],
+-    ).success(
+-        fn=generate_mvs,
+-        inputs=[processed_image, sample_steps, sample_seed],
+-        outputs=[mv_images, mv_show_images],
+-    ).success(
+-        fn=make3d,
+-        inputs=[mv_images],
+-        outputs=[output_video, output_model_obj, output_model_glb]
++    submit.click(
++        fn=generate_all,
++        inputs=[input_image, do_remove_background, sample_steps, sample_seed],
++        outputs=[
++            processed_image,
++            mv_images,
++            mv_show_images,
++            output_video,
++            output_video_file,
++            output_model_obj,
++            output_model_obj_file,
++            output_model_glb,
++            output_model_glb_file,
++        ],
+     )
+ 
+ demo.queue(max_size=10)
