@@ -9,6 +9,32 @@ crown spread, junction blending, folded broadleaf surfaces, rounded nearby
 trunks, cached Weber-Penn growth data, stable structural LOD, and restored dense
 conifer sprays are in the runtime and Biome Mixer where applicable.
 
+## External generator contract acceptance
+
+Tellus accepts Procplants generator contract revision 3, fixture version 3, as
+reviewed producer provenance through the fixture shipped by the exact pinned
+`procplants/core` package. The focused
+contract-acceptance test pins the approved Phi Fern, Blue Spruce, Clover
+Groundcover, and Weeping Willow hashes, UV0 and surface partitions, supported
+instance totals, runtime LOD-selection tiers, biome normalization vectors, and
+their four decreasing geometry LODs.
+
+Tellus consumes that immutable package through a thin adapter and verifies the
+installed runtime geometry against the package fixture. Tellus still owns its
+default biome mappings, chunk LOD policy, wind, shadows, renderer choice, and
+asset substitutions. In particular, WebGL remains the default renderer because
+it is faster for the current Tellus workload; Procplants WebGPU paths are
+opt-in correctness work and are not Tellus performance evidence.
+
+The isolated 2026-08 integration also exposes Maidenhair Fern Patch and
+Woodland Violet Carpet as explicit procedural placement choices beside the
+optimized Clover Groundcover. They are deliberately absent from automatic
+paint/ecology patches until field density, shadow, and occupancy behavior is
+reviewed. At seed `0x6a09e667`, the three close templates are respectively
+2,112, 1,226, and 2,276 triangles with broad 1.72x1.91, 1.23x1.35, and
+2.06x1.83 local footprints. Their branch-relative organ frames are finite,
+unit-length, orthogonal, and deterministic.
+
 ## Current implementation and performance contract
 
 - Authored broadleaf `crownSpread` lengthens primary horizontal scaffolds most
@@ -28,6 +54,14 @@ conifer sprays are in the runtime and Biome Mixer where applicable.
 - Moving players receive a quick sparse build. Cold templates and full density
   refine gradually after movement stops under bounded per-update build counts
   and millisecond budgets.
+- Phi Fern uses eight branch-relative broad tapered frond cards instead of repeated
+  leaflet chains, and Blue Spruce/Alpine Fir use bounded four-sided stems with
+  one branch sample while retaining explicit foliage coverage budgets.
+- Against the same `origin/master` build, the opt-in contract/cost/groundcover
+  pass changes only `tellus-procplant-biomes` materially: 154,248 to 157,662
+  raw bytes and 42,042 to 42,760 level-9 gzip bytes (+2.21% raw, +1.71% gzip).
+  The main chunk grows by 54 raw bytes and 13 gzip bytes; the shared
+  Three.js chunk is byte-identical.
 
 These are quality-preserving reductions in generation and rendering work. They
 have build/test/browser coverage, but the July realism pass did not record a

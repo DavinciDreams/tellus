@@ -8,6 +8,9 @@
   "engines": {
     "node": "22.x"
   },
+  "trustedDependencies": [
+    "procplants"
+  ],
   "scripts": {
     "dev": "vite --host --port 3344 --strictPort",
     "build": "tsc --noEmit && vite build",
@@ -23,7 +26,8 @@
     "test": "vitest run --passWithNoTests --testTimeout=30000",
     "test:coverage": "vitest run --passWithNoTests --testTimeout=30000 --coverage",
     "perf:bundle": "bun run build && node scripts/check-entry-bundle-performance.mjs",
-    "perf:render": "bun run build && node scripts/check-render-performance.mjs"
+    "perf:render": "bun run build && node scripts/check-render-performance.mjs",
+    "perf:procplants-webgl": "bun run build && node scripts/check-procplant-webgl-performance.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",
@@ -38,6 +42,7 @@
     "lucide-react": "^0.577.0",
     "meshoptimizer": "^1.1.1",
     "nostr-tools": "^2.23.5",
+    "procplants": "github:DavinciDreams/procedural-plant-lab#6c073c3accd64f84d6b38d3acd6e2de470b5548e",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "sharp": "^0.35.0",

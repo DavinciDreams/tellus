@@ -169,6 +169,10 @@ import {
   wildlifeSpeciesProfile,
 } from "./tellus-wildlife-species";
 import { createChunkRenderer, type ChunkRenderer } from "./tellus-chunk-renderer";
+import {
+  ProcPlantRegionChangeTracker,
+  ProcPlantTerrainInvalidationBatch,
+} from "./tellus-procplant-terrain-invalidation";
 import type { AgentId, TerrainKind, TerrainPaintKind, TerrainEditMode, GenerationProvider, DirectGenerationProvider, RoleGenerationProvider, InstantMeshTarget, GeneratedKind, ToolName, AssetPanelTab, ToolMenu, Vec3, GeneratedThing, ProceduralAssetPlacement, AssetLibraryModel, AssetLibraryResponse, DistantIslandSpec, TellusLog, GenerateRequest, InteractRequest, TellusSnapshot, TellusWorldApi, TellusRuntimeConfig, AssetForgePipelineStart, AssetForgePipelineStatus, DirectGenerationResponse, GeneratedAssetManifestEntry, SpeechRecognitionConstructor, SpeechRecognitionLike, VehicleMode, MaterialWithTextureMaps, WorldTemplateId, LandShapeOverrides, DayNightMode, LightingMood, WaterSettings, WaterStyle } from "./tellus-types";
 import { WORLD_RADIUS, WORLD_SCALE, setWorldScale, worldScaleForId, scaledPlayerSpeed, OCEAN_RADIUS, SEA_LEVEL, DISTANT_ISLAND_COUNT, TERRAIN_SEGMENTS, DISTANT_TERRAIN_SEGMENTS, DISTANT_TERRAIN_VERTEX_COUNT, DISTANT_WALK_LOCAL_RADIUS, PLAYER_SPEED, PENDING_GENERATION_FALLBACK_MS, POND_CENTER, POND_RADIUS, TERRAIN_VERTEX_COUNT, TERRAIN_SCULPT_RADIUS, TERRAIN_SCULPT_STEP, SKYBOX_FALLBACK_URLS, SKYBOX_VERTICAL_OFFSET, MOON_MODEL_URL, MOON_DISTANCE, MOON_SIZE, MOON_ARC_AZIMUTH, MOON_ARC_LATERAL_SWAY, PIXEL3D_PROVIDER, generationProviderLabels, instantMeshTargetLabels, terrainColors, terrainPaintKinds, waterMountTerms, airMountTerms, groundMountTerms, isChunkedWorldId, canonicalWorldId, chunkedWorldCenter, getChunkedWorldChunks, chunkedWorldSupportsPaint, CHUNK_SPAN } from "./tellus-constants";
 import { readJsonResponse, clamp, rand, isRecord, makeId, browserUuid, distance2D, promptIncludesAny, finiteNumber, sanitizeLogText, extractErrorMessage } from "./tellus-utils";
@@ -1297,6 +1301,7 @@ function createTellusWorld(
   configureCalmLakeBase(ocean.material);
   const archipelago = createDistantArchipelago(useWebGPU);
   let chunkRenderer: ChunkRenderer | null = null;
+  const procplantTerrainInvalidations = new ProcPlantTerrainInvalidationBatch();
   let lastActiveChunkCount = -1; // defer placed-asset grounding when the active chunk set changes
   let lastProvisionalChunkCount = -1;
   let chunkStreamGroundingPending = false;
@@ -1623,6 +1628,22 @@ function createTellusWorld(
     if (vegetationExclusionFootprintCache.size > 600) vegetationExclusionFootprintCache.clear();
     return footprint;
   };
+  const vegetationExclusionRegion = (
+    footprint: VegetationExclusionFootprint | null,
+  ): { minX: number; maxX: number; minZ: number; maxZ: number } | null => {
+    if (!footprint) return null;
+    if (footprint.kind === "aabb") return { ...footprint };
+    const cos = Math.abs(Math.cos(footprint.yaw));
+    const sin = Math.abs(Math.sin(footprint.yaw));
+    const extentX = footprint.halfWidth * cos + footprint.halfDepth * sin;
+    const extentZ = footprint.halfWidth * sin + footprint.halfDepth * cos;
+    return {
+      minX: footprint.x - extentX,
+      maxX: footprint.x + extentX,
+      minZ: footprint.z - extentZ,
+      maxZ: footprint.z + extentZ,
+    };
+  };
   const generatedBuildingExcludesVegetation = (x: number, z: number): boolean => {
     for (const thing of generated) {
       const footprint = vegetationExclusionFootprint(thing);
@@ -1727,6 +1748,7 @@ function createTellusWorld(
           grassInstances: 0,
           grassTriangles: 0,
           stemTriangles: 0,
+          organTriangles: 0,
           organDraws: 0,
           branchSegments: 0,
           attachedLeaves: 0,
@@ -1829,10 +1851,15 @@ function createTellusWorld(
       reloadRequired: true,
     };
   };
+  const generatedVegetationRegions = new ProcPlantRegionChangeTracker();
   const refreshVegetationForGeneratedThing = (thing: GeneratedThing | undefined) => {
-    if (!thing || !generatedThingSuppressesVegetation(thing)) return;
-    vegetation.notifyTerrainChanged();
-    procplants.notifyTerrainChanged();
+    if (!thing) return;
+    const stillPresent = generated.some((candidate) => candidate.id === thing.id);
+    const nextRegion = stillPresent && generatedThingSuppressesVegetation(thing)
+      ? vegetationExclusionRegion(vegetationExclusionFootprint(thing))
+      : null;
+    const changedRegions = generatedVegetationRegions.update(thing.id, nextRegion);
+    if (changedRegions.length > 0) procplants.notifyRegionsChanged(changedRegions);
   };
   const ambientPhysics = createAmbientPhysics({
     groundHeightAt: (x, z) => groundHeightAt(x, z) ?? SEA_LEVEL - 2.6,
@@ -10438,13 +10465,13 @@ function createTellusWorld(
         movingOnFoot ? (terrainOnlyActive ? 2 : 3) : 6,
       );
       const changedTerrainRegions = chunkRenderer.consumeChangedRegions();
-      if (changedTerrainRegions.length > 0) {
-        procplants.notifyRegionsChanged(changedTerrainRegions);
-      }
+      procplantTerrainInvalidations.add(changedTerrainRegions, now);
       // When the active chunk set changes (chunks streamed in/out), defer placed-asset grounding until
       // movement is idle. Treating streaming like a terrain edit used to invalidate all vegetation and
       // walk every generated thing on the boundary frame, which made every chunk crossing hitch.
       const postFlushChunkStats = chunkRenderer.stats();
+      const settledTerrainRegions = procplantTerrainInvalidations.drainIfSettled(postFlushChunkStats, now);
+      if (settledTerrainRegions.length > 0) procplants.notifyRegionsChanged(settledTerrainRegions);
       const activeChunks = postFlushChunkStats.active;
       const provisionalChunks = postFlushChunkStats.provisional;
       if (activeChunks !== lastActiveChunkCount || provisionalChunks !== lastProvisionalChunkCount) {
@@ -11322,7 +11349,7 @@ function createTellusWorld(
           agentId: "world",
           agentName: "Tellus",
           tool: "interact",
-          text: "WebGPU is not available in this browser. Using simplified WebGL preview.",
+          text: "Using the default WebGL renderer. WebGPU remains an explicit developer opt-in.",
         });
       }
       applyLowGpuDebugMode();

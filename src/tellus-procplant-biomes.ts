@@ -61,9 +61,43 @@ export interface ProcPlantPlaceableCatalogEntry {
   scatterCount: number;
   scatterRadius: number;
   scale: number;
+  /** Available to explicit placement tools but excluded from automatic ecology and paint selection. */
+  placementOnly: boolean;
   assetStoreModelId?: string;
   assetModelUrl?: string;
 }
+
+export const TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESETS = [
+  "phiFern",
+  "brackenFernMat",
+  "maidenhairFernPatch",
+  "woodlandVioletCarpet",
+  "trilliumPatch",
+  "horsetailColony",
+  "cloverGroundcover",
+  "woodSorrelCarpet",
+  "woodlandAnemoneCarpet",
+  "creepingPhloxCarpet",
+  "wildStrawberryGroundcover",
+] as const;
+export const TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESET_SET: ReadonlySet<string> = new Set(
+  TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESETS,
+);
+
+export const TELLUS_PLACEMENT_ONLY_GROUNDCOVER_PROCPLANT_PRESETS = [
+  "brackenFernMat",
+  "maidenhairFernPatch",
+  "woodlandVioletCarpet",
+  "trilliumPatch",
+  "horsetailColony",
+  "woodSorrelCarpet",
+  "woodlandAnemoneCarpet",
+  "creepingPhloxCarpet",
+  "wildStrawberryGroundcover",
+] as const;
+const TELLUS_PLACEMENT_ONLY_GROUNDCOVER_PROCPLANT_PRESET_SET = new Set<string>(
+  TELLUS_PLACEMENT_ONLY_GROUNDCOVER_PROCPLANT_PRESETS,
+);
 
 export const ASSET_BACKED_PROCPLANT_MODEL_IDS = [
   "3e610d94-51a5-4257-9899-34f5c8eaa0bb",
@@ -189,6 +223,7 @@ export const PROCPLANT_PLACEABLE_CATALOG: ProcPlantPlaceableCatalogEntry[] = pro
     scatterCount: kind === "tree" ? 4 : kind === "flower" ? 12 : 10,
     scatterRadius: kind === "tree" ? 30 : 11,
     scale: replacement?.scale ?? adultScaleForProcPlantPreset(presetId),
+    placementOnly: TELLUS_PLACEMENT_ONLY_GROUNDCOVER_PROCPLANT_PRESET_SET.has(presetId),
     assetStoreModelId: replacement?.assetStoreModelId,
     assetModelUrl: replacement
       ? `/api/assets/model/${encodeURIComponent(replacement.assetStoreModelId)}/game-optimized`
@@ -206,6 +241,32 @@ export const procPlantPlaceableById = (id: string): ProcPlantPlaceableCatalogEnt
 export type ProcPlantBiomeCandidate = Omit<ProcPlantBiomePatch, "version" | "seed"> & {
   weight: number;
 };
+
+// This is intentionally Tellus-owned policy. Procplants may add ecology-ready
+// presets without silently changing existing worlds' automatic populations.
+export const TELLUS_AUTOMATIC_ECOLOGY_PROCPLANT_PRESETS = [
+  "furGrass",
+  "phiFern",
+  "reedSedge",
+  "foldedPalm",
+  "oakCanopy",
+  "birchGrove",
+  "acaciaUmbrella",
+  "mangroveRoots",
+  "blueSpruce",
+  "alpineFir",
+  "redwoodSpire",
+  "tundraSmallPine",
+  "desertRosette",
+] as const;
+const TELLUS_AUTOMATIC_ECOLOGY_PROCPLANT_PRESET_SET = new Set<string>(
+  TELLUS_AUTOMATIC_ECOLOGY_PROCPLANT_PRESETS,
+);
+
+const automaticEcologyCommunity = (ecology: EcologySample, limit: number) =>
+  resolveEcologyCommunity(ecology, procPlantPresetIds.length)
+    .filter((entry) => TELLUS_AUTOMATIC_ECOLOGY_PROCPLANT_PRESET_SET.has(entry.presetId))
+    .slice(0, limit);
 
 const TEXTURED_TREE_REPLACED_AUTO_PRESETS = new Set(["foldedPalm"]);
 export const GLOBAL_DEFAULT_EXCLUDED_PROCPLANT_PRESETS: ReadonlySet<string> = new Set([
@@ -416,7 +477,7 @@ export const biomePatchForEcology = (
   ecology: EcologySample,
   seed: number,
 ): ProcPlantBiomePatch | null => {
-  const community = resolveEcologyCommunity(ecology, 6);
+  const community = automaticEcologyCommunity(ecology, 6);
   const candidates = community
     .filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.presetId))
     .map((entry) => globalDefaultCandidate(patchFromEcologyPreset(entry.presetId, ecology, entry.score)))
@@ -434,7 +495,7 @@ export const biomePatchesForEcology = (
   seed: number,
   limit = 8,
 ): ProcPlantBiomePatch[] => {
-  const community = resolveEcologyCommunity(ecology, limit);
+  const community = automaticEcologyCommunity(ecology, limit);
   const candidates = community
     .filter((entry) => !TEXTURED_TREE_REPLACED_AUTO_PRESETS.has(entry.presetId))
     .map((entry) => globalDefaultCandidate(patchFromEcologyPreset(entry.presetId, ecology, entry.score)))

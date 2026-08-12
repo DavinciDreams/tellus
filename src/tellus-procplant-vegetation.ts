@@ -30,6 +30,7 @@ import {
   biomePatchForPaint,
   environmentForBiomePatch,
   GLOBAL_DEFAULT_FERN_ASSET_IDS,
+  TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESET_SET,
   genomeForBiomePatch,
   treeBackendForBiomePatch,
 } from "./tellus-procplant-biomes";
@@ -77,21 +78,16 @@ import {
 import {
   branchModuleSpreadForGenome,
   buildProcPlantInstancedParts,
-  createProcPlantConiferSprayGeometry,
-  createProcPlantDaylilyBloomGeometry,
+  compileProcPlantLods,
+  createProcPlantInstanceGeometry,
   defaultPlantEnvironment,
-  createProcPlantFlowerCenterGeometry,
-  createProcPlantFlowerDiscGeometry,
-  createProcPlantFoxgloveBloomGeometry,
-  createProcPlantGrassBladeGeometry,
-  createProcPlantLeafGeometry,
-  createProcPlantPalmFrondGeometry,
-  createProcPlantPetalGeometry,
+  isProcPlantSupportedInstanceKind,
   type ProcPlantEnvironment,
   type ProcPlantGenome,
   type ProcPlantHabit,
   type ProcPlantInstance,
   type ProcPlantInstancedParts,
+  type ProcPlantCompiledLod,
   type ProcPlantTemplate,
   GOLDEN_ANGLE_RADIANS,
   procPlantPresets,
@@ -133,6 +129,7 @@ export interface ProcPlantVegetationStats {
   grassInstances: number;
   grassTriangles: number;
   stemTriangles: number;
+  organTriangles: number;
   organDraws: number;
   branchSegments: number;
   attachedLeaves: number;
@@ -197,6 +194,7 @@ interface ChunkStats {
   grassInstances: number;
   grassTriangles: number;
   stemTriangles: number;
+  organTriangles: number;
   organDraws: number;
   branchSegments: number;
   attachedLeaves: number;
@@ -365,6 +363,12 @@ export const groundPlantDistanceDensity = (
   return THREE.MathUtils.lerp(1, PROC_GROUND_PLANT_MIN_DENSITY, fade);
 };
 
+/** Package geometry tier used by audited Tellus groundcovers; horizon chunks omit them. */
+export const groundcoverTemplateLodForChunk = (
+  chunkLod: 0 | 1 | 2 | 3,
+  fullDetail = false,
+): 0 | 1 | 2 | null => fullDetail ? 0 : chunkLod === 3 ? null : chunkLod;
+
 /** Keep close trunks visually round even when low FPS reduces branch-count LOD. */
 export const procPlantBranchRadialSegments = (chunkLod: number, distanceLod: BranchModuleLodLevel): number => {
   const visualLod = Math.max(chunkLod, distanceLod);
@@ -454,15 +458,19 @@ const buildBranchModuleTreeCached = (
 // little, so 0.25-steps are visually indistinguishable while collapsing the cache key space).
 const PLANT_SEED_BUCKETS = 12;
 const procPlantPartsCache = new Map<string, ProcPlantInstancedParts>();
-const procPlantPartsCacheKey = (
+const procPlantLodsCache = new Map<string, ProcPlantCompiledLod[]>();
+const procPlantCacheIdentity = (
   genome: ProcPlantGenome,
   seed: number,
   env: ProcPlantEnvironment,
-): string => {
+) => {
   const bucket =
     ((Math.trunc(seed) % PLANT_SEED_BUCKETS) + PLANT_SEED_BUCKETS) % PLANT_SEED_BUCKETS;
-  const q = (v: number) => Math.round(v * 4) / 4;
-  return `${genome.id}|${bucket}|${q(env.light)}|${q(env.moisture)}|${q(env.crowding)}|${q(env.biomeWarmth)}`;
+  const q = (value: number) => Math.round(value * 4) / 4;
+  return {
+    bucket,
+    key: `${genome.id}|${bucket}|${q(env.light)}|${q(env.moisture)}|${q(env.crowding)}|${q(env.biomeWarmth)}`,
+  };
 };
 const buildProcPlantInstancedPartsCached = (
   genome: ProcPlantGenome,
@@ -470,9 +478,7 @@ const buildProcPlantInstancedPartsCached = (
   env: ProcPlantEnvironment,
   allowColdBuild = true,
 ): ProcPlantInstancedParts | null => {
-  const bucket =
-    ((Math.trunc(seed) % PLANT_SEED_BUCKETS) + PLANT_SEED_BUCKETS) % PLANT_SEED_BUCKETS;
-  const key = procPlantPartsCacheKey(genome, seed, env);
+  const { bucket, key } = procPlantCacheIdentity(genome, seed, env);
   let built = procPlantPartsCache.get(key);
   if (!built && !allowColdBuild) return null;
   if (!built) {
@@ -483,6 +489,22 @@ const buildProcPlantInstancedPartsCached = (
   return built;
 };
 
+const compileProcPlantLodsCached = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+  allowColdBuild = true,
+): ProcPlantCompiledLod[] | null => {
+  const { bucket, key } = procPlantCacheIdentity(genome, seed, env);
+  let lods = procPlantLodsCache.get(key);
+  if (!lods && !allowColdBuild) return null;
+  if (!lods) {
+    lods = compileProcPlantLods(genome, ((bucket + 1) * 0x9e3779b1) >>> 0, env);
+    procPlantLodsCache.set(key, lods);
+  }
+  return lods;
+};
+
 const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color): ProcPlantTemplate => {
   const source = geometry.index ? geometry.toNonIndexed() : geometry;
   const position = source.getAttribute("position");
@@ -490,10 +512,12 @@ const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color
   const vertexCount = position.count;
   const pos = new Float32Array(vertexCount * 3);
   const nrm = new Float32Array(vertexCount * 3);
+  const uv0 = new Float32Array(vertexCount * 2);
   const col = new Float32Array(vertexCount * 3);
   const tintable = new Uint8Array(vertexCount);
   const sway = new Float32Array(vertexCount);
   const idx = new Uint32Array(vertexCount);
+  const uv = source.getAttribute("uv");
   for (let i = 0; i < vertexCount; i++) {
     const offset = i * 3;
     pos[offset] = position.getX(i);
@@ -502,6 +526,9 @@ const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color
     nrm[offset] = normal?.getX(i) ?? 0;
     nrm[offset + 1] = normal?.getY(i) ?? 1;
     nrm[offset + 2] = normal?.getZ(i) ?? 0;
+    const uvOffset = i * 2;
+    uv0[uvOffset] = uv?.getX(i) ?? 0;
+    uv0[uvOffset + 1] = uv?.getY(i) ?? 0;
     col[offset] = color.r;
     col[offset + 1] = color.g;
     col[offset + 2] = color.b;
@@ -510,7 +537,7 @@ const templateFromGeometry = (geometry: THREE.BufferGeometry, color: THREE.Color
     idx[i] = i;
   }
   if (source !== geometry) source.dispose();
-  return { pos, nrm, col, tintable, sway, idx };
+  return { pos, nrm, uv0, col, tintable, sway, idx };
 };
 
 const combineTransformedTemplates = (
@@ -524,6 +551,7 @@ const combineTransformedTemplates = (
   const totalIndices = entries.reduce((sum, entry) => sum + entry.template.idx.length, 0);
   const pos = new Float32Array(totalVertices * 3);
   const nrm = new Float32Array(totalVertices * 3);
+  const uv0 = new Float32Array(totalVertices * 2);
   const col = new Float32Array(totalVertices * 3);
   const tintable = new Uint8Array(totalVertices);
   const sway = new Float32Array(totalVertices);
@@ -556,6 +584,10 @@ const combineTransformedTemplates = (
       nrm[target] = normal.x;
       nrm[target + 1] = normal.y;
       nrm[target + 2] = normal.z;
+      const sourceUv = vertex * 2;
+      const targetUv = (vertexCursor + vertex) * 2;
+      uv0[targetUv] = template.uv0[sourceUv] ?? 0;
+      uv0[targetUv + 1] = template.uv0[sourceUv + 1] ?? 0;
       col[target] = color?.r ?? template.col[source] ?? 1;
       col[target + 1] = color?.g ?? template.col[source + 1] ?? 1;
       col[target + 2] = color?.b ?? template.col[source + 2] ?? 1;
@@ -567,7 +599,7 @@ const combineTransformedTemplates = (
     indexCursor += template.idx.length;
   }
 
-  return { pos, nrm, col, tintable, sway, idx };
+  return { pos, nrm, uv0, col, tintable, sway, idx };
 };
 
 const cheapTreeTemplateCache = new Map<string, ProcPlantTemplate>();
@@ -598,6 +630,7 @@ export const procPlantTemplateFromAssetTemplate = (
   const template: ProcPlantTemplate = {
     pos: new Float32Array(asset.positions),
     nrm: new Float32Array(asset.normals),
+    uv0: new Float32Array(asset.vertexCount * 2),
     col: colors,
     tintable: new Uint8Array(asset.vertexCount),
     sway: new Float32Array(asset.vertexCount),
@@ -661,12 +694,16 @@ export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit):
   // through to the generic broadleaf trunk+icosahedron silhouette at distance.
   const conifer = habit === "conifer" || /fir|pine|douglas|larch|spruce/i.test(species);
   if (conifer) {
-    const template = buildRetroCutoutTreeTemplate(hashString(species), undefined, {
+    const retroTemplate = buildRetroCutoutTreeTemplate(hashString(species), undefined, {
       height: /small/i.test(species) ? 0.98 : /douglas|redwood/i.test(species) ? 1.36 : 1.18,
       width: /small/i.test(species) ? 0.42 : /douglas|redwood/i.test(species) ? 0.56 : 0.5,
       planes: /small/i.test(species) ? 3 : 4,
       trunkRadius: /small/i.test(species) ? 0.052 : 0.058,
     });
+    const template: ProcPlantTemplate = {
+      ...retroTemplate,
+      uv0: new Float32Array(retroTemplate.pos.length / 3 * 2),
+    };
     cheapTreeTemplateCache.set(cacheKey, template);
     return template;
   }
@@ -691,6 +728,7 @@ export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit):
   const vertexOffset = trunkTemplate.pos.length / 3;
   const pos = new Float32Array(trunkTemplate.pos.length + crownTemplate.pos.length);
   const nrm = new Float32Array(trunkTemplate.nrm.length + crownTemplate.nrm.length);
+  const uv0 = new Float32Array(trunkTemplate.uv0.length + crownTemplate.uv0.length);
   const col = new Float32Array(trunkTemplate.col.length + crownTemplate.col.length);
   const tintable = new Uint8Array(trunkTemplate.tintable.length + crownTemplate.tintable.length);
   const sway = new Float32Array(trunkTemplate.sway.length + crownTemplate.sway.length);
@@ -699,6 +737,8 @@ export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit):
   pos.set(crownTemplate.pos, trunkTemplate.pos.length);
   nrm.set(trunkTemplate.nrm, 0);
   nrm.set(crownTemplate.nrm, trunkTemplate.nrm.length);
+  uv0.set(trunkTemplate.uv0, 0);
+  uv0.set(crownTemplate.uv0, trunkTemplate.uv0.length);
   col.set(trunkTemplate.col, 0);
   col.set(crownTemplate.col, trunkTemplate.col.length);
   tintable.set(trunkTemplate.tintable, 0);
@@ -712,6 +752,7 @@ export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit):
   const template = {
     pos,
     nrm,
+    uv0,
     col,
     tintable,
     sway,
@@ -889,36 +930,60 @@ const createGrassCarpetGeometry = (bladeCount: number): THREE.BufferGeometry => 
 
 const geometryForKey = (key: string): THREE.BufferGeometry => {
   const [kind, shape, widthRatio, serration, curl, venation] = key.split(":");
+  if (kind === "grassCarpet") return createGrassCarpetGeometry(Number(shape) || 12);
+  if (!isProcPlantSupportedInstanceKind(kind)) {
+    throw new Error(`Unsupported Procplants v3 instance kind: ${kind}`);
+  }
+  const baseGenome = procPlantPresets.phiFern!;
+  const parsedVenation = Number(venation);
+  const genome = kind === "leaf"
+    ? {
+        ...baseGenome,
+        leaf: {
+          ...baseGenome.leaf,
+          shape: shape as ProcPlantGenome["leaf"]["shape"],
+          widthRatio: Number(widthRatio),
+          serration: Number(serration),
+          curl: Number(curl),
+          venation: Number.isFinite(parsedVenation) ? parsedVenation : 0.5,
+        },
+      }
+    : kind === "grassBlade"
+      ? {
+          ...baseGenome,
+          leaf: {
+            ...baseGenome.leaf,
+            widthRatio: Number(shape),
+            curl: Number(widthRatio),
+          },
+        }
+      : baseGenome;
   switch (kind) {
-    case "grassCarpet":
-      return createGrassCarpetGeometry(Number(shape) || 12);
     case "leaf":
-      const parsedVenation = Number(venation);
-      return createProcPlantLeafGeometry(
-        shape as ProcPlantGenome["leaf"]["shape"],
-        Number(widthRatio),
-        Number(serration),
-        Number(curl),
-        Number.isFinite(parsedVenation) ? parsedVenation : 0.5,
-      );
     case "grassBlade":
-      return createProcPlantGrassBladeGeometry(Number(shape), Number(widthRatio));
     case "petal":
-      return createProcPlantPetalGeometry();
     case "flowerDisc":
-      return createProcPlantFlowerDiscGeometry();
     case "daylilyBloom":
-      return createProcPlantDaylilyBloomGeometry();
+    case "hibiscusBloom":
+    case "flobotCupBloom":
+    case "flobotPetal2Bloom":
+    case "flobotPinkBloom":
     case "foxgloveBloom":
-      return createProcPlantFoxgloveBloomGeometry();
     case "flowerCenter":
-      return createProcPlantFlowerCenterGeometry();
+    case "fruit":
+    case "berry":
+    case "cone":
+    case "thorn":
+    case "aerialRoot":
     case "coniferSpray":
-      return createProcPlantConiferSprayGeometry();
+    case "fernFrond":
     case "palmFrond":
-      return createProcPlantPalmFrondGeometry();
-    default:
-      return createProcPlantPetalGeometry();
+    case "mossTuft":
+      return createProcPlantInstanceGeometry(kind, genome);
+    default: {
+      const unsupported: never = kind;
+      throw new Error(`Unsupported Procplants v3 instance kind: ${String(unsupported)}`);
+    }
   }
 };
 
@@ -933,6 +998,7 @@ const emptyStats = (): ProcPlantVegetationStats => ({
   grassInstances: 0,
   grassTriangles: 0,
   stemTriangles: 0,
+  organTriangles: 0,
   organDraws: 0,
   branchSegments: 0,
   attachedLeaves: 0,
@@ -1182,6 +1248,7 @@ export function createProcPlantVegetation(
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(template.pos, 3));
     geometry.setAttribute("normal", new THREE.BufferAttribute(template.nrm, 3));
+    geometry.setAttribute("uv", new THREE.BufferAttribute(template.uv0, 2));
     geometry.setAttribute("color", new THREE.BufferAttribute(template.col, 3));
     attachFoliageWindWeights(geometry, clampedWindWeights(template.sway));
     geometry.setIndex(new THREE.BufferAttribute(template.idx, 1));
@@ -1811,6 +1878,7 @@ export function createProcPlantVegetation(
       grassInstances: 0,
       grassTriangles: 0,
       stemTriangles: 0,
+      organTriangles: 0,
       organDraws: 0,
       branchSegments: 0,
       attachedLeaves: 0,
@@ -2418,6 +2486,29 @@ export function createProcPlantVegetation(
         chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
+      const groundcoverLod = TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESET_SET.has(genome.id)
+        ? groundcoverTemplateLodForChunk(chunk.lod, fullDetailLod)
+        : 0;
+      if (groundcoverLod !== null && groundcoverLod > 0) {
+        const lods = compileProcPlantLodsCached(genome, renderSeed, environment, allowColdBuilds);
+        if (!lods) {
+          chunk.needsColdRefinement = true;
+          continue;
+        }
+        const template = lods[groundcoverLod]!.template;
+        const matrix = new THREE.Matrix4()
+          .makeRotationY(yaw)
+          .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
+          .premultiply(new THREE.Matrix4().makeTranslation(
+            x,
+            height + 0.02 - templateMinY(template) * scale,
+            z,
+          ));
+        stemTemplates.push({ template, matrix });
+        chunk.stats.plants++;
+        chunk.stats.stemTriangles += template.idx.length / 3;
+        continue;
+      }
       const built = buildProcPlantInstancedPartsCached(genome, renderSeed, environment, allowColdBuilds);
       if (!built) {
         chunk.needsColdRefinement = true;
@@ -2455,7 +2546,7 @@ export function createProcPlantVegetation(
       const canopyKind: CanopyShadowKind = canopyInstances.some((instance) => instance.kind === "coniferSpray")
         ? "conifer"
         : "broadleaf";
-      const weberPennCacheKey = procPlantPartsCacheKey(genome, renderSeed, environment);
+      const weberPennCacheKey = procPlantCacheIdentity(genome, renderSeed, environment).key;
       if (genome.weberPenn && !fullDetailLod && chunk.lod === 2) {
         scheduleWeberPennImpostorBake(weberPennCacheKey, chunk.key, genome, built);
       }
@@ -2525,6 +2616,30 @@ export function createProcPlantVegetation(
           yaw,
           placement.scale,
         );
+        continue;
+      }
+      const groundcoverLod = TELLUS_AUDITED_GROUNDCOVER_PROCPLANT_PRESET_SET.has(genome.id)
+        ? groundcoverTemplateLodForChunk(chunk.lod, fullDetailLod)
+        : 0;
+      if (groundcoverLod !== null && groundcoverLod > 0) {
+        const environment = defaultPlantEnvironment();
+        const lods = compileProcPlantLodsCached(genome, placement.seed, environment, allowColdBuilds);
+        if (!lods) {
+          chunk.needsColdRefinement = true;
+          continue;
+        }
+        const template = lods[groundcoverLod]!.template;
+        const matrix = new THREE.Matrix4()
+          .makeRotationY(yaw)
+          .premultiply(new THREE.Matrix4().makeScale(placement.scale, placement.scale, placement.scale))
+          .premultiply(new THREE.Matrix4().makeTranslation(
+            placement.x,
+            height + 0.02 - templateMinY(template) * placement.scale,
+            placement.z,
+          ));
+        stemTemplates.push({ template, matrix });
+        chunk.stats.plants++;
+        chunk.stats.stemTriangles += template.idx.length / 3;
         continue;
       }
       const built = buildProcPlantInstancedPartsCached(
@@ -2614,9 +2729,10 @@ export function createProcPlantVegetation(
       mesh.receiveShadow = false;
       chunk.group.add(mesh);
       chunk.stats.organDraws++;
+      const vertices = bucket.geometry.getAttribute("position")?.count ?? 0;
+      const trianglesPerInstance = (bucket.geometry.getIndex()?.count ?? vertices) / 3;
+      chunk.stats.organTriangles += trianglesPerInstance * bucket.instances.length;
       if (bucket.key.startsWith("grassCarpet:")) {
-        const vertices = bucket.geometry.getAttribute("position")?.count ?? 0;
-        const trianglesPerInstance = (bucket.geometry.getIndex()?.count ?? vertices) / 3;
         chunk.stats.grassInstances += bucket.instances.length;
         chunk.stats.grassTriangles += trianglesPerInstance * bucket.instances.length;
       }
@@ -2711,6 +2827,7 @@ export function createProcPlantVegetation(
             grassInstances: 0,
             grassTriangles: 0,
             stemTriangles: 0,
+            organTriangles: 0,
             organDraws: 0,
             branchSegments: 0,
             attachedLeaves: 0,
@@ -2913,6 +3030,7 @@ export function createProcPlantVegetation(
       out.grassInstances += chunk.stats.grassInstances;
       out.grassTriangles += chunk.stats.grassTriangles;
       out.stemTriangles += chunk.stats.stemTriangles;
+      out.organTriangles += chunk.stats.organTriangles;
       out.organDraws += chunk.stats.organDraws;
       out.branchSegments += chunk.stats.branchSegments;
       out.attachedLeaves += chunk.stats.attachedLeaves;
