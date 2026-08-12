@@ -63,8 +63,11 @@ export function planAutomaticBuildingInteriorDoor(input: {
   return {
     interiorWorldId,
     label: `${input.buildingLabel.trim() || "Building"} door`.slice(0, 48),
+    // Match main.tsx's rotateXZ convention (x*cos - z*sin), which is what portalAnchorPosition
+    // uses to place the door from anchorOffset. Using +sin here mirrored the door across the
+    // building's X axis for any rotated building, landing it in the back wall.
     position: {
-      x: input.position.x + anchorOffset.z * sin,
+      x: input.position.x - anchorOffset.z * sin,
       y: input.position.y,
       z: input.position.z + anchorOffset.z * cos,
     },

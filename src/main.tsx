@@ -2780,7 +2780,12 @@ function createTellusWorld(
     }
     const bounds = interiorPlacementBounds(1.4);
     if (!bounds) return { position: interiorPlacementPosition(position.x, position.z), rotationY: 0 };
-    const x = clamp(position.x, bounds.minX, bounds.maxX);
+    // Pin the exit to the wall BEHIND the spawn rather than carrying the entry door's outdoor X
+    // across the threshold. applyInterior drops the player at the room origin, so an inherited X
+    // could land the exit on top of them and bounce them straight back out. Anchoring it to the
+    // spawn's own X keeps the door behind you and a full half-room away.
+    const spawn = interiorDoorSpawnForSceneUrl(interiorSceneUrl || GENERATED_INTERIOR_SCENE_URL);
+    const x = clamp(spawn.x, bounds.minX, bounds.maxX);
     const z = bounds.minZ;
     return {
       position: { x, y: interiorPlacementFloorHeightAt(x, z, visitorPosition.y) ?? Math.max(0, visitorPosition.y), z },
@@ -3819,7 +3824,11 @@ function createTellusWorld(
     userId,
     visitorId,
     visitorPosition: { ...visitorPosition },
-    visitorYaw: yaw, // facing direction (radians) for the minimap view cone
+    // Minimap view cone heading. In first person the camera IS the head, so the orbit yaw is the
+    // facing. In third person the body turns toward actual movement independently of the camera
+    // (see avatarFacing), so publishing `yaw` there made the cone track camera drags and refuse to
+    // flip when you reversed direction. Publish whichever one the player actually sees.
+    visitorYaw: cameraMode === "first" ? yaw : avatarFacing,
     viewDistance: scene.fog instanceof THREE.Fog ? scene.fog.far : 200 * WORLD_SCALE, // how far we can see
     remoteVisitors: Array.from(remoteVisitors.values()).map((presence) => ({
       ...presence,
@@ -12353,7 +12362,14 @@ function createTellusWorld(
       },
       { logText: `Adding an interior door to ${thing.prompt}...` },
     );
-    announcePortalSelection(portalId);
+    // The door is already anchored to the building above, so the full portal editor (attach /
+    // detach / anchor picker) has nothing useful to offer here. Surface a sparse HUD prompt whose
+    // only action is entering; the editor stays available by clicking the door.
+    window.dispatchEvent(
+      new CustomEvent("tellus:door-ready", {
+        detail: { portalId, label: plan.label },
+      }),
+    );
   };
   const sendPortalDelete = (portalId: string) => {
     const id = portalId.trim();
@@ -13495,12 +13511,16 @@ function App(): React.ReactElement {
     setMakerAgentBusyId("create");
     setMakerAgentsError(null);
     try {
-      await createMakerAgent({
+      const created = await createMakerAgent({
         worldId: canonicalWorldId(runtimeConfig.worldId),
         name,
         persona: makerAgentPersonaDraft.trim(),
       });
       await refreshMakerAgents();
+      // Unlike generated assets (which are placed in front of the player), the server chooses where
+      // an agent lands, so a brand-new agent can be anywhere. Track it immediately: the on-screen
+      // marker answers "where did my agent go" without the player having to find the map first.
+      if (created.agentId) setTrackedActorId(`agent:${created.agentId}`);
       setMakerAgentNameDraft("");
       setMakerAgentPersonaDraft("");
       setMakerAgentCreateOpen(false);
@@ -16347,7 +16367,13 @@ function App(): React.ReactElement {
   // Portals card: foldable + dismissable (was always-on with no close — the worst right-side offender).
   const [portalsPanelOpen, setPortalsPanelOpen] = useState(false);
   const [selectedPortalId, setSelectedPortalId] = useState("");
+  // Sparse HUD prompt for a freshly auto-attached building door: Enter is the only action, so the
+  // full portal editor stays closed unless the player clicks the door itself.
+  const [doorPrompt, setDoorPrompt] = useState<{ portalId: string; label: string } | null>(null);
   const [mapActorList, setMapActorList] = useState<"items" | "players" | "agents" | null>(null);
+  // The actor you're currently homing in on. Drives the persistent on-screen marker so "where is my
+  // agent" stays answerable without reopening the map.
+  const [trackedActorId, setTrackedActorId] = useState<string | null>(null);
   const worldMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const createImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -16818,8 +16844,13 @@ function App(): React.ReactElement {
             z: (chunkedMapDims.h * CHUNK_SPAN) / 2,
           }
       : null;
-  const mapExtentX = chunkedMapDims ? CHUNK_SPAN * 8 : mapRadius * 2;
-  const mapExtentZ = chunkedMapDims ? CHUNK_SPAN * 8 : mapRadius * 2;
+  // Draw exactly the region that actually streams. A load radius of r keeps a (2r+1)-chunk square
+  // around the player, so a hardcoded 8-chunk extent left the outer ring permanently painted with
+  // the "unloaded" checker — the map looked like it wasn't filling its box. Tracking the live
+  // radius (the chunk slider) keeps the terrain edge-to-edge at any draw distance.
+  const chunkedMapSpan = CHUNK_SPAN * (2 * chunkLoadRadius + 1);
+  const mapExtentX = chunkedMapDims ? chunkedMapSpan : mapRadius * 2;
+  const mapExtentZ = chunkedMapDims ? chunkedMapSpan : mapRadius * 2;
   const mapFracX = (x: number) =>
     chunkedMapCenter ? (x - (chunkedMapCenter.x - mapExtentX / 2)) / mapExtentX : x / (mapRadius * 2) + 0.5;
   const mapFracZ = (z: number) =>
@@ -16929,6 +16960,41 @@ function App(): React.ReactElement {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worldMapOpen, activeWorldId, mapExtentX, mapExtentZ, mapPlayerCell]);
+  // Every actor the map draws, in one list, so click-snapping and the tracked-target marker agree
+  // on what is selectable. Local player excluded — tracking yourself is meaningless.
+  const mapActors = useMemo(
+    () =>
+      snapshot.remoteVisitors
+        .filter((visitor) => visitor.position)
+        .map((visitor) => ({
+          visitorId: visitor.visitorId,
+          name: visitor.name,
+          position: visitor.position!,
+          isAgent: visitor.visitorId.startsWith("agent:"),
+        })),
+    [snapshot.remoteVisitors],
+  );
+  /** Nearest actor to a map fraction, within a forgiving pixel radius (null when none is close). */
+  const nearestMapActorToFraction = (
+    fx: number,
+    fz: number,
+    boxWidth: number,
+    boxHeight: number,
+  ) => {
+    const SNAP_PX = 14;
+    let best: (typeof mapActors)[number] | null = null;
+    let bestPx = Infinity;
+    for (const actor of mapActors) {
+      const dx = (mapFracX(actor.position.x) - fx) * boxWidth;
+      const dz = (mapFracZ(actor.position.z) - fz) * boxHeight;
+      const px = Math.hypot(dx, dz);
+      if (px < bestPx) {
+        bestPx = px;
+        best = actor;
+      }
+    }
+    return best && bestPx <= SNAP_PX ? best : null;
+  };
   const handleWorldMapClick = (event: React.MouseEvent<HTMLElement>) => {
     // Ignore clicks on the overlaid info panel / status badge — only the map plane warps.
     const target = event.target as HTMLElement;
@@ -16941,6 +17007,15 @@ function App(): React.ReactElement {
     if (rect.width === 0 || rect.height === 0) return;
     const fx = clamp((event.clientX - rect.left) / rect.width, 0, 1);
     const fz = clamp((event.clientY - rect.top) / rect.height, 0, 1);
+    // Snap to a nearby actor before falling back to raw terrain warp. Exact-hit-only made a near
+    // miss warp you to empty ground — often FURTHER from the agent you were aiming at, which
+    // punishes the attempt. Within the snap radius, "click near the agent" means "go to the agent".
+    const snapped = nearestMapActorToFraction(fx, fz, rect.width, rect.height);
+    if (snapped) {
+      setTrackedActorId(snapped.visitorId);
+      worldRef.current?.warpTo(snapped.position.x, snapped.position.z);
+      return;
+    }
     const pos = mapFracToWorld(fx, fz);
     worldRef.current?.warpTo(pos.x, pos.z);
   };
@@ -16964,6 +17039,27 @@ function App(): React.ReactElement {
   const actorName = (visitor: { visitorId: string; name?: string }): string => {
     return friendlyVisitorName(visitor.visitorId, visitor.name, snapshot.visitorId);
   };
+  // Tracked-target readout: distance plus a bearing relative to where the player is FACING, so the
+  // arrow means "turn this way" rather than "north is there". Bearing 0 = dead ahead.
+  const trackedActor = trackedActorId
+    ? mapActors.find((actor) => actor.visitorId === trackedActorId) ?? null
+    : null;
+  const trackedInfo = (() => {
+    if (!trackedActor || !snapshot.visitorPosition) return null;
+    const dx = trackedActor.position.x - snapshot.visitorPosition.x;
+    const dz = trackedActor.position.z - snapshot.visitorPosition.z;
+    const distance = Math.hypot(dx, dz);
+    // World forward is (sin yaw, cos yaw); atan2 in the same frame yields the relative bearing.
+    const bearing = Math.atan2(dx, dz) - (snapshot.visitorYaw ?? 0);
+    const normalized = Math.atan2(Math.sin(bearing), Math.cos(bearing));
+    return {
+      name: actorName(trackedActor),
+      distance,
+      // Screen rotation: 0 rad points up (ahead), positive turns clockwise.
+      rotationDeg: (normalized * 180) / Math.PI,
+      arrived: distance <= 6,
+    };
+  })();
   const currentWorldId = activeWorldId ?? runtimeConfig.worldId;
   const refreshFriends = useCallback(async (signal?: AbortSignal, showLoading = false) => {
     if (!account?.accountId) return false;
@@ -17211,6 +17307,25 @@ function App(): React.ReactElement {
     window.addEventListener("tellus:portal-selected", onPortalSelected);
     return () => window.removeEventListener("tellus:portal-selected", onPortalSelected);
   }, []);
+  useEffect(() => {
+    const onDoorReady = (event: Event) => {
+      const detail = (event as CustomEvent<{ portalId?: string; label?: string }>).detail;
+      if (!detail?.portalId) return;
+      setDoorPrompt({ portalId: detail.portalId, label: detail.label || "Interior door" });
+    };
+    window.addEventListener("tellus:door-ready", onDoorReady);
+    return () => window.removeEventListener("tellus:door-ready", onDoorReady);
+  }, []);
+  // Drop the prompt once the door is gone, or once the player is inside the room it opens.
+  useEffect(() => {
+    if (!doorPrompt) return;
+    if (!(snapshot.portals ?? []).some((portal) => portal.id === doorPrompt.portalId)) {
+      setDoorPrompt(null);
+    }
+  }, [doorPrompt, snapshot.portals]);
+  useEffect(() => {
+    if (doorPrompt && (activeWorldId ?? "").startsWith("interior-")) setDoorPrompt(null);
+  }, [doorPrompt, activeWorldId]);
   useEffect(() => {
     const target = portalsPanelOpen ? portalTargetWorldId : "";
     worldRef.current?.previewPortalTarget(target || null);
@@ -19212,14 +19327,17 @@ function App(): React.ReactElement {
                     className={[
                       "map-marker",
                       visitor.visitorId.startsWith("agent:") ? "agent" : "remote-player",
-                    ].join(" ")}
+                      trackedActorId === visitor.visitorId ? "tracked" : "",
+                    ].filter(Boolean).join(" ")}
                     style={mapPointStyle(visitor.position)}
-                    title={name}
+                    title={`Go to ${name} (and track them)`}
                     aria-label={`Go to ${name}`}
                     onClick={(event) => {
                       event.stopPropagation();
                       const pos = visitor.position;
-                      if (pos) worldRef.current?.warpTo(pos.x, pos.z);
+                      if (!pos) return;
+                      setTrackedActorId(visitor.visitorId);
+                      worldRef.current?.warpTo(pos.x, pos.z);
                     }}
                   />
                 ) : null;
@@ -19321,7 +19439,7 @@ function App(): React.ReactElement {
                       setMapActorList((current) => current === "items" ? null : "items");
                     }}
                   >
-                    <span className="world-info-label">Items</span>
+                    <span className="world-info-label"><Box size={10} /> Items</span>
                     <span className="world-info-value">{snapshot.generated.length}</span>
                   </button>
                   <button
@@ -19332,7 +19450,7 @@ function App(): React.ReactElement {
                       setMapActorList((current) => current === "players" ? null : "players");
                     }}
                   >
-                    <span className="world-info-label">Players</span>
+                    <span className="world-info-label"><UsersRound size={10} /> Players</span>
                     <span className="world-info-value">{playerList.length}</span>
                   </button>
                   <button
@@ -19343,7 +19461,7 @@ function App(): React.ReactElement {
                       setMapActorList((current) => current === "agents" ? null : "agents");
                     }}
                   >
-                    <span className="world-info-label">Agents</span>
+                    <span className="world-info-label"><Bot size={10} /> Agents</span>
                     <span className="world-info-value">{remoteAgents.length}</span>
                   </button>
                 </div>
@@ -19408,10 +19526,28 @@ function App(): React.ReactElement {
                           disabled={!visitor.position}
                           onClick={(event) => {
                             event.stopPropagation();
-                            if (visitor.position) worldRef.current?.warpTo(visitor.position.x, visitor.position.z);
+                            if (!visitor.position) return;
+                            // Travel AND track: after warping you still want to know which way it
+                            // is if it moves (agents wander) or you overshoot.
+                            if (visitor.visitorId !== "local-player") setTrackedActorId(visitor.visitorId);
+                            worldRef.current?.warpTo(visitor.position.x, visitor.position.z);
                           }}
                         >
                           Go to
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!visitor.position || visitor.visitorId === "local-player"}
+                          className={trackedActorId === visitor.visitorId ? "active" : undefined}
+                          title={trackedActorId === visitor.visitorId ? "Stop tracking" : `Track ${name} on screen`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setTrackedActorId((current) =>
+                              current === visitor.visitorId ? null : visitor.visitorId,
+                            );
+                          }}
+                        >
+                          {trackedActorId === visitor.visitorId ? "Tracking" : "Track"}
                         </button>
                         <button
                           type="button"
@@ -19467,6 +19603,66 @@ function App(): React.ReactElement {
                 </div>
               );
             })()}
+        {trackedInfo && (
+          <div className="tracked-target" role="status">
+            <span
+              className="tracked-target-arrow"
+              style={{ transform: `rotate(${trackedInfo.rotationDeg.toFixed(1)}deg)` }}
+              aria-hidden="true"
+            >
+              ↑
+            </span>
+            <span className="tracked-target-name">{trackedInfo.name}</span>
+            <span className="tracked-target-distance">
+              {trackedInfo.arrived ? "here" : `${Math.round(trackedInfo.distance)}m`}
+            </span>
+            <button
+              type="button"
+              className="tracked-target-goto"
+              title={`Travel to ${trackedInfo.name}`}
+              onClick={() => {
+                if (trackedActor) worldRef.current?.warpTo(trackedActor.position.x, trackedActor.position.z);
+              }}
+            >
+              Go
+            </button>
+            <button
+              type="button"
+              className="tracked-target-clear"
+              aria-label="Stop tracking"
+              title="Stop tracking"
+              onClick={() => setTrackedActorId(null)}
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {doorPrompt && (
+          <div className="door-prompt" role="status">
+            <span className="door-prompt-label">{doorPrompt.label}</span>
+            <div className="door-prompt-actions">
+              <button
+                type="button"
+                className="door-prompt-enter"
+                onClick={() => {
+                  worldRef.current?.enterPortal(doorPrompt.portalId);
+                  setDoorPrompt(null);
+                }}
+              >
+                Enter
+              </button>
+              <button
+                type="button"
+                className="door-prompt-dismiss"
+                aria-label="Dismiss door prompt"
+                title="Dismiss"
+                onClick={() => setDoorPrompt(null)}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
         {portalsPanelOpen && (() => {
           const portalBtn = {
             display: "block",

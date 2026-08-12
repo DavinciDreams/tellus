@@ -3109,6 +3109,31 @@ textarea::placeholder {
   outline-offset: 3px;
 }
 
+/* An 8px dot is both hard to hit and easy to mistake for decoration. Extend the hit area well past
+   the visible dot (users aim at the dot, not at pixels) and grow it on hover so it reads as a
+   control. ::after is invisible but clickable; the marker itself stays small. */
+.map-marker::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 999px;
+}
+
+.map-marker:hover {
+  transform: translate(-50%, -50%) scale(1.45);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 72%),
+    0 0 12px rgb(255 255 255 / 70%);
+}
+
+.map-marker.tracked {
+  background: #ffd76a;
+  border-color: #fff6b7;
+  box-shadow:
+    0 0 0 2px rgb(0 0 0 / 78%),
+    0 0 14px rgb(255 215 106 / 95%);
+}
+
 .map-marker.player {
   width: 13px;
   height: 13px;
@@ -3719,19 +3744,29 @@ textarea::placeholder {
   min-width: 0;
 }
 
+/* These tiles OPEN A LIST you can jump from — they are not read-only stats. They previously used a
+   transparent border and background at 8px, so they read as text and nobody discovered them. Give
+   them a resting border and a real hit area so they look like the controls they are. */
 .world-info-panel button {
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 5px;
+  background: rgb(255 244 185 / 5%);
   color: inherit;
   cursor: pointer;
-  padding: 1px 2px;
-  text-align: left;
+  padding: 3px 4px;
+  text-align: center;
+  justify-items: center;
+  min-height: 30px;
 }
 
 .world-info-panel button:hover,
 .world-info-panel button.active {
-  border-color: var(--hud-border-soft);
-  background: rgb(255 244 185 / 8%);
+  border-color: var(--hud-border);
+  background: rgb(255 244 185 / 14%);
+}
+
+.world-info-panel button.active {
+  box-shadow: inset 0 -2px 0 var(--hud-gold);
 }
 
 .world-info-label,
@@ -3739,20 +3774,33 @@ textarea::placeholder {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 8px;
+  font-size: 9px;
   line-height: 1.1;
 }
 
+/* Uppercase + letter-spacing is what forced "PLA…"/"AGE…" to truncate in a 3-column row. Sentence
+   case at a readable size fits the real words. */
 .world-info-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   color: var(--hud-gold);
-  font-weight: 800;
-  text-transform: uppercase;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.world-info-label > svg {
+  flex: none;
+  opacity: 0.9;
 }
 
 .world-info-value {
   color: var(--hud-text);
-  font-size: 9px;
-  text-align: left;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
 }
 
 .world-map-actor-list {
@@ -4032,7 +4080,7 @@ textarea::placeholder {
   grid-template-rows: auto auto;
   align-items: start;
   gap: 8px;
-  width: 300px;
+  width: max-content;
   max-width: calc(100vw - 40px);
   border: 1px solid var(--hud-border-soft);
   background: rgb(11 28 15 / 82%);
@@ -6770,7 +6818,7 @@ button.terrain-scatter-tile {
 }
 
 .selected-transform-hud {
-  bottom: 128px;
+  bottom: 62px;
 }
 
 .bottom-control-cluster {
@@ -7188,31 +7236,61 @@ button.terrain-scatter-tile {
   background: rgb(244 208 111 / 24%);
 }
 
-/* Keep selected-asset controls reachable while side drawers are open. */
+/* Selected-asset controls as a sparse bottom bar. Previously this was a 900px-wide wrapping
+   panel pinned top-center, which covered the very object you were rotating or moving. Anchoring
+   it just above the dock (like .door-prompt) and letting it hug its content keeps the viewport —
+   and the selected object — clear while you nudge it. */
 .selected-transform-hud {
-  top: 10px;
+  top: auto;
   right: auto;
-  bottom: auto;
+  bottom: 76px;
   left: 50%;
   z-index: 56;
   display: flex;
   align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
   gap: 6px;
-  width: min(900px, calc(100vw - 260px));
-  max-width: calc(100vw - 260px);
+  width: max-content;
+  max-width: calc(100vw - 24px);
   min-height: 44px;
-  padding: 6px 8px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: var(--hud-bg-strong);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
   transform: translateX(-50%);
+}
+
+.selected-transform-hud::-webkit-scrollbar { display: none; }
+
+/* Direct children carry inline gridColumn/gridRow from the old two-row grid layout. In the flex
+   bar those would leave gaps and stretch rows, so keep every child inline-sized instead. */
+.selected-transform-hud > *,
+.selected-transform-label > select {
+  flex: 0 0 auto;
+  grid-column: auto !important;
+  grid-row: auto !important;
+}
+
+.selected-transform-hud select {
+  max-width: 168px;
+  text-overflow: ellipsis;
+}
+
+/* The absolutely-positioned close puck belonged to the old panel; in the inline bar it floats over
+   the controls, and the row already ends with a "Close" button. */
+.selected-transform-hud .selected-transform-close {
+  display: none;
 }
 
 .selected-transform-label {
   display: flex;
-  flex: 1 1 300px;
+  flex: 0 0 auto;
   align-items: center;
   gap: 6px;
-  min-width: 220px;
+  min-width: 0;
 }
 
 .selected-transform-label > svg {
@@ -7223,19 +7301,19 @@ button.terrain-scatter-tile {
 
 .selected-transform-label select {
   width: auto;
-  flex: 1 1 170px;
-  min-width: 120px;
+  flex: 0 1 150px;
+  min-width: 96px;
   padding-block: 6px;
 }
 
 .selected-transform-label select[aria-label="Animation"] {
-  flex-basis: 160px;
+  flex-basis: 140px;
 }
 
 .selected-name-actions {
   display: flex;
-  flex: 1 1 280px;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   gap: 5px;
 }
 
@@ -7246,45 +7324,65 @@ button.terrain-scatter-tile {
   padding: 0 8px;
 }
 
+/* Keep the D-pad an actual cross — a flat row of arrows loses the directional affordance that
+   makes nudging readable at a glance. Compacted to 26px cells so the cross still fits one row. */
 .selected-nudge-pad {
-  display: flex;
+  display: grid;
   flex: none;
+  grid-template-columns: repeat(3, 24px);
+  grid-template-rows: repeat(3, 18px);
   align-items: center;
-  gap: 3px;
+  justify-items: center;
+  gap: 1px;
 }
+
+.selected-nudge-pad .icon-button {
+  width: 24px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.selected-nudge-pad .nudge-up { grid-column: 2 !important; grid-row: 1 !important; }
+.selected-nudge-pad .nudge-left { grid-column: 1 !important; grid-row: 2 !important; }
+.selected-nudge-pad .nudge-right { grid-column: 3 !important; grid-row: 2 !important; }
+.selected-nudge-pad .nudge-down { grid-column: 2 !important; grid-row: 3 !important; }
 
 .selected-step-control {
   flex: none;
 }
 
-.selected-nudge-pad .nudge-up,
-.selected-nudge-pad .nudge-left,
-.selected-nudge-pad .nudge-right,
-.selected-nudge-pad .nudge-down {
-  grid-column: auto;
-  grid-row: auto;
-}
-
+/* Rotate / height / scale stay as vertical pairs so each pair reads as one control. */
 .selected-place-actions,
 .selected-transform-stack {
-  display: flex;
+  display: grid;
   flex: none;
+  grid-template-rows: repeat(2, 26px);
+  gap: 2px;
   align-items: center;
-  gap: 4px;
+}
+
+.selected-place-actions .icon-button,
+.selected-transform-stack .icon-button {
+  width: 30px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
 }
 
 @media (max-width: 900px) {
   .selected-transform-hud {
-    top: 64px;
+    bottom: 62px;
     left: 8px;
     right: 8px;
     width: auto;
     max-width: none;
+    justify-content: flex-start;
     transform: none;
-  }
-
-  .selected-transform-label {
-    flex-basis: 100%;
   }
 }
 
@@ -7355,3 +7453,149 @@ button.terrain-scatter-tile {
  @media (max-width: 640px) {
    .tellus-dock-mount { bottom: 8px; max-width: calc(100vw - 12px); }
  }
+
+/* Sparse door prompt — shown when a procedural building gets an auto-attached
+   interior door. The door is already anchored, so Enter is the only action worth
+   surfacing; the full portal editor stays one door-click away. Sits just above
+   the bottom-center dock so it reads as a transient HUD line, not a panel. */
+.door-prompt {
+  position: fixed;
+  left: 50%;
+  bottom: 76px;
+  transform: translateX(-50%);
+  z-index: 51;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 999px;
+  background: var(--hud-bg-strong);
+  box-shadow: var(--hud-shadow), var(--hud-inset);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: auto;
+  max-width: calc(100vw - 24px);
+}
+
+.door-prompt-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.door-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.door-prompt-enter {
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 999px;
+  background: var(--hud-bg-soft);
+  color: inherit;
+  font: inherit;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.door-prompt-enter:hover {
+  background: var(--hud-bg);
+}
+
+.door-prompt-dismiss {
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 6px;
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.door-prompt-dismiss:hover {
+  opacity: 1;
+}
+
+@media (max-width: 640px) {
+  .door-prompt { bottom: 62px; font-size: 12px; }
+}
+
+/* Tracked-target marker — the persistent answer to "where is the thing I'm looking for?". The
+   arrow is a bearing relative to the player's FACING (0deg = dead ahead), so it reads as "turn
+   this way" rather than as a compass. Sits above the door prompt in the same bottom-center stack. */
+.tracked-target {
+  position: fixed;
+  left: 50%;
+  bottom: 116px;
+  transform: translateX(-50%);
+  z-index: 51;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px 7px 12px;
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 999px;
+  background: var(--hud-bg-strong);
+  box-shadow: var(--hud-shadow), var(--hud-inset);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: auto;
+  max-width: calc(100vw - 24px);
+}
+
+.tracked-target-arrow {
+  display: inline-block;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--hud-gold-bright);
+  transition: transform 0.12s linear;
+}
+
+.tracked-target-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 24ch;
+}
+
+.tracked-target-distance {
+  color: var(--hud-gold);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.tracked-target-goto {
+  border: 1px solid var(--hud-border-soft);
+  border-radius: 999px;
+  background: var(--hud-bg-soft);
+  color: inherit;
+  font: inherit;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.tracked-target-goto:hover {
+  background: var(--hud-bg);
+}
+
+.tracked-target-clear {
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  padding: 3px 5px;
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.tracked-target-clear:hover {
+  opacity: 1;
+}
+
+@media (max-width: 640px) {
+  .tracked-target { bottom: 100px; font-size: 12px; }
+}
