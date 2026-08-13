@@ -270,6 +270,8 @@ interface ActiveChunk {
 }
 
 export interface ChunkRenderer {
+  /** Hide/show cached terrain without evicting it (interiors suspend the outdoor substrate). */
+  setVisible(visible: boolean): void;
   /** Per-frame from animate(); re-evaluates the load/evict ring only when the center chunk changes.
    * movingOnFoot defers expensive LOD-UPGRADE rebuilds (a chunk's ring shrank, wanting MORE detail —
    * up to a full 4225-vertex retessellation) until the player settles; LOD-downgrades (less detail,
@@ -972,6 +974,9 @@ export function createChunkRenderer(
   };
 
   return {
+    setVisible: (visible) => {
+      group.visible = visible;
+    },
     update,
     prefetch,
     ensureBaseChunk,

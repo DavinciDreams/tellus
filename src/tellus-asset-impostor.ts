@@ -181,6 +181,23 @@ export interface ImpostorViewBlend {
   faceWeights: THREE.Vector3;
 }
 
+/**
+ * Keep a vegetation impostor upright while it faces the camera. A full Object3D.lookAt(camera)
+ * pitches the quad whenever camera height changes, making distant trees pivot around their centre
+ * on hills and during camera bob. Returning null preserves the last stable yaw when the camera is
+ * directly above the impostor and there is no meaningful horizontal direction.
+ */
+export const cylindricalImpostorTarget = (
+  cameraPosition: THREE.Vector3,
+  impostorPosition: THREE.Vector3,
+  target: THREE.Vector3,
+): THREE.Vector3 | null => {
+  const dx = cameraPosition.x - impostorPosition.x;
+  const dz = cameraPosition.z - impostorPosition.z;
+  if (dx * dx + dz * dz < 1e-8) return null;
+  return target.set(cameraPosition.x, impostorPosition.y, cameraPosition.z);
+};
+
 /** Exact inverse of the Asset Store's HEMI/FULL octahedral view encoding. */
 export const assetImpostorViewBlend = (
   direction: THREE.Vector3,
@@ -310,6 +327,7 @@ export const createAssetStoreImpostorInstance = (
   const cameraPosition = new THREE.Vector3();
   const meshPosition = new THREE.Vector3();
   const direction = new THREE.Vector3();
+  const billboardTarget = new THREE.Vector3();
   const update = (camera: THREE.Camera) => {
     camera.getWorldPosition(cameraPosition);
     mesh.getWorldPosition(meshPosition);
@@ -324,7 +342,8 @@ export const createAssetStoreImpostorInstance = (
     );
     material.uniforms.faceIndices!.value.copy(view.faceIndices);
     material.uniforms.faceWeights!.value.copy(view.faceWeights);
-    mesh.lookAt(cameraPosition);
+    const target = cylindricalImpostorTarget(cameraPosition, meshPosition, billboardTarget);
+    if (target) mesh.lookAt(target);
   };
   mesh.onBeforeRender = (_renderer, _scene, camera) => update(camera);
   return {

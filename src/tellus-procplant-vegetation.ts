@@ -56,6 +56,11 @@ import {
   type TellusImpostorInstance,
 } from "./tellus-impostor";
 import {
+  bakeWebGlImpostor,
+  isWebGlImpostorBakingSupported,
+  type WebGlImpostorHandle,
+} from "./tellus-webgl-impostor";
+import {
   BIOME_MIX_STORAGE_EVENT,
   activeBiomeMixStorageKey,
   biomeMixRenderSignature,
@@ -161,6 +166,8 @@ export interface ProcPlantVegetationStats {
 }
 
 export interface ProcPlantVegetationSystem {
+  /** Hide/show cached vegetation without rebuilding it when entering/leaving an interior. */
+  setVisible(visible: boolean): void;
   update(px: number, pz: number, playerY: number, fps: number, nowMs: number): void;
   notifyTerrainChanged(): void;
   notifyRegionsChanged(regions: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }>): void;
@@ -1220,8 +1227,13 @@ export function createProcPlantVegetation(
   const branchTreeImpostorBakes = new Set<string>();
   const branchTreeImpostorFailures = new Set<string>();
   const branchTreeImpostorConsumers = new Map<string, Set<string>>();
+  const weberPennImpostorHandles = new Map<string, WebGlImpostorHandle>();
+  const weberPennImpostorBakes = new Set<string>();
+  const weberPennImpostorFailures = new Set<string>();
+  const weberPennImpostorConsumers = new Map<string, Set<string>>();
   const branchTreeHorizonTemplates = new Map<string, ProcPlantTemplate>();
   let branchTreeImpostorBakeQueue = Promise.resolve();
+  let weberPennImpostorBakeQueue = Promise.resolve();
   const globalAssetTemplates = new Map<string, TellusBiomeAssetTemplate>();
   const authoredDefaultMixByBiome = new Map<EcologyBiomeId, TellusBiomeMixDefinition | null>();
   const authoredDefaultMixForBiome = (biome: EcologyBiomeId): TellusBiomeMixDefinition | null => {
@@ -1549,6 +1561,120 @@ export function createProcPlantVegetation(
     const instance = handle.createInstance({ scale });
     const center = handle.result.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3(0, 0.5, 0);
     center.multiplyScalar(scale).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    instance.mesh.position.set(x + center.x, groundY + center.y, z + center.z);
+    instance.mesh.castShadow = false;
+    instance.mesh.receiveShadow = false;
+    instance.update(camera);
+    chunk.group.add(instance.mesh);
+    chunk.impostors.push(instance);
+    chunk.stats.impostors++;
+    return true;
+  };
+
+  const buildWeberPennImpostorSource = (
+    genome: ProcPlantGenome,
+    built: ProcPlantInstancedParts,
+  ): THREE.Group => {
+    const source = new THREE.Group();
+    const stemMesh = new THREE.Mesh(
+      stemGeometryForTemplate(built.stems),
+      new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
+    );
+    source.add(stemMesh);
+    const buckets = new Map<string, ProcPlantInstance[]>();
+    for (const instance of built.instances) {
+      const key = geometryKeyFor(genome, instance);
+      const instances = buckets.get(key) ?? [];
+      instances.push(instance);
+      buckets.set(key, instances);
+    }
+    for (const [key, instances] of buckets) {
+      const material = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+      const mesh = new THREE.InstancedMesh(organGeometryForKey(key), material, instances.length);
+      instances.forEach((instance, index) => {
+        mesh.setMatrixAt(index, instance.matrix);
+        mesh.setColorAt(index, instance.color);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      source.add(mesh);
+    }
+    return source;
+  };
+
+  const scheduleWeberPennImpostorBake = (
+    cacheKey: string,
+    chunkKey: string,
+    genome: ProcPlantGenome,
+    built: ProcPlantInstancedParts,
+  ) => {
+    const renderer = options.renderer?.();
+    if (!isWebGlImpostorBakingSupported(renderer)) return;
+    if (weberPennImpostorFailures.has(cacheKey) || weberPennImpostorHandles.has(cacheKey)) return;
+    if (
+      !weberPennImpostorBakes.has(cacheKey) &&
+      weberPennImpostorHandles.size + weberPennImpostorBakes.size >= MAX_PROC_TREE_IMPOSTOR_HANDLES
+    ) return;
+    const consumers = weberPennImpostorConsumers.get(cacheKey) ?? new Set<string>();
+    consumers.add(chunkKey);
+    weberPennImpostorConsumers.set(cacheKey, consumers);
+    if (weberPennImpostorBakes.has(cacheKey)) return;
+    weberPennImpostorBakes.add(cacheKey);
+    weberPennImpostorBakeQueue = weberPennImpostorBakeQueue
+      .then(() => {
+        if (disposed) return;
+        const activeRenderer = options.renderer?.();
+        if (!isWebGlImpostorBakingSupported(activeRenderer)) return;
+        const source = buildWeberPennImpostorSource(genome, built);
+        try {
+          const handle = bakeWebGlImpostor(source, activeRenderer, {
+            atlasSize: PROC_TREE_IMPOSTOR_ATLAS_SIZE,
+            gridSize: PROC_TREE_IMPOSTOR_GRID_SIZE,
+          });
+          if (disposed) {
+            handle.dispose();
+            return;
+          }
+          weberPennImpostorHandles.set(cacheKey, handle);
+          for (const key of weberPennImpostorConsumers.get(cacheKey) ?? []) {
+            const chunk = active.get(key);
+            if (!chunk) continue;
+            chunk.rev = -1;
+            enqueue(key);
+          }
+        } catch (error) {
+          weberPennImpostorFailures.add(cacheKey);
+          console.warn("Tellus Weber-Penn impostor bake failed", cacheKey, error);
+        } finally {
+          disposeGroup(source);
+        }
+      })
+      .catch((error) => {
+        weberPennImpostorFailures.add(cacheKey);
+        console.warn("Tellus Weber-Penn impostor queue failed", cacheKey, error);
+      })
+      .finally(() => {
+        weberPennImpostorBakes.delete(cacheKey);
+        weberPennImpostorConsumers.delete(cacheKey);
+      });
+  };
+
+  const addWeberPennImpostor = (
+    chunk: ActiveChunk,
+    cacheKey: string,
+    x: number,
+    groundY: number,
+    z: number,
+    yaw: number,
+    scale: number,
+  ): boolean => {
+    const handle = weberPennImpostorHandles.get(cacheKey);
+    const camera = options.camera?.();
+    if (!handle || !camera) return false;
+    const instance = handle.createInstance(scale, yaw);
+    const center = handle.boundingBox.getCenter(new THREE.Vector3())
+      .multiplyScalar(scale)
+      .applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
     instance.mesh.position.set(x + center.x, groundY + center.y, z + center.z);
     instance.mesh.castShadow = false;
     instance.mesh.receiveShadow = false;
@@ -2413,9 +2539,6 @@ export function createProcPlantVegetation(
         .makeRotationY(yaw)
         .premultiply(new THREE.Matrix4().makeScale(scale, scale, scale))
         .premultiply(new THREE.Matrix4().makeTranslation(x, height + 0.02 - templateMinY(built.stems) * scale, z));
-      stemTemplates.push({ template: built.stems, matrix });
-      chunk.stats.plants++;
-      chunk.stats.stemTriangles += built.stats.stemTriangles;
       const organStride = treeHabit ? (chunk.lod === 2 ? 4 : chunk.lod === 1 ? 2 : 1) : 1;
       const canopyInstances = treeHabit
         ? built.instances.filter((instance) => organIsCanopy(geometryKeyFor(genome, instance)))
@@ -2423,6 +2546,32 @@ export function createProcPlantVegetation(
       const canopyKind: CanopyShadowKind = canopyInstances.some((instance) => instance.kind === "coniferSpray")
         ? "conifer"
         : "broadleaf";
+      const weberPennCacheKey = procPlantCacheIdentity(genome, renderSeed, environment).key;
+      if (genome.weberPenn && !fullDetailLod && chunk.lod === 2) {
+        scheduleWeberPennImpostorBake(weberPennCacheKey, chunk.key, genome, built);
+      }
+      const useWeberPennImpostor =
+        Boolean(genome.weberPenn) &&
+        !fullDetailLod &&
+        chunk.lod === 2 &&
+        distanceToPlayer >= detailDistance * PROC_TREE_IMPOSTOR_DISTANCE_FACTOR &&
+        addWeberPennImpostor(
+          chunk,
+          weberPennCacheKey,
+          x,
+          height + 0.02 - templateMinY(built.stems) * scale,
+          z,
+          yaw,
+          scale,
+        );
+      if (useWeberPennImpostor) {
+        queueCanopyShadowProxy(canopyInstances.map((instance) => instance.matrix), canopyKind, matrix);
+        chunk.stats.plants++;
+        continue;
+      }
+      stemTemplates.push({ template: built.stems, matrix });
+      chunk.stats.plants++;
+      chunk.stats.stemTriangles += built.stats.stemTriangles;
       for (let instanceIndex = 0; instanceIndex < built.instances.length; instanceIndex += organStride) {
         const instance = built.instances[instanceIndex]!;
         const key = geometryKeyFor(genome, instance);
@@ -2901,6 +3050,10 @@ export function createProcPlantVegetation(
   };
 
   return {
+    setVisible: (visible) => {
+      root.visible = visible;
+      canopyShadowPool.setVisible(visible);
+    },
     update,
     notifyTerrainChanged: () => {
       if (!terrainDirty) terrainInvalidations++;
@@ -2999,6 +3152,10 @@ export function createProcPlantVegetation(
       branchTreeImpostorHandles.clear();
       branchTreeImpostorFailures.clear();
       branchTreeImpostorConsumers.clear();
+      for (const handle of weberPennImpostorHandles.values()) handle.dispose();
+      weberPennImpostorHandles.clear();
+      weberPennImpostorFailures.clear();
+      weberPennImpostorConsumers.clear();
       for (const geometry of stemGeometryCache.values()) geometry.dispose();
       for (const geometry of organGeometryCache.values()) geometry.dispose();
       stemGeometryCache.clear();

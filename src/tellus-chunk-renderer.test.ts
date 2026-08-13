@@ -276,6 +276,19 @@ describe("createChunkRenderer lifecycle", () => {
     r.dispose();
   });
 
+  it("can hide cached outdoor terrain while an interior is active", () => {
+    const scene = new THREE.Scene();
+    const r = createChunkRenderer(scene);
+    const group = scene.getObjectByName("tellus-chunk-terrain") as THREE.Group;
+
+    r.setVisible(false);
+    expect(group.visible).toBe(false);
+    r.setVisible(true);
+    expect(group.visible).toBe(true);
+
+    r.dispose();
+  });
+
   it("keeps hysteresis-ring terrain cached but hides it outside the visible load ring", async () => {
     const scene = new THREE.Scene();
     const r = createChunkRenderer(scene);

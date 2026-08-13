@@ -350,6 +350,10 @@ export class CanopyShadowProxyPool {
     };
   }
 
+  setVisible(visible: boolean): void {
+    this.root.visible = visible;
+  }
+
   dispose(scene: THREE.Scene): void {
     scene.remove(this.root);
     this.root.clear();

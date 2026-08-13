@@ -1,0 +1,233 @@
+.tool-panel.nature-tool-panel {
+  top: 118px;
+  right: 20px;
+  bottom: 96px;
+  left: auto;
+  width: min(380px, calc(100vw - 40px));
+  height: auto;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.nature-panel {
+  min-height: 0;
+  height: 100%;
+}
+
+.nature-panel > .ds-panel__header {
+  padding: var(--ds-space-7) var(--ds-space-8);
+}
+
+.nature-panel > .ds-panel__body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.nature-panel__heading,
+.nature-panel__heading > span,
+.nature-panel__overview > div,
+.nature-panel__overview span,
+.nature-panel__section > header > span,
+.nature-population__title > span {
+  display: flex;
+}
+
+.nature-panel__heading {
+  align-items: center;
+  gap: var(--ds-space-4);
+  color: var(--ds-gold-bright);
+}
+
+.nature-panel__heading > span,
+.nature-panel__overview span,
+.nature-panel__section > header > span,
+.nature-population__title > span {
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+
+.nature-panel__heading strong {
+  font: var(--ds-weight-bold) var(--ds-text-lg)/var(--ds-leading-tight) var(--ds-font-serif);
+}
+
+.nature-panel__heading small,
+.nature-panel__overview small,
+.nature-panel__section header small,
+.nature-population small,
+.nature-panel__policy > small,
+.nature-panel__library > small {
+  color: var(--ds-muted);
+  font-size: var(--ds-text-xs);
+}
+
+.nature-panel__body {
+  display: grid;
+  gap: var(--ds-space-7);
+  padding: var(--ds-space-7) var(--ds-space-8) var(--ds-space-8);
+}
+
+.nature-panel__overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ds-space-4);
+}
+
+.nature-panel__overview > :is(div, a) {
+  align-items: center;
+  gap: var(--ds-space-4);
+  min-width: 0;
+  padding: var(--ds-space-5);
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-soft);
+  color: var(--ds-leaf-bright);
+}
+
+.nature-panel__ecology {
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color var(--ds-transition), background var(--ds-transition);
+}
+
+.nature-panel__ecology:hover {
+  border-color: var(--ds-border);
+  background: var(--ds-input-bg-hover);
+}
+
+.nature-panel__ecology > span {
+  flex: 1;
+}
+
+.nature-panel__external {
+  flex: none;
+  color: var(--ds-gold-bright);
+}
+
+.nature-panel__overview strong {
+  color: var(--ds-text);
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-tight);
+  white-space: normal;
+}
+
+.nature-panel__section,
+.nature-panel__policy,
+.nature-panel__populations,
+.nature-panel__library {
+  display: grid;
+  gap: var(--ds-space-5);
+}
+
+.nature-panel__section > header,
+.nature-population__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-4);
+}
+
+.nature-panel__section > header strong {
+  color: var(--ds-text);
+  font-size: var(--ds-text-md);
+}
+
+.nature-panel__policy {
+  padding: var(--ds-space-6);
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-input-bg);
+}
+
+.nature-panel__policy label {
+  display: grid;
+  gap: var(--ds-space-3);
+  color: var(--ds-text);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+}
+
+.nature-panel__policy label > span {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ds-space-4);
+}
+
+.nature-panel__policy output {
+  color: var(--ds-gold-bright);
+  font-family: var(--ds-font-mono);
+}
+
+.nature-panel__policy input[type="range"] {
+  width: 100%;
+  min-height: 24px;
+  accent-color: var(--ds-gold);
+}
+
+.nature-population {
+  display: grid;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-6);
+  border: 1px solid var(--ds-border-soft);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-bg-soft);
+}
+
+.nature-population__title strong {
+  color: var(--ds-text);
+  font-size: var(--ds-text-sm);
+  text-transform: capitalize;
+}
+
+.nature-population p,
+.nature-panel__empty,
+.nature-panel__message {
+  margin: 0;
+  color: var(--ds-muted);
+  font-size: var(--ds-text-xs);
+  line-height: var(--ds-leading-normal);
+}
+
+.nature-panel__empty {
+  padding: var(--ds-space-6);
+  border: 1px dashed var(--ds-border-soft);
+  border-radius: var(--ds-radius-md);
+}
+
+.nature-panel__library {
+  padding-top: var(--ds-space-6);
+  border-top: 1px solid var(--ds-border-soft);
+}
+
+.nature-panel__message {
+  padding: var(--ds-space-5);
+  border: 1px solid var(--ds-success-border);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-success-bg);
+  color: var(--ds-text);
+}
+
+.nature-panel__message--error {
+  border-color: var(--ds-danger-border);
+  background: var(--ds-danger-bg);
+  color: var(--ds-danger-text);
+}
+
+.nature-panel :is(a, button, input):focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+@media (max-width: 640px) {
+  .tool-panel.nature-tool-panel {
+    top: 72px;
+    right: 8px;
+    bottom: 88px;
+    left: auto;
+    width: calc(100vw - 16px);
+  }
+}

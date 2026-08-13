@@ -2,10 +2,10 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
-import generate3DHandler from "./api/generate-3d";
-import generatedAssetsHandler from "./api/generated-assets";
-import gradioFileHandler from "./api/gradio-file";
-import tellusStateHandler from "./api/tellus-state";
+import generate3DHandler from "./api/generate-3d.js";
+import generatedAssetsHandler from "./api/generated-assets.js";
+import gradioFileHandler from "./api/gradio-file.js";
+import tellusStateHandler from "./api/tellus-state.js";
 
 async function bodyFromRequest(request: import("node:http").IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -146,9 +146,20 @@ export default defineConfig(({ mode }) => {
         output: {
           manualChunks(id) {
             if (!id.includes("node_modules")) return undefined;
-            if (id.includes("@dimforge/rapier3d-compat")) return "vendor-rapier";
-            if (id.includes("@pixiv/three-vrm")) return "vendor-vrm";
-            if (id.includes("three")) return "vendor-three";
+            const normalizedId = id.replaceAll("\\", "/");
+            // Cesium is only used by the dedicated terrain/flight entries. Keeping it
+            // in the generic vendor chunk made the primary Tellus page preload the
+            // entire globe runtime and widget stylesheet before its first frame.
+            if (
+              normalizedId.includes("/node_modules/cesium/") ||
+              normalizedId.includes("/node_modules/@cesium/")
+            ) return "vendor-cesium";
+            // Let Rollup keep the dynamically imported 3D Tiles graph lazy. Forcing
+            // it into a manual chunk makes Vite conservatively preload that chunk.
+            if (normalizedId.includes("/node_modules/3d-tiles-renderer/")) return undefined;
+            if (normalizedId.includes("@dimforge/rapier3d-compat")) return "vendor-rapier";
+            if (normalizedId.includes("@pixiv/three-vrm")) return "vendor-vrm";
+            if (normalizedId.includes("/node_modules/three/")) return "vendor-three";
             return "vendor";
           },
         },
