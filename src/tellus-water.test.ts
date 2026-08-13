@@ -3,6 +3,7 @@ import * as THREE from "three";
 import {
   createOceanSurface,
   createPondWater,
+  createWaterShoreDistanceField,
   disposeObject,
   positionPondRipplePatch,
   triggerPondRipple,
@@ -11,14 +12,45 @@ import {
 import { pondPositionToUv } from "./tellus-pond-simulation";
 
 describe("interactive pond water", () => {
+  it("builds a signed shoreline distance field once and wires it into water shading", () => {
+    const shore = createWaterShoreDistanceField({
+      centerX: 0,
+      centerZ: 0,
+      width: 20,
+      depth: 20,
+      resolution: 40,
+      distanceRange: 8,
+      isWater: (x, z) => x * x + z * z >= 25,
+    });
+    const data = shore.texture.image.data as Uint8Array;
+    const center = data[20 * 40 + 20];
+    const corner = data[0];
+    expect(center).toBeLessThan(128);
+    expect(corner).toBeGreaterThan(128);
+
+    const ocean = createOceanSurface(false, undefined, { shoreDistanceField: shore });
+    const material = ocean.material as THREE.ShaderMaterial;
+    expect(material.uniforms.uHasShoreDistanceMap.value).toBe(1);
+    expect(material.uniforms.uShoreDistanceMap.value).toBe(shore.texture);
+    expect(material.userData.tellusWaterShaderVariant).toBe("webgl-contour-shore-distance");
+    disposeObject(ocean);
+  });
+
   it("uses a calm bounded reflective plane for inland lakes", () => {
-    const lake = createOceanSurface(false, undefined, { mode: "lake", width: 640, depth: 480 });
+    const lake = createOceanSurface(false, undefined, {
+      mode: "lake",
+      width: 640,
+      depth: 480,
+    });
     const material = lake.material as THREE.ShaderMaterial;
     const reflection = lake.getObjectByName("tellus-ocean-reflection") as THREE.Mesh;
 
     expect(lake.name).toBe("tellus-inland-water-plane");
     expect(lake.geometry).toBeInstanceOf(THREE.PlaneGeometry);
     expect(material.uniforms.uPondCalm.value).toBe(1);
+    expect(material.uniforms.uSkyColor.value).toBeInstanceOf(THREE.Color);
+    expect(material.fragmentShader).toContain("uSkyColor");
+    expect(material.fragmentShader).toContain("skyReflection");
     expect((reflection.material as THREE.ShaderMaterial).uniforms.motionStrength.value).toBe(0.22);
     disposeObject(lake);
   });

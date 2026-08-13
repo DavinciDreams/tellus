@@ -187,7 +187,8 @@ import {
   positionAtGroundRelativeOffset,
 } from "./tellus-grounding";
 import { gltfObjectCache, createGltfLoader, generatedAssetManifestEntries, generatedAssetManifestModelUrls, generatedAssetManifestAssetIds, loadAssetLibraryModels, browseAssetLibrary, type AssetBrowseSort, configureKtx2Support, textureFailedModelUrls, startPixel3DGeneration, waitForPixel3DModelUrl, hasExternalGenerationProvider, isMissingApiRouteError, generationProviderForThing, startDirectInstantMeshGeneration, waitForDirectGeneration, cancelDirectGeneration } from "./tellus-generation-client";
-import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, fittedModelDimensions, generatedModelHasRuntimeAnimations, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, positionPondRipplePatch, triggerPondRipple, updatePondRipples, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
+import { createTerrainGeometry, createFloatingRim, createFallbackOceanMaterial, createOceanSurface, createWaterShoreDistanceField, createDistantIslandTerrainGeometry, createDistantIsland, createDistantArchipelago, createSkyDome, createEnvironmentTexture, createBackdropWaterMaterial, createFlowerSpriteTexture, createFlowerSpriteMaterials, disposeMaterial, disposeObject, fitModelToHeight, fittedModelDimensions, generatedModelHasRuntimeAnimations, measureModelBounds, placeObjectAboveGround, loadGltfObject, generatedGltfCache, loadGeneratedGltfObject, prepareSkyboxModel, collectSkyboxTintMaterials, prepareMoonModel, loadSkyboxModel, assetTargetHeight, loadGeneratedModel, createPondWater, positionPondRipplePatch, triggerPondRipple, updatePondRipples, createGeneratedMesh, createGenerationSwirl, shouldShowGenerationSwirl, applyThingRotation, inferGeneratedKind, promptAccent, kindColor } from "./tellus-scene-builders";
+import type { WaterShoreDistanceField } from "./tellus-scene-builders";
 import { createTerrainMaterial, terrainKindCode, terrainTextureDiagnostics } from "./tellus-terrain-material";
 import { largeWorldBaseHeight, largeWorldBiomeCellAt, largeWorldTerrainKind, usesContinentalChunkedTerrain } from "./tellus-large-world-terrain";
 import {
@@ -1239,6 +1240,7 @@ function createTellusWorld(
   const usesSimulatedPondWater = !isChunked || usesChunkedLakeWater;
   const showsWorldWaterSurface = !isChunked || !isContinentalChunkedWorld || usesChunkedLakeWater;
   const chunkedDims = isChunked ? getChunkedWorldChunks() : null;
+  const chunkedCenterForWorld = isChunked ? chunkedWorldCenter() : null;
 
   // ── Entry loading screen + spawn grounding ────────────────────────────────────────────────────
   // The first couple seconds after entering a world pay one-time costs: the spawn chunk builds, the
@@ -1290,14 +1292,51 @@ function createTellusWorld(
     if (material.uniforms.uPondCalm) material.uniforms.uPondCalm.value = 1;
     material.userData.tellusCalmPondBase = true;
   };
+  // Sample the same analytic terrain used by the minimap into a compact signed-distance field.
+  // It is built once per world mount, then lets the WebGL water shader trace real coastlines instead
+  // of assuming every island/lake is circular. WebGPU keeps its existing TSL water path for now.
+  const waterShoreDistanceField = !useWebGPU && showsWorldWaterSurface
+    ? (() => {
+        const center = chunkedCenterForWorld ?? { x: 0, z: 0 };
+        const fullWidth = (chunkedDims?.w ?? 1) * CHUNK_SPAN;
+        const fullDepth = (chunkedDims?.h ?? 1) * CHUNK_SPAN;
+        const fieldWidth = isContinentalChunkedWorld
+          ? Math.min(fullWidth, OCEAN_RADIUS * 2.4)
+          : WORLD_RADIUS * 3;
+        const fieldDepth = isContinentalChunkedWorld
+          ? Math.min(fullDepth, OCEAN_RADIUS * 2.4)
+          : WORLD_RADIUS * 3;
+        return createWaterShoreDistanceField({
+          centerX: center.x,
+          centerZ: center.z,
+          width: fieldWidth,
+          depth: fieldDepth,
+          // Matches the minimap's terrain sampling density. At this scale one texel is smaller than
+          // the 18-unit shoreline foam band, while avoiding a long world-entry stall.
+          resolution: 128,
+          distanceRange: 96,
+          isWater: (x, z) => {
+            const height = isChunked ? largeWorldBaseHeight(x, z) : terrainHeight(x, z);
+            // The rendered water plane intersects the physical heightfield at sea level. Sampling
+            // height alone is both more accurate to that visible contour and much cheaper than the
+            // biome classifier (which also computes slope from several additional height samples).
+            return height <= SEA_LEVEL + (isChunked ? 0.45 : 0);
+          },
+        });
+      })()
+    : undefined;
   // Rich TSL water on the WebGPU path; WebGL keeps the lightweight fallback material.
   const ocean = createOceanSurface(useWebGPU, runtimeConfig.waterSettings, usesChunkedLakeWater
     ? {
         mode: "lake",
         width: (chunkedDims?.w ?? 1) * CHUNK_SPAN,
         depth: (chunkedDims?.h ?? 1) * CHUNK_SPAN,
+        shoreDistanceField: waterShoreDistanceField,
       }
-    : { mode: "ocean" });
+    : {
+        mode: "ocean",
+        shoreDistanceField: waterShoreDistanceField,
+      });
   configureCalmLakeBase(ocean.material);
   const archipelago = createDistantArchipelago(useWebGPU);
   let chunkRenderer: ChunkRenderer | null = null;
@@ -1308,7 +1347,6 @@ function createTellusWorld(
   let lastChunkStreamGroundingAt = 0;
   const chunkStreamGroundingQueue: string[] = [];
   const queuedChunkStreamGrounding = new Set<string>();
-  const chunkedCenterForWorld = isChunked ? chunkedWorldCenter() : null;
   if (chunkedCenterForWorld) {
     ocean.position.x = chunkedCenterForWorld.x;
     ocean.position.z = chunkedCenterForWorld.z;
@@ -3204,6 +3242,7 @@ function createTellusWorld(
       chunkStats: chunkRenderer?.stats(),
     },
     water: {
+      mode: evoflowWaterMode ?? (showsWorldWaterSurface ? "ocean" : "dry"),
       oceanVisible: ocean.visible,
       archipelagoVisible: archipelago.visible,
       pondWaterVisible: pondWater.visible,
@@ -3223,6 +3262,17 @@ function createTellusWorld(
       oceanShaderVariant: Array.isArray(ocean.material)
         ? ocean.material.map((material) => material.userData.tellusWaterShaderVariant)
         : ocean.material.userData.tellusWaterShaderVariant,
+      shorelineDistanceField: (() => {
+        const field = ocean.userData.tellusShoreDistanceField as WaterShoreDistanceField | undefined;
+        return field
+          ? { active: true, resolution: field.resolution, buildMs: Number(field.buildMs.toFixed(1)) }
+          : { active: false };
+      })(),
+      reflectionCaptureHz: (() => {
+        const reflection = ocean.getObjectByName("tellus-ocean-reflection");
+        const state = reflection?.userData.tellusReflectionState as { minIntervalMs?: number } | undefined;
+        return state?.minIntervalMs ? Number((1000 / state.minIntervalMs).toFixed(1)) : 0;
+      })(),
       oceanShoreCenter:
         !Array.isArray(ocean.material) &&
         ocean.material instanceof THREE.ShaderMaterial &&
@@ -4126,7 +4176,10 @@ function createTellusWorld(
     const previousOceanMaterial = ocean.material;
     ocean.material = useWebGPU
       ? createBackdropWaterMaterial(runtimeConfig.waterSettings)
-      : createFallbackOceanMaterial(runtimeConfig.waterSettings);
+      : createFallbackOceanMaterial(
+          runtimeConfig.waterSettings,
+          ocean.userData.tellusShoreDistanceField as WaterShoreDistanceField | undefined,
+        );
     configureCalmLakeBase(ocean.material);
     disposeMaterial(previousOceanMaterial);
 
@@ -9951,6 +10004,7 @@ function createTellusWorld(
         oceanColor.lerp(mood.oceanTint, mood.oceanTintStrength);
       }
       oceanMaterial.uniforms.uTintColor?.value.copy(oceanColor);
+      oceanMaterial.uniforms.uSkyColor?.value.copy(reflectedSkyColor);
       if (oceanMaterial.uniforms.uOpacity) {
         oceanMaterial.uniforms.uOpacity.value = (0.6 + daylight * 0.16) * mood.opacity;
       }
@@ -14812,6 +14866,8 @@ function App(): React.ReactElement {
   const [currentWaterSettings, setCurrentWaterSettings] = useState<WaterSettings>(
     runtimeConfig.waterSettings,
   );
+  const currentWorldWaterMode = evoflowWaterModeFor(currentWorldTemplate) ?? "ocean";
+  const newWorldWaterMode = evoflowWaterModeFor(newWorldTemplate) ?? "ocean";
   const [terrainTuningDraft, setTerrainTuningDraft] = useState<TerrainTuningDraft>(
     terrainTuningFromLandShape(runtimeConfig.landShape),
   );
@@ -18645,8 +18701,15 @@ function App(): React.ReactElement {
               </label>
             </div>
             <div className="world-water-controls" aria-label="Water settings">
+              {currentWorldWaterMode === "dry" ? (
+                <div className="world-water-mode-note" role="status">
+                  <strong>Dry terrain</strong>
+                  <span>This terrain preset has no surface water.</span>
+                </div>
+              ) : (
+                <>
               <label className="world-lighting-control">
-                <span>Water</span>
+                <span>{currentWorldWaterMode === "lake" ? "Lake" : "Ocean"}</span>
                 <select
                   aria-label="Water style"
                   title="Water color and clarity style"
@@ -18686,6 +18749,8 @@ function App(): React.ReactElement {
                   onChange={(e) => updateActiveWorldWater({ waveStrength: Number(e.target.value) })}
                 />
               </label>
+                </>
+              )}
             </div>
             <details className="world-tuning-controls">
               <summary>Terrain tune</summary>
@@ -18829,8 +18894,10 @@ function App(): React.ReactElement {
                     {skyboxLabel(newWorldSkyboxUrl)} -{" "}
                     {LIGHTING_MOOD_OPTIONS.find((option) => option.id === newWorldLightingMood)?.label ??
                       newWorldLightingMood} - {DAY_NIGHT_MODE_OPTIONS.find((option) => option.id === newWorldDayNightMode)?.label ??
-                      newWorldDayNightMode} - {WATER_STYLE_OPTIONS.find((option) => option.id === newWorldWaterSettings.style)?.label ??
-                      newWorldWaterSettings.style} - {newWorldChunkSize} chunks
+                      newWorldDayNightMode} - {newWorldWaterMode === "dry"
+                        ? "Dry terrain"
+                        : WATER_STYLE_OPTIONS.find((option) => option.id === newWorldWaterSettings.style)?.label ??
+                          newWorldWaterSettings.style} - {newWorldChunkSize} chunks
                   </small>
                 </div>
                 {ADVANCED_WORLD_TEMPLATE_OPTIONS.length > 0 && (
@@ -18912,6 +18979,13 @@ function App(): React.ReactElement {
                       ))}
                     </select>
                   </label>
+                  {newWorldWaterMode === "dry" ? (
+                    <div className="world-field compact world-water-mode-note" role="status">
+                      <span>Water</span>
+                      <strong>None</strong>
+                    </div>
+                  ) : (
+                    <>
                   <label className="world-field compact">
                     <span>Water</span>
                     <select
@@ -18946,6 +19020,8 @@ function App(): React.ReactElement {
                       }
                     />
                   </label>
+                    </>
+                  )}
                   <label className="world-field compact">
                     <span>Size (chunks)</span>
                     <input
