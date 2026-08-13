@@ -138,6 +138,7 @@ export default defineConfig(({ mode }) => {
           agentView: "agent-view.html",
           treeLodGallery: "tree-lod-gallery.html",
           biomeMixer: "biome-mixer.html",
+          biomeDefaults: "biome-defaults.html",
           yosemiteTerrainViewer: "yosemite-terrain-viewer.html",
           cesiumTerrainViewer: "cesium-terrain-viewer.html",
           dragonFlight: "dragon-flight.html",
