@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { buildHomePlanModel, homePlanFixtureById, validateHomePlan, type HomePlan } from "./home-planner";
 import { procPlantPlaceableById } from "./tellus-procplant-biomes";
 import { buildProcPlantObject, procPlantPresets } from "./tellus-procplants";
 import { buildProceduralObject, proceduralArchetype } from "./tellus-veg-archetypes";
@@ -19,6 +20,7 @@ import {
 // placement/sync/clone/throw/delete all just work on every client.
 
 export const PROCEDURAL_URL_PREFIX = "procedural://";
+export const HOME_PLAN_ARCHETYPE_PREFIX = "home-plan-";
 
 export const isProceduralModelUrl = (url: string | undefined | null): url is string =>
   typeof url === "string" && url.startsWith(PROCEDURAL_URL_PREFIX);
@@ -36,6 +38,14 @@ export const makeProceduralModelUrl = (archetypeId: string, seed: number): strin
 
 export const makeProcPlantModelUrl = (presetId: string, seed: number): string =>
   `${PROCEDURAL_URL_PREFIX}procplant-${presetId.toLowerCase()}?seed=${seed >>> 0}`;
+
+export const makeHomePlanModelUrl = (fixtureId: string, seed: number): string =>
+  `${PROCEDURAL_URL_PREFIX}${HOME_PLAN_ARCHETYPE_PREFIX}${fixtureId.toLowerCase()}?seed=${seed >>> 0}`;
+
+export const makeCustomHomePlanModelUrl = (plan: HomePlan, seed: number): string => {
+  const params = new URLSearchParams({ seed: String(seed >>> 0), plan: JSON.stringify(plan) });
+  return `${PROCEDURAL_URL_PREFIX}${HOME_PLAN_ARCHETYPE_PREFIX}custom?${params.toString()}`;
+};
 
 export const makeProceduralBuildingModelUrl = (
   archetypeId: string,
@@ -69,22 +79,38 @@ export const parseProceduralModelUrl = (
   procPlant?: {
     presetId: string;
   };
+  homePlan?: {
+    fixtureId?: string;
+    plan?: HomePlan;
+  };
 } | null => {
   if (!isProceduralModelUrl(url)) return null;
   const rest = url.slice(PROCEDURAL_URL_PREFIX.length);
   const q = rest.indexOf("?");
   const archetypeId = (q >= 0 ? rest.slice(0, q) : rest).toLowerCase();
+  const params = q >= 0 ? new URLSearchParams(rest.slice(q + 1)) : null;
   const building = proceduralBuildingArchetype(archetypeId);
   const procPlant = procPlantPlaceableById(archetypeId);
+  const homePlanFixtureId = archetypeId.startsWith(HOME_PLAN_ARCHETYPE_PREFIX)
+    ? archetypeId.slice(HOME_PLAN_ARCHETYPE_PREFIX.length)
+    : null;
+  const homePlan = homePlanFixtureId ? homePlanFixtureById(homePlanFixtureId) : undefined;
+  const customHomePlan = homePlanFixtureId === "custom" ? parseCustomHomePlan(params?.get("plan")) : undefined;
   // The mirror isn't a vegetation archetype — accept it here
   // so it rides the same procedural:// place/sync/clone pipeline.
-  if (archetypeId !== MIRROR_ARCHETYPE_ID && !building && !procPlant && !proceduralArchetype(archetypeId)) return null;
+  if (
+    archetypeId !== MIRROR_ARCHETYPE_ID &&
+    !building &&
+    !procPlant &&
+    !homePlan &&
+    !customHomePlan &&
+    !proceduralArchetype(archetypeId)
+  ) return null;
   let seed = 1;
   let material: BuildingMaterialStyle | undefined;
   let lighting: BuildingLightingStyle | undefined;
   let roof: boolean | undefined;
-  if (q >= 0) {
-    const params = new URLSearchParams(rest.slice(q + 1));
+  if (params) {
     const m = params.get("seed");
     if (m) seed = Number(m) >>> 0;
     material = normalizeBuildingMaterial(params.get("material"));
@@ -108,7 +134,23 @@ export const parseProceduralModelUrl = (
   if (procPlant) {
     return { archetypeId, seed, procPlant: { presetId: procPlant.presetId } };
   }
+  if (customHomePlan) {
+    return { archetypeId, seed, homePlan: { plan: customHomePlan } };
+  }
+  if (homePlanFixtureId && homePlan) {
+    return { archetypeId, seed, homePlan: { fixtureId: homePlanFixtureId } };
+  }
   return { archetypeId, seed };
+};
+
+const parseCustomHomePlan = (encoded: string | null | undefined): HomePlan | undefined => {
+  if (!encoded) return undefined;
+  try {
+    const value = JSON.parse(encoded) as HomePlan;
+    return validateHomePlan(value).length === 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 // Small build cache — repeated placements of the same url (clones, remote patches) share nothing
@@ -131,6 +173,8 @@ export const buildProceduralModel = (
       ? buildProceduralBuildingModel(parsed.building.recipeId, parsed.seed, parsed.building)
       : parsed.procPlant
         ? buildProcPlantObject(procPlantPresets[parsed.procPlant.presetId], parsed.seed)
+      : parsed.homePlan
+        ? buildHomePlanModel(parsed.homePlan.plan ?? homePlanFixtureById(parsed.homePlan.fixtureId!)!)
       : buildProceduralObject(parsed.archetypeId, parsed.seed);
     if (!built) return null;
     proto = built;

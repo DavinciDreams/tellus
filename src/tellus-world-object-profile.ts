@@ -166,6 +166,11 @@ function proceduralBuildingRecipeId(modelUrl?: string): string | null {
   return match?.[1] ?? null;
 }
 
+function proceduralHomePlanId(modelUrl?: string): string | null {
+  const match = /^procedural:\/\/home-plan-([^?]+)/.exec(modelUrl ?? "");
+  return match?.[1] ?? null;
+}
+
 function avatarHeight(ratio: number): number {
   return STANDARD_HUMANOID_HEIGHT * ratio;
 }
@@ -197,6 +202,9 @@ export function worldThingTargetHeight(
   const buildingRecipeId = proceduralBuildingRecipeId(thing.modelUrl);
   if (buildingRecipeId) {
     return clamp((proceduralBuildingBaseHeights[buildingRecipeId] ?? 7.2) * variation, 2.4, 64);
+  }
+  if (proceduralHomePlanId(thing.modelUrl)) {
+    return clamp(3.2 * variation, 2.4, 12);
   }
 
   const proceduralPlantHeights: Record<string, number> = {
@@ -277,9 +285,10 @@ export function buildWorldThingRuntimeProfile(
   const targetHeight = worldThingTargetHeight(thing);
   const height = options.dimensions?.height ?? targetHeight;
   const buildingRecipeId = proceduralBuildingRecipeId(thing.modelUrl);
+  const buildingLike = Boolean(buildingRecipeId || proceduralHomePlanId(thing.modelUrl));
   const radius =
     options.dimensions?.radius ??
-    Math.max(0.2, targetHeight * (buildingRecipeId ? 0.42 : 0.28));
+    Math.max(0.2, targetHeight * (buildingLike ? 0.42 : 0.28));
   return {
     id: thing.id,
     placementMode,
@@ -290,10 +299,10 @@ export function buildWorldThingRuntimeProfile(
     groundOffset,
     hasManualGroundOffset,
     seatHeight: seatHeightForThing(thing, height),
-    collisionRadius: buildingRecipeId
+    collisionRadius: buildingLike
       ? clamp(radius * 0.82, 1.2, 14)
       : clamp(radius * 0.72, 0.45, 4.2),
-    collisionHeight: buildingRecipeId ? clamp(height, 1.8, 36) : clamp(height, 0.8, 18),
+    collisionHeight: buildingLike ? clamp(height, 1.8, 36) : clamp(height, 0.8, 18),
   };
 }
 

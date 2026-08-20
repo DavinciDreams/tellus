@@ -24,6 +24,7 @@ import {
   Plus,
   RotateCcw,
   RotateCw,
+  Ruler,
   Save,
   Search,
   Send,
@@ -43,7 +44,14 @@ import { TransformControls } from "three/examples/jsm/controls/TransformControls
 import { PROCPLANT_PLACEABLE_CATALOG, procPlantPlaceableById } from "./tellus-procplant-biomes";
 import { createProcPlantVegetation } from "./tellus-procplant-vegetation";
 import { PROCEDURAL_CATALOG } from "./tellus-veg-archetypes";
-import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, resetLiveMirrors } from "./tellus-procedural-assets";
+import { makeProcPlantModelUrl, makeProceduralModelUrl, makeProceduralBuildingModelUrl, makeHomePlanModelUrl, makeCustomHomePlanModelUrl, sanitizeProceduralModelUrl, parseProceduralModelUrl, MIRROR_ARCHETYPE_ID, resetLiveMirrors } from "./tellus-procedural-assets";
+import {
+  HomePlanDesigner,
+  HOME_PLAN_FIXTURE_CATALOG,
+  type HomePlan,
+  type HomePlanDesignerMaterial,
+  type HomePlanFixtureId,
+} from "./home-planner";
 import {
   BUILDING_LIGHTING_OPTIONS,
   BUILDING_MATERIAL_OPTIONS,
@@ -6439,6 +6447,20 @@ function createTellusWorld(
     publish();
   };
 
+  const clearVegetation = (): { manualPlants: number } => {
+    const manualPlants = procplants.manualPlantPlacements().length;
+    procplants.replaceManualPlants([]);
+    try {
+      window.localStorage.setItem("tellus.procplants", "0");
+      window.localStorage.removeItem(`tellus.procplants.manual.${runtimeConfig.worldId}`);
+    } catch {
+      /* localStorage can be unavailable in private contexts. */
+    }
+    vegetation.dispose();
+    procplants.dispose();
+    return { manualPlants };
+  };
+
   // Warp the player to a world (x,z) — the click-map teleport. Grounds onto the terrain (chunked-aware via
   // groundedPosition), cancels any fall/run-accel, and republishes presence so peers see the jump.
   // Arrival grace: after any spawn/warp/interior-entry, if the player is standing inside a portal's
@@ -10931,6 +10953,7 @@ function createTellusWorld(
     setTerrainBrush,
     setTerrainBrushRadius,
     setVegetationBrush,
+    clearVegetation,
     sculptTerrain,
     importGeneratedThings,
     setSkyboxUrl,
@@ -11367,6 +11390,16 @@ function App(): React.ReactElement {
     setTerrainBrushMode(null);
     worldRef.current?.setTerrainBrush(null);
     worldRef.current?.setVegetationBrush(next, mode);
+  };
+  const clearVegetation = () => {
+    clearTerrainBrush();
+    const result = worldRef.current?.clearVegetation();
+    showWorldNote(
+      result && result.manualPlants > 0
+        ? `Vegetation cleared; removed ${result.manualPlants} manual plants`
+        : "Vegetation cleared",
+      3600,
+    );
   };
   // Live Tellus account (null when logged out). World deletion is ultimately
   // server-gated; the world list carries can_delete for owners/admins.
@@ -13807,6 +13840,8 @@ function App(): React.ReactElement {
   const [procBuildingMaterial, setProcBuildingMaterial] = useState<BuildingMaterialStyle>("auto");
   const [procBuildingLighting, setProcBuildingLighting] = useState<BuildingLightingStyle>("warm");
   const [procBuildingRoof, setProcBuildingRoof] = useState(true);
+  const [homePlanFixtureId, setHomePlanFixtureId] = useState<HomePlanFixtureId>("rectangular-cabin");
+  const [homeDesignerOpen, setHomeDesignerOpen] = useState(false);
   const assetWorldId = activeWorldId ?? runtimeConfig.worldId;
   const assetPrimaryTab: Extract<AssetPanelTab, "building" | "furniture"> =
     assetWorldId.startsWith("interior-") ? "furniture" : "building";
@@ -13850,6 +13885,45 @@ function App(): React.ReactElement {
       { scale: 1 },
     );
   }, [procBuildingLighting, procBuildingMaterial, procBuildingRoof, selectedProcBuilding]);
+  const selectedHomePlanFixture =
+    HOME_PLAN_FIXTURE_CATALOG.find((item) => item.id === homePlanFixtureId) ??
+    HOME_PLAN_FIXTURE_CATALOG[0];
+  const placeHomePlanFixture = useCallback(() => {
+    const seed = (Math.random() * 0xffffffff) >>> 0;
+    worldRef.current?.addLibraryAsset(
+      {
+        id: `home-plan-${selectedHomePlanFixture.id}-${seed.toString(16)}`,
+        name: selectedHomePlanFixture.label,
+        description: `${selectedHomePlanFixture.label} home plan building`,
+        modelUrl: makeHomePlanModelUrl(selectedHomePlanFixture.id, seed),
+        source: "generated",
+      },
+      { scale: 1 },
+    );
+  }, [selectedHomePlanFixture]);
+  const homeDesignerMaterials = useMemo<HomePlanDesignerMaterial[]>(
+    () =>
+      BUILDING_MATERIAL_OPTIONS.filter((option) => option.id !== "auto").map((option) => ({
+        id: option.id,
+        label: option.label,
+        ...BUILDING_MATERIAL_SWATCHES[option.id],
+      })),
+    [],
+  );
+  const placeCustomHomePlan = useCallback((plan: HomePlan) => {
+    const seed = (Math.random() * 0xffffffff) >>> 0;
+    worldRef.current?.addLibraryAsset(
+      {
+        id: `home-plan-custom-${seed.toString(16)}`,
+        name: plan.label,
+        description: `${plan.label} measured home plan`,
+        modelUrl: makeCustomHomePlanModelUrl(plan, seed),
+        source: "generated",
+      },
+      { scale: 1 },
+    );
+    setHomeDesignerOpen(false);
+  }, []);
   const assetBrowseQuery = assetSearch.trim();
   const assetBrowseSeq = useRef(0);
   const [assetReuseSuggestions, setAssetReuseSuggestions] = useState<AssetReuseCandidate[]>([]);
@@ -17593,6 +17667,32 @@ function App(): React.ReactElement {
                         <span>Place</span>
                       </button>
                     </div>
+                    <div className="asset-proc-divider" />
+                    <label className="asset-proc-field">
+                      <span>Home plan preset</span>
+                      <select
+                        value={homePlanFixtureId}
+                        onChange={(event) =>
+                          setHomePlanFixtureId(event.target.value as HomePlanFixtureId)
+                        }
+                      >
+                        {HOME_PLAN_FIXTURE_CATALOG.map((fixture) => (
+                          <option key={fixture.id} value={fixture.id}>
+                            {fixture.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="asset-proc-actions">
+                      <button type="button" onClick={placeHomePlanFixture}>
+                        <Plus size={14} />
+                        <span>Place preset</span>
+                      </button>
+                    </div>
+                    <button type="button" className="home-designer-launch" onClick={() => setHomeDesignerOpen(true)}>
+                      <Ruler size={15} />
+                      <span>Design custom home</span>
+                    </button>
                   </section>
                 )}
                 <label className="asset-search-field">
@@ -17950,7 +18050,19 @@ function App(): React.ReactElement {
               <span>Brick</span>
             </button>
           </div>
-          <div className="terrain-subtitle with-rule">Scatter</div>
+          <div className="terrain-subtitle-row with-rule">
+            <div className="terrain-subtitle">Scatter</div>
+            <button
+              type="button"
+              className="terrain-brush-clear"
+              title="Clear streamed and manual vegetation"
+              aria-label="Clear vegetation"
+              onClick={clearVegetation}
+            >
+              <X size={14} />
+              <span>Clear vegetation</span>
+            </button>
+          </div>
           <div className="terrain-scatter-grid">
             <a
               className="terrain-scatter-tile"
@@ -18036,6 +18148,14 @@ function App(): React.ReactElement {
 
       </aside>
       )}
+
+      <HomePlanDesigner
+        open={homeDesignerOpen}
+        materials={homeDesignerMaterials}
+        initialMaterialId="timber-frame"
+        onClose={() => setHomeDesignerOpen(false)}
+        onPlace={placeCustomHomePlan}
+      />
 
     </main>
   );

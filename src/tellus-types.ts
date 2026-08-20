@@ -361,6 +361,7 @@ export interface TellusWorldApi {
   setTerrainBrush(mode: TerrainEditMode | null): void;
   setTerrainBrushRadius(radius: number): void;
   setVegetationBrush(archetypeId: string | null, mode?: "single" | "multi"): void;
+  clearVegetation(): { manualPlants: number };
   sculptTerrain(mode: TerrainEditMode): void;
   importGeneratedThings(things: WorldGeneratedThing[]): void;
   setSkyboxUrl(url: string): Promise<string | null>;
