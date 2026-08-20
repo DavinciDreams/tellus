@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { shouldAttachSessionHeader } from "./tellus-auth";
+import {
+  canUseTellusMcp,
+  hasTellusMcpAccess,
+  shouldAttachSessionHeader,
+} from "./tellus-auth";
 import { runtimeConfig } from "./tellus-runtime-config";
 
 describe("Tellus auth fetch header routing", () => {
@@ -85,5 +89,33 @@ describe("Tellus auth fetch header routing", () => {
       shouldAttachSessionHeader("https://hyades.gnostr.cloud/api/assets/model/asset-1"),
     ).toBe(false);
     expect(shouldAttachSessionHeader("https://example.com/api/world/main/state")).toBe(false);
+  });
+});
+
+describe("Tellus MCP entitlement", () => {
+  it("allows active accounts to bring their own agents", () => {
+    expect(canUseTellusMcp({ status: "active" })).toBe(true);
+    expect(canUseTellusMcp({ status: "ACTIVE" })).toBe(true);
+  });
+
+  it("denies pending, banned, and unverified cached account state", () => {
+    expect(canUseTellusMcp({ status: "pending" })).toBe(false);
+    expect(canUseTellusMcp({ status: "banned" })).toBe(false);
+    expect(canUseTellusMcp({})).toBe(false);
+  });
+
+  it("lets a server denial narrow access but never lets stale status widen it", () => {
+    expect(
+      hasTellusMcpAccess(
+        { status: "active" },
+        { canUseMcp: false },
+      ),
+    ).toBe(false);
+    expect(
+      hasTellusMcpAccess(
+        { status: "pending" },
+        { canUseMcp: true },
+      ),
+    ).toBe(false);
   });
 });
