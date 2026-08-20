@@ -741,7 +741,7 @@ export async function getCheckout(id: string): Promise<PayCheckout> {
   return await apiJson<PayCheckout>(() => payUrl(`checkout/${encodeURIComponent(id)}`));
 }
 
-// ── MCP "play programmatically" token (premium) ──────────────────────────────
+// ── MCP "play programmatically" token (bring your own agent) ─────────────────
 
 export interface McpTokenStatus {
   hasToken: boolean;
@@ -750,16 +750,16 @@ export interface McpTokenStatus {
   canUseMcp?: boolean;
 }
 
-/** Rollout fallback: MCP is available to premium accounts and authenticated Tellus admins. */
+/** Rollout fallback: every active account may bring its own MCP agent. */
 export function canUseTellusMcp(
-  account: Pick<TellusAccount, "premium" | "role">,
+  account: Pick<TellusAccount, "status">,
 ): boolean {
-  return Boolean(account.premium) || account.role?.trim().toLowerCase() === "admin";
+  return account.status?.trim().toLowerCase() === "active";
 }
 
 /** A server denial narrows the rollout fallback; stale server state can never widen local entitlement. */
 export function hasTellusMcpAccess(
-  account: Pick<TellusAccount, "premium" | "role">,
+  account: Pick<TellusAccount, "status">,
   status?: Pick<McpTokenStatus, "canUseMcp"> | null,
 ): boolean {
   return canUseTellusMcp(account) && status?.canUseMcp !== false;

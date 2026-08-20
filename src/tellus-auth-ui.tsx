@@ -294,7 +294,7 @@ function McpGuideLink(): React.ReactElement {
   );
 }
 
-/** Surface the MCP guide to every user; premium or admin entitlement gates token management. */
+/** Surface the MCP guide to every user; active accounts may bring their own MCP agents. */
 function McpAccessSection({
   account,
 }: {
@@ -444,8 +444,7 @@ function McpAccessSection({
         </>
       ) : (
         <span className="auth-muted">
-          Premium or an administrator account is required to generate a Bearer
-          token for MCP access.
+          MCP access becomes available when this account is active.
         </span>
       )}
     </div>

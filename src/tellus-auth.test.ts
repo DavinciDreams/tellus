@@ -93,29 +93,27 @@ describe("Tellus auth fetch header routing", () => {
 });
 
 describe("Tellus MCP entitlement", () => {
-  it("allows premium accounts", () => {
-    expect(canUseTellusMcp({ premium: true, role: "user" })).toBe(true);
+  it("allows active accounts to bring their own agents", () => {
+    expect(canUseTellusMcp({ status: "active" })).toBe(true);
+    expect(canUseTellusMcp({ status: "ACTIVE" })).toBe(true);
   });
 
-  it("allows free admins using the authenticated account role", () => {
-    expect(canUseTellusMcp({ premium: false, role: "ADMIN" })).toBe(true);
-  });
-
-  it("denies free ordinary accounts", () => {
-    expect(canUseTellusMcp({ premium: false, role: "user" })).toBe(false);
+  it("denies pending, banned, and unverified cached account state", () => {
+    expect(canUseTellusMcp({ status: "pending" })).toBe(false);
+    expect(canUseTellusMcp({ status: "banned" })).toBe(false);
     expect(canUseTellusMcp({})).toBe(false);
   });
 
   it("lets a server denial narrow access but never lets stale status widen it", () => {
     expect(
       hasTellusMcpAccess(
-        { premium: false, role: "admin" },
+        { status: "active" },
         { canUseMcp: false },
       ),
     ).toBe(false);
     expect(
       hasTellusMcpAccess(
-        { premium: false, role: "user" },
+        { status: "pending" },
         { canUseMcp: true },
       ),
     ).toBe(false);
