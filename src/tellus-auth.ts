@@ -746,6 +746,23 @@ export async function getCheckout(id: string): Promise<PayCheckout> {
 export interface McpTokenStatus {
   hasToken: boolean;
   premium: boolean;
+  /** Server-authoritative entitlement when supported by Hyades. */
+  canUseMcp?: boolean;
+}
+
+/** Rollout fallback: MCP is available to premium accounts and authenticated Tellus admins. */
+export function canUseTellusMcp(
+  account: Pick<TellusAccount, "premium" | "role">,
+): boolean {
+  return Boolean(account.premium) || account.role?.trim().toLowerCase() === "admin";
+}
+
+/** A server denial narrows the rollout fallback; stale server state can never widen local entitlement. */
+export function hasTellusMcpAccess(
+  account: Pick<TellusAccount, "premium" | "role">,
+  status?: Pick<McpTokenStatus, "canUseMcp"> | null,
+): boolean {
+  return canUseTellusMcp(account) && status?.canUseMcp !== false;
 }
 
 export interface McpTokenMinted {
@@ -773,7 +790,7 @@ export async function getMcpTokenStatus(): Promise<McpTokenStatus> {
   return await apiJson<McpTokenStatus>(() => mcpTokenApiUrl());
 }
 
-/** Mint (or rotate) the MCP API token. Returns the secret ONCE. Premium-gated server-side. */
+/** Mint (or rotate) the MCP API token. Returns the secret ONCE. Entitlement is enforced server-side. */
 export async function mintMcpToken(): Promise<McpTokenMinted> {
   return await apiJson<McpTokenMinted>(() => mcpTokenApiUrl(), { method: "POST" });
 }
