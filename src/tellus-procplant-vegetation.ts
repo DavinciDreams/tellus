@@ -447,7 +447,21 @@ const buildBranchModuleTreeCached = (
     });
     branchModuleTreeCache.set(key, tree);
   }
+  if (!branchSpeciesReferenceHeights.has(species)) {
+    branchSpeciesReferenceHeights.set(species, branchModuleTreeHeight(tree));
+  }
   return tree;
+};
+
+/** Native height of a non-branch-module tree preset, measured once from a representative build. */
+const procPlantReferenceHeight = (genome: ProcPlantGenome, allowColdBuild: boolean): number | null => {
+  const cached = procPlantReferenceHeights.get(genome.id);
+  if (cached !== undefined) return cached;
+  const built = buildProcPlantInstancedPartsCached(genome, 0, defaultPlantEnvironment(), allowColdBuild);
+  if (!built) return null;
+  const height = templateHeight(built.stems);
+  procPlantReferenceHeights.set(genome.id, height);
+  return height;
 };
 
 // Same story as the detailed trees: buildProcPlantInstancedParts (flowers/shrubs/ferns/succulents)
@@ -684,7 +698,39 @@ const templateBounds = (template: ProcPlantTemplate): THREE.Box3 => {
   return bounds;
 };
 
-export const buildCheapTreeTemplate = (species: string, habit?: ProcPlantHabit): ProcPlantTemplate => {
+// Near trees are placed at their native template height times `scale` (branch-module oaks are ~1.55
+// units tall, Weber-Penn maples ~2.8). Every stand-in silhouette — horizon pool, travel fallback —
+// must be fitted to that same height, otherwise trees visibly grow or shrink when a chunk refines or
+// crosses into the horizon band.
+const branchModuleTreeHeightCache = new WeakMap<BranchModuleTree, number>();
+export const branchModuleTreeHeight = (tree: BranchModuleTree): number => {
+  const cached = branchModuleTreeHeightCache.get(tree);
+  if (cached !== undefined) return cached;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  const point = new THREE.Vector3();
+  for (const segment of tree.segments) {
+    const template = branchSegmentPrototypeTemplate(segment.prototypeId);
+    for (let index = 0; index < template.pos.length; index += 3) {
+      point.set(template.pos[index]!, template.pos[index + 1]!, template.pos[index + 2]!)
+        .applyMatrix4(segment.matrix);
+      minY = Math.min(minY, point.y);
+      maxY = Math.max(maxY, point.y);
+    }
+  }
+  for (const leaf of tree.leaves) {
+    point.setFromMatrixPosition(leaf.matrix);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  }
+  const height = Number.isFinite(minY) && Number.isFinite(maxY) ? Math.max(1e-4, maxY - minY) : 1;
+  branchModuleTreeHeightCache.set(tree, height);
+  return height;
+};
+const branchSpeciesReferenceHeights = new Map<string, number>();
+const procPlantReferenceHeights = new Map<string, number>();
+
+export const buildCheapTreeTemplate =(species: string, habit?: ProcPlantHabit): ProcPlantTemplate => {
   const cacheKey = `${species}|${habit ?? "unknown"}`;
   const cached = cheapTreeTemplateCache.get(cacheKey);
   if (cached) return cached;
@@ -1950,6 +1996,8 @@ export function createProcPlantVegetation(
       z: number,
       yaw: number,
       scale: number,
+      /** Native height of the near representation, when it is not this branch-module graph. */
+      nearReferenceHeight: number | null,
     ): boolean => {
       const horizonOptions: BiomeTreeTemplateOptions = {
         ...authoredOptions,
@@ -1982,7 +2030,13 @@ export function createProcPlantVegetation(
         leafA.lerp(leafB, 0.45),
         genome.branchModules?.barkColor ?? genome.weberPenn?.barkColor ?? 0x5b3d24,
       );
-      const silhouetteScale = scale / templateHeight(template);
+      // The horizon template is baked from the module graph in native units. When the near tree is
+      // that same graph it takes the same `scale`; when the near tree is a Weber-Penn/procplant mesh
+      // it is fitted to that mesh's height. Normalising to unit height (the old behaviour) shrank
+      // broadleaf crowns by ~35% and stretched or squashed Weber-Penn trees at the horizon band.
+      const silhouetteScale = nearReferenceHeight === null
+        ? scale
+        : scale * nearReferenceHeight / templateHeight(template);
       const matrix = new THREE.Matrix4()
         .makeRotationY(yaw)
         .premultiply(new THREE.Matrix4().makeScale(silhouetteScale, silhouetteScale, silhouetteScale))
@@ -2328,6 +2382,13 @@ export function createProcPlantVegetation(
           treeBackend?.kind === "lsystem" ? treeBackend : {},
         );
         if (horizonOnly) {
+          // Branch-module and L-system trees render this same graph up close. Weber-Penn-only presets
+          // reach here solely for the horizon tier; their near tree is the procplant mesh.
+          const nearUsesBranchGraph = treeBackend?.kind === "lsystem" || Boolean(genome.branchModules);
+          const nearReferenceHeight = nearUsesBranchGraph
+            ? null
+            : procPlantReferenceHeight(genome, allowColdBuilds);
+          if (!nearUsesBranchGraph && nearReferenceHeight === null) chunk.needsColdRefinement = true;
           addHorizonTree(
             genome,
             branchTreeSpecies,
@@ -2337,6 +2398,7 @@ export function createProcPlantVegetation(
             z,
             yaw,
             scale,
+            nearReferenceHeight,
           );
           continue;
         }
@@ -2351,9 +2413,11 @@ export function createProcPlantVegetation(
         );
         if (!moduleTree) {
           // A brand-new branch graph is still deferred during movement, but the emergency silhouette
-          // is normalized to the same one-unit tree height so it cannot tower over its replacement.
+          // is fitted to the species' measured graph height so it neither towers over nor pops up to
+          // its replacement.
           const template = buildCheapTreeTemplate(branchTreeSpecies, genome.habit);
-          const fallbackScale = scale / templateHeight(template);
+          const referenceHeight = branchSpeciesReferenceHeights.get(branchTreeSpecies) ?? 1;
+          const fallbackScale = scale * referenceHeight / templateHeight(template);
           const fallbackMatrix = new THREE.Matrix4()
             .makeRotationY(yaw)
             .premultiply(new THREE.Matrix4().makeScale(fallbackScale, fallbackScale, fallbackScale))
@@ -2471,7 +2535,9 @@ export function createProcPlantVegetation(
       const yaw = rand() * Math.PI * 2;
       if (horizonOnly) {
         const template = buildCheapTreeTemplate(genome.weberPenn?.species ?? genome.id, genome.habit);
-        const silhouetteScale = scale / templateHeight(template);
+        const referenceHeight = procPlantReferenceHeight(genome, allowColdBuilds);
+        if (referenceHeight === null) chunk.needsColdRefinement = true;
+        const silhouetteScale = scale * (referenceHeight ?? 1) / templateHeight(template);
         const matrix = new THREE.Matrix4()
           .makeRotationY(yaw)
           .premultiply(new THREE.Matrix4().makeScale(silhouetteScale, silhouetteScale, silhouetteScale))
@@ -2514,7 +2580,8 @@ export function createProcPlantVegetation(
         chunk.needsColdRefinement = true;
         if (shouldUseCheapDistantTree(genome.habit, false, baseScale)) {
           const template = buildCheapTreeTemplate(genome.weberPenn?.species ?? genome.id, genome.habit);
-          const fallbackScale = scale / templateHeight(template);
+          const referenceHeight = procPlantReferenceHeights.get(genome.id) ?? 1;
+          const fallbackScale = scale * referenceHeight / templateHeight(template);
           const matrix = new THREE.Matrix4()
             .makeRotationY(yaw)
             .premultiply(new THREE.Matrix4().makeScale(fallbackScale, fallbackScale, fallbackScale))
@@ -2534,6 +2601,9 @@ export function createProcPlantVegetation(
           chunk.stats.stemTriangles += template.idx.length / 3;
         }
         continue;
+      }
+      if (treeHabit && !procPlantReferenceHeights.has(genome.id)) {
+        procPlantReferenceHeights.set(genome.id, templateHeight(built.stems));
       }
       const matrix = new THREE.Matrix4()
         .makeRotationY(yaw)
@@ -2606,6 +2676,9 @@ export function createProcPlantVegetation(
         // omit ground plants and batch tree-form presets through the bounded representative graph.
         if (!procPlantUsesHorizonSilhouette(genome.habit)) continue;
         const species = genome.weberPenn?.species ?? genome.id;
+        // Manual placements always render the procplant mesh up close.
+        const nearReferenceHeight = procPlantReferenceHeight(genome, allowColdBuilds);
+        if (nearReferenceHeight === null) chunk.needsColdRefinement = true;
         addHorizonTree(
           genome,
           species,
@@ -2615,6 +2688,7 @@ export function createProcPlantVegetation(
           placement.z,
           yaw,
           placement.scale,
+          nearReferenceHeight,
         );
         continue;
       }
@@ -2870,6 +2944,8 @@ export function createProcPlantVegetation(
           ringLimit,
           PROC_TREE_HORIZON_MAX_RING,
           PROC_TREE_HORIZON_CHUNKS_PER_RING,
+          centerCx,
+          centerCz,
         )) {
           ensureNeededChunk(centerCx + dx, centerCz + dz, 3);
         }

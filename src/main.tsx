@@ -4997,8 +4997,17 @@ function createTellusWorld(
       const biomeCells = biomeCellsFromWorldPatch(parsed);
       if (biomeCells) {
         worldBiomeGridAuthoritative = true;
+        // Only cells whose biome actually changed need their vegetation regrown. Re-sent identical
+        // cells (a full-set seed after reconnect) previously rebuilt every procplant chunk they touched.
+        const changedBiomeCells = biomeCells.filter((cell) => {
+          const previous = worldBiomeCells.get(`${cell.cx}:${cell.cz}`);
+          return !previous ||
+            previous.biome !== cell.biome ||
+            previous.becoming !== cell.becoming ||
+            previous.intensity !== cell.intensity;
+        });
         for (const c of biomeCells) worldBiomeCells.set(`${c.cx}:${c.cz}`, c);
-        procplants.notifyRegionsChanged(biomeCells.map((cell) => worldBiomeCellBounds(cell.cx, cell.cz, {
+        procplants.notifyRegionsChanged(changedBiomeCells.map((cell) => worldBiomeCellBounds(cell.cx, cell.cz, {
           chunkedWorldChunks: chunkedDims,
           worldRadius: WORLD_RADIUS,
         })));

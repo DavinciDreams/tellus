@@ -44,16 +44,42 @@ describe("vegetation view priority", () => {
     const north = vegetationHorizonPrefetchOffsets(0, -1, 3);
     const slightlyTurned = vegetationHorizonPrefetchOffsets(0.1, -0.99, 3);
 
-    expect(north).toHaveLength(9 * 7);
+    // ~7 per ring across 9 rings, sampled by world hash.
+    expect(north.length).toBeGreaterThan(9 * 4);
+    expect(north.length).toBeLessThan(9 * 11);
     expect(slightlyTurned).toEqual(north);
     expect(north.every(({ dx, dz }) => {
       const ring = Math.max(Math.abs(dx), Math.abs(dz));
       return ring >= 6 && ring <= 14;
     })).toBe(true);
-    const farRow = north.filter(({ dx, dz }) => Math.max(Math.abs(dx), Math.abs(dz)) === 14);
-    expect(farRow).toHaveLength(7);
-    expect(Math.min(...farRow.map(({ dx }) => dx))).toBeLessThan(-8);
-    expect(Math.max(...farRow.map(({ dx }) => dx))).toBeGreaterThan(8);
+    const farRows = north.filter(({ dx, dz }) => Math.max(Math.abs(dx), Math.abs(dz)) >= 12);
+    expect(Math.min(...farRows.map(({ dx }) => dx))).toBeLessThan(-6);
+    expect(Math.max(...farRows.map(({ dx }) => dx))).toBeGreaterThan(6);
+  });
+
+  it("keeps horizon membership anchored to world chunks as the player crosses chunk borders", () => {
+    const worldSet = (centerCx: number, centerCz: number) => new Set(
+      vegetationHorizonPrefetchOffsets(0, -1, 3, 14, 7, centerCx, centerCz)
+        .map(({ dx, dz }) => `${centerCx + dx},${centerCz + dz}`),
+    );
+    const minimumAlignment = Math.cos(48 * Math.PI / 180);
+    for (let step = 0; step < 20; step++) {
+      const fromCz = 40 - step;
+      const toCz = fromCz - 1;
+      const before = worldSet(40, fromCz);
+      // Walking one chunk forward: a chunk may only leave by entering the detailed rings or by
+      // passing out of the view cone; anything still in the horizon band and in view must persist.
+      const after = worldSet(40, toCz);
+      const droppedInView = [...before].filter((key) => {
+        if (after.has(key)) return false;
+        const [cx, cz] = key.split(",").map(Number);
+        const dx = cx! - 40;
+        const dz = cz! - toCz;
+        const ring = Math.max(Math.abs(dx), Math.abs(dz));
+        return ring >= 6 && -dz / Math.hypot(dx, dz) >= minimumAlignment;
+      });
+      expect(droppedInView).toEqual([]);
+    }
   });
 
   it("uses full travel grass only in the near bubble and central camera cone", () => {
