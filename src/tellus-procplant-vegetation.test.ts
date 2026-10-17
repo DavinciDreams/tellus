@@ -288,6 +288,30 @@ describe("procplant vegetation", () => {
       (mesh.geometry.getIndex()?.count ?? 0) / 3
     ) < 2_000)).toBe(true);
 
+    // Horizon silhouettes must match the height of the Weber-Penn mesh this preset renders up close
+    // (entry scale 5.8 x stable scale 1.85 x per-tree jitter), not a unit-normalised stand-in.
+    const nearStems = buildProcPlantInstancedParts(procPlantPresets.acaciaUmbrella!, 0, defaultPlantEnvironment()).stems;
+    let nearMinY = Infinity;
+    let nearMaxY = -Infinity;
+    for (let index = 1; index < nearStems.pos.length; index += 3) {
+      nearMinY = Math.min(nearMinY, nearStems.pos[index]!);
+      nearMaxY = Math.max(nearMaxY, nearStems.pos[index]!);
+    }
+    const nearHeight = nearMaxY - nearMinY;
+    const instanceMatrix = new THREE.Matrix4();
+    const instanceScale = new THREE.Vector3();
+    for (const mesh of horizonMeshes as THREE.InstancedMesh[]) {
+      mesh.geometry.computeBoundingBox();
+      const templateHeight = mesh.geometry.boundingBox!.max.y - mesh.geometry.boundingBox!.min.y;
+      for (let index = 0; index < mesh.count; index++) {
+        mesh.getMatrixAt(index, instanceMatrix);
+        instanceScale.setFromMatrixScale(instanceMatrix);
+        const worldHeight = templateHeight * instanceScale.y;
+        expect(worldHeight).toBeGreaterThan(nearHeight * 5.8 * 1.85 * 0.88);
+        expect(worldHeight).toBeLessThan(nearHeight * 5.8 * 1.85 * 1.26);
+      }
+    }
+
     vegetation.dispose();
   });
 
@@ -1348,11 +1372,13 @@ describe("procplant vegetation", () => {
 
     vegetation.update(0, 0, 1, 60, 0);
     const stats = vegetation.stats();
-    expect(stats.chunks).toBe(120);
     expect(stats.lod0).toBe(1);
     expect(stats.lod1).toBe(24);
     expect(stats.lod2).toBe(32);
-    expect(stats.lod3).toBe(63);
+    // Horizon chunks are world-hash sampled at ~7 per ring over 9 rings.
+    expect(stats.lod3).toBeGreaterThan(9 * 5);
+    expect(stats.lod3).toBeLessThan(9 * 9);
+    expect(stats.chunks).toBe(1 + 24 + 32 + stats.lod3);
 
     vegetation.dispose();
   });

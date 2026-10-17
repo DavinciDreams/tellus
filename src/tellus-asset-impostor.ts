@@ -250,14 +250,20 @@ export const assetImpostorViewBlend = (
 };
 
 const vertexShader = `
+  #include <common>
+  #include <fog_pars_vertex>
   varying vec2 vUv;
   void main() {
     vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+    #include <fog_vertex>
   }
 `;
 
 const fragmentShader = `
+  #include <common>
+  #include <fog_pars_fragment>
   uniform sampler2D atlas;
   uniform vec2 gridSize;
   uniform vec2 atlasSize;
@@ -287,6 +293,11 @@ const fragmentShader = `
     if (total < 0.08) discard;
     vec3 rgb = (a.rgb * alphaWeights.x + b.rgb * alphaWeights.y + c.rgb * alphaWeights.z) / total;
     gl_FragColor = vec4(rgb * tint, clamp(total, 0.0, 1.0));
+    // The sRGB atlas is decoded to linear on sampling; encode for the canvas and fog like the
+    // built-in materials on neighbouring mesh LODs, otherwise impostors read dark and unfogged.
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+    #include <fog_fragment>
   }
 `;
 
@@ -305,6 +316,7 @@ export const createAssetStoreImpostorInstance = (
   const atlasHeight = template.metadata.atlas_height ?? template.metadata.height ?? textureImage?.height ?? 1;
   const material = new THREE.ShaderMaterial({
     uniforms: {
+      ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
       atlas: { value: template.texture },
       gridSize: { value: new THREE.Vector2(template.gridSizeX, template.gridSizeY) },
       atlasSize: { value: new THREE.Vector2(atlasWidth, atlasHeight) },
@@ -314,6 +326,7 @@ export const createAssetStoreImpostorInstance = (
     },
     vertexShader,
     fragmentShader,
+    fog: true,
     transparent: true,
     alphaTest: 0.08,
     depthTest: true,

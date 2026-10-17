@@ -98,11 +98,27 @@ export function vegetationSightlinePrefetchOffsets(
   ];
 }
 
+const HORIZON_CONE_DEGREES = 48;
+
+/** Stable [0, 1) hash of an absolute chunk coordinate. */
+export function horizonChunkHash(cx: number, cz: number): number {
+  let h = Math.imul(cx | 0, 0x27d4eb2d) ^ Math.imul(cz | 0, 0x165667b1) ^ 0x9e3779b9;
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
 /**
  * Samples a wide, sparse set of far chunks for horizon-scale tree silhouettes. Unlike the two-row
  * detail porch above, this reaches the terrain fog line without filling an entire square of plant
- * chunks. Direction is octant-quantized and every row is sampled from edge to edge, so normal camera
- * jitter cannot churn the population and the visible FOV does not collapse into a narrow centre strip.
+ * chunks. Direction is octant-quantized so normal camera jitter cannot churn the population.
+ *
+ * Membership is anchored to absolute chunk coordinates: a chunk is kept when its world hash falls
+ * under a per-ring keep fraction sized for ~`maxChunksPerRing` chunks. Picking evenly spaced
+ * candidates by player-relative offset (the previous scheme) selected a different set of world
+ * chunks after every 16 m chunk crossing, so distant trees were evicted and rebuilt elsewhere
+ * continuously. The keep fraction only grows as a ring gets closer, so walking toward a horizon
+ * chunk never drops it.
  */
 export function vegetationHorizonPrefetchOffsets(
   forwardX: number,
@@ -110,6 +126,8 @@ export function vegetationHorizonPrefetchOffsets(
   baseRing: number,
   maxRing = 14,
   maxChunksPerRing = 7,
+  centerCx = 0,
+  centerCz = 0,
 ): VegetationChunkOffset[] {
   const length = Math.hypot(forwardX, forwardZ);
   if (length < 1e-4 || maxRing <= baseRing + 2 || maxChunksPerRing <= 0) return [];
@@ -117,34 +135,21 @@ export function vegetationHorizonPrefetchOffsets(
   const directionX = Math.cos(octant * Math.PI / 4);
   const directionZ = Math.sin(octant * Math.PI / 4);
   const result: VegetationChunkOffset[] = [];
-  const minimumAlignment = Math.cos(48 * Math.PI / 180);
+  const minimumAlignment = Math.cos(HORIZON_CONE_DEGREES * Math.PI / 180);
 
   for (let ring = baseRing + 3; ring <= maxRing; ring++) {
-    const candidates: Array<VegetationChunkOffset & { lateral: number }> = [];
+    // Octant-independent estimate of the cone's share of the square ring's 8r perimeter chunks, so a
+    // camera turn across an octant boundary does not re-threshold chunks visible in both cones.
+    const expectedCandidates = Math.max(1, 8 * ring * (2 * HORIZON_CONE_DEGREES) / 360);
+    const keepFraction = Math.min(1, maxChunksPerRing / expectedCandidates);
     for (let dz = -ring; dz <= ring; dz++) {
       for (let dx = -ring; dx <= ring; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
-        const distance = Math.hypot(dx, dz);
-        const alignment = (dx * directionX + dz * directionZ) / distance;
+        const alignment = (dx * directionX + dz * directionZ) / Math.hypot(dx, dz);
         if (alignment < minimumAlignment) continue;
-        candidates.push({
-          dx,
-          dz,
-          lateral: (dx * -directionZ + dz * directionX) / distance,
-        });
+        if (horizonChunkHash(centerCx + dx, centerCz + dz) >= keepFraction) continue;
+        result.push({ dx, dz });
       }
-    }
-    candidates.sort((a, b) => a.lateral - b.lateral || a.dx - b.dx || a.dz - b.dz);
-    const count = Math.min(maxChunksPerRing, candidates.length);
-    if (count === 1) {
-      const candidate = candidates[Math.floor(candidates.length / 2)];
-      if (candidate) result.push({ dx: candidate.dx, dz: candidate.dz });
-      continue;
-    }
-    for (let index = 0; index < count; index++) {
-      const candidateIndex = Math.round(index * (candidates.length - 1) / (count - 1));
-      const candidate = candidates[candidateIndex];
-      if (candidate) result.push({ dx: candidate.dx, dz: candidate.dz });
     }
   }
   return result;

@@ -19,14 +19,20 @@ export interface WebGlImpostorHandle {
 }
 
 const vertexShader = `
+  #include <common>
+  #include <fog_pars_vertex>
   varying vec2 vUv;
   void main() {
     vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+    #include <fog_vertex>
   }
 `;
 
 const fragmentShader = `
+  #include <common>
+  #include <fog_pars_fragment>
   uniform sampler2D atlas;
   uniform vec2 gridSize;
   uniform vec3 faceIndices;
@@ -48,14 +54,29 @@ const fragmentShader = `
     vec4 a = texture2D(atlas, atlasUv(faceIndices.x));
     vec4 b = texture2D(atlas, atlasUv(faceIndices.y));
     vec4 c = texture2D(atlas, atlasUv(faceIndices.z));
-    vec3 weightedAlpha = faceWeights * vec3(a.a, b.a, c.a);
-    float alpha = weightedAlpha.x + weightedAlpha.y + weightedAlpha.z;
+    float alpha = dot(faceWeights, vec3(a.a, b.a, c.a));
     if (alpha < 0.12) discard;
-    vec3 rgb = (a.rgb * weightedAlpha.x + b.rgb * weightedAlpha.y + c.rgb * weightedAlpha.z) /
+    // The atlas is cleared to transparent black and holds opaque geometry, so its texels (and every
+    // mip level) are effectively premultiplied. Dividing the weighted colour by the weighted alpha
+    // recovers the true edge colour instead of darkening silhouettes as the tree recedes.
+    vec3 rgb = (a.rgb * faceWeights.x + b.rgb * faceWeights.y + c.rgb * faceWeights.z) /
       max(alpha, 0.0001);
     gl_FragColor = vec4(rgb, clamp(alpha, 0.0, 1.0));
+    // Match the lit meshes this replaces: the atlas stores linear colour, so apply the renderer's
+    // tone mapping, sRGB output encoding, and scene fog exactly as built-in materials do.
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+    #include <fog_fragment>
   }
 `;
+
+// Mirrors the main world's daytime rig (sun + hemisphere in src/main.tsx) so a baked crown has the
+// same brightness as the instanced Lambert meshes it replaces at the LOD boundary.
+const BAKE_SUN_COLOR = 0xffdfb7;
+const BAKE_SUN_INTENSITY = 4.1;
+const BAKE_SKY_COLOR = 0xb6ccff;
+const BAKE_GROUND_COLOR = 0x3d5332;
+const BAKE_HEMISPHERE_INTENSITY = 2.25;
 
 /** Inverse of the hemi-octahedral direction encoding used by the runtime shader. */
 export const hemiOctahedralViewDirection = (u: number, v: number): THREE.Vector3 => {
@@ -118,12 +139,17 @@ export const bakeWebGlImpostor = (
   const bakeScene = new THREE.Scene();
   const wrapper = new THREE.Group();
   wrapper.add(source);
-  source.position.sub(center);
+  // Object3D applies scale before translation, so the recentring offset must be scaled too.
+  // Subtracting the unscaled centre pushed tall sources below the orthographic frame, baking a
+  // sunken, bottom-clipped tree that then appeared to shrink and lose its trunk at the LOD switch.
+  const originalPosition = source.position.clone();
+  const originalScale = source.scale.clone();
   const normalizedScale = 1 / effectiveDiameter;
+  source.position.sub(center).multiplyScalar(normalizedScale);
   source.scale.multiplyScalar(normalizedScale);
   bakeScene.add(wrapper);
-  bakeScene.add(new THREE.HemisphereLight(0xdce9ff, 0x25331f, 1.65));
-  const key = new THREE.DirectionalLight(0xfff1d2, 2.2);
+  bakeScene.add(new THREE.HemisphereLight(BAKE_SKY_COLOR, BAKE_GROUND_COLOR, BAKE_HEMISPHERE_INTENSITY));
+  const key = new THREE.DirectionalLight(BAKE_SUN_COLOR, BAKE_SUN_INTENSITY);
   key.position.set(-2.5, 4, 3);
   bakeScene.add(key);
   const camera = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0.01, 4);
@@ -134,18 +160,16 @@ export const bakeWebGlImpostor = (
   const oldScissorTest = renderer.getScissorTest();
   const oldClearColor = renderer.getClearColor(new THREE.Color());
   const oldClearAlpha = renderer.getClearAlpha();
-  const oldToneMapping = renderer.toneMapping;
-  const oldExposure = renderer.toneMappingExposure;
   const oldAutoClear = renderer.autoClear;
   try {
+    // Render targets are always written in linear space without tone mapping; the runtime shader
+    // applies the renderer's output transform so baked and live trees share one colour pipeline.
     renderer.setRenderTarget(target);
     renderer.setClearColor(0x000000, 0);
     renderer.setViewport(0, 0, atlasSize, atlasSize);
     renderer.setScissor(0, 0, atlasSize, atlasSize);
     renderer.setScissorTest(false);
     renderer.clear(true, true, false);
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1;
     renderer.autoClear = false;
     renderer.setScissorTest(true);
     for (let row = 0; row < gridSize; row++) {
@@ -165,15 +189,13 @@ export const bakeWebGlImpostor = (
     }
   } finally {
     wrapper.remove(source);
-    source.position.add(center);
-    source.scale.multiplyScalar(1 / normalizedScale);
+    source.position.copy(originalPosition);
+    source.scale.copy(originalScale);
     renderer.setRenderTarget(oldTarget);
     renderer.setViewport(oldViewport);
     renderer.setScissor(oldScissor);
     renderer.setScissorTest(oldScissorTest);
     renderer.setClearColor(oldClearColor, oldClearAlpha);
-    renderer.toneMapping = oldToneMapping;
-    renderer.toneMappingExposure = oldExposure;
     renderer.autoClear = oldAutoClear;
   }
 
@@ -184,6 +206,7 @@ export const bakeWebGlImpostor = (
       const geometry = new THREE.PlaneGeometry(effectiveDiameter * scale, effectiveDiameter * scale);
       const material = new THREE.ShaderMaterial({
         uniforms: {
+          ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
           atlas: { value: target.texture },
           gridSize: { value: new THREE.Vector2(gridSize, gridSize) },
           faceIndices: { value: new THREE.Vector3() },
@@ -191,6 +214,7 @@ export const bakeWebGlImpostor = (
         },
         vertexShader,
         fragmentShader,
+        fog: true,
         transparent: true,
         alphaTest: 0.12,
         depthTest: true,
