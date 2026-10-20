@@ -5,10 +5,12 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   anonymousUserId,
   authStatus,
+  canUseTellusMcp,
   claimAnonymousId,
   getCheckout,
   getProducts,
   getSession,
+  hasTellusMcpAccess,
   linkNostr,
   loginNostrBunker,
   loginNostrNip07,
@@ -292,7 +294,7 @@ function McpGuideLink(): React.ReactElement {
   );
 }
 
-/** Surface the MCP guide to every user; premium gates only endpoint/token management. */
+/** Surface the MCP guide to every user; active accounts may bring their own MCP agents. */
 function McpAccessSection({
   account,
 }: {
@@ -303,9 +305,13 @@ function McpAccessSection({
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const endpoint = mcpEndpointUrl("main");
+  const accountCanUseMcp = canUseTellusMcp(account);
+  const hasMcpAccess = hasTellusMcpAccess(account, status);
 
   useEffect(() => {
-    if (!account.premium) return;
+    setStatus(null);
+    setToken(null);
+    if (!accountCanUseMcp) return;
     let alive = true;
     void getMcpTokenStatus()
       .then((s) => {
@@ -317,7 +323,7 @@ function McpAccessSection({
     return () => {
       alive = false;
     };
-  }, [account.premium]);
+  }, [account.accountId, accountCanUseMcp]);
 
   const copy = (text: string, what: string) => {
     void navigator.clipboard?.writeText(text).then(
@@ -336,7 +342,11 @@ function McpAccessSection({
     try {
       const r = await mintMcpToken();
       setToken(r.token);
-      setStatus({ hasToken: true, premium: true });
+      setStatus({
+        hasToken: true,
+        premium: Boolean(account.premium),
+        canUseMcp: true,
+      });
     } catch {
       /* surfaced by the disabled state resetting */
     } finally {
@@ -349,7 +359,11 @@ function McpAccessSection({
     try {
       await revokeMcpToken();
       setToken(null);
-      setStatus({ hasToken: false, premium: true });
+      setStatus({
+        hasToken: false,
+        premium: Boolean(account.premium),
+        canUseMcp: true,
+      });
     } catch {
       /* ignore */
     } finally {
@@ -365,7 +379,7 @@ function McpAccessSection({
         tools the in-world agents use.
       </span>
       <McpGuideLink />
-      {account.premium ? (
+      {hasMcpAccess ? (
         <>
           <span className="auth-kv">
             <span className="auth-muted">endpoint</span>
@@ -430,7 +444,7 @@ function McpAccessSection({
         </>
       ) : (
         <span className="auth-muted">
-          Premium is required to generate a Bearer token for MCP access.
+          MCP access becomes available when this account is active.
         </span>
       )}
     </div>
@@ -823,7 +837,7 @@ export function AuthControls(): React.ReactElement {
               </div>
             </div>
             {!pendingApproval && <PremiumCheckout account={account} />}
-            <McpAccessSection account={account} />
+            <McpAccessSection key={account.accountId} account={account} />
             {(account.claimedUserIds ?? []).length > 0 && (
               <div className="auth-section">
                 <span className="auth-section-title">Claimed identities</span>
